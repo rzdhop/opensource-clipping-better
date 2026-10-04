@@ -876,3 +876,126 @@ def clip_prompt_with_audio(visual: str, *, place: str, sfx=(), speakers=(), note
     effects = as_sentence(f"Sound effects: {effects}") if effects else ""
     parts = [lead, note_text, ambience, effects, silent, AUDIO_CLOSING]
     return _collapse_ws(" ".join(part for part in parts if part))
+
+
+# ================================================== plan 22 (native speech)
+#
+# A native-speech story's speaking clip (``media_policy.native_speech``): the
+# video model speaks the shot's one line itself, lips and voice one
+# performance. Shaped as Google's Veo prompting guide writes dialogue -- the
+# camera first, the speaker with a voice description and the line in quotes,
+# the ambience on its own line -- with the sentences that must reach the
+# model whole: the quoted line, the voice, what is heard and what is never
+# burned in.
+
+SPEECH_CLIP_MAX_WORDS = 200
+SPEECH_LOOK_MAX_WORDS = 12
+SPEECH_ACTION_MAX_WORDS = 24
+SPEECH_PLACE_MAX_WORDS = 18
+SPEECH_REACTION_MAX_WORDS = 10
+NO_ON_SCREEN_TEXT = "No subtitles, no captions, no on-screen text."
+SPEECH_NO_OTHER_SOUND = "No music, no narrator, no other voice."
+LANGUAGE_NAMES = {"fr": "French", "en": "English"}
+# The speech prompt's context layers, in the order they are dropped when the
+# whole is over budget -- the least valuable first; the line, the voice, the
+# Audio sentence and the closing sentences are never dropped.
+_SPEECH_DROP_ORDER = ("context", "style", "identity", "reaction", "camera", "action", "look")
+
+_AGE_WORDS = {"child": "a child", "young": "a young", "adult": "an adult", "elder": "an elderly"}
+_GENDER_WORDS = {"female": "woman", "male": "man", "neutral": "person"}
+
+
+def voice_line(voice_hints) -> str:
+    """How a character sounds, in one phrase, from its ``voice_hints``
+    (gender, age, style tags, direction): built from them alone, so it is the
+    same words in every clip of that character (the voice is asked the same
+    way each time). ``"a clear voice"`` with no hints."""
+    hints = voice_hints if isinstance(voice_hints, dict) else {}
+    tags = [str(tag).strip() for tag in hints.get("style_tags") or () if str(tag).strip()]
+    head = f"a {', '.join(tags)} voice" if tags else "a clear voice"
+    age, gender = hints.get("age"), hints.get("gender")
+    if age == "child":
+        whose = "a child"
+    elif age in _AGE_WORDS or gender in _GENDER_WORDS:
+        whose = f"{_AGE_WORDS.get(age, 'a')} {_GENDER_WORDS.get(gender, 'person')}"
+    else:
+        whose = ""
+    text = f"{head} of {whose}" if whose else head
+    direction = _fit(_collapse_ws(str(hints.get("direction") or "")), 12)
+    if direction:
+        direction = _strip_trailing_period(direction)
+        if direction[:1].isupper() and direction[1:2].islower():
+            direction = direction[0].lower() + direction[1:]
+        text += f", {direction}"
+    return _collapse_ws(text)
+
+
+def speech_clip_prompt(style_lock: dict, *, speaker: str, look: str, action: str, listener: str, language: str,
+                       voice: str, line: str, reaction: str, camera_phrase: str, place: str, ambience: str,
+                       budget: int = SPEECH_CLIP_MAX_WORDS, note: str = "") -> str:
+    """A speaking clip's prompt (plan 22), at most *budget* words
+    (:data:`SPEECH_CLIP_MAX_WORDS`, or the link's own):
+
+    "{Camera}. {Speaker}, {look}, {action}, looks at {listener} and says in
+    {language}, in {voice}, "{line}". {Listener} listens without speaking,
+    mouth closed, {reaction}. {Place}. {IDENTITY_KEEPS} {style motion
+    suffix} Audio: only {speaker}'s voice speaking {language}, close and
+    clear, lips in sync with the words. Ambient noise: {ambience}, low
+    underneath. No music, no narrator, no other voice. No subtitles, no
+    captions, no on-screen text."
+
+    *speaker* and *listener* are handles, never names (spec 2.3); *listener*
+    empty: the speaker talks straight ahead. The quoted *line* (in the
+    story's *language*), the *voice* phrase (:func:`voice_line`), the Audio
+    sentence and the two closing sentences are never cut; over the budget
+    the context layers go first (:data:`_SPEECH_DROP_ORDER`)."""
+    lang = LANGUAGE_NAMES.get(language, language)
+    quoted = _collapse_ws(str(line)).replace('"', "'")
+    who = _collapse_ws(speaker) or "the character"
+    other = _collapse_ws(listener)
+    heard = (f"Audio: only {who}'s voice speaking {lang}, close and clear, lips in sync with the words.")
+    ambient = as_sentence(f"Ambient noise: {_fit(ambience, SPEECH_PLACE_MAX_WORDS) or 'the room tone'}, low underneath")
+    closing = [heard, ambient, SPEECH_NO_OTHER_SOUND, NO_ON_SCREEN_TEXT]
+    note_text = as_sentence(note) if note else ""
+    layers = {
+        "camera": as_sentence(camera_phrase),
+        "look": _strip_trailing_period(_fit(_collapse_ws(look), SPEECH_LOOK_MAX_WORDS)),
+        "action": _strip_trailing_period(_fit(_collapse_ws(action), SPEECH_ACTION_MAX_WORDS)),
+        "reaction": _strip_trailing_period(_fit(_collapse_ws(reaction), SPEECH_REACTION_MAX_WORDS)),
+        "context": as_sentence(_fit(_collapse_ws(place), SPEECH_PLACE_MAX_WORDS)),
+        "identity": IDENTITY_KEEPS,
+        "style": as_sentence(clip_motion_suffix(style_lock)),
+    }
+
+    def build(kept):
+        head = [who[0].upper() + who[1:]]
+        for name in ("look", "action"):
+            if kept.get(name):
+                head.append(kept[name])
+        target = f"looks at {other}" if other else "looks straight ahead"
+        end = "" if quoted[-1:] in ".!?…" else "."
+        speech = f"{', '.join(head)}, {target} and says in {lang}, in {voice}, \"{quoted}\"{end}"
+        listens = ""
+        if other:
+            listens = f"{other[0].upper() + other[1:]} listens without speaking, mouth closed"
+            listens = as_sentence(f"{listens}, {kept['reaction']}" if kept.get("reaction") else listens)
+        parts = [kept.get("camera", ""), speech, listens, kept.get("context", ""), note_text,
+                 kept.get("identity", ""), kept.get("style", "")] + closing
+        return _collapse_ws(" ".join(part for part in parts if part))
+
+    for dropped in range(len(_SPEECH_DROP_ORDER) + 1):
+        kept = {name: text for name, text in layers.items() if text and name not in _SPEECH_DROP_ORDER[:dropped]}
+        prompt = build(kept)
+        if _word_count(prompt) <= budget:
+            return prompt
+    return prompt
+
+
+def speech_prompt_sentences(prompt: str) -> dict:
+    """The never-dropped parts of a speech clip *prompt*, found in it (for
+    the brief and the checks): the quoted line, the Audio sentence, the
+    no-other-sound and the no-on-screen-text sentences."""
+    quoted = re.search(r'"([^"]*)"', prompt)
+    audio = re.search(r"Audio: [^.]*\.", prompt)
+    return {"line": quoted.group(1) if quoted else None, "audio": audio.group(0) if audio else None,
+            "no_other_sound": SPEECH_NO_OTHER_SOUND in prompt, "no_on_screen_text": NO_ON_SCREEN_TEXT in prompt}

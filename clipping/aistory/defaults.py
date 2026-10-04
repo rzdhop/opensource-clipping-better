@@ -23,7 +23,10 @@ DEFAULT_BUDGET_PROFILE = "free"
 TIERS = (1, 2, 3)
 ROUTES = ("auto", "local", "api")
 CONSISTENCY_MODES = ("references", "prompt_only")
-BUDGET_PROFILES = ("free", "one_dollar", "quality")
+BUDGET_PROFILES = ("free", "one_dollar", "quality", "native_speech")
+# Plan 22: the native-speech budget profile (each character line spoken by
+# its own clip, ``media_policy.native_speech``).
+NATIVE_SPEECH_PROFILE = "native_speech"
 
 # Phase 7 (DEC-221): the optional ``generation_profile.pipeline``. Absent is
 # the legacy pipeline; "v2" gates the quality-only image links per role
@@ -43,6 +46,13 @@ VIDEO_RESOLUTIONS = (VIDEO_RESOLUTION_DEFAULT, "1080p")
 # whatever the budget profile says. Absent: the budget profile's ``lipsync``
 # (``media_policy.lipsync``). The values are ``budget.LIPSYNC_MODES``.
 LIPSYNC_MODES = ("none", "kling")
+
+# Plan 22: the optional ``generation_profile.speech_model``, the per-story
+# switch of a native-speech story's speaking clips -- a key of its budget
+# profile's ``speech_links`` (``lite``, ``fast``, ``premium``). Absent: the
+# profile's ``speech_model`` (``media_policy.speech_link``). The values are
+# ``budget.SPEECH_MODELS``.
+SPEECH_MODELS = ("lite", "fast", "premium")
 
 # Plan 21 stage 1 (agent mode): the optional ``generation_profile.mode``.
 # Absent is Studio -- every step waits for the human's approval, as always;

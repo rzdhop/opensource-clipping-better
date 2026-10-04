@@ -173,8 +173,8 @@ from clipping.providers import generation as gen
 from clipping.providers import lipsync as lipsync_providers
 from clipping.providers.registry import ChainError, Link, describe
 
-from .. import (defaults, hardware, imaging, media_policy, prompt_budgets, prompting, refimages, schemas, timing,
-               video_plan, voices, wordtiming)
+from .. import (defaults, hardware, imaging, media_policy, native_speech, prompt_budgets, prompting, refimages,
+               schemas, timing, video_plan, voices, wordtiming)
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import shots as shots_mod
@@ -182,6 +182,7 @@ from .. import store as store_mod
 from ..render import audio_assets, imagesize
 from . import clips, entities, episode_common, judge, llm_call, sticky_link, voice_lines
 from . import lipsync as lipsync_step
+from . import native_take as take_mod
 from . import script as script_step
 from . import storyboard as storyboard_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -1236,11 +1237,18 @@ def link_switch(ec, value, *, env, errors) -> dict:
     if not isinstance(value, dict):
         errors.append("links: expected an object {image?, video?}")
         return {}
-    extra = sorted(set(map(str, value)) - set(sticky_link.KINDS))
+    native = media_policy.native_speech(ec.story)
+    editable = sticky_link.KINDS + ((sticky_link.VIDEO_SPEECH,) if native else ())
+    extra = sorted(set(map(str, value)) - set(editable))
     if extra:
-        errors.append(f"links: unknown key(s) {', '.join(extra)} (editable: {', '.join(sticky_link.KINDS)})")
+        errors.append(f"links: unknown key(s) {', '.join(extra)} (editable: {', '.join(editable)})")
     merged = gating.merged_env(env)
     wanted = {}
+    if native:
+        # Plan 22: a native-speech episode's two video links, one a class of shot,
+        # each switched to a link its budget profile names (resolved by name).
+        _speech_link_switch(ec, value, wanted, errors)
+        return wanted
     for slot in sticky_link.KINDS:
         if slot not in value:
             continue
@@ -1261,6 +1269,27 @@ def link_switch(ec, value, *, env, errors) -> dict:
             continue
         wanted[slot] = link
     return wanted
+
+
+def _speech_link_switch(ec, value, wanted, errors) -> None:
+    """:func:`link_switch` of a native-speech episode (plan 22): ``image`` as
+    any story's is refused here only when asked (an image switch keeps its
+    own path); ``video_speech`` one of the budget profile's
+    ``speech_links``, ``video`` its ``silent_link`` or one of those."""
+    settings = media_policy._profile_of(ec.story)
+    speech = [link for link in (settings.get("speech_links") or {}).values() if isinstance(link, str)]
+    silent = list(dict.fromkeys([link for link in (settings.get("silent_link"),) if isinstance(link, str)] + speech))
+    for slot, allowed in ((sticky_link.VIDEO_SPEECH, speech), (sticky_link.VIDEO, silent)):
+        if slot not in value:
+            continue
+        link = value[slot]
+        if not isinstance(link, str) or link not in allowed:
+            errors.append(f"links.{slot}: {link!r} is not a link of the {ec.story['generation_profile']['budget_profile']}"
+                          f" budget profile (its links: {', '.join(allowed)})")
+            continue
+        wanted[slot] = link
+    if sticky_link.IMAGE in value:
+        errors.append("links.image: switch a native-speech episode's image link on its own")
 
 
 def switched_assets_doc(ec, storyboard, doc, wanted, *, env, now):
@@ -1284,7 +1313,7 @@ def switched_assets_doc(ec, storyboard, doc, wanted, *, env, now):
     return new
 
 
-def switched_video_doc(ec, doc, wanted, *, now):
+def switched_video_doc(ec, doc, wanted, *, now, kind=sticky_link.VIDEO):
     """*doc* (``assets.json``, or None: a minimal one is started) with the
     episode's video link switched to *wanted* -- ``links.video {link:
     wanted, since: now, switched_from: the link it had}`` -- or None when
@@ -1294,13 +1323,13 @@ def switched_video_doc(ec, doc, wanted, *, now):
     those again on *wanted*, and the assets approval goes stale with the
     fingerprint's ``links``; the storyboard -- its clip records, its
     approval -- is not touched."""
-    entry = sticky_link.recorded(doc, sticky_link.VIDEO)
+    entry = sticky_link.recorded(doc, kind)
     current = entry["link"] if entry else None
     if current == wanted:
         return None
     new = copy.deepcopy(doc) if doc is not None else _minimal_assets_doc(ec, now)
     new["links"] = dict(new.get("links") or {})
-    new["links"][sticky_link.VIDEO] = sticky_link.record(wanted, now=now, switched_from=current)
+    new["links"][kind] = sticky_link.record(wanted, now=now, switched_from=current)
     return new
 
 
@@ -1369,6 +1398,12 @@ def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0) -> tu
             clips_usd = video["est_usd"] - lipsync_step.counted_usd(video)
             what = (f"paid images, voices and {count} clip{'' if count == 1 else 's'} ({video['seconds']} s on "
                     f"{video['link']}, est ${clips_usd:.3f}{lipsync_step.clause(video)})")
+            part = video.get("speech")
+            if part is not None:
+                # Plan 22: a native-speech plan's two links and its retake budget.
+                what = (f"paid images, voices and {count} clip{'' if count == 1 else 's'} ({part['speech_seconds']} s "
+                        f"on {part['speech_link']} and {part['silent_seconds']} s on {part['silent_link']}, est "
+                        f"${clips_usd:.3f} with up to ${part['retake_usd']:.2f} of retakes)")
         if fix_usd > 0:
             what += f", with up to ${fix_usd:.2f} to redraw flagged keyframes"
         plan = SimpleNamespace(est_usd=total, link=f"episode {ec.ep}'s {what}")
@@ -1507,7 +1542,15 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
         # A plan held for the keyframes' approval (phase 7 stage 6b, RC-Q3) is out of this run, as animate off.
         elif video["route_class"] == "paid" and clips.to_buy(video) and not video.get("hold"):
             lip_usd = lipsync_step.counted_usd(video)
-            if video["count"]:
+            if video["count"] and video.get("speech") is not None:
+                # Plan 22: a native-speech episode's two links, each with its own price.
+                part = video["speech"]
+                for entry in part["classes"]:
+                    usd = entry["usd"] + (part["retake_usd"] if entry["class"] == "speech" else 0.0)
+                    if entry["count"] or usd:
+                        paid_links.append({"kind": gen.VIDEO, "link": entry["link"], "allowed": video["ready"],
+                                           "reason": video["refused"] or "paid, allowed", "est_usd": round(usd, 4)})
+            elif video["count"]:
                 paid_links.append({"kind": gen.VIDEO, "link": video["link"], "allowed": video["ready"],
                                    "reason": video["refused"] or "paid, allowed",
                                    "est_usd": round(video["est_usd"] - lip_usd, 4)})
@@ -1728,6 +1771,8 @@ def keyframe_item(ec, storyboard, index, *, link=None):
 
 KEYFRAME_FIXES = "keyframe_fixes"
 KEYFRAME_FIX_BUDGET = "keyframe_fix_budget"
+# Plan 22: a native-speech episode's retakes (``_Assets.retake_shot``).
+SPEECH_RETAKES = "speech_retakes"
 _ISSUE_MAX = 1000
 
 
@@ -1976,6 +2021,10 @@ def video_offer(ec, storyboard, link, *, why, env, adapters=None, todo=(), paid=
         chain = gen.chain_from_env(gen.VIDEO, merged)
     except ChainError:
         chain = []
+    if media_policy.native_speech(ec.story):
+        # Plan 22: a native-speech episode's links are its budget profile's, one a class of shot: no link of
+        # VIDEO_CHAIN is offered in their place; the Video card switches either among the profile's own.
+        chain = []
     own = sticky_link.family(link)
     rows = [row for row in clips.hosted_rows(chain, merged, adapters,
                                              resolution=media_policy.video_resolution(ec.story))
@@ -1999,6 +2048,9 @@ def video_offer(ec, storyboard, link, *, why, env, adapters=None, todo=(), paid=
     if nxt is None:
         next_reason = ("allow_paid is off" if keyed
                        else "; ".join(f"{row['link']}: {row['reason']}" for row in rows) or None)
+        if media_policy.native_speech(ec.story):
+            next_reason = ("a native-speech episode switches its speaking or silent clips' link only among its "
+                           "budget profile's (the assets edit's links.video_speech or links.video)")
     return StickyLinkGone(
         ep=ec.ep, link=link, why=str(why).rstrip(". "), chain=gen.ENV_NAMES[gen.VIDEO],
         next_link=nxt["link"] if nxt else None, next_route="paid" if nxt else None, next_reason=next_reason,
@@ -2142,6 +2194,9 @@ def clip_quote(ec, script, storyboard, shot, *, env, adapters=None, probe_local=
                               adapters=adapters, probe_local=probe_local, transport=transport, image_sha=None,
                               hold=clip_hold(ec, storyboard, doc))
     row = next((item for item in video["plan"] if item["shot_id"] == shot["shot_id"]), None)
+    if row is not None and row.get("link"):
+        # Plan 22: a native-speech shot's clip is on its class's link.
+        video = dict(video, link=row["link"])
     quote = {"video": video, "link": video["link"], "route_class": video["route_class"],
              "clip_s": row["clip_s"] if row else None, "est_usd": round(float(row["est_usd"]), 4) if row else 0.0,
              "cover": row.get("cover") if row else None, "over_cap": None, "ready": False,
@@ -2277,6 +2332,8 @@ class _Assets(voice_lines.LineMeasurement):
     crop_run = None
     # The ffmpeg runner of the lipsync's dialogue track and take (DEC-258); None is ``subprocess.run``.
     lipsync_run = None
+    # The ffmpeg/ffprobe runner of the native take (plan 22); None is ``subprocess.run``.
+    native_run = None
 
     def __init__(self, ctx, ec, *, tools, transcribe=None, budget=None):
         self.ctx = ctx
@@ -2318,6 +2375,8 @@ class _Assets(voice_lines.LineMeasurement):
         self.planned_video = None
         self.video = None
         self.video_link_kept = False
+        # Plan 22: a native-speech episode's speaking clips' link, recorded on its own.
+        self.speech_link_kept = False
         self.video_gone = None
         self.clip_todo = []
         self.local_image_ran = False
@@ -2997,13 +3056,15 @@ class _Assets(voice_lines.LineMeasurement):
             ctx.on_log(f"🎬 {video['message'] or 'No clip is planned.'}")
             return doc
         self.video_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO) is not None
+        self.speech_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO_SPEECH) is not None
         image_link = recorded_image_link(doc)
         tier = clips.tier_of(ec)
         by_id = {shot["shot_id"]: shot for shot in self.storyboard["shots"]}
+        native = video.get("speech") is not None
         todo, kept_ids = [], []
         for row in video["plan"]:
             shot = by_id[row["shot_id"]]
-            state = clips.clip_state(ec, shot, self.script, link=video["link"], tier=tier,
+            state = clips.clip_state(ec, shot, self.script, link=row.get("link") or video["link"], tier=tier,
                                      flags=clips.shot_flags(shot, doc),
                                      image_sha=_sha256_file(shot_image_path(ec, shot)))
             if state == "current":
@@ -3019,9 +3080,14 @@ class _Assets(voice_lines.LineMeasurement):
         if lip is not None and lip_link is None and lip.get("count"):
             ctx.on_log(f"👄 No lip-sync in this run: {lip.get('link') or gen.ENV_NAMES[gen.LIPSYNC]}: "
                        f"{lip.get('reason') or 'cannot run'}; the clips are kept as they are.")
+        if native:
+            # Plan 22: a kept speaking clip whose take is not current is taken now (free).
+            for shot_id in kept_ids:
+                self.native_take_shot(by_id[shot_id])
         if not todo and not lip_todo:
             ctx.on_log(f"🎬 Every planned shot has its current clip on {video['link']}: no clip to make.")
             self.lipsync_total()
+            self.take_total()
             return doc
         if todo:
             seconds = sum(int(row["clip_s"]) for row in todo)
@@ -3045,19 +3111,24 @@ class _Assets(voice_lines.LineMeasurement):
                 continue
             self.clip_todo = todo_ids[todo_ids.index(row["shot_id"]):]
             self.before_clip(self.clip_todo)
+            shot_video = dict(video, link=row["link"]) if native else video
             try:
-                record, info = self.make_clip(shot, video=video, clip_s=row["clip_s"], est_usd=row["est_usd"],
+                record, info = self.make_clip(shot, video=shot_video, clip_s=row["clip_s"], est_usd=row["est_usd"],
                                               seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
                                               note=clip_note(shot), flags=clips.shot_flags(shot, doc), tier=tier,
                                               image_link=image_link, cover=row.get("cover"))
             except ClipFailed as exc:
                 self.fail_clip(shot, exc)
                 continue
-            self.apply_clip(shot, record, info, video=video)
+            self.apply_clip(shot, record, info, video=shot_video)
+            if native:
+                # Plan 22: the clip's own sound becomes its line (the native take), retaken once when it misses.
+                self.native_take_shot(shot, video=shot_video, row=row, image_link=image_link)
             if lip_link is not None:
                 self.lipsync_shot(shot, link=lip_link)
         self.clip_todo = []
         self.lipsync_total()
+        self.take_total()
         return episode_common.read_episode(ec, ASSETS_DOC) or doc
 
     # ------------------------------------------------------------ the lipsync
@@ -3349,6 +3420,12 @@ class _Assets(voice_lines.LineMeasurement):
             raise fail(f"{gen.ENV_NAMES[gen.VIDEO]} cannot be used: {exc}") from None
         # The plan's link alone (A-087): never the next link of the chain.
         pinned = [candidate for candidate in chain if describe(candidate) == link][:1]
+        if not pinned and media_policy.native_speech(ec.story):
+            # Plan 22: a native-speech episode's links are its budget profile's, by name.
+            try:
+                pinned = gen.parse_generation_chain(gen.VIDEO, [link])[:1]
+            except ChainError:
+                pinned = []
         if not pinned:
             raise self.clip_gone(f"it is not a link of {gen.ENV_NAMES[gen.VIDEO]} any more", record)
         route = ec.story["generation_profile"]["route"]
@@ -3413,7 +3490,8 @@ class _Assets(voice_lines.LineMeasurement):
         shot["assets"]["clip"] = record
         shot["assets"]["video"] = clips.clip_rel(shot_id)
         self.write_board()
-        self.keep_video_link(record["link"])
+        speaking = bool(shot.get("speaks")) and media_policy.native_speech(ec.story)
+        self.keep_video_link(record["link"], kind=sticky_link.VIDEO_SPEECH if speaking else sticky_link.VIDEO)
         summary = self.video
         if info["cached"]:
             summary["reused"] += 1
@@ -3460,11 +3538,19 @@ class _Assets(voice_lines.LineMeasurement):
             self.video["failed"].append({"shot_id": shot_id, "reason": exc.reason})
         ctx.on_log(f"✖ Clip {shot_id} failed: {exc.reason}")
 
-    def keep_video_link(self, link) -> None:
+    def keep_video_link(self, link, kind=sticky_link.VIDEO) -> None:
         """Record *link*, which just served a clip, as the episode's
         ``links.video`` unless one is recorded (A-087): every later clip is
         asked of it alone. ``assets.json`` is read, changed and written at
-        once (a minimal one is started when there is none)."""
+        once (a minimal one is started when there is none). Plan 22: *kind*
+        ``video_speech`` records a native-speech episode's speaking clips'
+        link the same way, on its own."""
+        if kind == sticky_link.VIDEO_SPEECH:
+            if self.speech_link_kept:
+                return
+            self._keep_link(link, kind)
+            self.speech_link_kept = True
+            return
         if self.video_link_kept:
             return
         ec, ctx = self.ec, self.ctx
@@ -3487,6 +3573,267 @@ class _Assets(voice_lines.LineMeasurement):
             ctx.on_log(f"🔗 Episode {ec.ep}'s video link is now {link}: every other clip of it is made on that link "
                        "alone.")
         self.video_link_kept = True
+
+    def _keep_link(self, link, kind) -> None:
+        """:meth:`keep_video_link`'s record of a native-speech episode's
+        speaking clips' link (``links.video_speech``)."""
+        ec, ctx = self.ec, self.ctx
+        now = llm_call.utc_now()
+        try:
+            doc = episode_common.read_episode(ec, ASSETS_DOC)
+        except StepFailed as exc:
+            ctx.on_log(f"⚠️ The speaking clips' link could not be recorded ({exc}).")
+            return
+        if doc is None:
+            doc = _minimal_assets_doc(ec, now)
+        if sticky_link.recorded(doc, kind) is not None:
+            return
+        doc["links"] = dict(doc.get("links") or {})
+        doc["links"][kind] = sticky_link.record(link, now=now)
+        try:
+            ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=now)
+        except (schemas.SchemaError, ValueError, KeyError) as exc:
+            ctx.on_log(f"⚠️ {ASSETS_DOC} could not record the speaking clips' link now ({exc}).")
+            return
+        ctx.on_log(f"🔗 Episode {ec.ep}'s speaking clips are on {link}: every other speaking clip of it is made on "
+                   "that link alone.")
+
+    # ------------------------------------------------- the native take (plan 22)
+
+    def take_summary(self) -> dict:
+        summary = self.video.setdefault("takes", {"ok": [], "flagged": [], "approximate": [], "retaken": []}) \
+            if self.video is not None else {"ok": [], "flagged": [], "approximate": [], "retaken": []}
+        return summary
+
+    def native_take_shot(self, shot, *, video=None, row=None, image_link=None) -> None:
+        """*shot*'s clip taken (``native_take`` module docstring), free, after
+        it is kept: a speaking shot's sound transcribed and aligned against
+        its line, the line's audio and timing written from it and the take
+        recorded on the clip (``assets.clip.native_speech``); any shot's
+        length then follows its clip's real length
+        (``native_speech.shot_seconds``). A take that misses its line
+        (``mismatch``, ``no_speech``) is flagged; with *video* and *row* (the
+        clip just bought) an agent story buys it once more within its
+        budget's ``speech_retake`` (:meth:`retake_shot`). Nothing is asked of
+        a take already current for this very clip."""
+        ec, ctx = self.ec, self.ctx
+        shot_id = shot["shot_id"]
+        clip = shot["assets"].get("clip") or {}
+        path = clips.shot_clip_path(ec, shot)
+        if clip.get("state") != "current" or path is None:
+            return
+        if not shot.get("speaks"):
+            self._native_length(shot, path)
+            return
+        _scene, line = clips.speech_line(self.script, shot)
+        if line is None:
+            return
+        sha = _sha256_file(path)
+        if take_mod.is_current(clip.get("native_speech"), clip_sha256=sha, line_id=line["line_id"]) and (
+                clip["native_speech"]["state"] not in native_speech.TAKES_WITH_SPEECH
+                or voice_lines.is_measured(ec, line)):
+            return
+        take = self._take(shot, line, path, sha)
+        if take is None:
+            return
+        summary = self.take_summary()
+        if take["state"] == native_speech.TAKE_OK:
+            summary["ok"].append(shot_id)
+        elif take["state"] == native_speech.TAKE_STT_UNAVAILABLE:
+            summary["approximate"].append(shot_id)
+        else:
+            summary["flagged"].append({"shot_id": shot_id, "state": take["state"], "matched": take.get("matched"),
+                                       "heard": take.get("heard")})
+            if video is not None and row is not None:
+                self.retake_shot(shot, video=video, row=row, image_link=image_link)
+
+    def _native_length(self, shot, path) -> None:
+        """A silent clip's shot lasts its clip's real length."""
+        try:
+            real = take_mod.clip_seconds(path, run=self.native_run)
+        except take_mod.TakeError as exc:
+            self.ctx.on_log(f"⚠️ Shot {shot['shot_id']}: its clip's length could not be read ({exc}); its planned "
+                            "length is kept.")
+            return
+        seconds = max(float(self.ec.template["min_shot_s"]), native_speech.shot_seconds(real, speaks=False))
+        seconds = round(min(seconds, real), 3)
+        if abs(float(shot["duration_s"]) - seconds) > 1e-6:
+            shot["duration_s"] = seconds
+            self.write_board()
+            self.save()
+
+    def _take(self, shot, line, path, sha):
+        """The take itself (:meth:`native_take_shot`); the record, or None
+        when the clip cannot be read (said)."""
+        ec, ctx = self.ec, self.ctx
+        shot_id, line_id = shot["shot_id"], line["line_id"]
+        clip = shot["assets"]["clip"]
+        try:
+            real = take_mod.clip_seconds(path, run=self.native_run)
+        except take_mod.TakeError as exc:
+            ctx.on_log(f"⚠️ Shot {shot_id}: its clip cannot be taken ({exc}); its line has no audio yet.")
+            return None
+        reason = None
+        words = aligned_by = None
+        with tempfile.TemporaryDirectory(prefix="native-take-") as work:
+            full = None
+            if clips.clip_has_audio(path):
+                try:
+                    full = take_mod.extract_audio(path, os.path.join(work, "clip.wav"), run=self.native_run)
+                except take_mod.TakeError as exc:
+                    reason = str(exc)
+            if full is None:
+                words = []
+                reason = reason or "the clip has no sound track"
+            else:
+                transcribe = self.transcribe
+                if transcribe is None:
+                    transcribe, why = default_transcriber(ctx.settings_env)
+                    if transcribe is None:
+                        reason = f"{why}: add {' or '.join(media_policy.stt_missing_keys(gating.merged_env(ctx.settings_env))) or 'an STT key'} in Settings"
+                if transcribe is not None:
+                    ctx.cancel.check()
+                    try:
+                        words, aligned_by = transcribe(full, language=ec.language, on_log=ctx.on_log,
+                                                       cancel=ctx.cancel)
+                    except Exception as exc:  # noqa: BLE001 - an STT link that fails leaves the take approximate
+                        words, reason = None, f"the transcription failed ({exc})"
+            take = native_speech.evaluate_take(line["text"], words, clip_real_s=real, clip_s=clip["clip_s"],
+                                               aligned_by=aligned_by)
+            if take["state"] == native_speech.TAKE_NO_SPEECH and reason is None and full is not None:
+                reason = "nothing was heard in the clip's sound"
+            if (take["state"] in native_speech.TAKES_WITH_SPEECH and full is not None
+                    and take.get("start_s") is not None and take.get("end_s") is not None):
+                written = self._take_audio(shot, line, path, take, work)
+                if written is not None:
+                    reason = written
+        now = llm_call.utc_now()
+        if take["state"] == native_speech.TAKE_OK:
+            reason = None
+        record = take_mod.record(take, clip_sha256=sha, clip_real_s=real, line_id=line_id, now=now, reason=reason)
+        shot["assets"]["clip"] = dict(clip, native_speech=record)
+        end = take["end_s"] if take["state"] in (native_speech.TAKE_OK, native_speech.TAKE_MISMATCH) else None
+        seconds = native_speech.shot_seconds(real, speaks=True, end_s=end)
+        seconds = round(min(real, max(float(ec.template["min_shot_s"]), seconds)), 3)
+        shot["duration_s"] = seconds
+        self.write_board()
+        self.save()
+        ctx.on_log(take_mod.summary_line(shot_id, dict(take, reason=reason)))
+        return dict(take, reason=reason)
+
+    def _take_audio(self, shot, line, path, take, work):
+        """The take's speech as the line's audio (``assets/voice/line_NN.wav``)
+        and its sidecar, the line's timing measured from it; None, or why it
+        could not be written (the line then keeps no audio)."""
+        ec = self.ec
+        line_id = line["line_id"]
+        start, end = float(take["start_s"]), float(take["end_s"])
+        try:
+            segment = take_mod.extract_audio(path, os.path.join(work, "line.wav"), start_s=start, end_s=end,
+                                             run=self.native_run)
+            dest = ec.store.episode_asset_path(ec.story_id, ec.ep, "voice", voice_lines.asset_name(line_id, "wav"),
+                                               create=True)
+            side = sidecar_path(ec, line_id)
+        except take_mod.TakeError as exc:
+            return f"its speech could not be cut from the clip ({exc})"
+        except KeyError:
+            return f"{voice_lines.VOICE_ASSETS}/{voice_lines.asset_name(line_id, 'wav')} is not a real file"
+        voice = take_mod.pinned_voice(ec, line["speaker"])
+        if voice is None:
+            return f"{voice_lines.speaker_name(ec, line['speaker'])} has no pinned voice: the take cannot be its line"
+        _atomic_copy(segment, dest)
+        take_mod.write_json(side, take_mod.sidecar(take, link=(shot["assets"].get("clip") or {}).get("link"),
+                                                   duration_s=end - start))
+        line["timing"] = take_mod.line_timing(line, duration_s=end - start, voice=voice,
+                                              audio_rel=f"{voice_lines.VOICE_ASSETS}/"
+                                                        f"{voice_lines.asset_name(line_id, 'wav')}")
+        self.drop_other_take(line_id, "wav")
+        return None
+
+    def retake_shot(self, shot, *, video, row, image_link=None) -> None:
+        """One more take of a speaking clip whose take missed its line (plan
+        22): an agent story buys it -- a fresh seed, the same link, the same
+        gates and journal as any clip, booked -- when the shot has retakes
+        left (``speech_retake.max_per_shot``) and the episode's retake budget
+        (``speech_retake.cap_usd``, ``assets.json``'s ``speech_retakes``)
+        holds its price; the new clip is taken again (never retaken past
+        that). A Studio story's flagged shot waits for its human: the feed
+        names its regenerate target."""
+        ec, ctx = self.ec, self.ctx
+        shot_id = shot["shot_id"]
+        target = clip_target(ec.ep, shot_id)
+        if (ec.story.get("generation_profile") or {}).get("mode") != defaults.MODE_AGENT:
+            ctx.on_log(f"🔁 Shot {shot_id}: regenerate {target!r} for another take, or keep this one.")
+            return
+        doc = _read_assets_doc(ec)
+        budget = clips.retake_budget(ec, doc)
+        count = int(budget["shots"].get(shot_id) or 0)
+        price = float(((video.get("speech") or {}).get("speech_price")) or 0.0)
+        est = round(int(row["clip_s"]) * price, 4)
+        if count >= budget["max_per_shot"]:
+            ctx.on_log(f"🔁 Shot {shot_id}: no retake left ({count} of {budget['max_per_shot']}): regenerate "
+                       f"{target!r} for another take.")
+            return
+        if budget["spent_usd"] + est > budget["cap_usd"] + 1e-9:
+            ctx.on_log(f"🔁 Shot {shot_id}: a retake (est ${est:.3f}) would bring the retakes to "
+                       f"${budget['spent_usd'] + est:.2f} of their ${budget['cap_usd']:.2f}: regenerate {target!r} "
+                       "for another take.")
+            return
+        previous = copy.deepcopy(shot["assets"].get("clip") or {})
+        seed = entities.fresh_seed()
+        shot["assets"]["clip"] = dict(previous, pending={"seed": seed, "note": None,
+                                                         "requested_at": llm_call.utc_now()})
+        self.write_board()
+        ctx.on_log(f"🔁 Shot {shot_id}: retake {count + 1} of {budget['max_per_shot']} (seed {seed}, est ${est:.3f})")
+        flags = clips.shot_flags(shot, doc)
+        try:
+            self.before_clip([shot_id])
+            record, info = self.make_clip(shot, video=video, clip_s=row["clip_s"], est_usd=est, seed=seed, note=None,
+                                          flags=flags, tier=clips.tier_of(ec), image_link=image_link)
+        except ClipFailed as exc:
+            shot["assets"]["clip"] = previous
+            shot["assets"]["video"] = clips.clip_rel(shot_id)
+            self.write_board()
+            ctx.on_log(f"✖ Shot {shot_id}'s retake failed ({exc.reason}); its first take is kept.")
+            return
+        record["retakes"] = count + 1
+        self.apply_clip(shot, record, info, video=video)
+        spent = float(record["est_usd"]) if info.get("fresh") else 0.0
+        self._book_retake(shot_id, count + 1, spent, budget)
+        self.take_summary()["retaken"].append(shot_id)
+        self.native_take_shot(shot)
+
+    def _book_retake(self, shot_id, count, spent, budget) -> None:
+        """``assets.json``'s ``speech_retakes``: one more retake of *shot_id*
+        and what it cost."""
+        ec = self.ec
+        now = llm_call.utc_now()
+        doc = episode_common.read_episode(ec, ASSETS_DOC) or _minimal_assets_doc(ec, now)
+        record = dict(doc.get("speech_retakes") or {})
+        record.update(max_per_shot=budget["max_per_shot"], cap_usd=budget["cap_usd"],
+                      spent_usd=round(float(record.get("spent_usd") or 0.0) + spent, 4))
+        record["shots"] = dict(record.get("shots") or {}, **{shot_id: count})
+        doc["speech_retakes"] = record
+        try:
+            ec.store.write_episode_doc(ec.story_id, ec.ep, ASSETS_DOC, doc, now=now)
+        except (schemas.SchemaError, ValueError, KeyError) as exc:
+            self.ctx.on_log(f"⚠️ {ASSETS_DOC} could not record the retake ({exc}).")
+
+    def take_total(self) -> None:
+        """The run's one line about the native takes (plan 22), when it took any."""
+        takes = (self.video or {}).get("takes")
+        if not takes or not (takes["ok"] or takes["flagged"] or takes["approximate"]):
+            return
+        parts = []
+        if takes["ok"]:
+            parts.append(f"{len(takes['ok'])} speak their line")
+        if takes["flagged"]:
+            parts.append(f"{len(takes['flagged'])} flagged ({_and(item['shot_id'] for item in takes['flagged'])})")
+        if takes["approximate"]:
+            parts.append(f"{len(takes['approximate'])} unchecked, subtitles approximate")
+        if takes["retaken"]:
+            parts.append(f"{len(takes['retaken'])} retaken")
+        self.ctx.on_log(f"🗣 Native takes: {', '.join(parts)}.")
 
     def clip_gone(self, why, record) -> ClipFailed:
         """The plan's video link went away in this run (*why*): the offer
@@ -3629,7 +3976,8 @@ class _Assets(voice_lines.LineMeasurement):
         # A v2 episode's keyframe verdicts and approval (phase 7 stage 6b) and
         # its keyframe auto-fix records (phase 8 stage B): carried as they are
         # -- the approval goes stale by its fingerprint, never cleared here.
-        for key in (judge.KEYFRAME_VERDICTS, judge.KEYFRAMES_APPROVED, KEYFRAME_FIXES, KEYFRAME_FIX_BUDGET):
+        for key in (judge.KEYFRAME_VERDICTS, judge.KEYFRAMES_APPROVED, KEYFRAME_FIXES, KEYFRAME_FIX_BUDGET,
+                    SPEECH_RETAKES):
             if (previous or {}).get(key):
                 doc[key] = previous[key]
         doc.update({
@@ -3970,6 +4318,9 @@ class _Assets(voice_lines.LineMeasurement):
                     doc = self.animate_clips(doc)
                 except gencache.JournalError as exc:
                     raise self.journal_failed(exc) from None
+                if (self.video or {}).get("takes"):
+                    # Plan 22: the takes timed the characters' lines: their words and the SFX follow.
+                    doc = self.write_assets_doc()
         finally:
             self.write_ledger_view()
         return self.finish(doc)
@@ -3978,8 +4329,20 @@ class _Assets(voice_lines.LineMeasurement):
         ec, ctx, board = self.ec, self.ctx, self.storyboard
         link = recorded_image_link(doc)
         states = {shot["shot_id"]: shot_state(ec, shot, link=link) for shot in board["shots"]}
+        native = media_policy.native_speech(ec.story)
         unvoiced = [line["line_id"] for scene in self.script["scenes"] for line in scene["lines"]
-                    if not voice_lines.is_measured(ec, line)]
+                    if not voice_lines.is_measured(ec, line) and not (native and voice_lines.spoken_by_clip(ec, line))]
+        # Plan 22: a character line of a native-speech story is its clip's take: missing while its clip is
+        # still to buy (held for the keyframes' approval: not this run's), a failure once its clip is there.
+        untaken = [line["line_id"] for scene in self.script["scenes"] for line in scene["lines"]
+                   if native and voice_lines.spoken_by_clip(ec, line) and not voice_lines.is_measured(ec, line)]
+        held = bool((self.video or {}).get("hold")) or not animate_param(self.ctx.params)
+        for shot in board["shots"] if native else ():
+            clip = shot["assets"].get("clip") or {}
+            missing = [line_id for line_id in shot["lines"] if line_id in untaken]
+            if missing and clip.get("state") == "current" and clip.get("native_speech"):
+                self.failed.append((f"take of shot {shot['shot_id']}", clip_target(ec.ep, shot["shot_id"]),
+                                    f"its clip speaks no word of line {missing[0]}"))
         missing_cues = sum(1 for cue in doc["sfx"] if cue["state"] == "missing")
         failures = [{"what": what, "target": target, "reason": reason} for what, target, reason in self.failed]
         failures += [{"what": f"line {line_id}", "target": line_target(ec.ep, line_id),
@@ -4015,13 +4378,14 @@ class _Assets(voice_lines.LineMeasurement):
                       "cached": sum(1 for _sid, cached in self.made if cached),
                       "locked": sum(1 for shot in board["shots"] if shot["assets"].get("locked")),
                       "states": states},
-            "lines": {"measured": self.measured, "unvoiced": unvoiced},
+            "lines": dict({"measured": self.measured, "unvoiced": unvoiced}, **({"untaken": untaken} if native else {})),
             "aligned": list(self.aligned),
             "sfx": {"resolved": len(doc["sfx"]) - missing_cues, "missing": missing_cues},
             "bgm": None if doc["bgm"] is None else doc["bgm"]["mood"],
             "failed": failures,
-            "complete": not unvoiced and all(shot["assets"].get("locked") or states[shot["shot_id"]] == "current"
-                                             for shot in board["shots"]),
+            "complete": not unvoiced and (held or not untaken)
+                        and all(shot["assets"].get("locked") or states[shot["shot_id"]] == "current"
+                                for shot in board["shots"]),
             "fingerprint": current_fingerprint(ec, board, self.script, doc),
         }
         if tails["checked"]:
@@ -4206,6 +4570,7 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
         video = quote["video"]
         host.video = _video_summary(dict(video, plan=[{"shot_id": shot_id}]), animate=True)
         host.video_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO) is not None
+        host.speech_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO_SPEECH) is not None
         host.clip_todo = [shot_id]
         tier = clips.tier_of(ec)
         flags = clips.shot_flags(shot, doc)
@@ -4242,6 +4607,11 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
             raise refuse(f"{why}. The request is kept (seed {seed}): regenerate {target!r} again with the same "
                          "note, or run the assets step, to ask for the same clip.") from None
         host.apply_clip(shot, record, info, video=video)
+        if media_policy.native_speech(ec.story):
+            # Plan 22: the new clip is taken (free); a regenerate is the human's own retake.
+            host.native_take_shot(shot)
+            if (host.video or {}).get("takes"):
+                host.write_assets_doc()
         if media_policy.lipsync(ec.story):
             # DEC-258: a new clip is lipsynced again, on the same gates.
             status = lipsync_step.link_status(gates.merged, tools.adapters, allow_paid=gates.budget.allow_paid)
@@ -4288,6 +4658,11 @@ def regenerate_line_voice(ctx, ec, target, line_id, note, *, tools, refuse) -> d
     line = next((ln for scene in host.script["scenes"] for ln in scene["lines"] if ln["line_id"] == line_id), None)
     if line is None:
         raise refuse(f"episode {ec.ep}'s script has no line {line_id!r}.")
+    if voice_lines.spoken_by_clip(ec, line):
+        # Plan 22: a native-speech story's character line is its clip's own speech.
+        shot = next((item for item in host.storyboard["shots"] if line_id in item["lines"]), None)
+        how = f"regenerate {clip_target(ec.ep, shot['shot_id'])!r}" if shot else "regenerate its shot's clip"
+        raise refuse(f"line {line_id} is spoken by its own clip, never by a voice: {how} for another take.")
     if voices.voice_label(voice_lines.speaker_voice(ec, line["speaker"])) is None:
         who = "the narrator" if line["speaker"] == "narrator" else voice_lines.speaker_name(ec, line["speaker"])
         raise refuse(f"{voice_lines.no_voice_reason(ec, line['speaker'])}: pick a voice for {who} first.")

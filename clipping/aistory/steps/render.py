@@ -214,6 +214,14 @@ def require_renderable(ec) -> tuple:
                          f"or lock {_plural(outdated, 'it', 'them')}, approve the assets again, then render.")
 
     lines = [line for scene in script["scenes"] for line in scene["lines"]]
+    untaken = [line["line_id"] for line in lines
+               if voice_lines.spoken_by_clip(ec, line) and not voice_lines.is_measured(ec, line)]
+    if untaken:
+        # Plan 22: a native-speech story's character line is its clip's own speech (the native take).
+        raise StepFailed(f"Episode {ep} cannot be rendered: {_plural(untaken, 'line', 'lines')} {_and(untaken)} "
+                         f"{_plural(untaken, 'has', 'have')} no take of {_plural(untaken, 'its', 'their')} clip yet "
+                         "(the clip is missing, or speaks no word of it). Run the assets step (it takes every "
+                         "speaking clip) or regenerate the shot's clip, approve the assets again, then render.")
     unvoiced = [line["line_id"] for line in lines if not voice_lines.is_measured(ec, line)]
     if unvoiced:
         raise StepFailed(f"Episode {ep} cannot be rendered: {_plural(unvoiced, 'line', 'lines')} {_and(unvoiced)} "
@@ -396,6 +404,7 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         if blocked or unmade:
             raise StepFailed(fully_animated_refusal(ec, blocked, unmade, script=script, doc=assets_doc, link=link))
     ambient = tier == 3 and media_policy.ambience(ec.story)
+    speech = tier == 3 and media_policy.native_speech(ec.story)
     videos, keep_still, blocked, native, ambience, notes = {}, {}, [], [], [], []
     for shot in board["shots"]:
         shot_id = shot["shot_id"]
@@ -404,12 +413,21 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         if keep_still[shot_id] or not shot["assets"].get("clip"):
             continue
         image = assets_step.shot_image_path(ec, shot)
-        state = clips.clip_state(ec, shot, script, link=link, tier=tier, flags=flags,
-                                 image_sha=assets_step._sha256_file(image) if image is not None else None)
+        state = clips.clip_state(ec, shot, script, link=clips.class_link(ec.story, shot, assets_doc, link), tier=tier,
+                                 flags=flags, image_sha=assets_step._sha256_file(image) if image is not None else None)
         if state == "current":
             path = clips.shot_clip_path(ec, shot)
             videos[shot_id] = runner_mod.file_record(path, shot["assets"]["video"])
-            if ambient:
+            if speech:
+                # Plan 22: a speaking clip's sound in place of its line, a silent clip's as ambience
+                # under the narrator's voice-over.
+                if not clips.clip_has_audio(path):
+                    notes.append(silent_ambience_note(shot))
+                elif shot.get("speaks"):
+                    native.append(shot_id)
+                else:
+                    ambience.append(shot_id)
+            elif ambient:
                 if clips.clip_has_audio(path):
                     ambience.append(shot_id)
                 else:

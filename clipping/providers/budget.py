@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -40,7 +41,7 @@ BUDGET_PROFILE = ""          # "" = resolved from allow_paid
 
 PROFILE_WHEN_FREE = "free"
 PROFILE_WHEN_PAID = "one_dollar"
-PROFILE_NAMES = ("free", "one_dollar", "quality")
+PROFILE_NAMES = ("free", "one_dollar", "quality", "native_speech")
 
 ENV_NAMES = ("ALLOW_PAID", "PER_EPISODE_CAP_USD", "DAILY_CAP_USD", "PER_STORY_CAP_USD", "BUDGET_PROFILE")
 
@@ -117,6 +118,27 @@ VIDEO_LINK_POLICIES = ("cheapest_available", "first_in_chain", "first_with_audio
 # 2026-10-02): every shot's clip sound is heard UNDER its lines, ducked, the
 # lines always in their pinned TTS voices (``media_policy.ambience``).
 TIER3_AUDIO_MODES = ("opt_in", "ambience")
+# Plan 22 (the native-speech profile): ``speech`` -- each character line is
+# spoken by its own clip, the clip's sound heard in place of the line, the
+# narrator's TTS voice-over over the silent shots (``media_policy.native_speech``),
+# with ``video_link_policy: speech_by_shot`` -- a speaking shot on the
+# profile's ``speech_links[speech_model]``, a silent shot on its
+# ``silent_link``. Kept apart from the two tuples above (their values are
+# pinned where the phase-7 modes are tested); a profile may name any value of
+# :data:`TIER3_AUDIO_VALUES` / :data:`VIDEO_LINK_POLICY_VALUES`.
+SPEECH_AUDIO_MODE = "speech"
+SPEECH_LINK_POLICY = "speech_by_shot"
+TIER3_AUDIO_VALUES = TIER3_AUDIO_MODES + (SPEECH_AUDIO_MODE,)
+VIDEO_LINK_POLICY_VALUES = VIDEO_LINK_POLICIES + (SPEECH_LINK_POLICY,)
+# The speaking clips' model of a native-speech profile (``speech_model``, and
+# the story's own ``generation_profile.speech_model``): a key of its
+# ``speech_links``. Each link is a ``provider/model`` label resolved by name
+# when a clip is planned -- never checked against the providers here, so a
+# link added later (``manual/upload``) is named before it exists.
+SPEECH_MODELS = ("lite", "fast", "premium")
+SPEECH_RETAKE_KEYS = ("max_per_shot", "cap_usd")
+SPEECH_RETAKE_MAX = 3
+_LINK_LABEL = re.compile(r"^[a-z][a-z0-9_-]*/[^\s,*]+$")
 # ``lipsync`` (DEC-258): whether a fully animated v2 story's clips get their
 # characters' lips moved to the dialogue after they are bought -- ``none``, or
 # ``kling`` (Kling LipSync on fal, LIPSYNC_CHAIN). A profile without the key
@@ -152,12 +174,58 @@ def _profile_errors(name, profile) -> list:
     if resolution is not None and resolution not in VIDEO_RESOLUTIONS:
         errors.append(f"profile {name!r}: video_resolution must be one of {', '.join(VIDEO_RESOLUTIONS)}, "
                       f"not {resolution!r}")
-    for key, known in (("video_link_policy", VIDEO_LINK_POLICIES), ("tier3_native_audio", TIER3_AUDIO_MODES),
+    for key, known in (("video_link_policy", VIDEO_LINK_POLICY_VALUES), ("tier3_native_audio", TIER3_AUDIO_VALUES),
                        ("lipsync", LIPSYNC_MODES)):
         if key in profile and profile[key] not in known:
             errors.append(f"profile {name!r}: {key} must be one of {', '.join(known)}, not {profile[key]!r}")
     if "keyframe_fix" in profile:
         errors.extend(_keyframe_fix_errors(name, profile["keyframe_fix"]))
+    errors.extend(_speech_errors(name, profile))
+    return errors
+
+
+def _is_link(value) -> bool:
+    return isinstance(value, str) and _LINK_LABEL.match(value) is not None
+
+
+def _speech_errors(name, profile) -> list:
+    """What is wrong with profile *name*'s native-speech keys (plan 22):
+    ``speech_links`` (each of :data:`SPEECH_MODELS` a ``provider/model``
+    label), ``speech_model`` (one of them), ``silent_link`` (a label) and
+    ``speech_retake`` (``max_per_shot`` 0 to :data:`SPEECH_RETAKE_MAX`,
+    ``cap_usd`` >= 0); a ``speech_by_shot`` profile needs the first three.
+    The labels are checked for their shape only: the links are resolved by
+    name when a clip is planned."""
+    where = f"profile {name!r}"
+    errors = []
+    links = profile.get("speech_links")
+    if links is not None:
+        if not isinstance(links, dict) or sorted(links) != sorted(SPEECH_MODELS):
+            errors.append(f"{where}: speech_links must map exactly {', '.join(SPEECH_MODELS)} to links")
+        else:
+            bad = [model for model in SPEECH_MODELS if not _is_link(links[model])]
+            if bad:
+                errors.append(f"{where}: speech_links.{bad[0]} must be a provider/model link, not {links[bad[0]]!r}")
+    if "speech_model" in profile and profile["speech_model"] not in SPEECH_MODELS:
+        errors.append(f"{where}: speech_model must be one of {', '.join(SPEECH_MODELS)}, not "
+                      f"{profile['speech_model']!r}")
+    if "silent_link" in profile and not _is_link(profile["silent_link"]):
+        errors.append(f"{where}: silent_link must be a provider/model link, not {profile['silent_link']!r}")
+    if profile.get("video_link_policy") == SPEECH_LINK_POLICY:
+        missing = [key for key in ("speech_links", "speech_model", "silent_link") if key not in profile]
+        if missing:
+            errors.append(f"{where}: video_link_policy {SPEECH_LINK_POLICY!r} needs {', '.join(missing)}")
+    retake = profile.get("speech_retake")
+    if retake is not None:
+        if not isinstance(retake, dict) or sorted(retake) != sorted(SPEECH_RETAKE_KEYS):
+            errors.append(f"{where}: speech_retake must hold exactly {', '.join(SPEECH_RETAKE_KEYS)}")
+        else:
+            count, cap = retake["max_per_shot"], retake["cap_usd"]
+            if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= SPEECH_RETAKE_MAX:
+                errors.append(f"{where}: speech_retake.max_per_shot must be a whole number from 0 to "
+                              f"{SPEECH_RETAKE_MAX}, not {count!r}")
+            if isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap < 0:
+                errors.append(f"{where}: speech_retake.cap_usd must be an amount in USD (0 or more), not {cap!r}")
     return errors
 
 

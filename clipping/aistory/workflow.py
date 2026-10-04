@@ -3362,6 +3362,12 @@ def _shot_clip(ec, script, shot, doc, *, link, tier, image_sha) -> dict:
         view["lipsync"] = {"state": lipsync.get("state"), "link": lipsync.get("link"),
                            "lines": list(lipsync.get("lines") or []), "est_usd": lipsync.get("est_usd"),
                            "reason": lipsync.get("reason"), "generated_at": lipsync.get("generated_at")}
+    if "speaks" in shot:
+        # Plan 22: a native-speech shot -- whether its clip speaks its line, and its take.
+        take = record.get("native_speech") or None
+        view["speaks"] = bool(shot["speaks"])
+        view["take"] = None if take is None else {key: take.get(key) for key in (
+            "state", "matched", "heard", "start_s", "end_s", "aligned_by", "reason")}
     return view
 
 
@@ -3395,6 +3401,10 @@ def _video_view(ec, script, board, doc, *, env):
     if video.get("lipsync") is not None:
         # DEC-258: the clips' lipsync part, only on a story that lipsyncs.
         view["lipsync"] = copy.deepcopy(video["lipsync"])
+    if video.get("speech") is not None:
+        # Plan 22: a native-speech episode's two links, their prices and the retake budget.
+        view["speech"] = {key: copy.deepcopy(value) for key, value in video["speech"].items() if key != "classes"}
+        view["over_cap"] = video.get("over_cap")
     try:
         render_step.shot_clips(ec, script, board, doc or {}, fill_failed=False)
         view["render_blocked"] = None
@@ -3413,7 +3423,8 @@ def _derive_clips(ec, script, board, doc, *, env) -> dict:
     for shot in board["shots"]:
         image = assets_step.shot_image_path(ec, shot)
         sha = assets_step._sha256_file(image) if image is not None and shot["assets"].get("clip") else None
-        shots[shot["shot_id"]] = _shot_clip(ec, script, shot, doc, link=link, tier=tier, image_sha=sha)
+        shots[shot["shot_id"]] = _shot_clip(ec, script, shot, doc, link=clips_step.class_link(ec.story, shot, doc, link),
+                                            tier=tier, image_sha=sha)
     return {"shots": shots, "video": _video_view(ec, script, board, doc, env=env)}
 
 
@@ -4835,9 +4846,12 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
         _write_assets_doc(stories, story_id, ep, overridden, now=now, what="these shot overrides")
     if sticky_link.IMAGE in wanted:
         _switch_image_link(stories, story_id, ep, ec, board, wanted[sticky_link.IMAGE], env=env, now=now)
-    if sticky_link.VIDEO in wanted:
+    for kind in sticky_link.VIDEO_KINDS:
+        # Plan 22: a native-speech episode switches either of its two video links.
+        if kind not in wanted:
+            continue
         doc = read_episode(stories, story_id, ep, ASSETS_DOC)
-        new = assets_step.switched_video_doc(ec, doc, wanted[sticky_link.VIDEO], now=now)
+        new = assets_step.switched_video_doc(ec, doc, wanted[kind], now=now, kind=kind)
         if new is not None:
             _write_assets_doc(stories, story_id, ep, new, now=now, what="this video link")
     return board
@@ -5797,6 +5811,14 @@ def _agent_episode_usd(story, env) -> float:
         cap = float(budget_mod.profile_settings(profile).get("cap_usd") or 0.0)
     except (OSError, ValueError, KeyError, TypeError):
         cap = 0.0
+    if profile == defaults.NATIVE_SPEECH_PROFILE:
+        # Plan 22: a native-speech story's own figure (its speech model, links and retake budget).
+        try:
+            usd = float(media_policy.native_speech_estimate(gating.merged_env(env), story=story)["episode_usd"])
+        except Exception:  # noqa: BLE001 - a predicted figure falls back to the profile's own
+            usd = cap
+        fix = media_policy.keyframe_fix(story)
+        return round(usd + (float(fix["cap_usd"]) if fix else 0.0), 4)
     if profile != "quality":
         return round(cap, 4)
     try:

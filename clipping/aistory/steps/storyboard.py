@@ -41,7 +41,7 @@ import time
 
 from clipping.providers import pricing
 
-from .. import context, media_policy, prompts, schemas, shots, timing, voices
+from .. import context, media_policy, native_speech, prompts, schemas, shots, timing, voices
 from .. import store as store_mod
 from . import clips, entities, episode_common, llm_call, voice_lines
 from . import script as script_step
@@ -207,6 +207,10 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
     ledger = script_step.ledger_of(ec)
     assets_doc = _assets_doc(ec)
     budgets = clips.episode_budgets(ec, env, assets_doc=assets_doc)
+    native = media_policy.native_speech(ec.story)
+    if native:
+        # Plan 22: one shot a character line, planned at the length its clip sells.
+        plans = speech_plans(ec, script, plans)
     keep = kept_shots(previous, plans, replanned=replanned, replanned_shots=replanned_shots)
     reserved = reserved_shot_ids(assets_doc)
 
@@ -215,8 +219,11 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
             script, {sid: plans[sid] for sid in chosen}, {sid: sources[sid] for sid in chosen},
             entities=ec.entities, style_lock=ec.style_lock, template=ec.template, language=ec.language,
             consistency_mode=ec.consistency_mode, now=now, previous=previous, v2=media_policy.is_v2(ec.story),
-            shots_per_scene=ec.episode_defaults["shots_per_scene"], ledger=ledger, budgets=budgets,
-            keep={sid: keep[sid] for sid in chosen if sid in keep}, reserved=reserved)
+            shots_per_scene=(episode_common.NATIVE_SHOTS_PER_SCENE if native
+                             else ec.episode_defaults["shots_per_scene"]),
+            ledger=ledger, budgets=budgets,
+            keep={sid: keep[sid] for sid in chosen if sid in keep}, reserved=reserved,
+            timing_mode=native_speech.TIMING_MODE if native else None)
 
     try:
         board, notes = attempt(list(plans))
@@ -233,6 +240,42 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
             entry["stale"] = True
             entry["script_rev"] = previous["scenes"][sid]["script_rev"]
     return board, notes
+
+
+def speech_plans(ec, script, plans) -> dict:
+    """*plans* as a native-speech story plans them (plan 22,
+    ``shots.speech_shot_plan``): each character line one speaking shot at
+    the length its speech link sells, the reactions and narrator shots
+    silent on the silent link's lengths, up to the template's
+    ``reaction_shots`` (default 0 to 1) a scene. ``StepFailed`` naming a
+    line no clip can speak, with the fix."""
+    speech_lengths, silent_lengths = clips.speech_lengths(ec.story)
+    reactions = tuple(ec.template.get("reaction_shots") or (0, 1))
+    by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
+    out = {}
+    for sid, scene_plans in plans.items():
+        scene = by_id.get(sid)
+        if scene is None:
+            out[sid] = scene_plans
+            continue
+        try:
+            out[sid] = shots.speech_shot_plan(scene, scene_plans, language=ec.language, speech_lengths=speech_lengths,
+                                              silent_lengths=silent_lengths, reaction_shots=reactions)
+        except shots.SpeechLineTooLong as exc:
+            raise StepFailed(f"Episode {ec.ep}'s storyboard cannot be planned as speaking clips: {exc}.") from None
+    return out
+
+
+def require_speakable(ec, script) -> None:
+    """A native-speech story only (plan 22): refuse to plan shots -- before
+    any LLM call -- while a character line is longer than its longest clip
+    can speak (``shots.speech_line_refusal``), naming each with the fix. The
+    script step's own cap keeps a new line under it."""
+    if not media_policy.native_speech(ec.story):
+        return
+    refusal = shots.speech_line_refusal(script, clips.speech_lengths(ec.story)[0])
+    if refusal:
+        raise StepFailed(f"Episode {ec.ep}'s storyboard cannot be planned as speaking clips: {refusal}.")
 
 
 def save(ec, script, board, *, now) -> dict:
@@ -604,6 +647,7 @@ def build_fast(stores, story_id, ep, *, now, on_log) -> dict:
     episode_common.check_episode_preconditions(None, ec)
     script = require_complete_script(ec)
     require_prop_images(ec, script)
+    require_speakable(ec, script)
     previous = episode_common.read_episode(ec, STORYBOARD_DOC)
     plans, seen = {}, set()
     for scene in script["scenes"]:
@@ -631,6 +675,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
     episode_common.check_episode_preconditions(ctx, ec)
     script = require_complete_script(ec)
     require_prop_images(ec, script)
+    require_speakable(ec, script)
     ctx.cancel.check()
     tools = entities.Tools(runner=runner, time_fn=time_fn)
     budget = budget if budget is not None else episode_common.Budget(time_fn)

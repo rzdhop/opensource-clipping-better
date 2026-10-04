@@ -368,17 +368,20 @@ def _boundary_kind(prev_place_id: str, next_place_id: str) -> str:
     return "dissolve" if prev_place_id == next_place_id else "fadeblack"
 
 
-def plan_transitions(shots: list, scenes_by_id: dict, template: dict) -> list:
+def plan_transitions(shots: list, scenes_by_id: dict, template: dict, *, cuts_only: bool = False) -> list:
     """One transition per boundary between consecutive shots (spec 6.3, 6.5).
 
     A cut inside a scene; between scenes, a dissolve when both scenes share
     a ``place_id`` else a fade to black; durations come from the template's
     ``transitions_s``. The end card (not a shot) is never listed here.
+    *cuts_only* (plan 22, a native-speech board): every boundary a cut, so
+    every second a clip was bought for is seen and no line plays under a
+    blend.
     """
     transitions_s = template["transitions_s"]
     result = []
     for prev_shot, next_shot in zip(shots, shots[1:]):
-        if prev_shot["scene_id"] == next_shot["scene_id"]:
+        if cuts_only or prev_shot["scene_id"] == next_shot["scene_id"]:
             kind = "cut"
         else:
             prev_place = scenes_by_id[prev_shot["scene_id"]]["place_id"]
@@ -701,6 +704,8 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
     (:func:`covers`); :func:`episode_pass` is the same computation for any
     storyboard, and also returns each scene's line starts.
     """
+    if _native(storyboard):
+        return native_pass(script, storyboard, template, language)[0]
     boundary = _boundary_transitions(script["scenes"], template, storyboard)
     result, _scene_timings = _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
                                            shot_floors=_shot_floors(storyboard, template), whole_frames=whole_frames)
@@ -732,10 +737,30 @@ def episode_pass(script: dict, template: dict, language: str, *, style_lock: dic
     says which one a script beside a given storyboard is timed with, and
     every caller timing a stored document passes it.
     """
+    if _native(storyboard):
+        return native_pass(script, storyboard, template, language)
     boundary_board = storyboard if covers(storyboard, script) else None
     boundary = _boundary_transitions(script["scenes"], template, boundary_board)
     return _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
                          shot_floors=_shot_floors(storyboard, template), whole_frames=whole_frames)
+
+
+def _native(storyboard) -> bool:
+    """Whether *storyboard* is a native-speech story's (plan 22): its
+    ``timing_mode`` says so. Every other board is timed as it always was."""
+    return bool(storyboard) and storyboard.get("timing_mode") == "native_speech"
+
+
+def native_pass(script: dict, storyboard: dict, template: dict, language: str) -> tuple:
+    """:func:`episode_pass` of a native-speech board (plan 22,
+    ``native_speech.native_pass``): each shot lasts what its clip lasts, a
+    speaking shot's line starts where its take heard it, a narrator's line
+    in its silent shot. Only a board whose ``timing_mode`` is
+    ``native_speech`` is ever timed so."""
+    from . import native_speech
+
+    _check_language(language)
+    return native_speech.native_pass(script, storyboard, template, lambda line: line_duration(line, language)[0])
 
 
 def _episode_pass(script: dict, template: dict, language: str, *, style_lock: dict, boundary: list,
@@ -994,6 +1019,11 @@ def line_offsets(script: dict, timing: dict, template: dict, *, storyboard: dict
     the script), not re-estimated: this function only places lines, it
     never times them.
     """
+    if _native(storyboard):
+        # Plan 22: a native board places each line where its clip speaks it.
+        from . import native_speech
+
+        return native_speech.line_offsets(script, storyboard, lambda line: line["timing"]["duration_s"])
     scenes = script["scenes"]
     starts = scene_starts(script, timing, template, storyboard=storyboard)
     pauses = template["pauses_s"]

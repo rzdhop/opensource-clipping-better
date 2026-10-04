@@ -853,7 +853,7 @@ def _wav_output_args() -> list:
 
 
 def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_rel, stems_rel,
-                   native_audio=None, ambience=None) -> list:
+                   native_audio=None, ambience=None, speech=False) -> list:
     """The episode's audio mix (spec 6.5 "Audio graph"; plan: "Audio mix";
     DEC-157, DEC-158): one absolute timeline of exactly ``total_s``.
 
@@ -912,7 +912,11 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
     gentler ``AMBIENCE_DUCK_*`` values, then mixed on the SFX bus -- still
     three stems, ``stems/sfx.wav`` holding it, so the Tier-2 ducking check
     of the bed is unchanged. A render keeps one tier-3 mode: *native_audio*
-    and *ambience* together are a :class:`GraphError`.
+    and *ambience* together are a :class:`GraphError` -- but with *speech*
+    (plan 22, a native-speech board): its speaking shots' clips heard in
+    place of their lines and its silent shots' clips as ambience, ducked by
+    the dialogue as heard (the speech stems and the narrator's lines). Every
+    argv without *speech* is the one it always was.
     """
     if ending not in profiles.ENDINGS:
         raise GraphError(f"unknown ending {ending!r}, expected one of {profiles.ENDINGS}")
@@ -936,7 +940,7 @@ def audio_mix_argv(timeline, *, line_inputs, sfx_inputs, bgm_input, ending, out_
     _assert_relative(out_rel, what="out_rel")
     natives = _native_stems(timeline, native_audio) if native_audio else []
     ambient = _ambience_stems(timeline, ambience) if ambience else []
-    if natives and ambient:
+    if natives and ambient and not speech:
         raise GraphError("a render keeps one tier-3 audio mode: a clip's sound heard in place of its lines "
                          "(native_audio) or under them (ambience), not both")
 

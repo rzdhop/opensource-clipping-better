@@ -58,7 +58,7 @@ from clipping.providers import generation as gen
 from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
-from .. import hardware, imaging, media_policy, prompt_budgets, prompting, schemas, video_plan
+from .. import hardware, imaging, media_policy, native_speech, prompt_budgets, prompting, schemas, video_plan
 from .. import shots as shots_mod
 from . import episode_common, sticky_link
 from . import lipsync as lipsync_step
@@ -291,7 +291,12 @@ def clip_request_parts(ec, shot, script, *, tier, flags, note=None, link=None) -
     budget because it was built to another link's) -- None when it can, or
     with no link known."""
     story = getattr(ec, "story", None)
-    ambient = tier == 3 and media_policy.ambience(story)
+    speech_story = tier == 3 and media_policy.native_speech(story)
+    if speech_story and shot.get("speaks"):
+        # Plan 22: the clip speaks the shot's one line itself.
+        return speech_request_parts(ec, shot, script, note=note, link=link)
+    # Plan 22: a native-speech story's silent shot is an ambience clip.
+    ambient = tier == 3 and (media_policy.ambience(story) or speech_story)
     native = tier == 3 and bool(flags.get("keep_native_audio")) and not ambient
     lines = ()
     if native:
@@ -317,6 +322,63 @@ def clip_request_parts(ec, shot, script, *, tier, flags, note=None, link=None) -
     return {"prompt": sent, "negative": negative, "native_audio": asked,
             "hash": clip_prompt_hash(prompt, negative, native_audio=asked, resolution=resolution), "over": over,
             "refit": refit}
+
+
+def speech_line(script, shot):
+    """``(scene, line)`` of a speaking shot's one line, or ``(scene, None)``."""
+    scene = next((item for item in script["scenes"] if item["scene_id"] == shot["scene_id"]), None) or {}
+    line = next((item for item in scene.get("lines") or () if item["line_id"] in shot["lines"]), None)
+    return scene, line
+
+
+def speech_prompt_inputs(ec, shot, script) -> dict:
+    """What a speaking clip's prompt says (``prompting.speech_clip_prompt``'s
+    keywords but the budget), from the shot, its line, its speaker and
+    listener (by their handles, never their names) and its place."""
+    scene, line = speech_line(script, shot)
+    if line is None:
+        raise ValueError(f"shot {shot['shot_id']} speaks but holds no line of its scene")
+    entities = getattr(ec, "entities", None) or {}
+    characters = entities.get("characters") or {}
+    handles = shots_mod.character_handles(characters) if characters else {}
+    speaker = characters.get(line["speaker"]) or {}
+    in_frame = []
+    for tag in shot.get("subject_tags") or ():
+        try:
+            kind, entity_id, _variant = shots_mod.parse_tag(tag)
+        except ValueError:
+            continue
+        if kind == "char" and entity_id != line["speaker"]:
+            in_frame.append(entity_id)
+    listener = handles.get(in_frame[0], "") if in_frame else ""
+    look = shots_mod.render_look(speaker, max_words=prompting.SPEECH_LOOK_MAX_WORDS) if speaker.get("look") else ""
+    brief = audio_brief(ec, shot, script)
+    place = (entities.get("places") or {}).get(scene.get("place_id")) or {}
+    return {"speaker": handles.get(line["speaker"], "the character"), "look": look,
+            "action": shot.get("video_action") or shot.get("action") or "", "listener": listener,
+            "language": ec.language, "voice": prompting.voice_line(speaker.get("voice_hints")),
+            "line": line["text"], "reaction": shots_mod._reaction(scene, [line]),
+            "camera_phrase": prompting.CAMERA_PHRASES[shot["camera_motion"]],
+            "place": (place.get("descriptor") or "").strip(), "ambience": brief["place"]}
+
+
+def speech_request_parts(ec, shot, script, *, note=None, link=None) -> dict:
+    """``clip_request_parts`` of a native-speech story's speaking *shot*
+    (plan 22): the prompt is ``prompting.speech_clip_prompt`` of
+    :func:`speech_prompt_inputs`, built to *link*'s speech budget
+    (``prompt_budgets.speech_clip_words``: at most 200 words) with a
+    re-animate's *note* in it; the clip's sound is asked for (it is the
+    line); the hash is of that prompt, so a line rewritten makes its clip
+    stale. ``over`` as ``clip_request_parts``' (the link's limit)."""
+    inputs = speech_prompt_inputs(ec, shot, script)
+    budget = prompt_budgets.speech_clip_words(link)
+    prompt = prompting.speech_clip_prompt(ec.style_lock, budget=budget, note=note or "", **inputs)
+    _visual, negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=3)
+    resolution = media_policy.video_resolution(getattr(ec, "story", None))
+    over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, prompt, budget=budget) if link else None
+    return {"prompt": prompt, "negative": negative, "native_audio": True,
+            "hash": clip_prompt_hash(prompt, negative, native_audio=True, resolution=resolution), "over": over,
+            "refit": None}
 
 
 def _fitted_clip(ec, shot, script, prompt, *, note, link, budget, tier, lines, over) -> tuple:
@@ -367,12 +429,23 @@ def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
         return "failed"
     if clip["state"] != "current" or shot_clip_path(ec, shot) is None:
         return "stale" if clip["state"] == "stale" else "none"
+    if link is not None and shot.get("speaks") and media_policy.native_speech(getattr(ec, "story", None)):
+        # Plan 22: a speaking shot's clip is on the episode's speech link, never its silent one.
+        link = class_link(ec.story, shot, _assets_doc_of(ec), link)
     if link is not None and not sticky_link.on_link(clip["link"], link):
         return "stale"
     if image_sha is None or clip["image_sha256"] != image_sha:
         return "stale"
     expected = clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=clip.get("note"), link=link)["hash"]
     return "current" if clip["prompt_hash"] == expected else "stale"
+
+
+def _assets_doc_of(ec):
+    """The episode's ``assets.json`` (its recorded links), or None."""
+    try:
+        return episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC)
+    except (StepFailed, AttributeError):
+        return None
 
 
 # ------------------------------------------------------------ the links
@@ -495,6 +568,34 @@ def sold_lengths(story, link):
     return capped if capped and capped != tuple(lengths) else None
 
 
+def link_lengths(link):
+    """The lengths a native-speech clip on *link* is planned at: the link's
+    own table (``video.CLIP_LENGTHS``), else ``native_speech.SPEECH_LENGTHS``
+    (a link with no table yet: resolved by name, plan 22)."""
+    return tuple(video_providers.CLIP_LENGTHS.get(link or "") or native_speech.SPEECH_LENGTHS)
+
+
+def speech_lengths(story) -> tuple:
+    """``(speaking lengths, silent lengths)`` of a native-speech *story*'s
+    clips: its speech link's and its silent link's (:func:`link_lengths`)."""
+    return (link_lengths(media_policy.speech_link(story)), link_lengths(media_policy.silent_link(story)))
+
+
+def class_link(story, shot, assets_doc, default):
+    """The link *shot*'s clip is on (plan 22): on a native-speech *story* a
+    speaking shot's is the episode's ``links.video_speech`` record (else
+    the story's speech link), a silent shot's ``links.video`` (else its
+    silent link); any other story's, *default* (the episode's one video
+    link), as always."""
+    if not media_policy.native_speech(story):
+        return default
+    if shot.get("speaks"):
+        recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO_SPEECH)
+        return recorded["link"] if recorded is not None else media_policy.speech_link(story)
+    recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO)
+    return recorded["link"] if recorded is not None else media_policy.silent_link(story)
+
+
 # A placeholder key: what a hosted link would be picked as once its key is
 # set (:func:`planned_link`). Only ever read by ``hosted_rows``; never sent.
 _ASSUMED_KEY = "assumed-for-planning"
@@ -516,6 +617,10 @@ def planned_link(ec, env, *, assets_doc=None, adapters=None):
     profile = ec.story["generation_profile"]
     if profile.get("route") == "local":
         return None
+    if media_policy.native_speech(ec.story):
+        # Plan 22: the layered (silent) clip prompt is built for the silent link;
+        # a speaking shot's prompt is built at request time for its own.
+        return media_policy.silent_link(ec.story)
     try:
         settings = budget_mod.profile_settings(profile["budget_profile"])
     except (OSError, ValueError, KeyError):
@@ -732,6 +837,11 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         units.update(still=_still_rows(shots, flags, "keep_still"),
                      message="Every shot is kept still: no clip to make.")
         return units
+    if media_policy.native_speech(ec.story):
+        # Plan 22: a speaking shot on the speech link, a silent one on the silent link.
+        return _speech_units(ec, script, shots, flags, assets_doc, units=units, settings=settings, merged=merged,
+                             budget_obj=budget_obj, caps=caps, committed_usd=committed_usd, adapters=adapters,
+                             image_sha=image_sha, booked=booked, hold=hold, stop=stop)
 
     # --- the link: the episode's own, else the route and the profile's policy
     resolution = media_policy.video_resolution(ec.story)
@@ -1036,4 +1146,190 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
         text += f" Not now: {units['refused']}."
     if units["eta_s"]:
         text += f" About {units['eta_s'] / 60:.0f} min ({units['eta_note']})."
+    return text
+
+
+# ================================================== plan 22 (native speech)
+
+def link_row(label, merged, adapters, *, resolution=None) -> dict:
+    """``hosted_rows``' row of one link *label*, resolved by name (plan 22: a
+    native-speech profile's speech or silent link, which need not be a link
+    of VIDEO_CHAIN): keyed when it parses, has an adapter, is not refused,
+    has its keys and a price per second -- a link that costs nothing (one
+    the human fills, stage 5) is keyed at $0 whatever its unit."""
+    row = {"link": label, "status": "skipped", "reason": None, "price_per_second": None, "paid": False}
+    if not label:
+        row["reason"] = "the budget profile names no link"
+        return row
+    try:
+        link = gen.parse_generation_chain(gen.VIDEO, [label])[0]
+    except (ChainError, IndexError) as exc:
+        row["reason"] = f"not a video link that can run yet ({exc})"
+        return row
+    if gen.adapter_for(gen.VIDEO, link.provider, adapters) is None:
+        row["reason"] = f"no adapter yet for {link.provider} video"
+    elif label in video_providers.REFUSED_LINKS:
+        row["reason"] = video_providers.REFUSED_LINKS[label]
+    elif gen.missing_keys(link, merged):
+        row["reason"] = imaging.missing_keys_reason(gen.missing_keys(link, merged))
+    elif not gen.is_paid(link):
+        row.update(status="keyed", reason="keyed", price_per_second=0.0)
+    else:
+        try:
+            price = pricing.price_for(link, resolution)
+        except pricing.PriceUnknown as exc:
+            row["reason"] = str(exc)
+        else:
+            if price.unit != "second":
+                row["reason"] = f"priced per {price.unit}, not per second"
+            else:
+                row.update(status="keyed", reason="keyed", price_per_second=float(price.usd), paid=True)
+    return row
+
+
+def over_cap_sentence(total_usd, cap_usd) -> str:
+    """The native-speech plan's refusal over the per-episode cap (plan 22),
+    with the numbers and the two ways out."""
+    return (f"estimated ${total_usd:.2f} over the per-episode cap ${cap_usd:.2f}; raise PER_EPISODE_CAP_USD or use "
+            "your own clips")
+
+
+def retake_budget(ec, assets_doc) -> dict:
+    """``{"max_per_shot", "cap_usd", "spent_usd", "left_usd", "shots"}``: the
+    native-speech episode's retake budget (``media_policy.speech_retake``)
+    and what ``assets.json``'s ``speech_retakes`` says it spent; zeros
+    without one."""
+    settings = media_policy.speech_retake(ec.story) or {"max_per_shot": 0, "cap_usd": 0.0}
+    record = (assets_doc or {}).get("speech_retakes") or {}
+    spent = float(record.get("spent_usd") or 0.0)
+    return {"max_per_shot": settings["max_per_shot"], "cap_usd": settings["cap_usd"], "spent_usd": round(spent, 4),
+            "left_usd": round(max(0.0, settings["cap_usd"] - spent), 4), "shots": dict(record.get("shots") or {})}
+
+
+def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merged, budget_obj, caps,
+                  committed_usd, adapters, image_sha, booked, hold, stop) -> dict:
+    """:func:`video_units` of a native-speech story (plan 22): each shot on
+    its class's link (:func:`class_link`: a speaking shot on the episode's
+    speech link, a silent one on its silent link, each sticky on its own),
+    at the length the storyboard planned it (``clip_s``: a length that link
+    sells), a current clip or one the journal holds bought at $0; the
+    speaking seconds at the speech link's price plus the silent seconds at
+    the silent link's, plus the retake budget left (the contingency the
+    run may spend, :func:`retake_budget`). Over the episode's cap the whole
+    plan is refused with the numbers (``over_cap``); a link that cannot run
+    refuses it (``refused``) -- shown and priced, never bought."""
+    resolution = media_policy.video_resolution(ec.story)
+    speech_label = class_link(ec.story, {"speaks": True}, assets_doc, None)
+    silent_label = class_link(ec.story, {"speaks": False}, assets_doc, None)
+    rows = {label: link_row(label, merged, adapters, resolution=resolution)
+            for label in dict.fromkeys((speech_label, silent_label))}
+    speech_row, silent_row = rows[speech_label], rows[silent_label]
+    cap = float((caps.get("episode") or {}).get("cap_usd", budget_obj.per_episode_cap_usd))
+    committed = float(committed_usd or 0.0)
+    recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO_SPEECH) or sticky_link.recorded(
+        assets_doc, sticky_link.VIDEO)
+    units.update(mode=settings.get("animate") or "all_shots", link=speech_label, route_class="paid",
+                 source="record" if recorded else "policy", links=list(rows.values()),
+                 price_per_second=speech_row["price_per_second"])
+    tier_for_prompt = 3
+    plan, still, current_ids, booked_ids = [], [], [], []
+    for shot in shots:
+        shot_id = shot["shot_id"]
+        if flags[shot_id]["keep_still"]:
+            still.append({"shot_id": shot_id, "reason": "keep_still"})
+            continue
+        speaks = bool(shot.get("speaks"))
+        label = speech_label if speaks else silent_label
+        row = rows[label]
+        lengths = link_lengths(label)
+        clip_s = shot.get("clip_s")
+        if clip_s not in lengths:
+            clip_s = video_plan.requested_seconds(label, max(float(shot["duration_s"] or 0.0), _UNTIMED_S),
+                                                  lengths=lengths)
+        why = "speaks" if speaks else "silent"
+        price = float(row["price_per_second"] or 0.0)
+        est = clip_s * price
+        if shot["assets"].get("clip") and image_sha is not None and clip_state(
+                ec, shot, script, link=label, tier=tier_for_prompt, flags=flags[shot_id],
+                image_sha=image_sha(shot)) == "current":
+            why, est = "current", 0.0
+            current_ids.append(shot_id)
+        elif booked is not None and booked(shot, link=label, clip_s=clip_s, template=None):
+            why, est = "booked", 0.0
+            booked_ids.append(shot_id)
+        plan.append({"shot_id": shot_id, "clip_s": int(clip_s), "est_usd": round(est, 4), "why": why,
+                     "link": label, "speaks": speaks})
+    new = [row for row in plan if row["why"] not in ("current", "booked")]
+    speech_new = [row for row in new if row["speaks"]]
+    silent_new = [row for row in new if not row["speaks"]]
+    speech_usd = sum(row["est_usd"] for row in speech_new)
+    silent_usd = sum(row["est_usd"] for row in silent_new)
+    retake = retake_budget(ec, assets_doc)
+    # The retake contingency: what the run may spend retaking a speaking clip it buys now.
+    retake_usd = retake["left_usd"] if retake["max_per_shot"] > 0 and speech_new else 0.0
+    est = round(speech_usd + silent_usd + retake_usd, 4)
+    seconds = sum(row["clip_s"] for row in new)
+    units.update(plan=plan, still=still, count=len(new), seconds=int(seconds), est_usd=est,
+                 eta_s=0.0 if not new else None, eta_note="no clip to make" if not new else ETA_NONE)
+    units["speech"] = {
+        "speech_model": media_policy.speech_model(ec.story), "speech_link": speech_label, "silent_link": silent_label,
+        "speech_price": speech_row["price_per_second"], "silent_price": silent_row["price_per_second"],
+        "speech_count": len(speech_new), "silent_count": len(silent_new),
+        "speech_seconds": sum(row["clip_s"] for row in speech_new),
+        "silent_seconds": sum(row["clip_s"] for row in silent_new),
+        "speech_usd": round(speech_usd, 4), "silent_usd": round(silent_usd, 4), "retake_usd": round(retake_usd, 4),
+        "retake": retake, "classes": [
+            {"class": "speech", "link": speech_label, "count": len(speech_new), "usd": round(speech_usd, 4),
+             "row": speech_row},
+            {"class": "silent", "link": silent_label, "count": len(silent_new), "usd": round(silent_usd, 4),
+             "row": silent_row}],
+    }
+    refusal = None
+    needed = [row for label, row in rows.items()
+              if any(item["link"] == label for item in new) or (label == speech_label and retake_usd)]
+    for row in needed:
+        if row["status"] != "keyed":
+            refusal = f"{row['link']}: {row['reason']}"
+            break
+    if refusal is None and new and any(row["paid"] for row in needed) and not budget_obj.allow_paid:
+        refusal = "allow_paid is off"
+    total = committed + est
+    over = over_cap_sentence(total, cap) if new and total > cap + 1e-9 else None
+    units["over_cap"] = over
+    units["refused"] = refusal if new else None
+    units["ready"] = units["refused"] is None
+    units["message"] = _speech_message(units, current_ids, booked_ids, resolution=resolution)
+    if hold and new:
+        units["hold"] = hold
+        units["message"] += f" Held: {hold}."
+    return units
+
+
+def _speech_message(units, current_ids, booked_ids, *, resolution=None) -> str:
+    part = units["speech"]
+    kept = []
+    if current_ids:
+        kept.append(f"{len(current_ids)} current clip{_s(len(current_ids))} kept")
+    if booked_ids:
+        kept.append(f"{len(booked_ids)} bought already, collected at $0")
+    if units["still"]:
+        kept.append(f"{len(units['still'])} shot{_s(len(units['still']))} still")
+    tail = f" ({_and(kept)})" if kept else ""
+    size = f" at {resolution}" if resolution and resolution != pricing.DEFAULT_RESOLUTION else ""
+
+    def price(value):
+        return "?" if value is None else f"${value:g}/s"
+
+    if not units["count"]:
+        text = f"Every shot has its current clip: $0.00{tail}."
+    else:
+        text = (f"{units['count']} clip{_s(units['count'])} ({units['seconds']} s){size}: "
+                f"{part['speech_count']} speaking ({part['speech_seconds']} s on {part['speech_link']} at "
+                f"{price(part['speech_price'])}) and {part['silent_count']} silent ({part['silent_seconds']} s on "
+                f"{part['silent_link']} at {price(part['silent_price'])}), paid: est ${units['est_usd']:.3f}"
+                + (f" with up to ${part['retake_usd']:.2f} of retakes" if part["retake_usd"] else "") + f"{tail}.")
+    if units["over_cap"]:
+        text += f" Over the cap: {units['over_cap']}."
+    if units["refused"]:
+        text += f" Not now: {units['refused']}."
     return text

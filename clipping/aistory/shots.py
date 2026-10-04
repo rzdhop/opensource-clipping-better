@@ -34,7 +34,7 @@ import copy
 import re
 
 from . import names as names_mod
-from . import prompting, schemas, timing
+from . import native_speech, prompting, schemas, timing
 
 # --------------------------------------------------------------- constants
 
@@ -1936,6 +1936,19 @@ def _time_shots(shots, transitions, script, *, template, language, style_lock, s
     return notes
 
 
+def _speech_fields(shot, plan, kept) -> None:
+    """A native board's shot (plan 22): ``speaks`` and ``clip_s`` from its
+    plan, its length its clip's -- or, a kept shot whose clip is current,
+    the length its take gave it (``native_speech.shot_seconds``)."""
+    clip_s = int(plan["clip_s"])
+    shot["speaks"] = bool(plan.get("speaks"))
+    shot["clip_s"] = clip_s
+    shot["duration_s"] = float(clip_s)
+    clip = ((kept or {}).get("assets") or {}).get("clip") or {}
+    if kept is not None and clip.get("state") == "current" and int(kept.get("clip_s") or 0) == clip_s:
+        shot["duration_s"] = float(kept["duration_s"])
+
+
 def retime_storyboard(storyboard, script, *, template, language, style_lock) -> bool:
     """*storyboard*'s shot durations recomputed in place from *script*'s
     lines as they are now (measured, or estimated), exactly as
@@ -1962,6 +1975,8 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
     that re-cuts every shot switches it to whole frames and sets the flag
     (returned as a change, so the caller writes it -- and must re-time the
     script beside it again, ``episode_common.retime``)."""
+    if native_speech.is_native_board(storyboard):
+        return _retime_native(storyboard, script, language=language)
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in storyboard["scenes"]]
     line_ids = {scene["scene_id"]: {line["line_id"] for line in scene["lines"]} for scene in scenes_in_order}
     skip = {scene["scene_id"] for scene in script["scenes"] if scene["scene_id"] not in storyboard["scenes"]}
@@ -1993,6 +2008,30 @@ def retime_storyboard(storyboard, script, *, template, language, style_lock) -> 
         if entry.get("retime_only") and scene["scene_id"] not in skip and all(
                 _measured_for_its_words(line) for line in scene["lines"]):
             del entry["retime_only"]
+            changed = True
+    return changed
+
+
+def _retime_native(storyboard, script, *, language) -> bool:
+    """:func:`retime_storyboard` of a native board (plan 22): its shots last
+    what their clips last, so nothing moves -- but a narrator's silent shot
+    whose clip is not bought yet, sized to its narration
+    (``native_speech.narrator_clip_s``), follows the narration as it is now
+    measured. Returns whether one moved."""
+    lines = {line["line_id"]: line for scene in script["scenes"] for line in scene["lines"]}
+    changed = False
+    for shot in storyboard["shots"]:
+        if shot.get("speaks") or not shot["lines"]:
+            continue
+        if ((shot.get("assets") or {}).get("clip") or {}).get("state") == "current":
+            continue
+        narration = [lines[line_id] for line_id in shot["lines"] if line_id in lines]
+        if not narration:
+            continue
+        seconds = sum(timing.line_duration(line, language)[0] for line in narration)
+        clip_s = native_speech.narrator_clip_s(seconds)
+        if clip_s != shot.get("clip_s") or float(shot["duration_s"]) != float(clip_s):
+            shot["clip_s"], shot["duration_s"] = clip_s, float(clip_s)
             changed = True
     return changed
 
@@ -2064,7 +2103,7 @@ def name_map(entities, *, v2=False) -> dict:
 
 def build_storyboard(script, plans, sources, *, entities, style_lock, template, language, consistency_mode,
                      now, previous=None, v2=False, shots_per_scene=None, ledger=None, budgets=None, keep=None,
-                     reserved=()) -> tuple:
+                     reserved=(), timing_mode=None) -> tuple:
     """*plans* (``{scene_id: [plan, ...]}``) and *sources* (``{scene_id:
     "t1"|"fast"}``) resolved into a complete ``storyboard_v1`` document:
     scenes in the script's own order (only the ones *plans* covers), the
@@ -2103,6 +2142,14 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
     and of *reserved* (ids other per-shot records still name), never one
     used before, given in timeline order. With no *previous* and nothing
     reserved, the ids are ``sh01..`` in order, as they always were.
+
+    *timing_mode* ``"native_speech"`` (plan 22, :func:`speech_shot_plan`'s
+    plans): every shot carries ``speaks`` and ``clip_s`` from its plan and
+    lasts its clip (``duration_s == clip_s``; a kept shot whose clip is
+    current keeps the length its take gave it), every boundary is a cut,
+    and the board says ``timing_mode`` -- it is timed by
+    ``timing.native_pass``, never cut to the episode's window. Absent:
+    everything above, byte for byte.
     """
     scenes_by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     scenes_in_order = [scene for scene in script["scenes"] if scene["scene_id"] in plans]
@@ -2156,13 +2203,18 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             if "prompt_layout" in resolved:
                 shot["prompt_layout"] = resolved["prompt_layout"]
             _keep_t1_v2(shot, plan)
+            if timing_mode is not None:
+                _speech_fields(shot, plan, kept)
             if kept is not None:
                 shot = _carried_shot(kept, shot)
             shots.append(shot)
 
-    transitions = timing.plan_transitions(shots, scenes_by_id, template)
-    notes.extend(_time_shots(shots, transitions, script, template=template, language=language,
-                             style_lock=style_lock, whole_frames=True))
+    if timing_mode is not None:
+        transitions = timing.plan_transitions(shots, scenes_by_id, template, cuts_only=True)
+    else:
+        transitions = timing.plan_transitions(shots, scenes_by_id, template)
+        notes.extend(_time_shots(shots, transitions, script, template=template, language=language,
+                                 style_lock=style_lock, whole_frames=True))
 
     doc = {
         "$schema": schemas.STORYBOARD_SCHEMA_NAME,
@@ -2182,6 +2234,8 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
         "created_at": previous["created_at"] if previous is not None else now,
         "updated_at": now,
     }
+    if timing_mode is not None:
+        doc["timing_mode"] = timing_mode
 
     if shots_per_scene is None:
         shots_per_scene = style_lock["episode_defaults"]["shots_per_scene"]
@@ -2365,3 +2419,113 @@ def plans_from_storyboard(storyboard, script) -> dict:
         _keep_t1_v2(plan, shot)
         plans.setdefault(scene["scene_id"], []).append(plan)
     return plans
+
+
+# ================================================= plan 22 (native speech)
+
+class SpeechLineTooLong(ValueError):
+    """A character line no clip length can speak (``native_speech.line_refusal``)."""
+
+
+def speech_line_refusal(script, lengths=native_speech.SPEECH_LENGTHS):
+    """Why *script* cannot be planned as speaking clips -- each character
+    line one clip of at most the longest of *lengths* -- naming every such
+    line and the fix, or None (the storyboard step's check before any call)."""
+    refused = [native_speech.line_refusal(line, lengths) for scene in script["scenes"] for line in scene["lines"]
+               if line["speaker"] != "narrator"]
+    refused = [reason for reason in refused if reason]
+    if not refused:
+        return None
+    return "; ".join(refused)
+
+
+def _listener(scene, index, speaker):
+    """Who the character speaking line *index* of *scene* looks at: the
+    speaker of the line before when it is another character, else of the
+    line after, else the scene's first other character; None when alone."""
+    lines = scene["lines"]
+    for other in (lines[index - 1] if index > 0 else None, lines[index + 1] if index + 1 < len(lines) else None):
+        if other is not None and other["speaker"] not in ("narrator", speaker):
+            return other["speaker"]
+    return next((cid for cid in scene["characters"] if cid != speaker), None)
+
+
+# Framings that cannot show a speaker's face speaking: replaced on a speaking shot.
+_SPEECH_FRAMING_OVER = {"wide_establishing": "medium_two_shot", "insert_prop": "medium_single"}
+
+
+def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPEECH_LENGTHS,
+                     silent_lengths=native_speech.SPEECH_LENGTHS, reaction_shots=(0, 1)) -> list:
+    """A native-speech story's plans for *scene* (plan 22) from its beat
+    *plans* (T1 v2's, or a fast plan; framing, action, camera and staging
+    are theirs): one shot a character line, ``speaks: true``, the speaker
+    its subject and whom it addresses its secondary subject, planned at the
+    smallest of *speech_lengths* that can speak the line
+    (``native_speech.speech_clip_s``); a narrator line, a silent shot sized
+    to its narration (``native_speech.narrator_clip_s``) under which its
+    TTS voice-over plays; up to ``reaction_shots[1]`` of the beat plans with
+    no line kept as silent reaction shots of ``native_speech.REACTION_S``;
+    a scene with no line at all, one silent shot at its target length.
+    Every plan carries ``speaks`` and ``clip_s``. Idempotent: the plans it
+    returns, given back, give the same plans. :class:`SpeechLineTooLong`
+    for a character line no length can speak."""
+    lines = scene["lines"]
+    lo, hi = (list(reaction_shots) + [0, 1])[:2] if reaction_shots else (0, 1)
+    place_tags = [tag for plan in plans for tag in plan["subjects"] if not tag.startswith("@")]
+    place_tags = list(dict.fromkeys(place_tags)) or [f"#{scene['place_id']}:{scene['time_variant']}"]
+    characters = set(scene["characters"])
+
+    def from_plan(plan, **changes):
+        out = {key: (list(value) if isinstance(value, list) else value) for key, value in plan.items()}
+        out.update(changes)
+        return out
+
+    def speaking(plan, n):
+        line = lines[n - 1]
+        speaker = line["speaker"]
+        if speaker == "narrator":
+            seconds = timing.line_duration(line, language)[0]
+            return from_plan(plan, lines=[n], speaks=False,
+                             clip_s=native_speech.narrator_clip_s(seconds, silent_lengths))
+        clip_s = native_speech.speech_clip_s(line["text"], speech_lengths)
+        if clip_s is None:
+            raise SpeechLineTooLong(native_speech.line_refusal(line, speech_lengths))
+        listener = _listener(scene, n - 1, speaker)
+        if speaker in characters:
+            others = [tag for tag in plan["subjects"] if not tag.startswith("@")] or place_tags
+            subjects = [f"@{speaker}"] + ([f"@{listener}"] if listener and listener in characters else []) + others
+        else:
+            subjects = list(plan["subjects"])
+        framing = _SPEECH_FRAMING_OVER.get(plan["framing"], plan["framing"])
+        if framing == "medium_two_shot" and len([tag for tag in subjects if tag.startswith("@")]) < 2:
+            framing = "medium_single"
+        return from_plan(plan, lines=[n], subjects=subjects, framing=framing, speaks=True, clip_s=clip_s)
+
+    out, placed, reactions = [], set(), 0
+    for plan in plans:
+        numbers = [n for n in plan.get("lines") or () if 1 <= n <= len(lines) and n not in placed]
+        if numbers:
+            for n in sorted(numbers):
+                out.append(speaking(plan, n))
+                placed.add(n)
+        elif lines and reactions < hi:
+            out.append(from_plan(plan, lines=[], speaks=False,
+                                 clip_s=native_speech.silent_clip_s(native_speech.REACTION_S, silent_lengths)))
+            reactions += 1
+    template_plan = plans[0] if plans else _plan(framing="medium_single", camera_motion="hold", modifiers=[],
+                                                 action="", subjects=place_tags, lines=[])
+    for n in range(1, len(lines) + 1):
+        if n not in placed:
+            out.append(speaking(template_plan, n))
+            placed.add(n)
+    if not lines:
+        target = float(scene.get("target_duration_s") or native_speech.REACTION_S)
+        out = [from_plan(template_plan, lines=[], speaks=False,
+                         clip_s=native_speech.silent_clip_s(target, silent_lengths))]
+    elif reactions < lo and out:
+        last = next((plan for plan in reversed(out) if plan["speaks"]), out[-1])
+        while reactions < lo:
+            out.append(from_plan(last, lines=[], speaks=False,
+                                 clip_s=native_speech.silent_clip_s(native_speech.REACTION_S, silent_lengths)))
+            reactions += 1
+    return out

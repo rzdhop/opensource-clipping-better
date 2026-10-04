@@ -480,6 +480,11 @@ def write_script(ec, script, *, now) -> dict:
     return script
 
 
+# Plan 22: a native-speech board's shots a scene -- one a line, and reactions --
+# bounded only by the storyboard's own 60 shots.
+NATIVE_SHOTS_PER_SCENE = (1, 60)
+
+
 def storyboard_errors(ec, doc, script) -> list:
     """A storyboard's checks against its template and its script. A scene
     marked stale was planned from an older revision of its scene (its lines
@@ -491,8 +496,10 @@ def storyboard_errors(ec, doc, script) -> list:
     stale = {sid for sid, entry in doc["scenes"].items() if entry.get("stale")}
     current = dict(doc, shots=[shot for shot in doc["shots"] if shot["scene_id"] not in stale],
                    scenes={sid: entry for sid, entry in doc["scenes"].items() if sid not in stale})
+    native = doc.get("timing_mode") == schemas.STORYBOARD_TIMING_NATIVE
     return schemas.storyboard_context_errors(current, script,
-                                             shots_per_scene=ec.episode_defaults["shots_per_scene"])
+                                             shots_per_scene=NATIVE_SHOTS_PER_SCENE if native
+                                             else ec.episode_defaults["shots_per_scene"])
 
 
 def write_storyboard(ec, storyboard, script, *, now) -> dict:

@@ -171,9 +171,19 @@ def has_audio(ec, line_id) -> bool:
     return any(path is not None and os.path.isfile(path) for path in audio_path_candidates(ec, line_id))
 
 
+def spoken_by_clip(ec, line) -> bool:
+    """Whether *line* is spoken by its own clip, never by a TTS voice (plan
+    22): a character's line on a native-speech story -- its audio is the
+    clip's own sound (the assets step's native take). A narrator's line is
+    always a TTS voice-over."""
+    return line["speaker"] != "narrator" and media_policy.native_speech(ec.story)
+
+
 def lines_to_measure(ec, script) -> list:
-    """Every line of *script* the measurement would synthesise, in reading order."""
-    return [line for scene in script["scenes"] for line in scene["lines"] if not is_measured(ec, line)]
+    """Every line of *script* the measurement would synthesise, in reading
+    order -- never one its clip speaks (:func:`spoken_by_clip`)."""
+    return [line for scene in script["scenes"] for line in scene["lines"]
+            if not is_measured(ec, line) and not spoken_by_clip(ec, line)]
 
 
 def measure_estimate(ec, script, *, env=None, adapters=None) -> dict:

@@ -87,6 +87,14 @@ def clip_audio_words(link, *, live=None) -> int:
     return words_for(link, default=prompting.CLIP_AUDIO_MAX_WORDS, ceiling=CLIP_AUDIO_CEILING_WORDS, live=live)
 
 
+def speech_clip_words(link, *, live=None) -> int:
+    """A native-speech clip prompt's budget on *link* (plan 22): at most
+    ``prompting.SPEECH_CLIP_MAX_WORDS`` (200), never over the link's own
+    (Veo's 1024 tokens is about 630 words)."""
+    return words_for(link, default=prompting.SPEECH_CLIP_MAX_WORDS, ceiling=prompting.SPEECH_CLIP_MAX_WORDS,
+                     live=live)
+
+
 def sheet_words(link, *, live=None) -> int:
     """A v2 character sheet prompt's budget on *link*."""
     return words_for(link, default=prompting.SHEET_V2_MAX_WORDS, ceiling=SHEET_CEILING_WORDS, live=live)

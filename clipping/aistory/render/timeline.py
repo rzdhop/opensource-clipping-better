@@ -321,7 +321,11 @@ def build_timeline(script: dict, storyboard: dict, template: dict, language: str
 
     sfx_anchors = _sfx_anchors(script, scene_starts=scene_starts_map, line_starts_by_id=line_starts_by_id)
 
-    _assert_no_line_in_a_transition_window(shot_entries, lines)
+    if storyboard.get("timing_mode") != "native_speech":
+        # Plan 22: a native board's boundaries are all cuts, and a clip's own
+        # speech may run under the end card's fade-in (the clip is heard to its
+        # last frame): only the other boards keep spec 6.4's window rule.
+        _assert_no_line_in_a_transition_window(shot_entries, lines)
 
     return {
         "total_s": total_s,

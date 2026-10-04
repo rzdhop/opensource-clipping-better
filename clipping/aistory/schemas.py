@@ -594,6 +594,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (DEC-258): the clips' lipsync for this story; absent, the
         # budget profile's (media_policy.lipsync).
         "lipsync": {"type": "string", "enum": list(defaults.LIPSYNC_MODES)},
+        # Optional (plan 22): a native-speech story's speaking-clip model; absent,
+        # the budget profile's (media_policy.speech_link).
+        "speech_model": {"type": "string", "enum": list(defaults.SPEECH_MODELS)},
         # Optional (plan 21 stage 1): absent is Studio; "agent" lets the
         # story-fast-track job approve by rule (defaults.STORY_MODES).
         "mode": {"type": "string", "enum": list(defaults.STORY_MODES)},
@@ -3078,6 +3081,30 @@ _STORYBOARD_LIPSYNC_SCHEMA = _or_null(_document({
     "billed_s": {"type": "integer", "minimum": 0},
     "reason": {"type": ["string", "null"], "maxLength": 1000},
 }))
+# Plan 22: a native-speech story's take of a speaking clip (the native take,
+# ``assets._Assets.native_take_shot``): the clip's own sound transcribed and
+# aligned against its line. ``state`` ok (heard, timed), mismatch (the words
+# heard are not enough of the line, or its last word runs to the clip's
+# end), no_speech, or stt_unavailable (no STT link could run: the planned
+# window, approximate). ``clip_sha256`` names the clip it is the take of (a
+# new clip makes it stale); ``start_s``/``end_s`` the speech inside the clip
+# (the line's audio); ``clip_real_s`` the clip's own length. Optional on the
+# clip: every clip recorded before validates.
+NATIVE_TAKE_STATES = ("ok", "mismatch", "no_speech", "stt_unavailable")
+_STORYBOARD_NATIVE_TAKE_SCHEMA = _or_null(_document({
+    "state": {"type": "string", "enum": list(NATIVE_TAKE_STATES)},
+    "matched": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "heard": {"type": ["string", "null"], "maxLength": 400},
+    "start_s": {"type": ["number", "null"], "minimum": 0},
+    "end_s": {"type": ["number", "null"], "minimum": 0},
+    "aligned_by": {"type": ["string", "null"], "maxLength": 120},
+    "clip_sha256": _SHA256,
+    "clip_real_s": {"type": "number", "minimum": 0},
+    "line_id": {"type": "string", "pattern": r"^l[0-9]{2}$"},
+    "checked_at": _NON_EMPTY_STRING,
+}, optional={
+    "reason": {"type": ["string", "null"], "maxLength": 1000},
+}))
 _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     "state": {"type": "string", "enum": list(CLIP_STATES)},
     "link": {"type": "string", "maxLength": 160, "pattern": r"^[a-z][a-z0-9_-]*/[^\s,*]+$"},
@@ -3100,6 +3127,10 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     "cover": {"type": ["string", "null"], "enum": ["stretch", None]},
     # DEC-258: the clip's lipsync (_STORYBOARD_LIPSYNC_SCHEMA).
     "lipsync": _STORYBOARD_LIPSYNC_SCHEMA,
+    # Plan 22: a speaking clip's take (_STORYBOARD_NATIVE_TAKE_SCHEMA).
+    "native_speech": _STORYBOARD_NATIVE_TAKE_SCHEMA,
+    # Plan 22: how many times the clip was bought again for its take (a retake).
+    "retakes": {"type": "integer", "minimum": 0},
 }))
 
 # The five keys of spec 2.8 stay required; phase 4's record of the image is
@@ -3138,6 +3169,8 @@ _STORYBOARD_ASSETS_SCHEMA = _document({
 
 # The one prompt layout a storyboard shot names (phase 7 stage 3b).
 STORYBOARD_PROMPT_LAYOUT_V1 = "layered_v1"
+# Plan 22: the one timing mode a storyboard names (native_speech.TIMING_MODE).
+STORYBOARD_TIMING_NATIVE = "native_speech"
 
 # Where a T1 v2 shot's subject stands (phase 7 stage 4).
 STAGING_POSITIONS = ("left", "centre", "right", "back")
@@ -3193,6 +3226,11 @@ _STORYBOARD_SHOT_SCHEMA = _document({
     # did not plan; the existing ``motion`` key is the Tier-1 camera motion.
     "clip_motion": _text(400),
     "staging": {"type": "array", "items": STORYBOARD_STAGING_SCHEMA, "maxItems": 4},
+    # Plan 22 (a native-speech board, ``timing_mode: native_speech``): whether
+    # the shot's clip speaks its one line on camera, and the clip length it
+    # was planned at (a length its link sells). Absent on every other shot.
+    "speaks": {"type": "boolean"},
+    "clip_s": {"type": "integer", "minimum": 1},
 })
 
 _STORYBOARD_TRANSITION_SCHEMA = _document({
@@ -3231,6 +3269,10 @@ STORYBOARD_SCHEMA = _document({
     # (timing.board_whole_frames). Absent on a storyboard timed before, which
     # keeps -- and renders in -- its old timing until a full re-time.
     "whole_frames": {"type": "boolean"},
+    # Plan 22: a native-speech story's board (shots.speech_shot_plan): each
+    # shot lasts its clip, each character line is spoken by its own shot's
+    # clip (timing.native_pass). Absent on every other board.
+    "timing_mode": {"type": "string", "enum": [STORYBOARD_TIMING_NATIVE]},
 })
 
 
@@ -3510,7 +3552,10 @@ _EPISODE_LINK_SCHEMA = _document({
 }, optional={
     "switched_from": _EPISODE_LINK_LABEL,
 })
-_EPISODE_LINKS_SCHEMA = _document({}, optional={"image": _EPISODE_LINK_SCHEMA, "video": _EPISODE_LINK_SCHEMA})
+# Plan 22: ``video_speech`` -- a native-speech episode's speaking clips' link,
+# sticky on its own beside ``video`` (its silent clips').
+_EPISODE_LINKS_SCHEMA = _document({}, optional={"image": _EPISODE_LINK_SCHEMA, "video": _EPISODE_LINK_SCHEMA,
+                                                "video_speech": _EPISODE_LINK_SCHEMA})
 
 # Phase 6 stage 7: the user's per-shot overrides of what the clips do
 # (``workflow.patch_assets``): ``keep_still`` over the storyboard's own,
@@ -3575,6 +3620,14 @@ _EPISODE_ASSETS_KEYFRAME_FIX_BUDGET_SCHEMA = _document({
     "spent_usd": {"type": "number", "minimum": 0},
 })
 
+_EPISODE_ASSETS_SPEECH_RETAKES_SCHEMA = _document({
+    "max_per_shot": {"type": "integer", "minimum": 0},
+    "cap_usd": {"type": "number", "minimum": 0},
+    "spent_usd": {"type": "number", "minimum": 0},
+    # keyed by shot id -> the number of retakes bought, checked in episode_assets_errors.
+    "shots": {"type": "object"},
+})
+
 # The keyframe approval (phase 7 stage 6b, DEC-230): when, whether it went
 # over a failed or missing verdict ("anyway"), and the fingerprint of the
 # keyframes it approved -- once the current fingerprint differs, the
@@ -3613,6 +3666,10 @@ EPISODE_ASSETS_SCHEMA = _document({
     # checked in episode_assets_errors; and the episode's fix budget.
     "keyframe_fixes": {"type": "object"},
     "keyframe_fix_budget": _EPISODE_ASSETS_KEYFRAME_FIX_BUDGET_SCHEMA,
+    # Plan 22: a native-speech episode's retakes (a speaking clip bought again
+    # once for a take that missed its line): the profile's ``speech_retake``
+    # budget, what it spent, and per shot (keyed by shot id) how many.
+    "speech_retakes": _EPISODE_ASSETS_SPEECH_RETAKES_SCHEMA,
 })
 # The maps of assets.json keyed by shot id (above): the ids a storyboard
 # re-plan never gives a new shot (walk follow-up F5), so no override, verdict
@@ -3676,6 +3733,12 @@ def episode_assets_errors(doc) -> list:
             errors.append(f"$.keyframe_fixes: {key!r} is not a shot id")
             continue
         errors.extend(validate(entry, _EPISODE_ASSETS_KEYFRAME_FIX_SCHEMA, path))
+
+    for key, count in ((doc.get("speech_retakes") or {}).get("shots") or {}).items():
+        if not (isinstance(key, str) and _search(SHOT_ID_PATTERN, key)):
+            errors.append(f"$.speech_retakes.shots: {key!r} is not a shot id")
+        elif isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            errors.append(f"$.speech_retakes.shots.{key}: {count!r} is not a number of retakes")
 
     for i, cue in enumerate(doc["sfx"]):
         if (cue["state"] == "resolved") != (cue["file"] is not None):

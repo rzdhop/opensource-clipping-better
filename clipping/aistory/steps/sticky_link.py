@@ -40,9 +40,12 @@ from clipping.providers import generation as gen
 from .. import imaging
 from .pacing import is_rate_limit
 
-# The slots of ``assets.json``'s ``links``.
-IMAGE, VIDEO = "image", "video"
+# The slots of ``assets.json``'s ``links``. Plan 22: ``video_speech`` -- a
+# native-speech episode's speaking clips' link, sticky on its own beside
+# ``video`` (its silent clips'): two links an episode, one a class of shot.
+IMAGE, VIDEO, VIDEO_SPEECH = "image", "video", "video_speech"
 KINDS = (IMAGE, VIDEO)
+VIDEO_KINDS = (VIDEO, VIDEO_SPEECH)
 
 # Why a gate turned the link away before sending anything: its route, no
 # adapter, no key (``run_generation_chain``'s skips), ``allow_paid`` off, a

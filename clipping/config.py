@@ -879,7 +879,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     budget_group.add_argument(
         "--budget-profile",
-        choices=("free", "one_dollar", "quality"),
+        choices=("free", "one_dollar", "quality", "native_speech"),
         default=None,
         help="Where paid money goes. Default: free until --allow-paid, one_dollar from then on.",
     )

@@ -506,6 +506,10 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         mix_args["native_audio"] = native_audio
     if ambience_inputs:
         mix_args["ambience"] = ambience_inputs
+    if native_audio and ambience_inputs and storyboard.get("timing_mode") == schemas.STORYBOARD_TIMING_NATIVE:
+        # Plan 22: a native-speech board keeps both -- its speaking clips in place of their lines,
+        # its silent clips under the narrator's voice-over.
+        mix_args["speech"] = True
     stages.append(_stage("A", "audio_mix", filtergraph.audio_mix_argv(timeline, **mix_args), MIX_REL))
 
     # L1: measure the mix

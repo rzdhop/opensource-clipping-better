@@ -222,7 +222,9 @@ def lipsync(story) -> bool:
     whose budget profile's ``lipsync`` does (the quality preset). ``none`` on
     the story turns it off whatever the profile says. A profile that cannot
     be read counts as one that says nothing."""
-    if not fully_animated(story):
+    if not fully_animated(story) or native_speech(story):
+        # Plan 22: a native-speech story's clips speak their own lines -- the
+        # face and the voice are one performance, nothing to sync after.
         return False
     profile = story.get("generation_profile") or {}
     chosen = profile.get("lipsync")
@@ -233,6 +235,98 @@ def lipsync(story) -> bool:
     except (OSError, ValueError, KeyError, TypeError):
         return False
     return settings.get("lipsync") == LIPSYNC_KLING
+
+
+# ------------------------------------------------------------ native speech
+
+# Plan 22: ``tier3_native_audio``'s value of the native-speech profile.
+SPEECH = budget_mod.SPEECH_AUDIO_MODE
+assert defaults.SPEECH_MODELS == budget_mod.SPEECH_MODELS
+
+
+def _profile_of(story) -> dict:
+    """*story*'s budget profile's settings, or {} when it cannot be read."""
+    profile = (story or {}).get("generation_profile") or {}
+    try:
+        return budget_mod.profile_settings(profile.get("budget_profile"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def native_speech(story) -> bool:
+    """Whether *story*'s character lines are spoken by their clips (plan 22,
+    the ``native_speech`` profile): a v2 story at tier 3 whose budget
+    profile's ``tier3_native_audio`` is ``speech``. Such a story plans one
+    shot a character line (``shots.speech_shot_plan``), buys a speaking
+    shot's clip on its speech link and a silent one on its silent link,
+    voices only the narrator (TTS), never lipsyncs, takes each speaking
+    clip's own sound as its line (the native take) and renders it in place
+    of the line. A profile that cannot be read counts as one that says
+    nothing."""
+    if not is_v2(story):
+        return False
+    if int(((story or {}).get("generation_profile") or {}).get("tier") or 1) != 3:
+        return False
+    return _profile_of(story).get("tier3_native_audio") == SPEECH
+
+
+def speech_model(story) -> str:
+    """The speaking clips' model of *story* (plan 22): its own
+    ``generation_profile.speech_model`` (the per-story switch), else its
+    budget profile's ``speech_model``, else ``fast``."""
+    chosen = ((story or {}).get("generation_profile") or {}).get("speech_model")
+    if chosen in defaults.SPEECH_MODELS:
+        return chosen
+    chosen = _profile_of(story).get("speech_model")
+    return chosen if chosen in defaults.SPEECH_MODELS else "fast"
+
+
+def speech_link(story, model=None):
+    """The link label *story*'s speaking clips are bought on (plan 22): its
+    budget profile's ``speech_links[model or speech_model(story)]``, or None.
+    Resolved by name: whether that provider exists is the clip plan's
+    question, never this one's (a link may be named before its adapter is)."""
+    links = _profile_of(story).get("speech_links") or {}
+    link = links.get(model or speech_model(story))
+    return link if isinstance(link, str) and link else None
+
+
+def silent_link(story):
+    """The link label *story*'s silent clips (reaction and narrator shots)
+    are bought on: its budget profile's ``silent_link``, or None. By name,
+    as :func:`speech_link`."""
+    link = _profile_of(story).get("silent_link")
+    return link if isinstance(link, str) and link else None
+
+
+def speech_retake(story):
+    """``{"max_per_shot", "cap_usd"}``: how a native-speech story retakes a
+    speaking clip whose take missed its line (its budget profile's
+    ``speech_retake``), or None."""
+    if not native_speech(story):
+        return None
+    retake = _profile_of(story).get("speech_retake")
+    if not isinstance(retake, dict):
+        return None
+    return {"max_per_shot": int(retake["max_per_shot"]), "cap_usd": float(retake["cap_usd"])}
+
+
+def stt_missing_keys(merged) -> list:
+    """The keys the native take's transcriber needs when none of STT_CHAIN's
+    hosted links has one (``assets.default_transcriber``'s rule), else []."""
+    from clipping.providers import stt
+    from clipping.providers.registry import PROVIDERS
+
+    merged = merged or {}
+    try:
+        chain = stt.parse_stt_chain(merged.get("STT_CHAIN") or stt.DEFAULT_STT_CHAIN)
+    except ChainError:
+        chain = []
+    names = [PROVIDERS[link.provider].env_key for link in chain
+             if link.provider != "local" and link.provider in PROVIDERS]
+    if any((merged.get(name) or "").strip() for name in names):
+        return []
+    return list(dict.fromkeys(names))
 
 
 def keyframe_fix(story):
@@ -304,6 +398,8 @@ def new_story_offer(settings_env) -> dict:
                                if SOUND_LINK in row["for"] and not row["set"]],
         "allow_paid": allow_paid,
         "estimate": estimate,
+        # Plan 22: what the native-speech profile costs, for each speaking-clip model.
+        "native_speech": native_speech_estimate(merged),
     }
 
 
@@ -494,6 +590,132 @@ def preset_estimate(merged=None) -> dict:
             "sheets_usd": round(sheets_usd, 4), "plates_usd": round(plates_usd, 4),
             "props_usd": round(props_usd, 4),
         },
+        "prices_as_of": pricing.PRICES_AS_OF,
+    }
+
+
+# ----------------------------------------------- the native-speech preset's price
+
+# What a native-speech episode is counted on before any story exists (plan
+# 22's table: a ~50 s confrontation, nine character lines of about 40 s in
+# all, three silent shots -- reactions and a narrator's voice-over -- of
+# 4 s, a keyframe each). A story's own numbers are its storyboard's.
+PRESET_SPEECH_SHOTS = 9
+PRESET_SPEECH_SECONDS = 40
+PRESET_SILENT_SHOTS = 3
+PRESET_SILENT_SECONDS = 12
+
+
+def native_speech_profile() -> dict:
+    """The ``generation_profile`` of a native-speech story: the quality
+    preset's (v2, tier 3, hosted links, references) on the native_speech
+    budget profile."""
+    return dict(defaults.quality_generation_profile(), budget_profile=defaults.NATIVE_SPEECH_PROFILE)
+
+
+def link_price(label, resolution=None):
+    """``(price per second, None)`` of the video link *label* at
+    *resolution*, or ``(None, why)`` when it has none (a link that is not
+    known yet, or not priced per second). Calls nothing."""
+    try:
+        link = gen.parse_generation_chain(gen.VIDEO, [label])[0]
+        price = pricing.price_for(link, resolution)
+    except (ChainError, pricing.PriceUnknown, IndexError, KeyError) as exc:
+        return None, str(exc)
+    if price.unit != "second":
+        return None, f"{label} is priced per {price.unit}, not per second"
+    return float(price.usd), None
+
+
+def _link_keys(label, merged) -> list:
+    try:
+        link = gen.parse_generation_chain(gen.VIDEO, [label])[0]
+    except (ChainError, IndexError):
+        return []
+    return [{"key": name, "for": f"the clips on {label}", "set": bool(((merged or {}).get(name) or "").strip())}
+            for name in gen.env_keys_for(link)]
+
+
+def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
+    """What a native-speech episode costs (plan 22), from the price table
+    and the native_speech profile alone -- or *story*'s own profile and
+    switch -- calling nothing::
+
+        {"profile", "label", "speech_model", "speech_link", "silent_link", "episode_usd", "story_usd",
+         "clips_usd", "retake_usd", "keyframes_usd", "by_model": {model: episode_usd | None},
+         "keys_needed": [{"key", "for", "set"}], "missing_keys": [name, ...], "stt_missing_keys": [...],
+         "summary", "assumptions", "episode": {...}, "priced": bool, "reason": sentence | None}
+
+    :data:`PRESET_SPEECH_SHOTS` speaking shots (:data:`PRESET_SPEECH_SECONDS`)
+    on the speech link of *model* (else the story's or profile's), the
+    silent shots on the silent link, a keyframe each on the keyframe role's
+    first link, plus the profile's retake budget (``speech_retake.cap_usd``)
+    as the contingency; the story's one-off images as the quality preset
+    counts them. A link with no price (not known yet) prices nothing and
+    says why (``priced`` false)."""
+    story_doc = story if story is not None else {"generation_profile": native_speech_profile()}
+    settings = _profile_of(story_doc)
+    chosen = model if model in defaults.SPEECH_MODELS else speech_model(story_doc)
+    speech, silent = speech_link(story_doc, chosen), silent_link(story_doc)
+    resolution = video_resolution(story_doc)
+    quality = preset_estimate(merged)
+    keyframe_usd = float(quality["episode"]["keyframe_usd"])
+    shots = PRESET_SPEECH_SHOTS + PRESET_SILENT_SHOTS
+    keyframes_usd = shots * keyframe_usd
+    retake = settings.get("speech_retake") or {}
+    retake_usd = float(retake.get("cap_usd") or 0.0) if int(retake.get("max_per_shot") or 0) > 0 else 0.0
+
+    def priced(which):
+        link = speech_link(story_doc, which)
+        speech_price, why = link_price(link, resolution) if link else (None, "no speech link")
+        silent_price, why_silent = link_price(silent, resolution) if silent else (None, "no silent link")
+        if speech_price is None or silent_price is None:
+            return None, why or why_silent
+        clips_usd = PRESET_SPEECH_SECONDS * speech_price + PRESET_SILENT_SECONDS * silent_price
+        return {"clips_usd": clips_usd, "speech_price": speech_price, "silent_price": silent_price,
+                "episode_usd": clips_usd + keyframes_usd + retake_usd}, None
+
+    by_model = {}
+    for which in defaults.SPEECH_MODELS:
+        row, _why = priced(which)
+        by_model[which] = round(row["episode_usd"], 4) if row else None
+    row, reason = priced(chosen)
+    keys = list(quality["keys_needed"][:len(QUALITY_KEYS)])
+    for label in dict.fromkeys(link for link in (speech, silent) if link):
+        for entry in _link_keys(label, merged):
+            if entry["key"] not in {item["key"] for item in keys}:
+                keys.append(entry)
+    stt_missing = stt_missing_keys(merged)
+    missing = [entry["key"] for entry in keys if not entry["set"]]
+    label = settings.get("label") or defaults.NATIVE_SPEECH_PROFILE
+    if row is None:
+        episode_usd, clips_usd, summary = 0.0, 0.0, f"Not priced: {reason}."
+    else:
+        episode_usd, clips_usd = row["episode_usd"], row["clips_usd"]
+        summary = (f"≈ {_usd(episode_usd)} an episode ({PRESET_SPEECH_SHOTS} speaking clips on {speech}, "
+                   f"{PRESET_SILENT_SHOTS} silent on {silent}, up to {_usd(retake_usd)} of retakes) plus "
+                   f"≈ {_usd(quality['story_usd'])} once per story for sheets, plates and props")
+    if missing or stt_missing:
+        need = missing + [f"{' or '.join(stt_missing)} (the speech check)"] if stt_missing else missing
+        summary += f"; add {' and '.join(need)} in Settings"
+    assumptions = (f"An episode: {PRESET_SPEECH_SHOTS} character lines, each one clip that speaks it "
+                   f"({PRESET_SPEECH_SECONDS} s on {speech}), {PRESET_SILENT_SHOTS} silent shots "
+                   f"({PRESET_SILENT_SECONDS} s on {silent}) at {resolution}, a keyframe each on "
+                   f"{quality['episode']['keyframe_link']} (${keyframe_usd:g} each = {_usd(keyframes_usd)}), and the "
+                   f"retake budget ({_usd(retake_usd)}). No TTS and no lip-sync for the characters' lines; the "
+                   f"narrator stays a free TTS voice-over. Prices from the table of {pricing.PRICES_AS_OF}.")
+    return {
+        "profile": defaults.NATIVE_SPEECH_PROFILE, "label": label, "speech_model": chosen,
+        "speech_link": speech, "silent_link": silent, "resolution": resolution,
+        "episode_usd": round(episode_usd, 4), "story_usd": quality["story_usd"],
+        "clips_usd": round(clips_usd, 4), "retake_usd": round(retake_usd, 4), "keyframes_usd": round(keyframes_usd, 4),
+        "by_model": by_model, "keys_needed": keys, "missing_keys": missing, "stt_missing_keys": stt_missing,
+        "summary": summary, "assumptions": assumptions, "priced": row is not None, "reason": reason,
+        "episode": {"speech_shots": PRESET_SPEECH_SHOTS, "speech_seconds": PRESET_SPEECH_SECONDS,
+                    "silent_shots": PRESET_SILENT_SHOTS, "silent_seconds": PRESET_SILENT_SECONDS,
+                    "speech_price_per_second": row["speech_price"] if row else None,
+                    "silent_price_per_second": row["silent_price"] if row else None,
+                    "keyframe_link": quality["episode"]["keyframe_link"], "keyframe_usd": keyframe_usd},
         "prices_as_of": pricing.PRICES_AS_OF,
     }
 
