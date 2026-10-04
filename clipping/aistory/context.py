@@ -858,8 +858,11 @@ def slice_for_shot(ec, scene, plan, previous_shot, *, ledger) -> str:
 # retry): a card must keep every name the user's brief binds on. What counts
 # as a name here is deliberately narrow (false positives would refuse a good
 # card for nothing): a capitalised word that is not simply capitalised
-# because it opens a sentence, a quoted span, or the word right after
-# "appelé(e)"/"named"/"called".
+# because it opens a sentence, a short capitalised quoted span (at most 4
+# words -- a longer one is a line of dialogue or a title, not a name), or a
+# capitalised word right after "appelé(e)"/"named"/"called" (the cue binds
+# nothing when what follows is a lowercase preposition: "named after",
+# "called for").
 
 _WORD_TOKEN = re.compile(r"[^\W\d_]+", re.UNICODE)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -893,9 +896,12 @@ def brief_entities(brief) -> list:
     that are **not** the first word of their sentence (a sentence starting
     with a capitalised pronoun, e.g. French "Elle la traite ...", is never
     one of these -- :data:`_ENTITY_STOP_WORDS` also drops a mid-sentence
-    article/pronoun or a month/day name), quoted spans ("..."/«...»), and the
-    word right after "appelé(e)"/"named"/"called". Each once, first-seen
-    order, as written in the brief (fold with :func:`_fold` to compare)."""
+    article/pronoun or a month/day name), a short capitalised quoted span
+    ("..."/«...», at most 4 words -- a longer quoted span is a line of
+    dialogue or a title, never a name), and a capitalised word right after
+    "appelé(e)"/"named"/"called" (never a lowercase one: the cue binds
+    nothing in "named after" or "called for"). Each once, first-seen order,
+    as written in the brief (fold with :func:`_fold` to compare)."""
     found, seen = [], set()
 
     def add(token):
@@ -909,9 +915,17 @@ def brief_entities(brief) -> list:
 
     text = brief or ""
     for match in _QUOTED_SPAN.finditer(text):
-        add(match.group(1))
+        span = match.group(1).strip()
+        # A quote can hold a line of dialogue or a title, not a name -- bind it only
+        # when it reads like one: short (at most 4 words) and capitalised.
+        if span and span[0].isupper() and len(span.split()) <= 4:
+            add(span)
     for match in _NAMED_AFTER.finditer(text):
-        add(match.group(1))
+        token = match.group(1)
+        # "named after"/"called for"/"appele pour" bind a preposition, not a name --
+        # only a capitalised word right after the cue is the name itself.
+        if token[:1].isupper():
+            add(token)
     for sentence in _SENTENCE_SPLIT.split(text):
         for index, token in enumerate(_WORD_TOKEN.findall(sentence)):
             if index == 0 or not token[0].isupper():

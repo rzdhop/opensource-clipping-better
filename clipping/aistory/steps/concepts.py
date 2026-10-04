@@ -169,9 +169,14 @@ def _apply_brief_judge(ctx, *, language, brief, concept, system, user, prompt_id
     judged by C1J; not kept, the same C1v2 call asked once more with the
     judge's ``missing`` as the refusal reasons (DEC-259); still not kept,
     *concept* (the retried reply) is returned with ``brief_fit.kept`` false.
-    ``brief_fit`` is None only when the judge is skipped (no usable premium
-    link, said once via *judge_state*) or a judge call itself fails (said
-    every time it happens -- never silent, never fatal to the card)."""
+    ``brief_fit`` is None only when the judge is never reached at all: the
+    chain is skipped (no usable premium link, said once via *judge_state*)
+    or the *first* judge call fails outright (said every time it happens --
+    never silent, never fatal to the card). Once a first verdict says the
+    card drifted, that finding is never lost: if the retry's re-judge call
+    then fails, the retried card still carries the first verdict's
+    ``kept: false`` and ``missing`` -- a known drift must never read as
+    "never judged" and fall through to an approve-by-rule."""
     if not _judge_usable(ctx):
         if not judge_state["skip_logged"]:
             ctx.on_log("⚖️ C1J (brief judge) skipped: the premium chain has no usable link.")
@@ -203,7 +208,11 @@ def _apply_brief_judge(ctx, *, language, brief, concept, system, user, prompt_id
         verdict2 = _judge_card(ctx, language=language, brief=brief, card=retried, runner=runner, time_fn=time_fn)
     except StepFailed as exc:
         ctx.on_log(f"⚠️ C1J could not re-judge the retried card: {exc.reason}")
-        return retried, None
+        # A known drift must never vanish into an approve-by-rule: keep the first
+        # verdict's "kept: false" on the retried card rather than dropping to None
+        # (None means "never judged", not "judged, found drifted, re-judge failed").
+        return retried, {"kept": False, "missing": verdict["missing"], "checked_by": C1J_CHECKED_BY,
+                         "checked_at": llm_call.utc_now()}
 
     return retried, {"kept": verdict2["kept"], "missing": verdict2["missing"], "checked_by": C1J_CHECKED_BY,
                      "checked_at": llm_call.utc_now()}

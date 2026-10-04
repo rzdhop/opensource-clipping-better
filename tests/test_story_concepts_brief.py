@@ -146,7 +146,12 @@ def test_brief_entities_names_quotes_and_named_after():
     )
     entities = [context._fold(e) for e in context.brief_entities(brief)]
     assert context._fold("Nude") in entities
-    assert context._fold("la Souris") in entities
+    # The quoted span itself is "la Souris", lowercase-led (a French nickname's own
+    # article) -- it no longer binds as a quoted span (a quote only binds when it
+    # starts with a capital, DEC-274's quote-safety fix), but "Souris" alone is
+    # still picked up by the general mid-sentence capitalisation rule.
+    assert context._fold("la Souris") not in entities
+    assert context._fold("Souris") in entities
     assert context._fold("Fernand") in entities
     # "Rouge" opens the first sentence: never an entity from capitalisation alone.
     assert context._fold("Rouge") not in entities
@@ -162,6 +167,34 @@ def test_brief_entities_skips_sentence_initial_and_stop_words():
     assert context._fold("Directeur") in entities
     # "Lundi" (a day name) opens its own sentence and is also stop-listed.
     assert context._fold("Lundi") not in entities
+
+
+def test_brief_entities_ignores_a_long_quoted_sentence():
+    """A quote can hold a line of dialogue, not a name: bound whole, it would
+    make ``c1v2_errors`` demand the card repeat that whole sentence verbatim
+    and refuse every reply. Only a short (at most 4 words), capitalised quote
+    reads as a name."""
+    brief = 'Rouge dit : «Ce soir, quelqu\'un quitte l\'ile» a toute la classe.'
+    entities = [context._fold(e) for e in context.brief_entities(brief)]
+    assert context._fold("Ce soir, quelqu'un quitte l'ile") not in entities
+
+
+def test_brief_entities_quoted_capitalised_name_still_binds():
+    """A short, capitalised quote still reads as a name (unchanged)."""
+    brief = 'Dans le couloir, «Rouge» coince une nouvelle venue.'
+    entities = [context._fold(e) for e in context.brief_entities(brief)]
+    assert context._fold("Rouge") in entities
+
+
+def test_named_after_does_not_bind_a_preposition():
+    """"named"/"called"/"appelé(e)" bind the name that follows, never a
+    preposition: "named after", "called for" and "appelee pour" name
+    nothing."""
+    brief = "Le prix est named after the founder. Le signal est called for help. Elle est appelee pour temoigner."
+    entities = [context._fold(e) for e in context.brief_entities(brief)]
+    assert context._fold("after") not in entities
+    assert context._fold("for") not in entities
+    assert context._fold("pour") not in entities
 
 
 # ====================================================================== rule check
@@ -265,6 +298,43 @@ def test_concepts_step_not_kept_retries_once_then_flags_the_card(tmp_path):
     assert written["title"] == "Deuxieme Tentative"
     assert written["brief_fit"]["kept"] is False
     assert written["brief_fit"]["missing"] == ["le ton comique n'est toujours pas garde"]
+
+
+def test_a_failed_rejudge_keeps_the_first_verdicts_drift_flag(tmp_path):
+    """A known drift must never vanish into an approve-by-rule: when the
+    retry's re-judge call fails outright, the retried card is still stored
+    with the FIRST verdict's ``kept: false`` and ``missing`` -- never
+    ``brief_fit`` left off (which would read as "never judged", not "judged,
+    found drifted, re-judge failed"), and never ``kept: true`` by omission."""
+    from clipping.aistory.store import StoryStore
+    from clipping.providers.errors import ProviderError
+
+    store = StoryStore(tmp_path, on_log=lambda line: None)
+    story_id = _v3_story(store)
+
+    first = _card(title="Premiere Tentative")
+    retried = _card(title="Deuxieme Tentative")
+    ctx, log = tss._ctx(store, story_id, params={"count": 1}, settings_env=SETTINGS)
+    runner = tss.FakeRunner(
+        {"concepts": [first]},                                     # C1v2, call 1
+        {"kept": False, "missing": ["le ton comique n'est pas garde"]},  # C1J, 1st verdict
+        {"concepts": [retried]},                                   # C1v2 retry
+        ProviderError("every provider failed"),                    # C1J re-judge: fails outright
+        link=LINK,
+    )
+    result = concepts_step.run(ctx, runner=runner)
+
+    assert result["generated"] == 1
+    assert len(runner.calls) == 4  # the re-judge was attempted, once
+    doc = store.read_doc(story_id, "concepts.json")
+    written = doc["concepts"][0]
+    # The retried reply is kept as the card...
+    assert written["title"] == "Deuxieme Tentative"
+    # ...but its brief_fit is the first verdict's drift, not None and not kept.
+    assert written["brief_fit"]["kept"] is False
+    assert written["brief_fit"]["missing"] == ["le ton comique n'est pas garde"]
+    assert written["brief_fit"]["checked_by"] == "C1J"
+    assert any("C1J could not re-judge the retried card" in line for line in log)
 
 
 def test_judge_usable_is_false_without_a_usable_premium_link(tmp_path):
