@@ -18,14 +18,16 @@
   GPU now (Pinokio documented for the later GPU box); Anthropic provider Sonnet 5.5 default / Opus 5.5 by name / server-side
   fallbacks ON (booked at the served model); universes (all ten, audience notes), two-view sheets at 1080×1920, variants,
   action prompts; NO doctrine prompt; nano-banana-2-lite on sheets; chatterbox before Fish Audio.
-- **Merged on main:** A1 `99a0d62` (the daily extra; reviewed, 1 of 3 findings fixed), B1 `3c3e024` (the stock library;
-  reviewed, 3 of 3 fixed). Both additive and uncalled: live through the bind mount, no restart needed, pushed (CI = baseline).
-- **Running now:** D1 (Opus, `feat/plan23-d1`, off 513c59a), A2 (Sonnet, `feat/plan23-a2`, off main 1e86a93), C1 (Sonnet,
-  `feat/plan23-c1`, off main 1e86a93); disjoint files. On each report: code-review skill, rebase, the Tier-1 selection in
-  both envs, ff-merge with the exit code checked, action-log line, push. Deploys batched at 0 running jobs; every .py
-  compiled with the image's Python 3.11 before a deploy (the a7ba8dc rule).
-- **Next action:** after A2 → A3 (Sonnet) then A4 + A5 (Opus); after C1 → C2 only on the human's go ($0.54); after D1 →
-  D2 / D4 (Sonnet) and D6; A7, D5, B7 are Opus stages; B2 after B1 (Sonnet).
+- **Merged on main (all pushed; CI = baseline):** A1 `99a0d62` (the daily extra), B1 `3c3e024` (the stock library),
+  C1 `19ce37d` (fal/ltx-2.5-fast tables), A2 `75c2dd9` (the extra at every check site), D1 `e5ce133` (the Anthropic
+  provider — **needs the image rebuild**: `anthropic>=1.11.0` is in requirements.txt but not in the container; until the
+  rebuild a Claude link fails FATAL and the chain moves on; Settings.jsx changed too). A1/A2/B1/C1 are live through the bind
+  mount (additive; no restart done, 0 jobs). Deploy = rebuild at 0 running jobs after A3 + A6 land (one rebuild for all).
+- **Running now:** B6 (Opus, `feat/plan23-b6`, render geometry), A3 (Sonnet, `feat/plan23-a3`, the allow-today API),
+  D4 (Sonnet, `feat/plan23-d4`, two-view sheets + body rule). On each report: code-review skill, rebase, the Tier-1
+  selection in both envs, ff-merge with the exit code checked, action-log line, push.
+- **Next action:** after A3 → A4 + A5 (Opus) → A6 (dashboard) → deploy (rebuild) → A7 (Opus); C2 only on the human's go
+  ($0.54); D2, D6 (Sonnet), D5 after D4 (Opus); B2 after B1, B3, B5 after B6, B7 (Opus) after B6, B8 last.
 - **Open questions:** none blocking. One reading to confirm with the human when they look: "No doctrine" was read as
   dropping only the doctrine prompt, keeping all ten universes (A-157).
 
