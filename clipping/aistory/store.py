@@ -310,6 +310,8 @@ _PROFILE_CHOICES = {
     # the switch that makes its images the user's own uploads.
     "speech_model": defaults.SPEECH_MODELS,
     "images": defaults.IMAGE_MODES,
+    # Plan 22 stage 2 (DEC-274): v2 (absent) or the brief-faithful v3 prompts.
+    "writing": defaults.WRITING_VERSIONS,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
 _PROFILE_CLEARABLE = ("speech_model", "images")
@@ -804,6 +806,12 @@ class StoryStore:
                 f"unknown episode template {episode_template_id!r} "
                 f"(shipped: {', '.join(defaults.EPISODE_TEMPLATE_IDS)})")
         profile = _merge_generation_profile(generation_profile)
+        # Plan 22 stage 2 (DEC-274): every story created from now on writes
+        # on the brief-faithful v3 prompts (the concepts/bible steps still
+        # gate on a non-empty seed_text too) -- unless the caller named a
+        # writing version of its own (a test fixture, or a future explicit
+        # "v2" choice).
+        profile.setdefault("writing", defaults.WRITING_V3)
 
         approvals = {key: None for key, _ in _APPROVAL_STEPS}
         doc = {

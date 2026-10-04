@@ -18,6 +18,7 @@ package, imported where used: neither imports this module.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from clipping.providers.pacing import estimate_tokens
@@ -30,6 +31,12 @@ LANGUAGE_NAMES = {"fr": "French", "en": "English"}
 _SEED_WORD_LIMIT = 120
 _NOTE_WORD_LIMIT = 60
 _BIBLE_WORD_LIMIT = 120
+# Plan 22 stage 2 (DEC-274): a v3 story's user brief is read in full, not cut
+# at the old seed's 120 words -- the whole point of C1v2/B1v3 is to keep what
+# the brief names, so a cut that drops a named character defeats it. Still
+# bounded (never unbounded prompt material): 400 words is the human's own cap
+# on what they paste as a brief.
+_BRIEF_WORD_LIMIT = 400
 # C1's "do not repeat" titles: the library's (14 since plan 20 stage 2) and
 # the 9 cards one "Generate 10 more" run writes before its last call all fit
 # (23), so a first run never cuts; was 20 with the ten-concept library.
@@ -198,6 +205,11 @@ class Pack:
     bible: str | None = None
     world: str | None = None
     seed: str | None = None
+    # Plan 22 stage 2: a v3 story's brief, read in full (``_BRIEF_WORD_LIMIT``)
+    # and rendered first, fenced (``prompts._data_block``) -- a separate field
+    # from ``seed`` above, which the v1/v2 prompts still render as one data
+    # line and still cut at ``_SEED_WORD_LIMIT``.
+    brief: str | None = None
     note: str | None = None
     avoid: str | None = None
     # Phase 2 (spec 4.1): the style lock's character design rule (from
@@ -217,6 +229,7 @@ def build_pack(
     concept=None,
     template=None,
     seed_text=None,
+    brief_text=None,
     note=None,
     avoid_titles=None,
     cast=None,
@@ -246,6 +259,12 @@ def build_pack(
         seed, cut = trim_words(seed_text, _SEED_WORD_LIMIT)
         if cut:
             trimmed.append("seed")
+
+    brief = None
+    if brief_text:
+        brief, cut = trim_words(brief_text, _BRIEF_WORD_LIMIT)
+        if cut:
+            trimmed.append("brief")
 
     note_text = None
     if note:
@@ -280,6 +299,7 @@ def build_pack(
         bible=bible_text,
         world=world_text,
         seed=seed,
+        brief=brief,
         note=note_text,
         avoid=avoid,
         character_design_rules=character_design_rules,
@@ -830,3 +850,73 @@ def slice_for_shot(ec, scene, plan, previous_shot, *, ledger) -> str:
     if not lines:
         return ""
     return "\n".join(["Continuity now (keep it):"] + lines)
+
+
+# ============================================================ brief entities (plan 22 stage 2)
+#
+# C1v2's rule check (``steps/concepts.py``'s validator, DEC-259's told-why
+# retry): a card must keep every name the user's brief binds on. What counts
+# as a name here is deliberately narrow (false positives would refuse a good
+# card for nothing): a capitalised word that is not simply capitalised
+# because it opens a sentence, a quoted span, or the word right after
+# "appelé(e)"/"named"/"called".
+
+_WORD_TOKEN = re.compile(r"[^\W\d_]+", re.UNICODE)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_QUOTED_SPAN = re.compile(r"[«\"“]([^»\"”]+)[»\"”]")
+_NAMED_AFTER = re.compile(r"\b(?:appel[ée]e?s?|named|called)\s+([^\W\d_]+)", re.UNICODE | re.IGNORECASE)
+
+# Articles and pronouns that are capitalised for reasons other than being a
+# name (mid-sentence in a title, or "I"/"Je"), and month/day names (often
+# capitalised in a pasted brief): never an entity on their own.
+_ENTITY_STOP_WORDS = {
+    "le", "la", "les", "l", "un", "une", "des", "the", "a", "an", "i", "je",
+    "janvier", "fevrier", "février", "mars", "avril", "mai", "juin", "juillet",
+    "aout", "août", "septembre", "octobre", "novembre", "decembre", "décembre",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+}
+
+
+def _fold(text) -> str:
+    """Case- and accent-folded (NFKD, combining marks stripped, then
+    lowercased) -- so "École"/"ecole" compare equal; the rule check folds
+    both the brief's entities and the card's text this way."""
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+
+
+def brief_entities(brief) -> list:
+    """The names a C1v2 card must keep (plan 22 stage 2): capitalised tokens
+    that are **not** the first word of their sentence (a sentence starting
+    with a capitalised pronoun, e.g. French "Elle la traite ...", is never
+    one of these -- :data:`_ENTITY_STOP_WORDS` also drops a mid-sentence
+    article/pronoun or a month/day name), quoted spans ("..."/«...»), and the
+    word right after "appelé(e)"/"named"/"called". Each once, first-seen
+    order, as written in the brief (fold with :func:`_fold` to compare)."""
+    found, seen = [], set()
+
+    def add(token):
+        token = token.strip()
+        if not token:
+            return
+        key = _fold(token)
+        if key and key not in seen:
+            seen.add(key)
+            found.append(token)
+
+    text = brief or ""
+    for match in _QUOTED_SPAN.finditer(text):
+        add(match.group(1))
+    for match in _NAMED_AFTER.finditer(text):
+        add(match.group(1))
+    for sentence in _SENTENCE_SPLIT.split(text):
+        for index, token in enumerate(_WORD_TOKEN.findall(sentence)):
+            if index == 0 or not token[0].isupper():
+                continue
+            if _fold(token) in _ENTITY_STOP_WORDS:
+                continue
+            add(token)
+    return found

@@ -10,6 +10,13 @@ the ``regenerate bible:<field>`` target that finishes it.
 Writing any bible field clears ``approvals.bible`` -- a changed bible is an
 unapproved bible -- and leaves ``approvals.style`` alone (the derived status
 already stops counting it). The table here is shared with ``regenerate``.
+
+Plan 22 stage 2 (DEC-274): with a non-empty ``seed_text`` and
+``generation_profile.writing == "v3"``, B1 is written by B1v3 instead
+(:func:`prompts.build_b1_v3`) -- the brief under the concept, told to keep
+its names, setting and conflict; same fields, same cap. A bible-field
+regenerate (``steps/regenerate.py``, one field at a time) keeps using B1
+either way: it is not this step's full run.
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from __future__ import annotations
 import copy
 import time
 
-from .. import context, prompts, schemas
+from .. import context, defaults, prompts, schemas
 from . import llm_call
 from .llm_call import StepFailed
 
@@ -49,16 +56,29 @@ def _quoted_list(names) -> str:
     return ", ".join(quoted[:-1]) + " and " + quoted[-1]
 
 
-def pack_for(story, *, note=None):
+def _writing_gate(story) -> bool:
+    """Whether this story writes B1 from the brief (plan 22 stage 2,
+    DEC-274): a non-empty ``seed_text`` and ``generation_profile.writing ==
+    "v3"``. Without either, B1 is built exactly as it always was (RC-W2)."""
+    if not story.get("seed_text"):
+        return False
+    return (story.get("generation_profile") or {}).get("writing") == defaults.WRITING_V3
+
+
+def pack_for(story, *, note=None, brief=False):
     """The context pack for a bible prompt: the chosen concept plus the bible
-    and world written so far. ``StepFailed`` when the concept snapshot lacks
-    what the prompt renders (a hand-edited or custom concept)."""
+    and world written so far -- and, with *brief* (only ever true for this
+    step's own full B1v3 run, :func:`_writing_gate`), the story's
+    ``seed_text`` too (B1v3 reads it; B2/B3 and a bible-field regenerate
+    never do, so they never carry it). ``StepFailed`` when the concept
+    snapshot lacks what the prompt renders (a hand-edited or custom concept)."""
     try:
         return context.build_pack(
             language=story["language"],
             story=story,
             concept=story["concept"],
             note=note,
+            brief_text=story.get("seed_text") if brief else None,
         )
     except (KeyError, TypeError) as exc:
         raise StepFailed(f"The chosen concept cannot be read ({type(exc).__name__}: {exc}); choose it again.") from None
@@ -156,13 +176,19 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, parts=None) -> dict:
         # The story as it now stands: what the previous part wrote, and any
         # edit the user made meanwhile.
         story = store.get(ctx.story_id)
-        pack = pack_for(story)
+        use_brief = part == "B1" and _writing_gate(story)
+        pack = pack_for(story, brief=use_brief)
         llm_call.announce_trimmed(ctx, pack, announced)
-        system, user, schema = BUILDERS[part](pack)
+        if use_brief:
+            system, user, schema = prompts.build_b1_v3(pack)
+            prompt_id = "B1v3"
+        else:
+            system, user, schema = BUILDERS[part](pack)
+            prompt_id = part
 
         try:
             reply = llm_call.call_json(
-                ctx, part, system, user, schema,
+                ctx, prompt_id, system, user, schema,
                 validator=validator_for(story, part), runner=runner, time_fn=time_fn,
             )
         except StepFailed as exc:

@@ -53,6 +53,12 @@ PROMPT_VERSION = "s6"
 # wants less randomness so re-rolls stay recognisably the same story.
 IDEATION_TEMPERATURE = 0.9
 
+# Plan 22 stage 2 (DEC-274): C1v2's own temperature, lower than
+# IDEATION_TEMPERATURE -- the ten C1v2 calls differ only in angle
+# (``C1_ANGLES``, below), never in premise: the brief already fixed the
+# premise, so less randomness keeps every card recognisably the same story.
+C1V2_TEMPERATURE = 0.7
+
 # "Generate 10 more" is C1_CALLS calls of C1_CONCEPTS_PER_CALL concept each.
 # One card per call: on 2026-09-26 every two-card French reply was cut off
 # mid-JSON at the old 500 cap (two full French cards need ~900-1,100 output
@@ -173,6 +179,11 @@ MAX_TOKENS = {
     "L1": 690,
     "J1": 970, "J2": 110,
     "S1v2": 1150,
+    # Plan 22 stage 2 (DEC-274): C1v2 answers the same C1 schema (= C1's own
+    # cap); C1J is a short verdict (kept/missing); B1v3 answers the same
+    # B1_SCHEMA (= B1's own cap, the "Keep the brief's..." sentence changes
+    # nothing it is allowed to answer).
+    "C1v2": 700, "C1J": 200, "B1v3": 400,
 }
 
 # E1's payoff variant (phase 5, plan 11 stage 3, DEC-138's method): from
@@ -226,6 +237,9 @@ TEMPERATURE = {
     "J1": ANALYTIC_TEMPERATURE,
     "J2": ANALYTIC_TEMPERATURE,
     "S1v2": WRITING_TEMPERATURE,
+    "C1v2": C1V2_TEMPERATURE,
+    "C1J": ANALYTIC_TEMPERATURE,
+    "B1v3": WRITING_TEMPERATURE,
 }
 SCHEMA_NAMES = {
     "C1": "story_concepts", "B1": "bible_core", "B2": "bible_world", "B3": "bible_values",
@@ -244,6 +258,11 @@ SCHEMA_NAMES = {
     "L1": "continuity_ledger",
     "J1": "first_watch_check", "J2": "keyframe_check",
     "S1v2": "season_arc_skeleton_v2",
+    # Distinct from "C1"/"B1"'s own schema names even though the shape is
+    # identical -- the same convention every other versioned prompt follows
+    # (E1v2, T1v2, S1v2, ...): one schema name per prompt id, a bijection a
+    # test fixture's schema_name -> prompt_id lookup can rely on.
+    "C1v2": "story_concepts_v2", "C1J": "concept_brief_check", "B1v3": "bible_core_v3",
 }
 
 # E4's input is the whole script, not a small pack -- it needs a wider
@@ -367,10 +386,24 @@ SCHEMA_NAMES = {
 # bible past its 120-word cut, the world at B2's caps, 12 cast and 8 places
 # with 20-word one-lines -- 2,301; + 15 %, rounded up to ten
 # (tests/test_story_season_archetypes.py).
+#
+# C1v2/C1J/B1v3 (plan 22 stage 2, DEC-274, DEC-138's method): C1v2's own
+# worst case -- a 400-word French brief (``context._BRIEF_WORD_LIMIT``) at
+# its own density, the widest style line and the story-own avoid list at its
+# cap (``context._AVOID_TITLE_LIMIT``, 24 titles of 8 words each, since a
+# brief drops the library's titles) -- measures 1,462 tokens
+# (tests/test_story_prompts.py::test_c1v2_budget_with_a_400_word_brief);
+# + 15 %, rounded up to ten. B1v3 on the same brief plus a concept at every
+# C1 field's own cap (title/logline/world/cast_sketch) measures 1,280; + 15 %,
+# rounded up to ten. C1J (no pack: the brief plus one card at its caps) measures
+# 1,070 -- past 85 % of the default 1,200-token pack budget (the same
+# threshold stage 6 used to give E1..T1r their own row), so it gets one too:
+# + 15 %, rounded up to ten.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
                 "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2150, "T1rv2": 2130, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
-                "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990, "S1v2": 2650}
+                "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990, "S1v2": 2650,
+                "C1v2": 1690, "B1v3": 1480, "C1J": 1240}
 
 # Plan 22 stage 1 (DEC-273): the prompts written on STORY_LLM_PREMIUM_CHAIN
 # rather than STORY_LLM_CHAIN -- the calls the human singled out as the ones
@@ -384,8 +417,10 @@ INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r
 # Matched by family, not listed one id at a time, so a new version of one of
 # these prompts (E1v3, ...) is premium the moment its MAX_TOKENS row exists
 # above -- the membership below is computed from MAX_TOKENS' own keys, never
-# maintained separately from them.
-_PREMIUM_PROMPT_FAMILIES = ("C1", "B1", "E1", "E2", "E3", "J1")
+# maintained separately from them. "C1J" (plan 22 stage 2, DEC-274) is listed
+# on its own: its suffix is not a version number of "C1", so the family
+# match above would otherwise miss it.
+_PREMIUM_PROMPT_FAMILIES = ("C1", "B1", "E1", "E2", "E3", "J1", "C1J")
 
 
 def _is_premium_family(prompt_id: str) -> bool:
@@ -494,6 +529,8 @@ def _data_block(pack, sections) -> str:
             parts.append(f"World written so far:\n{value}")
         elif name == "seed":
             parts.append(f"Seed idea from the user: {value}")
+        elif name == "brief":
+            parts.append(f"The user's brief -- binding:\n<<<\n{value}\n>>>")
         elif name == "avoid":
             parts.append(f"Do not repeat or closely imitate these existing titles: {value}")
         elif name == "character_design_rules":
@@ -539,6 +576,184 @@ def build_c1(pack, *, style_ids, batch, of):
     return _system(pack), user, schemas.c1_schema(style_ids)
 
 
+# ----------------------------------------------------------- C1v2 (plan 22 stage 2)
+#
+# DEC-274: a v3 story (``generation_profile.writing == "v3"``) with a
+# non-empty ``seed_text`` writes its ten concept cards from the user's own
+# brief, not a free invention -- the brief is read in full
+# (``context._BRIEF_WORD_LIMIT``, 400 words, not the old seed's 120) and
+# shown first, fenced, binding; what varies call to call is only the angle
+# the card leads with, never the premise (``C1_ANGLES``). The library's
+# titles drop out of the avoid list with a brief present (``steps/concepts.py``):
+# they compete with the brief, not with this story's own other cards.
+
+# "call n takes angle n" (plan 22 stage 2): ten angles for ten calls, one
+# book -- "Generate 10 more" is always C1_CALLS calls, so a 1-to-1 mapping
+# needs no modulo; ``params.count: 1`` (agent mode) takes angle 1, the brief
+# played straight (DEC-270: "the idea is the concept", no ranking invented).
+C1_ANGLES = (
+    "the brief played straight",
+    "open on its first confrontation",
+    "from the antagonist's want",
+    "the secret under the premise",
+    "a ticking clock",
+    "a public humiliation at stake",
+    "an unexpected ally",
+    "who holds power flips",
+    "a mystery of origins",
+    "betrayal from someone close",
+)
+
+
+def build_c1_v2(pack, *, style_ids, batch, of, angle):
+    """One brief-faithful concept (plan 22 stage 2, C1v2): call *batch* of
+    *of*, leading with *angle* (one of :data:`C1_ANGLES`).
+
+    *pack* carries ``brief`` (not ``seed``) and, when this story already has
+    cards, ``avoid`` of this story's own titles only (the caller never sends
+    the library's)."""
+    style_ids = list(style_ids)
+    data_block = _data_block(pack, ("brief", "style", "avoid"))
+    styles_list = ", ".join(style_ids)
+
+    user = (
+        f"{data_block}"
+        "Write exactly 1 concept for a serialized vertical-video fiction "
+        f"series that tells this brief (call {batch} of {of}).\n\n"
+        "The brief is binding. Keep exactly what it gives: every named "
+        "character (same name, role and relationships), the setting, the "
+        "premise and its central conflict, the genre, the tone, and every "
+        "event it describes. Invent only what it leaves open. Never rename, "
+        "replace or drop a named character, never move the story elsewhere, "
+        "never change what the conflict is about.\n\n"
+        f"This call's angle: {angle}. The angle chooses which side of the "
+        "brief the concept leads with -- never the premise. Where the angle "
+        "and the brief disagree, follow the brief.\n\n"
+        "Give:\n"
+        "- title: at most 8 words\n"
+        "- logline: one complete sentence, at most 30 words: who wants "
+        "what, who stands in the way, and what is at stake -- the brief's "
+        "own conflict\n"
+        "- world: the setting and premise as the brief gives them, at most "
+        "60 words\n"
+        "- cast_sketch: 3 to 5 characters; every character the brief names "
+        "comes first, with the brief's name and role; each with a role "
+        "(one of lead, support, recurring, guest) and a one-line "
+        "description, at most 25 words\n"
+        "- hook_formula: what makes someone stop scrolling on episode 1\n"
+        "- value: the real substance this story carries (a dilemma, a "
+        "lesson, a truth about people)\n"
+        "- retention_mechanics: why someone comes back for episode 2\n"
+        f"- style_fit: the visual style that best fits this concept, one of "
+        f"{styles_list}\n\n"
+        "Never use real people, brands, studio names or copyrighted "
+        "characters."
+    )
+    return _system(pack), user, schemas.c1_schema(style_ids)
+
+
+def _c1v2_search_text(concept) -> str:
+    cast_text = " ".join(f"{m['name']} {m['one_line']}" for m in concept.get("cast_sketch") or ())
+    return " ".join([concept.get("title") or "", concept.get("logline") or "", concept.get("world") or "",
+                     cast_text])
+
+
+def c1v2_errors(doc, *, style_ids, brief) -> list:
+    """C1v2's post-validation (plan 22 stage 2): ``schemas.c1_errors``'s own
+    checks, then the rule check -- every name :func:`context.brief_entities`
+    finds in *brief* must appear (accent- and case-folded,
+    :func:`context._fold`) in the card's title, logline, world or
+    cast_sketch; DEC-259's told-why retry then fixes exactly the name a
+    reply dropped."""
+    errors = schemas.c1_errors(doc, style_ids)
+    if errors:
+        return errors
+    errors = []
+    for concept in doc["concepts"]:
+        haystack = context._fold(_c1v2_search_text(concept))
+        for name in context.brief_entities(brief):
+            if context._fold(name) not in haystack:
+                errors.append(f"$.cast_sketch: the brief names {name}; the concept never does -- keep it")
+    return errors
+
+
+# ------------------------------------------------------------- C1J (plan 22 stage 2)
+#
+# DEC-274: the brief judge. One premium call per accepted v3 card (after
+# C1v2's own binding ask and the rule check already tried to keep the brief
+# in it): does the card still tell the user's brief? Analytic, like J1/J2 --
+# it compares, it never writes -- so it takes no ``Pack`` and reads nothing
+# else of the story (``steps/concepts.py`` calls it once per card, outside
+# any step's usual pack-building).
+
+C1J_MISSING_MAX = 5
+C1J_MISSING_MAX_WORDS = 12
+
+_C1J_SYSTEM = (
+    "You check whether a story concept keeps a user's brief. You invent "
+    "nothing. Reply with JSON only, matching the schema, in {language_name}."
+)
+
+_C1J_ASK = (
+    "Give:\n"
+    "- kept: true when the concept tells the brief's own story -- its "
+    "named characters in their roles, its setting, its central conflict, "
+    "its genre and tone; false when any of these is missing, renamed or "
+    "replaced\n"
+    f"- missing: up to {C1J_MISSING_MAX} things of the brief the concept "
+    f"drops or changes, each at most {C1J_MISSING_MAX_WORDS} words; [] "
+    "when kept"
+)
+
+
+def c1j_schema() -> dict:
+    return _llm_obj({
+        "kept": {"type": "boolean", "description": "true when the concept keeps the brief's own story"},
+        "missing": {
+            "type": "array",
+            "description": f"up to {C1J_MISSING_MAX} items, each at most {C1J_MISSING_MAX_WORDS} words",
+            "items": {"type": "string"},
+        },
+    })
+
+
+def _c1j_card_block(card) -> str:
+    lines = [f"Title: {card['title']}", f"Logline: {card['logline']}", f"World: {card['world']}", "Cast:"]
+    lines += [f"- {member['name']} ({member['role']}): {member['one_line']}" for member in card["cast_sketch"]]
+    return "\n".join(lines)
+
+
+def build_c1j(*, language, brief, card):
+    """The brief judge of one C1v2 card (plan 22 stage 2): the brief, then
+    the card's title/logline/world/cast, then the verdict ask."""
+    language_name = context.LANGUAGE_NAMES.get(language, language)
+    user = (
+        f"The user's brief -- binding:\n<<<\n{brief}\n>>>\n\n"
+        f"{_c1j_card_block(card)}\n\n"
+        f"{_C1J_ASK}"
+    )
+    return _C1J_SYSTEM.format(language_name=language_name), user, c1j_schema()
+
+
+def validate_c1j(reply) -> list:
+    """Post-validation for a C1J response: the schema, at most
+    :data:`C1J_MISSING_MAX` items each capped at
+    :data:`C1J_MISSING_MAX_WORDS`, and ``missing`` empty when ``kept`` is
+    true (the ask's own "[] when kept")."""
+    errors = schemas.validate(reply, c1j_schema())
+    if errors:
+        return errors
+    errors = []
+    missing = reply["missing"]
+    if len(missing) > C1J_MISSING_MAX:
+        errors.append(f"$.missing: {len(missing)} item(s), expected at most {C1J_MISSING_MAX}")
+    for i, item in enumerate(missing):
+        _text_errors(errors, f"$.missing[{i}]", item, max_words=C1J_MISSING_MAX_WORDS)
+    if reply["kept"] and missing:
+        errors.append("$.missing: must be empty when kept is true")
+    return errors
+
+
 # --------------------------------------------------------------- B1/B2/B3
 
 _B1_ASK = (
@@ -581,6 +796,23 @@ def build_b1(pack, *, regenerate=None):
     if regenerate is not None:
         user += _regenerate_block(regenerate)
     user += _B1_ASK
+    return _system(pack), user, schemas.B1_SCHEMA
+
+
+# Plan 22 stage 2 (DEC-274): appended to B1's own ask, never changing its
+# own wording (RC-W2: without the gate -- no seed, no "writing": "v3" -- B1
+# is built by build_b1 above, byte-identical to today).
+_B1_V3_KEEP = "Keep the brief's names, setting and conflict."
+
+
+def build_b1_v3(pack):
+    """B1 with the user's brief under the concept (plan 22 stage 2, B1v3):
+    same fields, same cap, the only change is what it is told to keep. No
+    ``regenerate``: a bible-field regenerate (``steps/regenerate.py``)
+    rewrites one field from its own "current values" block and stays on
+    :func:`build_b1`, whether the story is v3 or not."""
+    user = _data_block(pack, ("concept", "brief"))
+    user += _B1_ASK + "\n\n" + _B1_V3_KEEP
     return _system(pack), user, schemas.B1_SCHEMA
 
 

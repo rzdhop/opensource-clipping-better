@@ -98,6 +98,7 @@ _ERRORS_IN_FAILURE = 5
 
 _TRIMMED_LABELS = {
     "seed": "Seed text",
+    "brief": "The user's brief",
     "note": "Author's note",
     "avoid": "The list of titles to avoid",
     "bible": "The bible summary",

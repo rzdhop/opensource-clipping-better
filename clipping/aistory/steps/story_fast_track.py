@@ -287,6 +287,13 @@ class _AgentRun:
             calls = CONCEPT_COUNT - len(summary["failed_calls"])
             cards = self.call(workflow.generated_cards, store, story["story_id"])
         card = cards[-1]
+        # Plan 22 stage 2 (DEC-274, amending DEC-270): a v3 brief card the
+        # judge found drifted stops the run -- "the idea is the concept", so
+        # a card that no longer tells it is never approved by rule.
+        brief_fit = card.get("brief_fit")
+        if brief_fit is not None and not brief_fit["kept"]:
+            missing = "; ".join(brief_fit["missing"])
+            raise StepFailed(f"The concept drifted from your brief: {missing}")
         self.approve("the concept",
                      lambda wf, now: wf.choose_concept(store, story["story_id"], concept_id=card["concept_id"],
                                                        now=now, by=AGENT_APPROVED),

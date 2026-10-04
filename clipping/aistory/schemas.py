@@ -604,6 +604,10 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (plan 21 stage 1): absent is Studio; "agent" lets the
         # story-fast-track job approve by rule (defaults.STORY_MODES).
         "mode": {"type": "string", "enum": list(defaults.STORY_MODES)},
+        # Optional (plan 22 stage 2, DEC-274): absent or "v2" keeps every
+        # prompt as it was; "v3" gates the brief-faithful concept and bible
+        # prompts, only with a non-empty seed_text too (defaults.WRITING_VERSIONS).
+        "writing": {"type": "string", "enum": list(defaults.WRITING_VERSIONS)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -999,6 +1003,21 @@ _GENERATED_CAST_MEMBER_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Plan 22 stage 2 (DEC-274): the brief judge's verdict on a v3 card, written
+# once C1J ran (optional: a card from before this stage, or one the judge
+# skipped -- the premium chain had no usable link -- carries none, RC-M3).
+_BRIEF_FIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kept": {"type": "boolean"},
+        "missing": _string_array(max_items=5),
+        "checked_by": _NON_EMPTY_STRING,
+        "checked_at": _NON_EMPTY_STRING,
+    },
+    "required": ["kept", "missing", "checked_by", "checked_at"],
+    "additionalProperties": False,
+}
+
 STORY_CONCEPT_CARD_SCHEMA = {
     "type": "object",
     "properties": {
@@ -1017,6 +1036,7 @@ STORY_CONCEPT_CARD_SCHEMA = {
         # A shipped style id when it was written; only the shape is checked
         # here, so retiring a style later cannot invalidate an old file.
         "style_fit": {"type": "string", "pattern": _ID_PATTERN},
+        "brief_fit": _BRIEF_FIT_SCHEMA,
     },
     "required": [
         "concept_id", "source", "prompt_version", "created_at", "language", "title",

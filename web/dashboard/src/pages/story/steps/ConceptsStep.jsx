@@ -4,6 +4,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { StepError } from '../fields'
+import { Badge } from '../../../ui'
 
 /** A library card's `style_fit` is `{default, alternatives}`; a generated
  * card's is the bare template id. Both are shown and filtered the same way. */
@@ -26,6 +27,11 @@ function ConceptCard({ card, styleName, onChoose, choosing, disabled, error }) {
     <div className="card story-concept-card">
       <h4>{card.title}</h4>
       <p className="story-concept-logline">{card.logline}</p>
+      {card.brief_fit && (
+        card.brief_fit.kept
+          ? <Badge tone="success">✓ Kept to your brief</Badge>
+          : <Badge tone="warning">⚠ Drifted: {card.brief_fit.missing.join('; ')}</Badge>
+      )}
       <p className="story-concept-value"><em>Value:</em> {card.value}</p>
 
       <button

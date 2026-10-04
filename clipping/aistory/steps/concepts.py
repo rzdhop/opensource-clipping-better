@@ -18,6 +18,22 @@ come first so they are never the ones cut.
 ``params.count`` (plan 21 stage 1, agent mode: "the idea is the concept")
 asks for fewer cards: 1 to ``CALLS``, one call each; absent, ``CALLS``
 (:func:`read_count`). Nothing else changes.
+
+**Plan 22 stage 2 (DEC-274), with a non-empty ``seed_text`` and
+``generation_profile.writing == "v3"``**: every card is written to tell that
+brief, not invented freely -- C1v2 instead of C1 (:func:`prompts.build_c1_v2`),
+one of ``prompts.C1_ANGLES`` per call, the story's own cards as the avoid
+list (never the library's: they compete with the brief, not with this
+story's other cards). The rule check runs inside the call's own validator
+(:func:`prompts.c1v2_errors`), so a dropped name is a told-why retry
+(DEC-259) before anything is stored. Once a reply is accepted, the brief
+judge (C1J, :func:`prompts.build_c1j`) checks the whole card against the
+brief; not kept -> the same C1v2 call is asked once more with the judge's
+``missing`` as the refusal reasons; still not kept -> the card is stored
+anyway with ``brief_fit.kept`` false, never silently. Without a usable link
+on the premium chain the judge is skipped (and ``brief_fit`` left off every
+card of the batch) -- said once, not once per card. Without the gate, every
+card is written exactly as it always was (RC-W2).
 """
 
 from __future__ import annotations
@@ -25,7 +41,7 @@ from __future__ import annotations
 import re
 import time
 
-from .. import context, prompts, schemas, templates
+from .. import context, defaults, prompts, schemas, templates
 from . import llm_call
 from .llm_call import StepFailed
 
@@ -35,6 +51,10 @@ CONCEPTS_FILENAME = "concepts.json"
 # Plan 21 stage 1: the step's one parameter, the number of concepts to write.
 COUNT_PARAM = "count"
 PARAMS = (COUNT_PARAM,)
+# Plan 22 stage 2: the brief judge's provenance (``brief_fit.checked_by``) --
+# the prompt id, not a link name: ``call_json`` never hands its caller which
+# link of the chain answered.
+C1J_CHECKED_BY = "C1J"
 
 _GENERATED_ID = re.compile(schemas.GENERATED_CONCEPT_ID_PATTERN)
 
@@ -107,6 +127,88 @@ def _library_titles(language) -> list:
     return [concept["title"][language] for concept in templates.load_concepts()]
 
 
+def _writing_gate(story) -> bool:
+    """Whether this story writes its concepts from the brief (plan 22 stage
+    2, DEC-274): a non-empty ``seed_text`` and ``generation_profile.writing
+    == "v3"``. Without either, every card is written exactly as it always
+    was (RC-W2)."""
+    if not story.get("seed_text"):
+        return False
+    return (story.get("generation_profile") or {}).get("writing") == defaults.WRITING_V3
+
+
+def _judge_usable(ctx) -> bool:
+    """Whether the premium chain (C1J's, DEC-273) has a link the judge could
+    actually reach -- the same precondition ``llm_call.call_json`` itself
+    checks before a call, read here first so the judge is skipped quietly
+    (once, not per card) rather than failing a card's whole generation."""
+    try:
+        chain, skipped = llm_call.story_chain(ctx.settings_env, premium=True)
+    except Exception:
+        return False
+    if not chain:
+        return False
+    keys = llm_call.resolve_keys(ctx.settings_env)
+    paid = [link for link, _reason in skipped]
+    return not (paid and not any(keys.get(link.provider) for link in chain))
+
+
+def _judge_card(ctx, *, language, brief, card, runner, time_fn):
+    """One C1J call on *card*; ``StepFailed`` propagates (the caller decides
+    what a failed judge call means)."""
+    system, user, schema = prompts.build_c1j(language=language, brief=brief, card=card)
+    return llm_call.call_json(
+        ctx, "C1J", system, user, schema,
+        validator=prompts.validate_c1j, runner=runner, time_fn=time_fn,
+    )
+
+
+def _apply_brief_judge(ctx, *, language, brief, concept, system, user, prompt_id, schema, validator,
+                       runner, time_fn, judge_state) -> tuple:
+    """``(concept, brief_fit)`` for one accepted v3 card (plan 22 stage 2):
+    judged by C1J; not kept, the same C1v2 call asked once more with the
+    judge's ``missing`` as the refusal reasons (DEC-259); still not kept,
+    *concept* (the retried reply) is returned with ``brief_fit.kept`` false.
+    ``brief_fit`` is None only when the judge is skipped (no usable premium
+    link, said once via *judge_state*) or a judge call itself fails (said
+    every time it happens -- never silent, never fatal to the card)."""
+    if not _judge_usable(ctx):
+        if not judge_state["skip_logged"]:
+            ctx.on_log("⚖️ C1J (brief judge) skipped: the premium chain has no usable link.")
+            judge_state["skip_logged"] = True
+        return concept, None
+
+    try:
+        verdict = _judge_card(ctx, language=language, brief=brief, card=concept, runner=runner, time_fn=time_fn)
+    except StepFailed as exc:
+        ctx.on_log(f"⚠️ C1J could not judge this card: {exc.reason}")
+        return concept, None
+
+    if verdict["kept"]:
+        return concept, {"kept": True, "missing": [], "checked_by": C1J_CHECKED_BY, "checked_at": llm_call.utc_now()}
+
+    retry_user = llm_call.refused_prompt(user, verdict["missing"])
+    try:
+        reply = llm_call.call_json(
+            ctx, prompt_id, system, retry_user, schema,
+            validator=validator, runner=runner, time_fn=time_fn,
+        )
+    except StepFailed as exc:
+        ctx.on_log(f"⚠️ C1v2 retry after the brief judge failed: {exc.reason}; keeping the first reply.")
+        return concept, {"kept": False, "missing": verdict["missing"], "checked_by": C1J_CHECKED_BY,
+                         "checked_at": llm_call.utc_now()}
+
+    retried = reply["concepts"][0]
+    try:
+        verdict2 = _judge_card(ctx, language=language, brief=brief, card=retried, runner=runner, time_fn=time_fn)
+    except StepFailed as exc:
+        ctx.on_log(f"⚠️ C1J could not re-judge the retried card: {exc.reason}")
+        return retried, None
+
+    return retried, {"kept": verdict2["kept"], "missing": verdict2["missing"], "checked_by": C1J_CHECKED_BY,
+                     "checked_at": llm_call.utc_now()}
+
+
 def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
     """Generate up to ``CALLS * CONCEPTS_PER_CALL`` cards for the story.
 
@@ -114,6 +216,10 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
     ``concepts``); *runner*/*time_fn* are handed to ``llm_call.call_json``.
     ``ctx.params`` may hold ``count`` (:func:`read_count`); a regenerate's
     params are its own (its target and note), so it writes :data:`CALLS`.
+
+    Plan 22 stage 2: with :func:`_writing_gate`, every card is written by
+    C1v2 from the story's brief instead of C1 (module docstring); without
+    it, this is exactly today's C1 run.
     """
     calls = CALLS if note is not None or ctx.step == "regenerate" else read_count(ctx.params)
     store, story = llm_call.open_story(ctx)
@@ -128,43 +234,72 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
         ) from None
     seed = _seed_with_note(story.get("seed_text"), note)
     style_ids = templates.list_style_ids()
+    use_brief = _writing_gate(story)
 
     cards = _existing_cards(store, ctx.story_id)
     number = _next_number(cards)
     library_titles = _library_titles(language)
     generated_titles = [card["title"] for card in cards]
 
-    def validator(reply):
-        return schemas.c1_errors(reply, style_ids)
-
     new_ids = []
     failed = []  # (call, reason)
     announced = set()
+    judge_state = {"skip_logged": False}
 
     for call in range(1, calls + 1):
         ctx.cancel.check()
-        pack = context.build_pack(
-            language=language,
-            template=template,
-            seed_text=seed,
-            avoid_titles=library_titles + generated_titles[::-1],
-        )
+        if use_brief:
+            pack = context.build_pack(
+                language=language,
+                template=template,
+                brief_text=seed,
+                # DEC-274: the library's titles compete with the brief, not
+                # with this story's own cards -- left out here.
+                avoid_titles=generated_titles[::-1],
+            )
+        else:
+            pack = context.build_pack(
+                language=language,
+                template=template,
+                seed_text=seed,
+                avoid_titles=library_titles + generated_titles[::-1],
+            )
         llm_call.announce_trimmed(ctx, pack, announced)
-        system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=calls)
+
+        if use_brief:
+            angle = prompts.C1_ANGLES[(call - 1) % len(prompts.C1_ANGLES)]
+            system, user, schema = prompts.build_c1_v2(pack, style_ids=style_ids, batch=call, of=calls, angle=angle)
+            prompt_id = "C1v2"
+
+            def validator(reply, _brief=pack.brief):
+                return prompts.c1v2_errors(reply, style_ids=style_ids, brief=_brief)
+        else:
+            system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=calls)
+            prompt_id = "C1"
+
+            def validator(reply):
+                return schemas.c1_errors(reply, style_ids)
 
         try:
             reply = llm_call.call_json(
-                ctx, "C1", system, user, schema,
+                ctx, prompt_id, system, user, schema,
                 validator=validator, runner=runner, time_fn=time_fn,
             )
         except StepFailed as exc:
             failed.append((call, exc.reason))
-            ctx.on_log(f"✖ C1 call {call}/{calls} failed: {exc.reason}")
+            ctx.on_log(f"✖ {prompt_id} call {call}/{calls} failed: {exc.reason}")
             continue
 
         now = llm_call.utc_now()
         call_cards = []
         for concept in reply["concepts"]:
+            brief_fit = None
+            if use_brief:
+                concept, brief_fit = _apply_brief_judge(
+                    ctx, language=language, brief=pack.brief, concept=concept, system=system, user=user,
+                    prompt_id=prompt_id, schema=schema, validator=validator, runner=runner, time_fn=time_fn,
+                    judge_state=judge_state,
+                )
             card = {
                 "concept_id": _concept_id(number),
                 "source": "generated",
@@ -173,6 +308,8 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
                 "language": language,
             }
             card.update({field: concept[field] for field in _CARD_FIELDS})
+            if brief_fit is not None:
+                card["brief_fit"] = brief_fit
             call_cards.append(card)
             number += 1
 
@@ -192,7 +329,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
         generated_titles.extend(card["title"] for card in call_cards)
         new_ids.extend(card["concept_id"] for card in call_cards)
         titles = " · ".join(card["title"] for card in call_cards)
-        ctx.on_log(f"💡 C1 call {call}/{calls}: {titles}")
+        ctx.on_log(f"💡 {prompt_id} call {call}/{calls}: {titles}")
 
     wanted = calls * CONCEPTS_PER_CALL
     if not new_ids:

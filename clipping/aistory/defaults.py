@@ -75,6 +75,17 @@ MODE_STUDIO = "studio"
 MODE_AGENT = "agent"
 STORY_MODES = (MODE_STUDIO, MODE_AGENT)
 
+# Plan 22 stage 2 (DEC-274): the optional ``generation_profile.writing``.
+# Absent or "v2" keeps every prompt exactly as it was (C1/B1); "v3" gates the
+# brief-faithful concept and bible prompts (C1v2/C1J, B1v3) -- never without
+# a non-empty ``seed_text`` too (``steps/concepts.py``, ``steps/bible.py``).
+# Never in ``default_generation_profile`` below: ``store.create`` stamps
+# "v3" on every story made from now on; a story read from before this stage
+# has no key at all and reads as "v2" (RC-W2: byte-identical without it).
+WRITING_V2 = "v2"
+WRITING_V3 = "v3"
+WRITING_VERSIONS = (WRITING_V2, WRITING_V3)
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"
