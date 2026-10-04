@@ -17,10 +17,13 @@
   (A-145 confirmed); the STT key still missing.
 - **Stage 4 MERGED** on main `dbce458` (pushed; DEC-276; reviewed: 5 findings, 2 fixed, 3 recorded). **Deployed**:
   the image rebuilt at 0 running jobs for stages 1 + 4, health 200, bundle index-Dul_PjDm.js.
-- **Running now:** stage 2 (Sonnet, `.claude/worktrees/plan22-s2`, `feat/plan22-concepts`; told to rebase onto main)
-  and stage 5 (Opus, `.claude/worktrees/plan22-s5`, `feat/plan22-manual-link`, off dbce458: the manual link / bring
-  your own clips). Next: on each report — review (code-review skill), rebase, selection in both envs, ff-merge gated
-  on the exit code, DEC-274 / DEC-277, deploy; then stage 3 (writing v3) off main after stage 2.
+- **Stage 5 MERGED** on main `5ae4046` (pushed; DEC-277; reviewed: 5 findings, 3 fixed, 2 recorded). **NOT deployed
+  yet**: the manual profile becomes the default for new stories and needs stage 3's format — deploy 2 + 3 + 5 together.
+- **Stage 2** (`feat/plan22-concepts`, based on 700ef46): two commits (6a60fdc, 2fac72b), tree clean, but the agent's
+  last logged runs (17:49 / 17:51) were RED (local 17 failed / 3923 passed; CI 14 failed) and no hand-back arrived; the
+  orchestrator asked for the report and will verify on the rebased tree (onto main 5ae4046) before any merge.
+- **Next:** stage 2's verdict → rebase, selection, review, merge; then stage 3 (writing v3 + `confrontation_50s_v2`,
+  Sonnet or Opus, off main); then deploy 2 + 3 + 5 at 0 running jobs; stage 7 docs; stage 8 the walk (manual mode).
 - **Before stage 4 is used live (the human said yes):** `GEMINI_PAID_API_KEY` and a Groq (or Mistral) STT key in
   Settings; caps 10 / 20 / 60. Neither key is set today — Veo has never run on this host.
 - **Open questions:** none blocking. Assumptions A-145…A-150.
@@ -1002,6 +1005,7 @@
 | RC-N1 | Veo Lite's request body is byte-identical (DEC-276) | `tests/test_video_adapters.py::test_veo_lite_body_unchanged` |
 | RC-N2 | A non-speech story's storyboard, clips, estimate and render are byte-identical (DEC-276) | the goldens + `test_story_ambience.py`, `test_story_lipsync.py` unedited |
 | RC-N3 | On a speech story every bought second is rendered or trimmed by the rule; every speaking clip has a take before render (DEC-276) | `tests/test_story_native_take.py`, `tests/test_story_render_native_speech.py` |
+| RC-N4 | A `manual/upload` link never sends a request and never books a cent (DEC-277) | `tests/test_story_manual_link.py` |
 | RC-V5 | No silent mixing of image or video links inside an episode — amended by DEC-276: a native-speech episode keeps two sticky video links, one per shot class, both shown | stage 6/8; `tests/test_story_native_speech_clips.py` |
 | RC-V6 | The estimate and the run agree on the shots and the dollars | stage 8 |
 | RC-V7 | A failed or stale clip never renders unless "fill" is ticked | stage 9 |

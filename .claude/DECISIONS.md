@@ -5380,3 +5380,63 @@ stay unconfirmed until real takes are heard. Tests: 6 new files + adapter, prici
 (696 skipped); the merge selection on the final tip (30 files) 696 passed locally, 524 / 172 skipped on the CI env.
 New **RC-N2** (a non-speech story's storyboard, clips, estimate and render byte-identical) and **RC-N3** (every
 bought second rendered or trimmed by the rule; every speaking clip has a take record before render).
+
+## DEC-277 — The manual link: the human is a provider — the app writes the shot brief, the human makes the clips (and, by choice, the images) on their own subscriptions and uploads them; the run pauses and resumes (plan 22 stage 5, after DEC-276)
+**Context.** The human (2026-10-04): "I like the bring your own clips mode: you give prompts, very crafted contexts
+and detailed, I manually get them on the platform that I got subscription for, you then build the rest … so that I
+can generate images or video clips myself with prompts and image shots." Platforms: Google Flow (Veo 3.1, ≤ 3
+reference images, 8 s, 9:16) and Higgsfield/Freepik (Veo, Kling, Seedance). API clips cost 4–8× the subscription
+credit price per second, the clip bill was ≈ 85 % of an episode, and the caps are 2 / 4 / 10.
+**Decision** (`19ec027` … `5ae4046`, 11 commits; reviewed: 5 findings, 3 fixed, 2 recorded).
+- **The provider** `manual` (`GEN_PROVIDERS["manual"]`, kinds image, image edit, video; no key, free, never probed,
+  never paid; `MANUAL_LINK = "manual/upload"`, `is_manual`, `AwaitingUpload`); `run_generation_chain` handles a manual
+  link before route, keys, probe, budget, limiter and journal and raises `AwaitingUpload`, so a later link never
+  stands in for the human (**RC-N4**: a manual link never sends a request and never books a cent).
+- **The profile** `native_speech_manual` ("Native speech — your own clips": every speech and silent link
+  `manual/upload`, cap 2.0, the quality image roles, no retakes, no lipsync) and the per-story switch
+  `generation_profile.images: "manual"` (sheets, plates, props and keyframes the human's own). **The default for a
+  new story when FAL_KEY is set** (`media_policy.new_story_profile` → `defaults.manual_speech_generation_profile`):
+  wizard, API, agent mode and CLI alike.
+- **The brief** (`steps/brief.py`, presets `templates/platforms/{flow,higgsfield}.json` checked by
+  `aistory/platforms.py`): per shot its purpose, the prompt (stage 4's speech or ambience prompt rephrased per
+  platform; a French speaking shot never goes to Kling), the negative prompt, the length to pick, 9:16, the reference
+  images in priority order cut to the platform's maximum, the line with its voice line, the checks, the upload slot
+  and the state; `assets/brief/shot_brief.{json,md}`; `GET …/episodes/{ep}/brief[.zip]?platform=`; `image_brief`
+  for the entities and keyframes (`GET /{id}/image-brief?ep=`). Credits from the preset ("≈ 240 Flow credits on AI
+  Pro" for 12 shots).
+- **Uploads** (`aistory/manual_uploads.py`; the routes reuse the streaming multipart receiver with a 500 MB cap):
+  `POST …/episodes/{ep}/shots/{shot_id}/clip` — 409 before the storyboard is approved or while a step runs (checked
+  again right before the write), 404 unknown shot, 400 with the reason (no video stream, not MP4/MOV, under 2 s, not
+  9:16 ± 2 % — refused rather than cropped, a speaking shot with no sound); stored as `shot_NN.manual.mp4` (the
+  previous take kept under `assets/clips/takes/`), recorded `{link: manual/upload, route: manual, state: current,
+  clip_s, est_usd: 0, prompt_hash, sha256, uploaded_at, duration_s, filename}`, hashed once, then taken for free
+  (`native_take_shot`). Images: `POST /{id}/cast/{c}/sheet?which=`, `/places/{p}/plate?variant=`,
+  `/props/{p}/image`, `/episodes/{ep}/shots/{s}/keyframe` — decoded and re-encoded clean, at least half the role's
+  size, a keyframe 9:16 ± 2 % cropped to the exact even 9:16, recorded `source: manual/upload`.
+- **Pause and resume**: on a manual story the assets step asks nothing for manual clips or keyframes, lists what is
+  missing (keyframes first, clips once they are approved) and ends `awaiting_uploads` — a new job status that frees
+  the worker, survives a restart, ends the live stream and refuses a cancel; the fast track and the agent run pause
+  ("⏸ … paused at …"), never fail. Each upload updates the paused job's count; the upload that leaves nothing missing
+  creates the same step again as a new job (`resumed_by`) unless another step runs or the queue is full ("held").
+  The estimate shows the clips at $0 with the platform's credits.
+- **Dashboard**: the "Shot list" pane (purpose, copy-ready prompt, reference thumbnails with downloads, the line and
+  voice, the length, the checks, an upload slot with progress, state badges, a Flow/Higgsfield select, "Download
+  brief (zip)", "7 of 12 clips uploaded"); Generate reads "Waiting for N clips"; the Agent run card shows the pause
+  and the brief; upload slots on the cast, places and props tiles when images are manual. **CLI**: `aistory brief`
+  and `aistory upload-clip`.
+**Rejected.** Cropping a 16:9 upload to 9:16 (cuts the characters out of frame — refused with the fix instead).
+Automating the platforms (their terms forbid it; the mode stays manual by design). Pausing the cast and places runs
+on manual images (they fail with "upload it on its tile" instead; only the assets step pauses).
+**Consequence.** A manual-mode episode costs ≈ $0.6 of keyframes + ≈ $0.2 of text in cash (≈ $0 when images are
+manual too) and ≈ 240 Flow credits. **Not deployed with stage 4**: the default-profile flip lands before stage 3's
+confrontation format and 17-word cap exist, so a default wizard story on `serial_60s_v2` would be refused by the
+one-shot-per-line gates — stage 5 deploys together with stage 3. Recorded for later: the hosted STT runs
+synchronously inside the upload request (a slow transcription holds the response); `lipsync` is still missing from
+`store._PROFILE_CHOICES` (a DEC-258 gap; `speech_model` and `images` were added); stage 4's prompt repeats the
+speaker's handle when the shot's action starts with it. For the walk the human sets an STT key (else takes are
+"approximate"), picks 9:16 on Flow, Frames to Video with the keyframe (else Ingredients with the sheets), Veo 3.1
+Fast, downloads the MP4 with its audio and uploads it on the Shot list. Tests: `test_story_manual_link.py` (12),
+`test_api_shot_upload.py` (12), `test_story_cli_manual.py` (2), `test_dashboard_shot_list.py` (6), fast-track pause
+and resume (+2); re-pins on purpose: the profile lists, the new-story default, the job response, the feed's terminal
+statuses, `test_story_native_speech_clips.py` (a nonexistent provider instead of `manual`). The agent's 194-file
+selection 6364 local / 5520 + 813 skipped; the merge selection (32 files) 731 local, 483 / 248 skipped on the CI env.
