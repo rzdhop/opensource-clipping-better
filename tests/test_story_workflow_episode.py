@@ -237,7 +237,9 @@ def test_a_script_is_approved_only_complete_and_freshly_checked(wf, store):
 
     _run(m.script, store, story_id, llm=FakeLLM(E4=[E4_ISSUES]))
     detail = _refused(wf, "conflict", wf.approve_script, store, story_id, 1, now=LATER)
-    assert "2 issues" in detail and "Broccolia parle trop gentiment ici." in detail
+    # DEC-261: the character note is minor -- kept for review, neither counted nor quoted.
+    assert "1 issue" in detail and "Broccolia parle trop gentiment ici." not in detail
+    assert "1 minor note kept for review" in detail
     assert "Le vote surprise n'est jamais expliqué." in detail and "approve anyway" in detail
 
     script = _script(store, story_id)

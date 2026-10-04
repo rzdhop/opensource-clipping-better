@@ -217,9 +217,11 @@ def test_auto_approve_refuses_a_script_with_issues_and_approves_nothing(cli):
 
     assert code == 1
     err = cli.capsys.readouterr().err
-    # The issues (scene id, kind, fix) and the sentence the API would answer,
-    # both in the one message workflow.approve_script raises.
-    assert "s03" in err and "character" in err and "continuity" in err
+    # The blocking issue (kind, fix), the minor note kept for review (DEC-261:
+    # a character note is never counted or named) and the sentence the API
+    # would answer, all in the one message workflow.approve_script raises.
+    assert "1 issue" in err and "continuity" in err and "Le vote surprise n'est jamais expliqué." in err
+    assert "1 minor note kept for review" in err and "s03" not in err
     assert "approve anyway" in err
     script = cli.episode_doc(story_id, 1, "script.json")
     assert script["approved_at"] is None

@@ -358,7 +358,9 @@ def test_the_script_approval_rules_through_the_api(api):
 
     response = _approve(api, story_id, "script:1")
     assert response.status_code == 409
-    assert "2 issues" in response.json()["detail"] and "approve anyway" in response.json()["detail"]
+    # DEC-261: one blocking issue counted, the character note kept for review.
+    assert "1 issue" in response.json()["detail"] and "approve anyway" in response.json()["detail"]
+    assert "1 minor note kept for review" in response.json()["detail"]
     assert api.jobs.get_job(job)["status"] == "awaiting_approval"
 
     response = _approve(api, story_id, "script:1", {"approve_anyway": True})
