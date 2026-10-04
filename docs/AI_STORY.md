@@ -1170,8 +1170,11 @@ mode** (`POST /api/stories` with `"mode": "agent"`, stored as
 existing story) can instead be taken from its one-line seed to episode 1
 rendered with its metadata pack by **one job**, `story-fast-track` (`POST
 /api/stories/{id}/steps/story-fast-track`, no parameters; refused with a 409
-on a Studio story). The dashboard's Mode choice and the CLI command arrive
-in the next stages of plan 21; the backend is there now.
+on a Studio story). From the CLI: `new --mode agent --seed-text "..."
+[--format ID]` then `step STORY_ID story-fast-track` (or the `agent`
+command, doing both in one call) -- see "From the CLI" below. The
+dashboard's Mode choice arrives in the next stage of plan 21; the backend
+and the CLI are there now.
 
 The job runs nine parts in order, each a line `⏩ Agent n/9: <part>` in the
 feed and the job's `sub_step`: the **concept** (the concepts step asked for
@@ -1277,10 +1280,12 @@ is queued or running is refused (409), telling you to wait or cancel.
 ## From the CLI
 
 `python main.py --ai-story` covers all thirteen steps for scripting or
-testing, without a browser. Nine subcommands: `new`, `step`, `render`,
-`fast-track`, `feedback`, `approve`, `list`, `voice-tails` (what the Gemini
-tail guard cut, or would cut, from each line of an episode — read only) and
-`prompt-limits` (every link's prompt size limit and its source).
+testing, without a browser. Ten subcommands: `new`, `step`, `render`,
+`fast-track`, `agent` (plan 21 stage 2: `new --mode agent` then `step
+STORY_ID story-fast-track` in one call), `feedback`, `approve`, `list`,
+`voice-tails` (what the Gemini tail guard cut, or would cut, from each line
+of an episode — read only) and `prompt-limits` (every link's prompt size
+limit and its source).
 
 Keys, chains, caps and `allow_paid` come from the environment (or `.env`);
 add **`--settings`** to any subcommand to read the ones the dashboard's
@@ -1329,6 +1334,15 @@ python main.py --ai-story step STORY_ID script --ep 2 --auto-approve
 python main.py --ai-story step STORY_ID rerender --ep 1 --dry-run
 python main.py --ai-story step STORY_ID rerender --ep 1
 python main.py --ai-story list
+```
+
+Agent mode (plan 21 stage 2): `new --mode agent` and `--format` set the
+story up, `story-fast-track` runs it, `agent` does both in one call --
+
+```
+python main.py --ai-story new --lang fr --mode agent --seed-text "A fruit island reality show" --style fruit_drama --format narrated_drama_60s_v2
+python main.py --ai-story step STORY_ID story-fast-track --estimate
+python main.py --ai-story agent --lang fr --seed-text "A fruit island reality show" --style fruit_drama
 ```
 
 `script` and `storyboard` both take `--ep N`, required — the episode
@@ -1419,16 +1433,19 @@ storyboard; for `assets` it approves the grid once every shot is current or
 locked and every line voiced; for `feedback` it approves with no direction
 chosen — and **never** "approve anyway": with issues still open it prints
 them and exits 1 instead of forcing the approval through. `render`,
-`metadata`, `fast-track` and `rerender` take no `--auto-approve`: their job
-ends completed once it is done, with nothing left to approve (the fast
-track auto-approves each document it writes fresh by that document's own
-rule regardless, never through this flag); `propose-next` never takes it
-either — each proposed item needs a human decision, from the dashboard or
-the API.
+`metadata`, `fast-track`, `rerender` and `story-fast-track` take no
+`--auto-approve`: their job ends completed once it is done, with nothing
+left to approve (the fast track and the agent run each auto-approve every
+document they write fresh by that document's own rule regardless, never
+through this flag); `propose-next` never takes it either — each proposed
+item needs a human decision, from the dashboard or the API.
 
 `new` creates a draft story and, with `--concept`, chooses a library concept
 in the same call. `--lang` is required — there is no default, on the CLI
-any more than in the API. `--tier`, `--route`, `--consistency-mode` and
+any more than in the API. `--mode agent` (default `studio`) creates the
+story in agent mode, exactly as `POST /api/stories` does; `--format` sets
+its own episode template (one of the shipped ones, a usage error naming
+them otherwise). `--tier`, `--route`, `--consistency-mode` and
 `--budget-profile` set the generation profile; left out, they take the same
 defaults as the dashboard (`1`, `auto`, `references`, `free` — an agreement
 test keeps the CLI, the API's request model and the dashboard's form from

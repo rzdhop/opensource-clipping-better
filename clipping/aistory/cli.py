@@ -4,13 +4,17 @@
 clip parser sees it (DEC-114): this is a parser of its own, and the clip CLI's
 options and defaults are untouched. Commands::
 
-    main.py --ai-story new --lang fr [--concept ID] [--style ID] [--seed-text TEXT]
+    main.py --ai-story new --lang fr [--mode studio|agent] [--concept ID] [--style ID]
+                           [--format TEMPLATE_ID] [--seed-text TEXT]
                            [--tier N] [--route R] [--consistency-mode M] [--budget-profile P]
     main.py --ai-story step <story_id> concepts|bible|style|style_preview [options]
+    main.py --ai-story step <story_id> concepts [--count N]
     main.py --ai-story step <story_id> cast|places_proposal|places|season|knowledge [options]
     main.py --ai-story step <story_id> script|storyboard --ep N [options]
     main.py --ai-story step <story_id> assets|render|metadata --ep N [options]
     main.py --ai-story step <story_id> assets --ep N [--tier T] [--route R] [--no-animate] [--estimate]
+    main.py --ai-story step <story_id> story-fast-track [--estimate]
+    main.py --ai-story agent --lang fr --seed-text TEXT [--style ID] [--format TEMPLATE_ID] [options]
     main.py --ai-story step <story_id> memory|feedback|propose-next --ep N [options]
     main.py --ai-story step <story_id> rerender --ep N [--dry-run]
     main.py --ai-story render <story_id> --ep N [options]
@@ -168,6 +172,20 @@ its kept audio (``voice_lines.tail_report``: the file's length, the cut, its
 reason), and changes nothing: the assets step is what cleans a line voiced
 before the guard, for free. A way for a person to check the "crshhh" fix.
 
+Agent mode (plan 21 stage 2): ``new --mode agent`` (default ``studio``)
+creates the story exactly as the API does, with ``generation_profile.mode:
+"agent"``; ``--format ID`` (either command, one of
+``defaults.EPISODE_TEMPLATE_IDS``, a usage error naming them otherwise) sets
+the story's own episode template. ``step <story_id> story-fast-track`` then
+runs the agent job (module docstring of ``steps/story_fast_track.py``): the
+same gates as the API's job queue -- refused on a Studio story with the same
+sentence (``workflow.require_agent_mode``), the key gate, then the runner's
+own estimate before its first part (RC-A3) -- and takes no parameter but
+``--estimate`` (``workflow.story_fast_track_estimate``'s own message,
+printed; calls nothing, runs no step). ``agent`` is the one-command version:
+``new --mode agent`` then ``step <story_id> story-fast-track`` in a single
+call, printing the story's line first, the same exit codes as ``step``.
+
 Limitation: the CLI and a running server do not coordinate step runs on the
 same story. The server's one-step-per-story rule lives in its job store
 (``web/api/store.py``), which the CLI does not read, so running a step here
@@ -196,6 +214,7 @@ from . import defaults, media_policy, refimages, schemas, templates, workflow
 from . import store as story_store
 from .steps import StepFailed
 from .steps import assets as assets_step
+from .steps import concepts as concepts_step
 from .steps import entities as entities_step
 from .steps import episode_common
 from .steps import fast_track as fast_track_step
@@ -268,9 +287,9 @@ _PHASE4_JOB_STEPS = ("assets", "render", "metadata")
 
 # Every step `step` runs, phase 1 then phase 2 then phase 3 then phase 4 then
 # phase 5's series steps (step 13: memory, feedback, propose-next) then its
-# re-edit render (plan 11 stage 9: rerender).
+# re-edit render (plan 11 stage 9: rerender) then plan 21's agent run.
 STEPS = workflow.PHASE1_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEPS + _PHASE4_JOB_STEPS + \
-    workflow.SERIES_STEPS + workflow.REEDIT_STEPS
+    workflow.SERIES_STEPS + workflow.REEDIT_STEPS + workflow.AGENT_STEPS
 
 # The steps --auto-approve approves, and what to do for the others. `memory`
 # approves like `bible`/`season` (workflow.approve_memory, unconditionally);
@@ -297,6 +316,10 @@ _NOT_AUTO_APPROVABLE = {
     "render": "the render ends completed once it is done: there is nothing to approve.",
     "metadata": "the metadata pack ends completed once it is written: there is nothing to approve.",
     "rerender": "the re-render ends completed once it is done: there is nothing to approve.",
+    "story-fast-track": (
+        "the agent run approves by itself, by: agent -- there is nothing to approve afterward; review the "
+        "documents in Studio, where every regenerate stays available."
+    ),
     "propose-next": (
         "each proposed character and twist needs a human decision, from the dashboard or the API "
         "(POST .../episodes/{ep}/proposals/{item_id}): accept or reject it, then approve "
@@ -316,6 +339,7 @@ _KEYED_STEPS = workflow.LLM_STEPS + workflow.PHASE2_STEPS + workflow.PHASE3_STEP
 # The options of `step` that only some steps take: (dest, flag, steps).
 _STEP_ONLY = (
     ("note", "--note", ("concepts",)),
+    ("count", "--count", ("concepts",)),
     ("template", "--template", ("style",)),
     ("override", "--override", ("style",)),
     ("consistency_mode", "--consistency-mode", ("style",)),
@@ -333,7 +357,7 @@ _STEP_ONLY = (
     ("tier", "--tier", ("assets",)),
     ("route", "--route", ("assets",)),
     ("no_animate", "--no-animate", ("assets",)),
-    ("estimate", "--estimate", ("assets",)),
+    ("estimate", "--estimate", ("assets",) + workflow.AGENT_STEPS),
     ("subtitles", "--subtitles", ("render",)),
     ("encoder", "--encoder", ("render",)),
     ("fill_failed_with_motion", "--fill-failed-with-motion", ("render",)),
@@ -407,8 +431,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="read the keys, chains, caps and allow_paid stored by the dashboard's Settings "
                              "(data/settings.json, or WEB_SETTINGS_FILE) over the environment")
 
-    commands = parser.add_subparsers(dest="command",
-                                     metavar="{new,step,render,fast-track,feedback,approve,list,prompt-limits}", required=True)
+    commands = parser.add_subparsers(
+        dest="command",
+        metavar="{new,step,render,fast-track,agent,feedback,approve,list,voice-tails,prompt-limits}",
+        required=True,
+    )
 
     # ---- new
     new = commands.add_parser(
@@ -419,11 +446,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--lang", required=True, choices=schemas.LANGUAGES,
         help="the story's language; required, there is no default",
     )
+    new.add_argument("--mode", choices=defaults.STORY_MODES, default=defaults.MODE_STUDIO,
+                     help=("studio (default: every step waits for your approval) or agent (one "
+                           "story-fast-track job takes the story from its seed to episode 1, approving by "
+                           "rule), stored as generation_profile.mode on an agent story"))
     new.add_argument("--seed-text", default=None, metavar="TEXT",
                      help="a few words the concepts start from")
     styles = templates.list_style_ids()
     new.add_argument("--style", default=None, choices=styles, metavar="ID",
                      help=f"a shipped style template: {', '.join(styles)}")
+    new.add_argument("--format", default=None, choices=defaults.EPISODE_TEMPLATE_IDS, metavar="ID",
+                     help=(f"the story's own episode template: {', '.join(defaults.EPISODE_TEMPLATE_IDS)} "
+                           "(default: the pipeline's own)"))
     concepts = [concept["concept_id"] for concept in templates.load_concepts()]
     new.add_argument("--concept", default=None, choices=concepts, metavar="ID",
                      help=f"a library concept to choose at once: {', '.join(concepts)}")
@@ -440,6 +474,40 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--budget-profile", choices=defaults.BUDGET_PROFILES,
                      default=defaults.DEFAULT_BUDGET_PROFILE, action=_ProfileFlag,
                      help="the story's budget profile (default: %(default)s)")
+
+    # ---- agent (plan 21 stage 2: 'new --mode agent' then 'step ID story-fast-track' in one call)
+    agent_cmd = commands.add_parser(
+        "agent", parents=[common],
+        help="create an agent-mode story and run it to episode 1 in one job",
+        description=(
+            "Exactly 'new --mode agent ...' then 'step STORY_ID story-fast-track', in one call: create the "
+            "story (printing its line first), then run the agent job (steps/story_fast_track.py's module "
+            "docstring) -- the same gates as the API's job queue (the key gate, then the runner's own "
+            "estimate before its first part, RC-A3). The same exit codes as 'step'."
+        ),
+    )
+    agent_cmd.add_argument(
+        "--lang", required=True, choices=schemas.LANGUAGES,
+        help="the story's language; required, there is no default",
+    )
+    agent_cmd.add_argument("--seed-text", default=None, metavar="TEXT",
+                           help="a few words the concept is written from (the idea is the concept)")
+    agent_cmd.add_argument("--style", default=None, choices=styles, metavar="ID",
+                           help=f"a shipped style template: {', '.join(styles)}")
+    agent_cmd.add_argument("--format", default=None, choices=defaults.EPISODE_TEMPLATE_IDS, metavar="ID",
+                           help=(f"the story's own episode template: {', '.join(defaults.EPISODE_TEMPLATE_IDS)} "
+                                 "(default: the pipeline's own)"))
+    agent_cmd.add_argument("--tier", type=int, choices=defaults.TIERS, default=defaults.DEFAULT_TIER,
+                           action=_ProfileFlag, help="generation tier (default: %(default)s)")
+    agent_cmd.add_argument("--route", choices=defaults.ROUTES, default=defaults.DEFAULT_ROUTE,
+                           action=_ProfileFlag, help="where images are made (default: %(default)s)")
+    agent_cmd.add_argument("--consistency-mode", choices=defaults.CONSISTENCY_MODES,
+                           default=defaults.DEFAULT_CONSISTENCY_MODE, action=_ProfileFlag,
+                           help="how characters are kept consistent (default: %(default)s)")
+    agent_cmd.add_argument("--budget-profile", choices=defaults.BUDGET_PROFILES,
+                           default=defaults.DEFAULT_BUDGET_PROFILE, action=_ProfileFlag,
+                           help="the story's budget profile (default: %(default)s)")
+    agent_cmd.set_defaults(mode=defaults.MODE_AGENT, concept=None)
 
     # ---- step
     step = commands.add_parser(
@@ -462,13 +530,20 @@ def build_parser() -> argparse.ArgumentParser:
             "-- each item is decided from the dashboard or the API, never here; rerender "
             "(--ep) renders episode ep again from its documents as they are now, making again "
             "only the shot clips that changed since its last good render, calling no API -- "
-            "--dry-run prints what it would re-render without rendering."
+            "--dry-run prints what it would re-render without rendering; story-fast-track (an "
+            "agent-mode story only) runs the agent job from the story's seed to episode 1 "
+            "rendered, approving by rule -- --estimate prints what it would still do and spend, "
+            "and runs nothing."
         ),
     )
     step.add_argument("story_id", help="the story's id (see 'list')")
     step.add_argument("step", choices=STEPS, help="the step to run")
     step.add_argument("--note", default=None, metavar="TEXT",
                       help="concepts only: an author's note the ten new concepts follow")
+    step.add_argument("--count", type=int, default=None, metavar="N",
+                      help=(f"concepts only (ignored with --note, which always writes {concepts_step.CALLS}): "
+                            f"how many concepts to write, 1 to {concepts_step.CALLS} (default: "
+                            f"{concepts_step.CALLS})"))
     step.add_argument("--template", default=None, choices=styles, metavar="ID",
                       help="style only: the style template (default: the story's, else its concept's)")
     step.add_argument(
@@ -523,8 +598,10 @@ def build_parser() -> argparse.ArgumentParser:
     step.add_argument("--no-animate", action="store_true",
                       help="assets only: make no clip in this run (tier 2 and 3 animate by default)")
     step.add_argument("--estimate", action="store_true",
-                      help=("assets only: print what the step would make and spend (images, voices and, at "
-                            "tier 2 or 3, clips) and run nothing: no call, no step"))
+                      help=("assets: print what the step would make and spend (images, voices and, at "
+                            "tier 2 or 3, clips); story-fast-track: print what the agent run would still do "
+                            "and spend, under the caps and the time budget -- either way, run nothing: no "
+                            "call, no step"))
     step.add_argument(
         "--subtitles", choices=render_step.SUBTITLE_CHOICES, default=None, metavar="MODE",
         help=(f"render only: the subtitle mode, one of {', '.join(render_step.SUBTITLE_CHOICES)} "
@@ -797,7 +874,13 @@ def _run_step(stories, story_id, step, params, ep=None):
 
 # ---------------------------------------------------------------- commands
 
-def _cmd_new(args, stories) -> int:
+def _create_story(args, stories) -> dict:
+    """``new``'s and ``agent``'s shared story creation: the story defaults
+    unless a profile option was given, ``mode: agent`` merged onto the
+    profile exactly as ``POST /api/stories`` adds it
+    (``generation_profile.mode``; plan 21 stage 1), and the library concept
+    chosen at once when ``--concept`` is given (``new`` only: ``agent`` sets
+    it to None). ``ValueError`` from the store propagates."""
     profile = {
         "tier": args.tier,
         "route": args.route,
@@ -808,16 +891,23 @@ def _cmd_new(args, stories) -> int:
         # No profile option given: the quality preset when this process's
         # environment holds both quality keys (the API's rule, on its Settings).
         profile = media_policy.new_story_profile(_settings_env()) or profile
+    if args.mode == defaults.MODE_AGENT:
+        profile = dict(profile or {}, mode=defaults.MODE_AGENT)
+    story = stories.create(
+        language=args.lang, seed_text=args.seed_text, style_template_id=args.style,
+        generation_profile=profile, episode_template_id=args.format, now=_now(),
+    )
+    if getattr(args, "concept", None):
+        story = workflow.choose_concept(stories, story["story_id"], concept_id=args.concept, now=_now())
+    return story
+
+
+def _cmd_new(args, stories) -> int:
     try:
-        story = stories.create(
-            language=args.lang, seed_text=args.seed_text, style_template_id=args.style,
-            generation_profile=profile, now=_now(),
-        )
+        story = _create_story(args, stories)
     except ValueError as exc:
         _err(str(exc))
         return EXIT_FAILED
-    if args.concept:
-        story = workflow.choose_concept(stories, story["story_id"], concept_id=args.concept, now=_now())
     print(_line(story))
     return EXIT_OK
 
@@ -844,6 +934,63 @@ def _cmd_list(args, stories) -> int:
     return EXIT_OK
 
 
+# ------------------------------------------------------------------- agent
+
+def _agent_estimate_message(stories, story) -> str:
+    """``story_fast_track_estimate``'s own message, read-only: what the
+    agent run would still do and spend, under the caps and the time budget,
+    or why it is not ready (``--estimate``, module docstring, plan 21 stage
+    2)."""
+    estimate = workflow.story_fast_track_estimate(stories, story, env=_settings_env())
+    return estimate["message"]
+
+
+def _run_agent(stories, story) -> int:
+    """``story-fast-track``: the agent run, the same gates as the API's job
+    queue, in the API's order (``_agent_checks``) -- ``workflow.
+    require_agent_mode`` (a Studio story's own sentence; ``WorkflowError``
+    propagates to :func:`main`'s handler as exit 1), ``workflow.
+    agent_request`` (the step takes no parameter), the key gate -- then the
+    runner itself (``steps.story_fast_track``), which meets the full
+    estimate again (RC-A3) before its first part and raises ``StepFailed``
+    with its own stop sentence otherwise."""
+    story_id = story["story_id"]
+    workflow.require_agent_mode(story)
+    workflow.agent_request({})
+    refusal = _llm_refusal(False)
+    if refusal:
+        _err(refusal)
+        return EXIT_FAILED
+    interrupted, _result = _run_step(stories, story_id, workflow.AGENT_STEP, {})
+    if interrupted:
+        return interrupted
+    print(_line(workflow.load(stories, story_id)))
+    return EXIT_OK
+
+
+def _agent_step(args, stories, story) -> int:
+    """``step ID story-fast-track``: ``--estimate`` prints the agent run's
+    message and runs nothing; otherwise :func:`_run_agent`."""
+    if args.estimate:
+        print(_agent_estimate_message(stories, story))
+        return EXIT_OK
+    return _run_agent(stories, story)
+
+
+def _cmd_agent(args, stories) -> int:
+    """``agent``: ``new --mode agent ...`` then ``step STORY_ID
+    story-fast-track`` in one call (module docstring; plan 21 stage 2) --
+    the story's line is printed first, then the agent run's own lines and
+    summary, with ``step``'s exit codes."""
+    try:
+        story = _create_story(args, stories)
+    except ValueError as exc:
+        _err(str(exc))
+        return EXIT_FAILED
+    print(_line(story))
+    return _run_agent(stories, story)
+
+
 def _cmd_step(args, stories) -> int:
     step = args.step
 
@@ -866,6 +1013,9 @@ def _cmd_step(args, stories) -> int:
 
     story_id = args.story_id
     story = workflow.load(stories, story_id)
+
+    if step in workflow.AGENT_STEPS:
+        return _agent_step(args, stories, story)
 
     if step in workflow.PHASE2_STEPS:
         return _phase2_step(args, stories, story, items)
@@ -916,6 +1066,10 @@ def _cmd_step(args, stories) -> int:
             # "Ten more, with a note" is the regenerate target of the API.
             runner_step = "regenerate"
             params = {"target": "concepts", "note": args.note}
+        elif step == "concepts" and args.count is not None:
+            # Plan 21 stage 1's new param (agent mode: count 1, "the idea is
+            # the concept"); the step's own rule checks the range.
+            params = {concepts_step.COUNT_PARAM: args.count}
         interrupted, _result = _run_step(stories, story_id, runner_step, params)
         if interrupted:
             return interrupted
@@ -1685,8 +1839,8 @@ def _cmd_voice_tails(args, stories) -> int:
 
 
 _COMMANDS = {"new": _cmd_new, "step": _cmd_step, "render": _cmd_render, "fast-track": _cmd_fast_track,
-             "feedback": _cmd_feedback, "approve": _cmd_approve, "voice-tails": _cmd_voice_tails,
-             "list": _cmd_list, "prompt-limits": _cmd_prompt_limits}
+             "agent": _cmd_agent, "feedback": _cmd_feedback, "approve": _cmd_approve,
+             "voice-tails": _cmd_voice_tails, "list": _cmd_list, "prompt-limits": _cmd_prompt_limits}
 
 
 def main(argv=None) -> int:

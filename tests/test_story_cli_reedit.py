@@ -138,7 +138,10 @@ def test_rerender_is_one_of_steps_and_takes_ep_and_dry_run():
     from clipping.aistory import cli as cli_module
     from clipping.aistory import workflow
 
-    assert cli_module.STEPS[-1] == "rerender" == workflow.REEDIT_STEPS[0]
+    # Plan 21 stage 2 appends workflow.AGENT_STEPS after REEDIT_STEPS, so
+    # "rerender" is no longer STEPS' last entry -- re-pinned on purpose.
+    assert "rerender" == workflow.REEDIT_STEPS[0]
+    assert cli_module.STEPS[-1] == workflow.AGENT_STEPS[-1] == "story-fast-track"
     parser = cli_module.build_parser()
     step = _subparser(parser, "step")
     assert "rerender" in _positional(step, "step").choices
