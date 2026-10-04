@@ -31,6 +31,22 @@ const SPEECH_MODELS = [
   { id: 'premium', label: 'Premium (Veo 3.1)' },
 ]
 
+// Plan 23 stage D4: how a character's reference sheets are drawn (generation_profile.sheet_mode),
+// the story's default first; the price of each comes from the preset estimate
+// (estimate.story.sheet_usd_by_mode).
+const SHEET_MODES = [
+  { id: 'three_sheet', label: 'Three sheets (portrait, turnaround, expressions)' },
+  { id: 'two_view', label: 'One front + back sheet' },
+  { id: 'two_view_expressions', label: 'Front + back sheet and expressions' },
+]
+
+// Plan 23 stage D4: how the characters' bodies are drawn (generation_profile.body_rule); '' sends nothing
+// -- the style's own rules (today's).
+const BODY_RULES = [
+  { id: '', label: 'As the style draws them' },
+  { id: 'all_matter', label: "All skin is the character's matter" },
+]
+
 function CreateStoryForm() {
   const navigate = useNavigate()
   // No default: a language a user forgot to pick must never silently become
@@ -49,6 +65,9 @@ function CreateStoryForm() {
   const [speechModel, setSpeechModel] = useState('fast')
   // Plan 22 stage 5: on "your own clips", the sheets, plates, props and keyframes may be yours too.
   const [imagesOwn, setImagesOwn] = useState(false)
+  // Plan 23 stage D4: the characters' sheets and bodies; the defaults send nothing.
+  const [sheetMode, setSheetMode] = useState('three_sheet')
+  const [bodyRule, setBodyRule] = useState('')
   // The episode format the user picked; '' until they pick one, so the
   // select follows the style's suggestion, else the pipeline's default.
   const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
@@ -146,6 +165,8 @@ function CreateStoryForm() {
           ...(pipeline ? { pipeline } : {}),
           ...(nativeSpeech ? { speech_model: speechModel } : {}),
           ...(manualClips && imagesOwn ? { images: 'manual' } : {}),
+          ...(pipeline === 'v2' && sheetMode !== 'three_sheet' ? { sheet_mode: sheetMode } : {}),
+          ...(bodyRule ? { body_rule: bodyRule } : {}),
         } : null,
       }
       const story = await createStory(createFields)
@@ -372,6 +393,41 @@ function CreateStoryForm() {
                   My own images too (sheets, plates, props and keyframes, from the image brief)
                 </label>
               )}
+              {pipeline === 'v2' && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="new-story-sheet-mode">Character sheets</label>
+                  <select id="new-story-sheet-mode" className="form-select" value={sheetMode}
+                    onChange={(e) => choose(setSheetMode)(e.target.value)}>
+                    {SHEET_MODES.map((mode) => {
+                      const usd = estimate && estimate.story && estimate.story.sheet_usd_by_mode
+                        ? estimate.story.sheet_usd_by_mode[mode.id] : null
+                      return (
+                        <option key={mode.id} value={mode.id}>
+                          {mode.label}{usd != null ? ` — ≈ $${usd.toFixed(2)} a character` : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  {sheetMode !== 'three_sheet' && (
+                    <p className="form-hint">
+                      One 9:16 image per character: the front on the left half, the back on the right.
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label" htmlFor="new-story-body-rule">Bodies</label>
+                <select id="new-story-body-rule" className="form-select" value={bodyRule}
+                  onChange={(e) => choose(setBodyRule)(e.target.value)}>
+                  {BODY_RULES.map((rule) => <option key={rule.id} value={rule.id}>{rule.label}</option>)}
+                </select>
+                {bodyRule === 'all_matter' && (
+                  <p className="form-hint">
+                    The whole body, hands and legs included, is drawn in the character's own matter. Only a style
+                    that defines it (Fruit Drama) can be approved with it.
+                  </p>
+                )}
+              </div>
               {nativeSpeech && !manualClips && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-speech-model">Speaking clips</label>

@@ -52,6 +52,8 @@ KEYFRAME_CEILING_WORDS = 320
 CLIP_CEILING_WORDS = 160
 CLIP_AUDIO_CEILING_WORDS = CLIP_CEILING_WORDS + prompting.CLIP_AUDIO_SHARE_WORDS
 SHEET_CEILING_WORDS = 200
+# Plan 23 stage D4: the two-view sheet's skeleton alone is ~150 words.
+TWO_VIEW_CEILING_WORDS = 280
 PLATE_CEILING_WORDS = 220
 PROP_CEILING_WORDS = 120
 
@@ -98,6 +100,11 @@ def speech_clip_words(link, *, live=None) -> int:
 def sheet_words(link, *, live=None) -> int:
     """A v2 character sheet prompt's budget on *link*."""
     return words_for(link, default=prompting.SHEET_V2_MAX_WORDS, ceiling=SHEET_CEILING_WORDS, live=live)
+
+
+def two_view_words(link, *, live=None) -> int:
+    """A v2 two-view character sheet prompt's budget on *link* (plan 23 stage D4)."""
+    return words_for(link, default=prompting.TWO_VIEW_V2_MAX_WORDS, ceiling=TWO_VIEW_CEILING_WORDS, live=live)
 
 
 def plate_words(link, *, live=None) -> int:

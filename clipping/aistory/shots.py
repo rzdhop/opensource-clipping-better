@@ -33,6 +33,7 @@ from __future__ import annotations
 import copy
 import re
 
+from . import defaults
 from . import names as names_mod
 from . import native_speech, prompting, schemas, timing
 
@@ -1293,8 +1294,12 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     # Phase 8 stage B: a character dressed in another set than its sheet's is
     # never asked to keep the sheet's outfit too.
     outfits = _outfits(frame, char_handles, ledger)
-    roles = prompting.role_text(sent, outfits=outfits) if references else ""
-    compact_roles = prompting.role_text(sent, compact=True, outfits=outfits) if references else ""
+    # Plan 23 stage D4: the identity images are front+back sheets (``entities["sheet_mode"]``, set
+    # by ``episode_common.load_context`` on a two-view story only): drawn once, not twice.
+    two_view = entities.get("sheet_mode") in (defaults.SHEET_TWO_VIEW, defaults.SHEET_TWO_VIEW_EXPRESSIONS)
+    roles = prompting.role_text(sent, outfits=outfits, two_view=two_view) if references else ""
+    compact_roles = (prompting.role_text(sent, compact=True, outfits=outfits, two_view=two_view)
+                     if references else "")
 
     lines = _shot_lines(plan, scene)
     clause = _delivery_clause(lines, char_handles)

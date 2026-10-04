@@ -647,6 +647,10 @@ class GenerationProfileModel(BaseModel):
     # Optional (plan 22 stage 5): "manual" -- the sheets, plates, props and
     # keyframes are the human's own uploads; left out, the profile's links.
     images: Optional[Literal["manual"]] = None
+    # Optional (plan 23 stage D4): left out, three sheets a character (portrait,
+    # turnaround, expressions) and the style's own body rules.
+    sheet_mode: Optional[Literal["three_sheet","two_view","two_view_expressions"]] = None
+    body_rule: Optional[Literal["human_body","all_matter"]] = None
 
     @model_serializer(mode="wrap")
     def _without_unset_pipeline(self, handler):
@@ -658,6 +662,9 @@ class GenerationProfileModel(BaseModel):
             data.pop("speech_model", None)
         if isinstance(data, dict) and data.get("images") is None:
             data.pop("images", None)
+        for key in ("sheet_mode", "body_rule"):
+            if isinstance(data, dict) and data.get(key) is None:
+                data.pop(key, None)
         return data
 
 

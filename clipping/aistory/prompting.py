@@ -445,6 +445,47 @@ def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, 
     )
 
 
+# Plan 23 stage D4: the two-view character sheet (the creators' template): ONE
+# 9:16 image with the character's front and back side by side, written into
+# the portrait slot. The layout is said once, in the head; the look follows
+# it; the dress rule, the plain background and the proportions close it.
+# Its skeleton alone (the layout, the dress rule, the closing) is about 150 words,
+# so it gets more room than the other sheets: the style's rendering and the body
+# rules need what is left (Seedream took 220-word prompts on the walks).
+TWO_VIEW_V2_MAX_WORDS = 260
+TWO_VIEW_HEAD = (
+    "A character reference sheet showing two full-body views of the same character side by side, separated by a "
+    "clean vertical line in the centre. LEFT HALF: full frontal view head to toe facing the camera. RIGHT HALF: "
+    "full back view head to toe. Never cut the character in half across the line. Never more than two views. "
+    "Never crop a view. Character")
+DRESS_RULE = ("Fully dressed from shoulders to feet: a complete top, a complete bottom (trousers, or a skirt or "
+              "dress below the knee) and shoes; no bare legs, no visible underwear.")
+# What a keyframe says about a character's identity image when it is a two-view sheet (the
+# failure to guard: the character drawn twice in the frame).
+TWO_VIEW_ROLE = "Image {number} shows this one character twice, front and back: draw them once."
+_TWO_VIEW_ROLE_COMPACT = "image {number} shows {handle} twice, front and back: draw them once"
+
+
+def two_view_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=TWO_VIEW_V2_MAX_WORDS,
+                       cues: str = "") -> str:
+    """A v2 character's two-view sheet (``sheet_mode`` ``two_view``): one
+    vertical 9:16 image, the front on the left half and the back on the
+    right, head to toe, from its rendered look (``shots.render_look``) --
+    built through :func:`_sheet_v2` like the other sheets, at most *budget*
+    words (:data:`TWO_VIEW_V2_MAX_WORDS`, or the link's own): the layout, the
+    look and the dress rule are the skeleton (never cut), the style's
+    rendering and design rules fill what the *budget* leaves. *cues* as
+    :func:`portrait_prompt_v2`'s."""
+    return _sheet_v2(
+        style_lock,
+        head=TWO_VIEW_HEAD,
+        look_text=look_text, signature_items=signature_items,
+        tail=(f"{DRESS_RULE} Plain {style_lock['sheet_background']} background, soft uniform light, no text, no "
+              "grid, no labels. Adult proportions, never chibi. Vertical 9:16."),
+        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues,
+    )
+
+
 def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=PLATE_V2_MAX_WORDS) -> str:
     """A v2 place's plate for one time variant: the place in words
     (``shots.render_place``: descriptor, layout map, the variant's light,
@@ -558,7 +599,7 @@ def fit_words(text: str, limit: int) -> str:
     return _fit(text, limit)
 
 
-def role_text(roles, *, compact=False, outfits=None) -> str:
+def role_text(roles, *, compact=False, outfits=None, two_view=False) -> str:
     """What each reference image is, in the order the images are sent:
     *roles* is ``[(role, handle), ...]`` -- ``identity`` (a character's
     full-body sheet), ``expressions`` (its expression sheet, a close-up's
@@ -577,10 +618,15 @@ def role_text(roles, *, compact=False, outfits=None) -> str:
 
     *compact* (a crowded keyframe past its budget ladder): one sentence,
     each image numbered with a few words and the keep-exactly rule said once
-    for all of them -- about half the words of the sentence per image."""
+    for all of them -- about half the words of the sentence per image.
+
+    *two_view* (plan 23 stage D4: the story's identity images are front+back
+    sheets, ``sheet_mode`` ``two_view``): each ``identity`` image also says
+    it shows its one character twice, front and back, to be drawn once
+    (:data:`TWO_VIEW_ROLE`). False: the text it always was."""
     outfits = outfits or {}
     if compact:
-        return _compact_role_text(roles, outfits)
+        return _compact_role_text(roles, outfits, two_view)
     sentences, identity_of = [], {}
     for number, (role, handle) in enumerate(roles, start=1):
         worn = outfits.get(handle) if role in (ROLE_IDENTITY, ROLE_EXPRESSIONS) else None
@@ -589,6 +635,8 @@ def role_text(roles, *, compact=False, outfits=None) -> str:
             identity_of.setdefault(handle, number)
             keep = "face, hair, build and proportions" if worn else "identity, proportions and outfit"
             sentences.append(f"Image {number} is {handle}'s reference (keep {keep} exactly{here}).")
+            if two_view:
+                sentences.append(TWO_VIEW_ROLE.format(number=number))
         elif role == ROLE_EXPRESSIONS:
             identity_of.setdefault(handle, number)
             keep = "identity and face" if worn else "identity, face and outfit"
@@ -609,13 +657,15 @@ def role_text(roles, *, compact=False, outfits=None) -> str:
     return " ".join(sentences)
 
 
-def _compact_role_text(roles, outfits) -> str:
+def _compact_role_text(roles, outfits, two_view=False) -> str:
     """:func:`role_text`'s *compact* form."""
-    parts, identity_of, continuity, changed = [], {}, False, []
+    parts, identity_of, continuity, changed, twice = [], {}, False, [], []
     for number, (role, handle) in enumerate(roles, start=1):
         if role in (ROLE_IDENTITY, ROLE_EXPRESSIONS):
             identity_of.setdefault(handle, number)
             parts.append(f"{number} {handle}{'' if role == ROLE_IDENTITY else ' (expressions)'}")
+            if two_view and role == ROLE_IDENTITY:
+                twice.append(_TWO_VIEW_ROLE_COMPACT.format(number=number, handle=handle))
             if outfits.get(handle) and handle not in changed:
                 changed.append(handle)
         elif role == ROLE_SET:
@@ -637,6 +687,8 @@ def _compact_role_text(roles, outfits) -> str:
         tail += ", and continuous with the previous shot"
     if changed:
         tail += ", except that " + " and ".join(f"{handle} wears {outfits[handle]}" for handle in changed)
+    if twice:
+        tail += "; " + "; ".join(twice)
     return (f"Reference images: {', '.join(parts)}; keep each identity, outfit, shape, layout and light "
             f"exactly{tail}.")
 

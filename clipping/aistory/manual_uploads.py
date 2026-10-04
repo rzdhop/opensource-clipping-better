@@ -377,7 +377,8 @@ def _clean_image(received, folder, *, role, exact_916=False) -> tuple:
         width, height = _image_size(cleaned)
         least = brief_mod.IMAGE_MIN_SIZES[role]
         if width < least[0] or height < least[1]:
-            raise UploadRefused(f"The image is {width}x{height}: a {role} is at least {least[0]}x{least[1]} "
+            what = role.replace("_", " ")
+            raise UploadRefused(f"The image is {width}x{height}: a {what} is at least {least[0]}x{least[1]} "
                                 f"(the app makes it at {'x'.join(map(str, brief_mod.IMAGE_SIZES[role]))}).")
         if exact_916:
             if abs(width / height - ASPECT) / ASPECT > ASPECT_TOLERANCE:
@@ -432,7 +433,15 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guar
     if kind == "characters":
         if slot not in refimages.CHARACTER_IMAGES:
             raise UploadRefused(f"{slot!r} is not a character sheet ({', '.join(refimages.CHARACTER_IMAGES)}).")
+        if slot not in refimages.character_images(story):
+            # Plan 23 stage D4: the story draws one front+back sheet (and, in two_view_expressions, the expressions).
+            raise UploadRefused(f"{slot!r} is not a sheet of this story: its characters have "
+                                f"{', '.join(refimages.character_images(story))} "
+                                f"({media_policy.sheet_mode(story)}).")
+        # A two-view story's portrait slot is its 9:16 front+back sheet (a larger least size).
         stem, role, base = slot, slot, slot == "portrait"
+        if base and media_policy.two_view(story):
+            role = "sheet_two_view"
     elif kind == "places":
         if not isinstance(slot, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,19}", slot or ""):
             raise UploadRefused(f"{slot!r} is not a time variant name (day, night, golden_hour...).")

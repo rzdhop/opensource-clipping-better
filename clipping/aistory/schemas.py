@@ -306,6 +306,19 @@ STYLE_TEMPLATE_SCHEMA = {
         "episode_defaults": _EPISODE_DEFAULTS_SCHEMA,
         "audio": _AUDIO_SCHEMA,
         "notes": {"type": "string"},
+        # Optional (plan 23 stage D4): the body rules of ``generation_profile.body_rule`` --
+        # ``body_rules.all_matter`` is a sentence with a ``{material}`` slot that replaces
+        # ``character_design_rules`` in the lock; ``default_material`` fills the slot;
+        # ``default_body_rule`` is what a story with no ``body_rule`` gets (absent: human_body).
+        # None of the three reaches a lock (``stylelock.build_style_lock`` drops them).
+        "body_rules": {
+            "type": "object",
+            "properties": {"all_matter": _NON_EMPTY_STRING},
+            "required": ["all_matter"],
+            "additionalProperties": False,
+        },
+        "default_material": _NON_EMPTY_STRING,
+        "default_body_rule": {"type": "string", "enum": list(defaults.BODY_RULES)},
     },
     "required": [
         "$schema", "template_id", "version", "name", "rendering", "camera", "lighting",
@@ -608,6 +621,14 @@ _GENERATION_PROFILE_SCHEMA = {
         # prompt as it was; "v3" gates the brief-faithful concept and bible
         # prompts, only with a non-empty seed_text too (defaults.WRITING_VERSIONS).
         "writing": {"type": "string", "enum": list(defaults.WRITING_VERSIONS)},
+        # Optional (plan 23 stage D4): absent is three sheets a character
+        # (portrait, turnaround, expressions); the two-view modes draw one
+        # front+back sheet (defaults.SHEET_MODES).
+        "sheet_mode": {"type": "string", "enum": list(defaults.SHEET_MODES)},
+        # Optional (plan 23 stage D4): absent is the style's default_body_rule;
+        # "all_matter" draws the whole body in the character's own matter
+        # (defaults.BODY_RULES).
+        "body_rule": {"type": "string", "enum": list(defaults.BODY_RULES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,

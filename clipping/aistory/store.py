@@ -312,9 +312,13 @@ _PROFILE_CHOICES = {
     "images": defaults.IMAGE_MODES,
     # Plan 22 stage 2 (DEC-274): v2 (absent) or the brief-faithful v3 prompts.
     "writing": defaults.WRITING_VERSIONS,
+    # Plan 23 stage D4: how a character's sheets and body are drawn (absent: three sheets,
+    # the style's own body rules).
+    "sheet_mode": defaults.SHEET_MODES,
+    "body_rule": defaults.BODY_RULES,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
-_PROFILE_CLEARABLE = ("speech_model", "images")
+_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule")
 
 _INDEX_ENTRY_SCHEMA = {
     "type": "object",

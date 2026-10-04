@@ -13,6 +13,14 @@ import { stepLabel } from './storySteps'
 const ROUTES = ['auto', 'local', 'api']
 // Plan 22: a native-speech story's speaking-clip models (generation_profile.speech_model).
 const SPEECH_MODELS = { lite: 'Lite (Veo 3.1 lite)', fast: 'Fast (Veo 3.1 Fast)', premium: 'Premium (Veo 3.1)' }
+// Plan 23 stage D4: how a character's sheets are drawn (generation_profile.sheet_mode; absent = three_sheet).
+const SHEET_MODES = {
+  three_sheet: 'Three sheets (portrait, turnaround, expressions)',
+  two_view: 'One front + back sheet',
+  two_view_expressions: 'Front + back sheet and expressions',
+}
+// Plan 23 stage D4: how the bodies are drawn (generation_profile.body_rule; absent = the style's own rules).
+const BODY_RULES = { '': 'As the style draws them', all_matter: "All skin is the character's matter" }
 
 /**
  * The episode the Visual tier card prices its video estimate for
@@ -113,6 +121,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const [budgetProfile, setBudgetProfile] = useState(profile.budget_profile)
   // Plan 22: the per-story switch of a native-speech story's speaking clips (absent: the profile's, fast).
   const [speechModel, setSpeechModel] = useState(profile.speech_model || 'fast')
+  // Plan 23 stage D4: the characters' sheets and bodies (absent: three sheets, the style's own rules).
+  const [sheetMode, setSheetMode] = useState(profile.sheet_mode || 'three_sheet')
+  const [bodyRule, setBodyRule] = useState(profile.body_rule || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // A pipeline switch refused over written episodes (PATCH's structured 409):
@@ -129,6 +140,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   }, [profile.tier, profile.route, profile.budget_profile])
 
   useEffect(() => { setSpeechModel(profile.speech_model || 'fast') }, [profile.speech_model])
+  useEffect(() => { setSheetMode(profile.sheet_mode || 'three_sheet') }, [profile.sheet_mode])
+  useEffect(() => { setBodyRule(profile.body_rule || '') }, [profile.body_rule])
 
   const save = async (patch) => {
     setSaving(true)
@@ -144,6 +157,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       setRoute(profile.route)
       setBudgetProfile(profile.budget_profile)
       setSpeechModel(profile.speech_model || 'fast')
+      setSheetMode(profile.sheet_mode || 'three_sheet')
+      setBodyRule(profile.body_rule || '')
       setError(err.message)
       if (err.status === 409 && err.code === PIPELINE_SWITCH_HAS_SCRIPTS && err.detail.episodes) {
         setSwitchOffer({ episodes: err.detail.episodes, patch })
@@ -193,6 +208,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
     }
   }
   const handleSpeechModel = (value) => { setSpeechModel(value); save({ speech_model: value }) }
+  // The default is no key at all (null clears it): a story that never chose keeps its documents as they were.
+  const handleSheetMode = (value) => { setSheetMode(value); save({ sheet_mode: value === 'three_sheet' ? null : value }) }
+  const handleBodyRule = (value) => { setBodyRule(value); save({ body_rule: value || null }) }
 
   // Every shot a clip: the quality budget profile (animate all_shots) at tier
   // >= 2 on the api route, on the v2 pipeline (the server sets its template and
@@ -205,6 +223,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const manualClips = story.generation_profile.budget_profile === 'native_speech_manual'
   const nativeSpeech = story.generation_profile.budget_profile === 'native_speech' || manualClips
   const imagesOwn = story.generation_profile.images === 'manual'
+  // The style's rules are written into its lock once, when it is approved.
+  const styleLocked = Boolean(story.approvals && story.approvals.style)
   const fullyAnimated = isV2 && (story.generation_profile.budget_profile === 'quality' || nativeSpeech) && tier >= 2
   const makeFullyAnimated = () => {
     const patch = { tier: Math.max(tier, 2), route: 'api', budget_profile: 'quality' }
@@ -288,6 +308,26 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           My own images too (sheets, plates, props and keyframes: upload them on their tiles)
         </label>
       )}
+      {isV2 && (
+        <div className="form-group">
+          <label className="form-label" htmlFor="story-profile-sheet-mode">Character sheets</label>
+          <select id="story-profile-sheet-mode" className="form-select" value={sheetMode}
+            onChange={(e) => handleSheetMode(e.target.value)} disabled={saving}>
+            {Object.entries(SHEET_MODES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+          <p className="form-hint">
+            Sheets drawn from now on; regenerate a character's images to draw it again in the new mode.
+          </p>
+        </div>
+      )}
+      <div className="form-group">
+        <label className="form-label" htmlFor="story-profile-body-rule">Bodies</label>
+        <select id="story-profile-body-rule" className="form-select" value={bodyRule}
+          onChange={(e) => handleBodyRule(e.target.value)} disabled={saving || styleLocked}>
+          {Object.entries(BODY_RULES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+        {styleLocked && <p className="form-hint">Written into the style when it was approved: it cannot change now.</p>}
+      </div>
       {nativeSpeech && !manualClips && (
         <div className="form-group">
           <label className="form-label" htmlFor="story-profile-speech-model">Speaking clips</label>

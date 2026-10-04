@@ -352,7 +352,8 @@ def _regenerate_image(ctx, store, target, kind, eid, slot, note, tools) -> dict:
     # The sheets that were drawn from the old portrait are drawn again.
     character = store.read_entity(ctx.story_id, CHARACTERS, eid)
     failed = []
-    for sheet in ("turnaround", "expressions"):
+    # Plan 23 stage D4: only the sheets the story's sheet_mode draws from the portrait.
+    for sheet in refimages.character_sheets(store.get(ctx.story_id)):
         if character["refs"][sheet] is None:
             continue
         ctx.cancel.check()

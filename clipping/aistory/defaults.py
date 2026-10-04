@@ -86,6 +86,27 @@ WRITING_V2 = "v2"
 WRITING_V3 = "v3"
 WRITING_VERSIONS = (WRITING_V2, WRITING_V3)
 
+# Plan 23 stage D4: the optional ``generation_profile.sheet_mode``, how a
+# character's reference sheets are drawn. Absent is "three_sheet", today's
+# portrait + turnaround + expressions; "two_view" draws ONE 9:16 sheet per
+# character (the front and the back side by side) into the ``refs.portrait``
+# slot, the turnaround and the expressions left out; "two_view_expressions"
+# adds the expressions sheet, an edit of it (``media_policy.sheet_mode``).
+SHEET_THREE = "three_sheet"
+SHEET_TWO_VIEW = "two_view"
+SHEET_TWO_VIEW_EXPRESSIONS = "two_view_expressions"
+SHEET_MODES = (SHEET_THREE, SHEET_TWO_VIEW, SHEET_TWO_VIEW_EXPRESSIONS)
+
+# Plan 23 stage D4: the optional ``generation_profile.body_rule``, how a
+# story's characters' bodies are drawn. Absent is the style's own
+# ``default_body_rule`` (``human_body`` unless the template says otherwise:
+# today's rules); "all_matter" replaces the style lock's
+# ``character_design_rules`` with the template's ``body_rules.all_matter``
+# when the style is locked (``media_policy.body_rule``).
+BODY_HUMAN = "human_body"
+BODY_ALL_MATTER = "all_matter"
+BODY_RULES = (BODY_HUMAN, BODY_ALL_MATTER)
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

@@ -3530,6 +3530,9 @@ _J2_SCENE_CHANGE_ISSUE = ("what changed from image 2 to image 1 in who a charact
                           "the light, which change with the scene")
 _J2_SHEETS_NOTE = ("A character sheet shows who the character is: face, hair, build and proportions; the outfit "
                    "each wears in this shot is the one written below.")
+# Plan 23 stage D4: said only when the sheets are two-view ones (``sheet_mode`` two_view).
+_J2_TWO_VIEW_NOTE = ("Each sheet shows its one character twice, front and back: the character should appear once in "
+                     "image 1.")
 
 
 def _j2_continuity_ask(*, has_previous, same_scene, sheets, outfit) -> str:
@@ -3568,7 +3571,7 @@ def j2_schema() -> dict:
     }, required=("shows_beat", "missing", "continuity_issue"))
 
 
-def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True):
+def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True, two_view=False):
     """The keyframe judge of shot *shot_id* (section above): *brief* is what
     the shot must show (``steps/judge.keyframe_brief``); *previous_shot_id*
     the shot whose keyframe is image 2, None for the first shot (then, with
@@ -3579,7 +3582,8 @@ def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(
     scene (None: not said, stage 6b's text); *sheets* are the names of the
     characters whose identity sheet follows the keyframes, in image order;
     *outfit*: across a scene change, whether the outfits are compared too
-    (:func:`_j2_continuity_ask`)."""
+    (:func:`_j2_continuity_ask`); *two_view* (plan 23 stage D4): the sheets
+    show their character front and back (:data:`_J2_TWO_VIEW_NOTE`)."""
     has_previous = previous_shot_id is not None
     user = f"Image 1 is the keyframe of shot {shot_id}."
     if has_previous:
@@ -3594,20 +3598,23 @@ def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(
         user += f" Image {number} is {name}'s character sheet."
     if sheets:
         user += f" {_J2_SHEETS_NOTE}"
+        if two_view:
+            user += f" {_J2_TWO_VIEW_NOTE}"
     user += f"\n\nWhat shot {shot_id} must show:\n{brief}\n\n"
     user += _J2_ASK + _j2_continuity_ask(has_previous=has_previous, same_scene=same_scene, sheets=sheets,
                                          outfit=outfit)
     return _J2_SYSTEM, user, j2_schema()
 
 
-def j2_prompt_text(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True) -> str:
+def j2_prompt_text(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True,
+                   two_view=False) -> str:
     """J2 as the one text a vision adapter sends beside the images: the
     system text, the ask and the reply's schema joined
     (``uploads.vision_prompt``'s shape)."""
     import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
 
     system, user, schema = build_j2(shot_id=shot_id, brief=brief, previous_shot_id=previous_shot_id,
-                                    same_scene=same_scene, sheets=sheets, outfit=outfit)
+                                    same_scene=same_scene, sheets=sheets, outfit=outfit, two_view=two_view)
     shape = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
     return f"{system}\n\n{user}\n\nThe reply's JSON schema: {shape}"
 

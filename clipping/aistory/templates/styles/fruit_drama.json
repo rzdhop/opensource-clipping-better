@@ -103,5 +103,10 @@
     ],
     "voice_direction": "over-acted telenovela delivery, exaggerated emotion, crisp diction, quick pace"
   },
+  "body_rules": {
+    "all_matter": "The entire body including arms, hands, legs and feet is made of {material}; no human skin anywhere. Real hair. Realistic adult proportions, never chibi, never baby-cartoon. Realistic eyes with a detailed iris. Fully dressed from shoulders to feet: a complete top, a complete bottom below the knee and shoes; no bare legs, no visible underwear."
+  },
+  "default_material": "the character's own fruit or vegetable flesh with hyper-detailed natural texture, subsurface scattering, pores, seeds, juice reflections and small imperfections",
+  "default_body_rule": "human_body",
   "notes": "The spec attaches this aside to hook_style: insert_prop -- \"a sign, a contract, a phone screen that states the premise in ≤ 5 words\" -- describing what the diegetic prop should communicate; it is guidance for writing hook content, not prompt text itself."
 }

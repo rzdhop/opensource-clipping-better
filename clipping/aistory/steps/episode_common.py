@@ -225,12 +225,17 @@ def load_context(stores, story_id, ep) -> EpisodeContext:
     characters = entities.cast_order(stores.list_entities(story_id, CHARACTERS))
     places = stores.list_entities(story_id, PLACES)
     props = stores.list_entities(story_id, PROPS)
+    docs = {"characters": {doc["char_id"]: doc for doc in characters},
+            "places": {doc["place_id"]: doc for doc in places},
+            "props": {doc["prop_id"]: doc for doc in props}}
+    if media_policy.two_view(story):
+        # Plan 23 stage D4: the characters' identity image is a front+back sheet -- a keyframe's
+        # reference roles say so (``shots._layered``). The key is absent on every other story.
+        docs["sheet_mode"] = media_policy.sheet_mode(story)
     return EpisodeContext(
         store=stores, story_id=story_id, ep=ep, story=story, style_lock=style_lock, season=season,
         template=template,
-        entities={"characters": {doc["char_id"]: doc for doc in characters},
-                  "places": {doc["place_id"]: doc for doc in places},
-                  "props": {doc["prop_id"]: doc for doc in props}},
+        entities=docs,
         cast=characters,
         places={doc["place_id"]: list(doc["time_variants"]) for doc in places},
         prop_ids=[doc["prop_id"] for doc in props],

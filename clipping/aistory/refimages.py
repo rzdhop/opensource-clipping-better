@@ -85,7 +85,7 @@ from clipping.providers import gating
 from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError
 
-from . import imaging, media_policy, prompt_budgets, prompting, schemas, shots
+from . import defaults, imaging, media_policy, prompt_budgets, prompting, schemas, shots
 from . import names as names_mod
 from . import uploads as uploads_mod
 
@@ -100,8 +100,44 @@ PLATE_SIZE = (720, 1280)
 VARIANT_SIZE = PLATE_SIZE
 PROP_SIZE = (1024, 1024)
 
+# Plan 23 stage D4: a two-view sheet (the front and the back side by side, in
+# the portrait slot) is asked at the render's own 1080x1920; flat-priced per
+# image on Seedream, which scales every request up to 1440x2560 alike.
+TWO_VIEW_SIZE = (1080, 1920)
+
+# Every slot a character's image can be in; a story's own are
+# :func:`character_images` (its ``sheet_mode``).
 CHARACTER_IMAGES = ("portrait", "turnaround", "expressions")
 CHARACTER_SIZES = {"portrait": PORTRAIT_SIZE, "turnaround": TURNAROUND_SIZE, "expressions": EXPRESSIONS_SIZE}
+
+
+def character_images(story) -> tuple:
+    """The images *story* draws for each character, in order (plan 23 stage
+    D4, ``media_policy.sheet_mode``): the portrait, turnaround and
+    expressions sheet (``three_sheet``, absent); the portrait alone -- one
+    front+back sheet -- in ``two_view``; the portrait and the expressions
+    sheet in ``two_view_expressions``."""
+    mode = media_policy.sheet_mode(story)
+    if mode == defaults.SHEET_TWO_VIEW:
+        return CHARACTER_IMAGES[:1]
+    if mode == defaults.SHEET_TWO_VIEW_EXPRESSIONS:
+        return ("portrait", "expressions")
+    return CHARACTER_IMAGES
+
+
+def character_sheets(story) -> tuple:
+    """:func:`character_images` after the portrait: the sheets *story* draws
+    from it, each an edit of it in ``references`` mode."""
+    return character_images(story)[1:]
+
+
+def character_size(story, which) -> tuple:
+    """The size of a character's image *which* in *story*: the two-view
+    sheet (the portrait slot of a two-view mode) at :data:`TWO_VIEW_SIZE`,
+    else :data:`CHARACTER_SIZES`."""
+    if which == "portrait" and media_policy.two_view(story):
+        return TWO_VIEW_SIZE
+    return CHARACTER_SIZES[which]
 _CHARACTER_PROMPTS = {
     "portrait": prompting.portrait_prompt,
     "turnaround": prompting.turnaround_prompt,
@@ -578,6 +614,12 @@ def character_prompt(story, character, which, *, env, lock) -> str:
         # others edits of it -- text to image too in prompt-only mode, _derived).
         edit = which != "portrait" and story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
         link = _first_link(story, "sheet", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
+        if which == "portrait" and media_policy.two_view(story):
+            # Plan 23 stage D4: the portrait slot holds the front+back sheet.
+            return prompting.two_view_prompt_v2(lock, look_text=shots.render_look(character),
+                                                signature_items=character["signature_items"],
+                                                budget=prompt_budgets.two_view_words(link),
+                                                cues=shots.visual_cues(character))
         return _CHARACTER_PROMPTS_V2[which](lock, look_text=shots.render_look(character),
                                             signature_items=character["signature_items"],
                                             budget=prompt_budgets.sheet_words(link),
@@ -613,6 +655,9 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     _check_seed(seed)
     _check(cancel)
     story = stories.get(story_id)
+    if which not in character_images(story):
+        raise RefImageError(f"{which!r} is not drawn in this story's sheet mode "
+                            f"({media_policy.sheet_mode(story)}: {', '.join(character_images(story))}).")
     character = stories.read_entity(story_id, CHARACTERS, char_id)
     name = character["name"]
     subject = f"{name} {which}"
@@ -623,7 +668,7 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     prompt = character_prompt(story, character, which, env=env, lock=lock)
     prompt = _with_note(prompt, note, stories=stories, story_id=story_id)
     step = f"character_image:{char_id}:{which}"
-    size = CHARACTER_SIZES[which]
+    size = character_size(story, which)
 
     override = seed
     if which == "portrait":

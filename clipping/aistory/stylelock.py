@@ -139,6 +139,9 @@ def build_style_lock(template: dict, overrides: dict | None = None, *, now: str)
     lock = copy.deepcopy(template)
     name = lock.pop("name")
     lock.pop("notes", None)
+    # Plan 23 stage D4: the body-rule hooks stay on the template (``lock_style`` reads them there).
+    for key in ("body_rules", "default_material", "default_body_rule"):
+        lock.pop(key, None)
     lock.pop("$schema", None)
     template_id = lock.pop("template_id")
     template_version = lock.pop("version")
@@ -206,14 +209,49 @@ def apply_overrides(lock: dict, overrides: dict, *, now: str) -> dict:
     return build_style_lock(template, merged, now=now)
 
 
-def lock_style(lock: dict, *, now: str) -> dict:
+def all_matter_rules(template_id: str, *, material: str | None = None) -> str | None:
+    """The ``character_design_rules`` a style gives characters whose whole
+    body is their own matter (plan 23 stage D4): the shipped template's
+    ``body_rules.all_matter`` with its ``{material}`` slot filled by
+    *material* (a universe's rule, a later stage), else the template's
+    ``default_material``; None when the style has no such rule (or no
+    material to fill it with)."""
+    try:
+        template = templates.load_style(template_id)
+    except KeyError:
+        return None
+    text = (template.get("body_rules") or {}).get("all_matter")
+    material = material or template.get("default_material")
+    if not text:
+        return None
+    if "{material}" in text:
+        if not material:
+            return None
+        text = text.replace("{material}", material)
+    return text
+
+
+def lock_style(lock: dict, *, now: str, body_rule: str | None = None, material: str | None = None) -> dict:
     """Return a copy of ``lock`` with ``locked_at`` set to ``now``.
 
     Refuses when already locked — locking twice would silently discard the
     original lock timestamp.
+
+    Plan 23 stage D4: with *body_rule* ``"all_matter"`` the copy's
+    ``character_design_rules`` are the style's ``body_rules.all_matter``
+    (:func:`all_matter_rules`, *material* filling its slot) -- the one moment
+    the rules change: a lock already frozen is never touched, and any other
+    *body_rule* (None, ``"human_body"``) leaves them as the template wrote
+    them. ``StyleLockError`` when the style has no such rule.
     """
     if lock.get("locked_at") is not None:
         raise StyleLockError("style is locked", ["style_lock is already locked"])
     new_lock = copy.deepcopy(lock)
+    if body_rule == "all_matter":
+        rules = all_matter_rules(lock["template_id"], material=material)
+        if rules is None:
+            raise StyleLockError("body rule", [
+                f"the {lock['template_id']!r} style has no all_matter body rule (body_rules.all_matter)"])
+        new_lock["character_design_rules"] = rules
     new_lock["locked_at"] = now
     return new_lock

@@ -110,6 +110,54 @@ def images_manual(story) -> bool:
     return is_v2(story) and profile.get("images") == defaults.IMAGES_MANUAL
 
 
+def sheet_mode(story) -> str:
+    """How *story*'s characters' reference sheets are drawn (plan 23 stage
+    D4, ``generation_profile.sheet_mode``): ``three_sheet`` (absent, and
+    every story not on the v2 pipeline: a portrait, a turnaround and an
+    expressions sheet), ``two_view`` (one 9:16 sheet showing the front and
+    the back, in the ``refs.portrait`` slot) or ``two_view_expressions``
+    (that sheet and an expressions sheet, an edit of it)."""
+    chosen = ((story or {}).get("generation_profile") or {}).get("sheet_mode")
+    if is_v2(story) and chosen in defaults.SHEET_MODES:
+        return chosen
+    return defaults.SHEET_THREE
+
+
+def two_view(story) -> bool:
+    """Whether *story*'s identity image (``refs.portrait``) is a front+back
+    sheet (:func:`sheet_mode` is one of the two-view modes)."""
+    return sheet_mode(story) != defaults.SHEET_THREE
+
+
+def sheet_edits(story_or_mode) -> int:
+    """How many of a character's sheets are edits of its portrait in a sheet
+    mode (a story's, or the mode's name): two in ``three_sheet`` (turnaround,
+    expressions), none in ``two_view``, one in ``two_view_expressions``."""
+    mode = story_or_mode if isinstance(story_or_mode, str) else sheet_mode(story_or_mode)
+    return SHEET_EDITS.get(mode, SHEET_EDITS[defaults.SHEET_THREE])
+
+
+def body_rule(story, style_id=None) -> str:
+    """How *story*'s characters' bodies are drawn (plan 23 stage D4,
+    ``generation_profile.body_rule``): its own choice, else the default of
+    the style *style_id* (else the story's ``style_template_id``) -- the
+    template's ``default_body_rule`` -- else ``human_body``, the rules every
+    style had before. Read when the style is locked
+    (``stylelock.lock_style``); a locked style is never changed after."""
+    chosen = ((story or {}).get("generation_profile") or {}).get("body_rule")
+    if chosen in defaults.BODY_RULES:
+        return chosen
+    style_id = style_id or (story or {}).get("style_template_id")
+    if style_id:
+        try:
+            fallback = templates.load_style(style_id).get("default_body_rule")
+        except KeyError:
+            fallback = None
+        if fallback in defaults.BODY_RULES:
+            return fallback
+    return defaults.BODY_HUMAN
+
+
 def is_manual_link(label) -> bool:
     """Whether the link *label* is the human's own upload (``manual/upload``)."""
     return isinstance(label, str) and gen.is_manual(label)
@@ -459,6 +507,10 @@ PRESET_STORY_PROPS = 3
 # A character's sheets: the portrait (text to image), then the turnaround and
 # the expressions sheet, each an edit of it (refimages.CHARACTER_IMAGES).
 _SHEET_EDITS = 2
+# Plan 23 stage D4: the edits of the portrait per sheet mode (``sheet_edits``);
+# ``three_sheet`` is :data:`_SHEET_EDITS`.
+SHEET_EDITS = {defaults.SHEET_THREE: _SHEET_EDITS, defaults.SHEET_TWO_VIEW: 0,
+               defaults.SHEET_TWO_VIEW_EXPRESSIONS: 1}
 
 
 # The keys the preset's clips need for their own sound (stage E): the link
@@ -514,7 +566,7 @@ def _usd(amount) -> str:
     return f"${amount:.2f}"
 
 
-def preset_estimate(merged=None) -> dict:
+def preset_estimate(merged=None, *, story=None) -> dict:
     """What the Quality (billed APIs) preset costs (phase 7 stage 7, A18),
     from the price table (``pricing.py``), the quality budget profile and the
     v2 episode template alone, so it can never drift from them::
@@ -548,7 +600,13 @@ def preset_estimate(merged=None) -> dict:
     it, on the first link as above, the summary saying there is no
     ambience and which key brings it. ``keys_needed`` names each key the
     preset reads, what it is for and whether it is set (``keys`` stays the
-    keys a new story needs for the preset to be its default)."""
+    keys a new story needs for the preset to be its default).
+
+    Plan 23 stage D4: with a *story* (a ``story.json`` document) the sheets
+    are counted in its ``sheet_mode`` (one image and no edit a character in
+    ``two_view``, one and one in ``two_view_expressions``); without one, or
+    on ``three_sheet``, the text is what it always was. ``story`` also
+    carries ``sheet_usd_by_mode``: a character's sheets in each mode."""
     profile = defaults.quality_generation_profile()
     settings = budget_mod.profile_settings(profile["budget_profile"])
     story_doc = {"generation_profile": profile}
@@ -581,11 +639,14 @@ def preset_estimate(merged=None) -> dict:
     # --- once per story
     portrait_link, sheet_edit_link = first_link("sheet", gen.IMAGE), first_link("sheet", gen.IMAGE_EDIT)
     plate_link, prop_link = first_link("plate", gen.IMAGE), first_link("prop", gen.IMAGE)
-    sheets_usd = PRESET_STORY_CHARACTERS * (price(portrait_link) + _SHEET_EDITS * price(sheet_edit_link))
+    edits = sheet_edits(story)
+    sheet_usd_by_mode = {mode: price(portrait_link) + count * price(sheet_edit_link)
+                         for mode, count in SHEET_EDITS.items()}
+    sheets_usd = PRESET_STORY_CHARACTERS * (price(portrait_link) + edits * price(sheet_edit_link))
     plates_usd = PRESET_STORY_PLACES * price(plate_link)
     props_usd = PRESET_STORY_PROPS * price(prop_link)
     story_usd = sheets_usd + plates_usd + props_usd
-    images = PRESET_STORY_CHARACTERS * (1 + _SHEET_EDITS) + PRESET_STORY_PLACES + PRESET_STORY_PROPS
+    images = PRESET_STORY_CHARACTERS * (1 + edits) + PRESET_STORY_PLACES + PRESET_STORY_PROPS
 
     label = settings.get("label") or profile["budget_profile"]
     video_label = describe(video_link)
@@ -602,8 +663,8 @@ def preset_estimate(merged=None) -> dict:
         f"An episode: {shots} shots over the v2 template's {seconds:g} s target, each a {video_label} clip at "
         f"{resolution} rounded up to whole seconds ({billed} s billed at ${per_second:g} a second = "
         f"{_usd(video_usd)}) and a keyframe on {describe(keyframe_link)} (${keyframe_usd:g} each = "
-        f"{_usd(keyframes_usd)}). Once per story: {PRESET_STORY_CHARACTERS} characters × {1 + _SHEET_EDITS} "
-        f"sheets, {PRESET_STORY_PLACES} plates and {PRESET_STORY_PROPS} props ({images} images on "
+        f"{_usd(keyframes_usd)}). Once per story: {PRESET_STORY_CHARACTERS} characters × {1 + edits} "
+        f"sheet{'s' if edits else ''}, {PRESET_STORY_PLACES} plates and {PRESET_STORY_PROPS} props ({images} images on "
         f"{' and '.join(dict.fromkeys(map(describe, (portrait_link, sheet_edit_link, plate_link, prop_link))))}"
         f" = {_usd(story_usd)}). Prices from the table of "
         f"{pricing.PRICES_AS_OF}. Writing is not counted: the story's writing chain tries its free links first.")
@@ -633,6 +694,7 @@ def preset_estimate(merged=None) -> dict:
             "plate_link": describe(plate_link), "prop_link": describe(prop_link),
             "sheets_usd": round(sheets_usd, 4), "plates_usd": round(plates_usd, 4),
             "props_usd": round(props_usd, 4),
+            "sheet_usd_by_mode": {mode: round(usd, 4) for mode, usd in sheet_usd_by_mode.items()},
         },
         "prices_as_of": pricing.PRICES_AS_OF,
     }
@@ -710,7 +772,7 @@ def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
     chosen = model if model in defaults.SPEECH_MODELS else speech_model(story_doc)
     speech, silent = speech_link(story_doc, chosen), silent_link(story_doc)
     resolution = video_resolution(story_doc)
-    quality = preset_estimate(merged)
+    quality = preset_estimate(merged, story=story)
     keyframe_usd = float(quality["episode"]["keyframe_usd"])
     shots = PRESET_SPEECH_SHOTS + PRESET_SILENT_SHOTS
     keyframes_usd = shots * keyframe_usd

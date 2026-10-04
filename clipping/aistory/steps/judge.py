@@ -703,7 +703,8 @@ def j2_request(ec, shot, path, prev_id, prev_path, context=None):
     # every shot of it, so across a scene change its outfit is compared too.
     text = prompts.j2_prompt_text(shot_id=shot["shot_id"], brief=brief,
                                   previous_shot_id=prev_id if has_previous else None, same_scene=same_scene,
-                                  sheets=[name for name, _sheet in sheets], outfit=True)
+                                  sheets=[name for name, _sheet in sheets], outfit=True,
+                                  two_view=media_policy.two_view(getattr(ec, "story", None)))
     request = gen.GenRequest(kind=gen.VISION, prompt=text, images=images,
                              extra={"max_tokens": prompts.MAX_TOKENS[J2], "temperature": prompts.TEMPERATURE[J2]})
     return request, has_previous or bool(sheets)

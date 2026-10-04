@@ -669,7 +669,8 @@ def _images(run, ctx, store, char_id, tools) -> None:
         ctx.cancel.check()
         if _image(run, ctx, store, char_id, "portrait", tools) is None:
             return  # the sheets are made from the portrait
-    for which in SHEETS:
+    # Plan 23 stage D4: only the sheets the story's sheet_mode draws (none in two_view).
+    for which in refimages.character_sheets(store.get(ctx.story_id)):
         character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
         if entities.has_file(store, ctx.story_id, CHARACTERS, char_id, character["refs"][which]):
             continue

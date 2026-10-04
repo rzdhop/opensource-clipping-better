@@ -799,9 +799,24 @@ def approve_style(stories, story_id, *, now, by=USER_APPROVED) -> dict:
     current = style_lock(stories, story_id)
     if current is None:
         raise WorkflowError(CONFLICT, "There is no style to approve yet: run the style step first.")
+    if current.get("locked_at"):
+        raise WorkflowError(
+            CONFLICT,
+            f"The style is already locked (since {current.get('locked_at')}).",
+        )
+    # Plan 23 stage D4: "all skin is the character's matter" is written into the lock now, once
+    # (a lock already frozen is never touched); any other rule leaves the template's own.
+    story = load(stories, story_id)
+    body = media_policy.body_rule(story, current["template_id"])
     try:
-        locked = stylelock.lock_style(current, now=now)
-    except stylelock.StyleLockError:
+        locked = stylelock.lock_style(current, now=now, body_rule=body)
+    except stylelock.StyleLockError as exc:
+        if body == defaults.BODY_ALL_MATTER:
+            raise WorkflowError(
+                CONFLICT,
+                (f"This story draws every body in the character's own matter (Bodies: all skin is the "
+                 f"character's matter), which the {current['template_id']} style does not define: pick a style "
+                 "that does, or set Bodies back to as the style draws them in the generation profile.")) from None
         raise WorkflowError(
             CONFLICT,
             f"The style is already locked (since {current.get('locked_at')}).",
@@ -1175,15 +1190,19 @@ def character_written(doc) -> bool:
     return bool(doc["descriptor"]) and low <= len(doc["signature_items"]) <= high
 
 
-def character_missing(stories, story_id, doc) -> list:
+def character_missing(stories, story_id, doc, *, story=None) -> list:
     """What the character still lacks before it can be approved, in order:
     ``text`` (a descriptor and 2-3 signature items), ``portrait``,
     ``turnaround``, ``expressions`` (whatever their consistency label), ``voice``
     (a pinned voice) and ``sample`` (its voice sample, on disk). An image or a
-    sample counts only as a regular file where the store keeps it."""
+    sample counts only as a regular file where the store keeps it. Plan 23
+    stage D4: only the images the story's ``sheet_mode`` draws
+    (``refimages.character_images``; read from *story*, else from the store)."""
     cid = doc["char_id"]
     missing = [] if character_written(doc) else ["text"]
-    for which in ("portrait",) + SHEETS:
+    if story is None:
+        story = stories.get(story_id)
+    for which in refimages.character_images(story):
         if not _has(stories, story_id, CHARACTERS, cid, doc["refs"][which]):
             missing.append(which)
     if not doc["voice"]:
@@ -1357,8 +1376,9 @@ def progress(stories, story, *, env, probe_local=False) -> dict:
     places = list_entities(stories, story_id, PLACES)
     props = list_entities(stories, story_id, PROPS)
 
-    char_missing = {doc["char_id"]: character_missing(stories, story_id, doc) for doc in characters}
-    sheets = sum(1 for missing in char_missing.values() for sheet in SHEETS if sheet in missing)
+    char_missing = {doc["char_id"]: character_missing(stories, story_id, doc, story=story) for doc in characters}
+    sheet_slots = refimages.character_sheets(story)
+    sheets = sum(1 for missing in char_missing.values() for sheet in sheet_slots if sheet in missing)
     variants = sum(1 for doc in places for name, ref in doc["time_variants"].items()
                    if name != MASTER_PLATE and not _has(stories, story_id, PLACES, doc["place_id"], ref))
     readiness = (edit_readiness(stories, story, env=env, qty=sheets + variants, probe_local=probe_local)
@@ -1370,7 +1390,7 @@ def progress(stories, story, *, env, probe_local=False) -> dict:
     for doc in characters:
         missing = char_missing[doc["char_id"]]
         waits = (references and blocked and "portrait" not in missing
-                 and any(sheet in missing for sheet in SHEETS))
+                 and any(sheet in missing for sheet in sheet_slots))
         out_characters[doc["char_id"]] = {"missing": missing, "needs_editor": waits}
     return {
         "characters": out_characters,
@@ -1608,6 +1628,8 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
     v2 = media_policy.is_v2(story)
     units = _units()
+    # Plan 23 stage D4: the sheets the story's sheet_mode draws from the portrait (none in two_view).
+    sheet_slots = refimages.character_sheets(story)
 
     def sheets(count):
         units["images" if prompt_only else "edit_images"] += count
@@ -1615,13 +1637,13 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
     existing = list_entities(stories, story_id, CHARACTERS)
     names = {entities_step.name_key(doc["name"]) for doc in existing}
     for doc in existing:
-        missing = character_missing(stories, story_id, doc)
+        missing = character_missing(stories, story_id, doc, story=story)
         redrawn = v2 and not doc.get("look")
         units["llm_calls"] += "text" in missing
         units["llm_calls"] += v2 and not doc.get("dossier")
         units["llm_calls"] += redrawn
         units["images"] += redrawn or "portrait" in missing
-        sheets(sum(redrawn or sheet in missing for sheet in SHEETS))
+        sheets(sum(redrawn or sheet in missing for sheet in sheet_slots))
         if "sample" in missing:
             units["tts_chars"] += _sample_chars(doc)
     for name in list(selected) + [entry.get("name") for entry in custom]:
@@ -1631,7 +1653,7 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
         names.add(key)
         units["llm_calls"] += 3 if v2 else 1
         units["images"] += 1
-        sheets(len(SHEETS))
+        sheets(len(sheet_slots))
         units["tts_chars"] += SAMPLE_CHARS_ESTIMATE
     return units
 
@@ -1707,7 +1729,7 @@ def target_units(stories, story, parsed) -> dict:
     if slot in ("portrait", MASTER_PLATE, "image"):
         units = _units(images=1)
         if slot == "portrait":
-            again = sum(1 for sheet in SHEETS if doc["refs"][sheet] is not None)
+            again = sum(1 for sheet in refimages.character_sheets(story) if doc["refs"][sheet] is not None)
             units["images" if prompt_only else "edit_images"] += again
         return units
     return _units(images=1) if prompt_only else _units(edit_images=1)
@@ -1851,6 +1873,10 @@ def check_entity_target(stories, story, parsed, *, voice=None, env=None):
     if not written:
         raise WorkflowError(CONFLICT, f"Write {name} first: its text makes every image.")
     slot = parsed[3] if len(parsed) > 3 else "image"
+    if kind == CHARACTERS and slot in refimages.CHARACTER_IMAGES and slot not in refimages.character_images(story):
+        raise WorkflowError(CONFLICT, (f"{name}'s {slot} is not drawn in this story's sheet mode "
+                                       f"({media_policy.sheet_mode(story)}: "
+                                       f"{', '.join(refimages.character_images(story))})."))
     if kind == CHARACTERS and slot in SHEETS and not _has(stories, story_id, kind, eid, doc["refs"]["portrait"]):
         raise WorkflowError(CONFLICT, f"Make {name}'s portrait first: the {slot} is drawn from it.")
     if kind == PLACES and slot != MASTER_PLATE and not _has(

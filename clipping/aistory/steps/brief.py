@@ -205,8 +205,10 @@ def references(ec, script, shot) -> list:
             continue
         refs_doc = doc.get("refs") or {}
         for which in ("portrait", "turnaround"):
+            # Plan 23 stage D4: a two-view story's portrait is its front+back sheet.
+            kind_of_sheet = "front and back" if which == "portrait" and media_policy.two_view(ec.story) else which
             entry = _entity_ref(ec, "characters", char_id, refs_doc.get(which),
-                                f"{names.get(char_id, char_id)} — character sheet ({which})")
+                                f"{names.get(char_id, char_id)} — character sheet ({kind_of_sheet})")
             if entry is not None:
                 refs.append(dict(entry, kind="sheet"))
                 break
@@ -530,10 +532,14 @@ def brief_zip(ec, brief, *, image=False) -> bytes:
 
 # The least an uploaded image may measure, by what it is: half the size the
 # app would make it at (``refimages``' sizes; a keyframe is the plate's 9:16).
+# ``sheet_two_view`` (plan 23 stage D4): the front+back sheet of a two-view story, in the portrait
+# slot -- 9:16 like the portrait, at the render's 1080x1920 (each view stays 540 px wide).
 IMAGE_MIN_SIZES = {"portrait": (360, 640), "turnaround": (640, 360), "expressions": (600, 400),
-                   "plate": (360, 640), "prop": (512, 512), "keyframe": (360, 640)}
+                   "plate": (360, 640), "prop": (512, 512), "keyframe": (360, 640),
+                   "sheet_two_view": (540, 960)}
 IMAGE_SIZES = {"portrait": (720, 1280), "turnaround": (1280, 720), "expressions": (1200, 800),
-               "plate": (720, 1280), "prop": (1024, 1024), "keyframe": (1080, 1920)}
+               "plate": (720, 1280), "prop": (1024, 1024), "keyframe": (1080, 1920),
+               "sheet_two_view": (1080, 1920)}
 
 
 def entity_image_slot(story_id, kind, eid, slot) -> str:
@@ -556,11 +562,15 @@ def _entity_entries(stories, story, *, env):
     for character in stories.list_entities(story_id, "characters"):
         if not character.get("descriptor") or not character.get("signature_items"):
             continue
-        for which in refimages.CHARACTER_IMAGES:
+        for which in refimages.character_images(story):
             entry = character["refs"].get(which)
+            # Plan 23 stage D4: a two-view story's portrait slot holds the front+back sheet.
+            two_view = which == "portrait" and media_policy.two_view(story)
             entries.append({
                 "kind": "sheet", "entity": "characters", "id": character["char_id"], "slot": which,
-                "label": f"{character['name']} — {which}", "role": which,
+                "label": (f"{character['name']} — character sheet (front and back)" if two_view
+                          else f"{character['name']} — {which}"),
+                "role": "sheet_two_view" if two_view else which,
                 "prompt": refimages.character_prompt(story, character, which, env=env, lock=lock),
                 "state": "uploaded" if entry else "missing",
                 "upload_slot": entity_image_slot(story_id, "characters", character["char_id"], which)})
