@@ -4914,3 +4914,68 @@ fastapi). Bundle: JS 611.63 -> 632.80 kB (gzip 171.15 -> 178.34), CSS 75.85 -> 8
 *Amended 2026-10-03 (the orchestrator, before the merge): `thumbs.THUMB_WIDTH` 160 → 480 — a 160 px thumbnail read
 soft on a ~340 px list cover; 480 stays sharp at 2x and is still a tenth of the full portrait (641ab2a; the thumb
 test re-pinned on purpose).*
+
+## DEC-258 — Characters' lips follow the TTS voices: each bought clip with an on-screen line is post-processed by Kling LipSync on fal (option B); clips of a lipsyncing story are 10 s at most
+**Context.** A fully animated quality episode speaks every line in the pinned Gemini/Edge voices the human likes, but
+the clips' mouths move on their own (A-137 only asks the video model to "speak with the mouth moving"). The human's
+"decide for me" over two paid probes (2026-10-03): A = Veo 3.1 speaking the French lines natively from the keyframe;
+B = Kling LipSync audio-to-video on an already bought clip with its TTS line. The orchestrator chose B. Kling LipSync
+(`fal-ai/kling-video/lipsync/audio-to-video`): video 2-10 s at 720-1920 px, audio 2-60 s and at most 5 MB (mp3/wav),
+$0.014 per 5 s of input video rounded up to the next 5 s; the probe completed in 72 s on a 7 s seedance clip scaled to
+720x1280 with a 5.4 s line (h264 + aac 720x1280 out).
+**Decision.**
+- **Provider**: a post-process kind `generation.LIPSYNC` (`LIPSYNC_CHAIN`, default `fal/kling-lipsync`, providers
+  `fal` only), kept out of `KINDS` (the Settings page's five chains and their chain test are unchanged).
+  `clipping/providers/lipsync.py` `FalLipsyncAdapter(images.FalAdapter)`: the clip and the dialogue track are uploaded
+  to fal storage (`POST rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3` with the key, `PUT` the
+  bytes to the signed `upload_url` without it) and sent as `{video_url, audio_url}`; poll, journal and resume are the
+  image path's (the submit is billed: never twice for one request key). The uploads go through the runner's new
+  `_Sent.free` (the counting transport's uncounted twin): a failed upload is proven unbilled, only the queue's submit
+  counts (DEC-153). `gencache` keys a lipsync by the clip's bytes, the track's bytes and `clip_s`.
+  `pricing.PRICES["fal/kling-lipsync"] = Price("second", 0.0028, ...)`; the estimate rounds up to 5 s.
+- **Policy**: budget profiles gain `lipsync: none | kling` (`quality` → `kling`, the others `none`);
+  `media_policy.lipsync(story)` = fully animated (v2, tier >= 2, `all_shots`) and the story's optional
+  `generation_profile.lipsync` (the per-story off switch: `none`), else the profile, says `kling`. A lipsyncing story's
+  plan buys no clip past `LIPSYNC_MAX_CLIP_S` = 10 (`clips.sold_lengths` / `longest_clip_s(story=)`), so its storyboard
+  (`storyboard.max_shot_s`) plans a scene past 10 s as two shots on seedance; DEC-250's stretch covers up to 12.5 s.
+  Veo (8 s) is unchanged.
+- **The dialogue track** (`steps/lipsync.py`): a 24 kHz mono 16-bit WAV exactly `clip_s` long, silent but for the
+  shot's lines spoken by a character in its frame (`subject_tags`) -- an off-screen speaker's line is left out (a
+  voice-over would move the wrong mouth); each at its offset in the shot from `render.timeline.build_timeline` (line
+  start − shot start), divided by the render's stretch, with `atempo` at the same factor for a `cover: stretch` clip;
+  built by one deterministic ffmpeg argv. No such line → no track → no lipsync (the plain clip stays). A `track_hash`
+  over the inputs (each line's audio sha256, offset, trim, tempo, `clip_s`) decides staleness without ffmpeg.
+- **The post-process** (`assets._Assets.lipsync_shot`): after `apply_clip`, and on a later run for a kept clip whose
+  lipsync is missing or stale, the track is built and sent on LIPSYNC_CHAIN's link under the paid gates (caps,
+  `allow_paid`, the ledger row `unit: second`, `qty` = billed seconds), the answer remuxed with the **plain clip's own
+  sound** (or none) -- the driving track is never kept, so the TTS lines stay the only voice and an ambience clip keeps
+  its ambience -- and kept as `assets/clips/shot_NN.lipsync.mp4`; `assets.video` names it and
+  `assets.clip.lipsync = {state, link, clip_sha256, track_hash, audio_sha256, cache_key, est_usd, generated_at, lines,
+  billed_s, reason?}`. Stale when the plain clip, the track inputs or the link change; a failure records `failed` with
+  the reason and keeps the plain clip as `assets.video` (never a missing video), named in `summary.video.lipsync`
+  (`done`, `reused`, `skipped`, `failed`, `seconds`, `usd`, `unavailable`) and the feed ("👄 Shot sh03: lips synced to
+  2 lines (7 s, $0.028)", the run's total). The clip regenerate (`shot:<ep>:<id>:video`) lipsyncs the new clip.
+  `schemas`: the clip name pattern admits `shot_NN.lipsync.mp4`, named only with a current lipsync; the clip record's
+  `lipsync` is optional (RC-M3: stored stories validate unchanged).
+- **Estimate**: `clips.video_units` carries `lipsync` (`lipsync_units`: every planned clip with an in-frame line whose
+  lipsync is not current -- the lines' audio need not exist yet, so the fast track prices it before the voices); when
+  the link can run it (`counted`) its price is in the video part's `est_usd`, so `asset_units`' total and caps, the
+  fast track's paid check (its own part "N lip-syncs on fal/kling-lipsync (est $x)") and the per-episode cap count it;
+  `paid_links` gains a `lipsync` row; the message says "+ $0.280 lip-sync (8 clips)", or "No lip-sync: <why>".
+- **Dashboard**: the clip badge "Lip-synced" (success) / "Lip-sync failed" (warning, the reason as text); the Video card
+  says "+ $x lip-sync (n clips) on fal/kling-lipsync"; the clip preview plays `assets.video` (the synced take).
+**Rejected.** A -- Veo 3.1 native speech: about $29 an episode at 720p with audio on every shot, caps to raise, French
+quality not yet heard; it may come back as an opt-in once heard. Lipsyncing through a data URL (a 6 MB clip is too big
+for fal's JSON input). Keeping the lipsync answer's own audio (the line would be heard twice, and the ambience lost).
+Every line in the track whoever is on screen (a voice-over moves the wrong mouth). Putting `lipsync` in
+`generation.KINDS` (a one-link chain would join the Settings list and its chain test, and the "every default chain has
+four links" pin). Raising the default caps here (the human's Settings decide).
+**Consequence.** About $0.15-0.30 more an episode (one lipsync per clip with an on-screen line: $0.014 for a clip of
+5 s or less, $0.028 for 6-10 s). On Veo the paid check's total (≈ $3.52 + $0.40 redraw ceiling + ≈ $0.22 lipsync)
+passes the default $4.00 episode cap: the human raises `PER_EPISODE_CAP_USD` or turns the lipsync off for the story.
+Re-pins (each a story turning the lipsync off with `generation_profile.lipsync: none`, its assertions unchanged):
+`tests/test_story_ambience.py::_v2_storyboard_story` (default `lipsync="none"`; used by two ambience tests, two
+long-shot tests and two clip-performance tests) and two `test_story_long_shots.py` tests on `amb._story`
+(`_without_lipsync`). New: `tests/test_story_lipsync.py` (19). Left for later: the clip-regenerate quote and the
+new-story preset estimate do not add the lipsync; a re-voiced line leaves the old take in `assets.video` until the
+next assets run. A-140.

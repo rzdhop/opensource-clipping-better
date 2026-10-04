@@ -523,6 +523,12 @@
   drawn (28 px avatars, ~200 px tiles, the stories-list covers up to ~340 px). UNCONFIRMED until the human uses the
   deployed stage 5 on a phone and a desktop: confirmed if they keep it; refuted if a page reads worse (then that page's
   layout changes, not the kit) or a cover looks soft (then the list asks `{ thumb: false }` or the width grows).
+- **A-140** — (DEC-258) Kling LipSync reads well on the fruit-headed characters over a whole episode (mouths that
+  move on the French TTS lines without smearing the face, the head or the keyframe's look), and on a shot with two
+  characters in frame it moves the mouth of the one who speaks (the track carries only in-frame speakers' lines, but
+  Kling picks the face itself). UNCONFIRMED until the human watches the first lipsynced episode: confirmed if the lips
+  follow the voices and the faces stay on model; refuted if faces smear or the wrong face speaks (then two-character
+  shots skip the lipsync, or the track is split per speaker, or option A comes back for those shots).
 
 ## Confirmed
 - **A-082** — fal.ai as measured in the paid test (2026-09-29, DEC-174):
