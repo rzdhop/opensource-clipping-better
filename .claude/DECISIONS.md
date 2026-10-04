@@ -5204,3 +5204,24 @@ the line count on the model's reply (asked for in the prompt, judged by J1; a co
 legacy E1 get no narration line; no CLI flag for the format; English labels only in the wizard; the backend does not
 check that a format fits the pipeline (as before); BGM preference stays with the style's `emotion_to_mood`. Commit
 0feb342 (main).
+
+## DEC-269 — Seven plot archetypes steer a v2 story's season arc; S1 runs as S1v2 with its own budget; four more fruit-drama concepts (plan 20 stage 2, after DEC-268)
+**Context.** The fruit-drama formula runs on a handful of telenovela archetypes (infidelity, inheritance, betrayal,
+forgiveness, a secret child, a rigged contest, a reality-show parody); the season step asked for six generic arc
+functions with no plot engine, and the concept library held two archetypes in fourteen slots' worth of ideas.
+**Decision.** `templates/archetypes/*.json` (`archetype_v1`): seven archetypes, one beat per `ARC_FUNCTION` in order
+(the midpoint always a reversal, the crisis a cliffhanger moment), three twists, a payoff, mutual pairings, FR and EN
+written natively; a loader in `templates.py`, the schema and word caps in `schemas.py`. On a v2 story the season ask
+lists them and asks for a primary plus at most one paired secondary, stored as `season.json.archetypes` and a per-entry
+`archetype` validated against the library; episode 1 and the finale sit on the primary, a named secondary carries at
+least one episode. Because the list pushes the French S1 to 1,197 of 1,200 tokens and the reply past S1's 950 cap, the
+v2 ask is its own prompt id `S1v2` (reply cap 1150, input budget 2650, measured on French worst cases + 15 %); the v1
+S1/S2 asks are byte-identical (the S1 golden `test_build_s1_golden_fr` is unedited). S2 (and its regenerate) is told
+its entry's beat; the knowledge step's D5 and the series-memory block name the archetype in one line. Four concepts:
+`citrus_ball` (infidelity), `pineapple_crown` (betrayal), `seeds_of_the_past` (forgiveness), `kitchen_heir` (secret
+child) — the library is fourteen; C1's do-not-repeat cap 20 → 24 so a first "Generate 10 more" run never cuts.
+**Rejected.** Giving S2 all six beats (it sits near its budget; the overview it already gets shows the arc). Using the
+twists in a prompt now (propose-next is the natural reader; a follow-up).
+**Consequence.** The dashboard does not show the archetype yet; legacy S1/S2 have no input budget of their own (an
+older gap, measured at ~1,886 tokens on true-cap inputs); a v2 story switched back to v1 keeps its archetype lines
+(they read the season data). Commit ae28eba (main).
