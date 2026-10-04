@@ -420,6 +420,8 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {PROG} feedback STORY_ID --ep 1 --text-file comments.txt --auto-approve\n"
             f"  {PROG} step STORY_ID propose-next --ep 1\n"
             f"  {PROG} list\n"
+            f"  {PROG} brief STORY_ID 1 --platform flow --zip brief.zip\n"
+            f"  {PROG} upload-clip STORY_ID 1 sh03 take.mp4\n"
             f"  {PROG} prompt-limits"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -433,7 +435,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = parser.add_subparsers(
         dest="command",
-        metavar="{new,step,render,fast-track,agent,feedback,approve,list,voice-tails,prompt-limits}",
+        metavar="{new,step,render,fast-track,agent,feedback,approve,list,voice-tails,brief,upload-clip,"
+                "prompt-limits}",
         required=True,
     )
 
@@ -728,6 +731,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tails_cmd.add_argument("story_id", help="the story's id (see 'list')")
     tails_cmd.add_argument("--ep", type=int, required=True, metavar="N", help="the episode number to check")
+
+    # ---- brief / upload-clip (plan 22 stage 5: the manual link, your own clips)
+    brief_cmd = commands.add_parser(
+        "brief", parents=[common], help="print an episode's shot brief (your own clips), or write it as a zip",
+        description=(
+            "Print episode EP's shot brief for PLATFORM (flow, the default, or higgsfield): per shot what it "
+            "must show, the prompt to paste, the length to pick, the reference images, the line and its voice, "
+            "what to check and where to upload -- the clips you make on your own subscription for a story on "
+            "'Native speech — your own clips'. --zip PATH writes the brief and its reference images there. "
+            "Calls nothing."
+        ),
+    )
+    brief_cmd.add_argument("story_id", help="the story's id (see 'list')")
+    brief_cmd.add_argument("ep", type=int, help="the episode number")
+    brief_cmd.add_argument("--platform", choices=("flow", "higgsfield"), default="flow",
+                           help="where you make the clips (default: flow)")
+    brief_cmd.add_argument("--zip", metavar="PATH", default=None,
+                           help="write the brief (.md, .json) and its reference images to this zip file")
+    upload_cmd = commands.add_parser(
+        "upload-clip", parents=[common], help="upload your own clip for one shot (the manual link)",
+        description=(
+            "Take FILE as shot SHOT_ID's clip of episode EP, with the API's own checks (a video stream, at "
+            "least 2 s, 9:16, a sound track when the shot speaks): stored as assets/clips/shot_NN.manual.mp4 "
+            "(an earlier one kept in assets/clips/takes/), then taken -- its speech heard against the line on "
+            "the STT chain. The file itself is copied, never moved."
+        ),
+    )
+    upload_cmd.add_argument("story_id", help="the story's id (see 'list')")
+    upload_cmd.add_argument("ep", type=int, help="the episode number")
+    upload_cmd.add_argument("shot_id", help="the shot (sh01, sh02, ...)")
+    upload_cmd.add_argument("file", help="the clip (an MP4)")
 
     # ---- list
     commands.add_parser("list", parents=[common], help="list the stories",
@@ -1838,9 +1872,81 @@ def _cmd_voice_tails(args, stories) -> int:
     return EXIT_OK
 
 
+def _cmd_brief(args, stories) -> int:
+    """``brief``: an episode's shot brief (``steps.brief``), printed as its
+    Markdown, or written with its reference images to ``--zip``."""
+    from . import platforms
+    from .steps import brief as brief_step
+
+    story = workflow.load(stories, args.story_id)
+    ec = episode_common.load_context(stories, story["story_id"], workflow.episode_bounds(stories, story, args.ep))
+    try:
+        brief = brief_step.shot_brief(ec, platform=args.platform)
+    except platforms.PresetError as exc:
+        _err(str(exc))
+        return EXIT_FAILED
+    try:
+        brief_step.write_brief(ec, brief)
+    except (OSError, KeyError) as exc:
+        _err(f"⚠️ The brief could not be kept in the episode's assets/brief/ ({exc}).")
+    if args.zip:
+        data = brief_step.brief_zip(ec, brief)
+        with open(args.zip, "wb") as fh:
+            fh.write(data)
+        counts = brief["counts"]
+        print(f"📦 Shot brief written to {args.zip}: {counts['total']} shots, {counts['missing']} clip"
+              f"{'' if counts['missing'] == 1 else 's'} to make ({brief['credits']}).")
+        return EXIT_OK
+    print(brief_step.render_markdown(brief), end="")
+    return EXIT_OK
+
+
+def _cmd_upload_clip(args, stories) -> int:
+    """``upload-clip``: *file* as the shot's clip, through the API's own
+    checks (``manual_uploads.accept_clip``); the file is copied first."""
+    import shutil
+    import tempfile
+
+    from . import manual_uploads
+
+    story = workflow.load(stories, args.story_id)
+    story_id = story["story_id"]
+    ep = workflow.episode_bounds(stories, story, args.ep)
+    if not os.path.isfile(args.file):
+        return _usage_error("upload-clip", f"{args.file!r} is not a file")
+    if os.path.getsize(args.file) > manual_uploads.MAX_CLIP_BYTES:
+        _err(f"The clip is larger than {manual_uploads.MAX_CLIP_BYTES // (1024 * 1024)} MB.")
+        return EXIT_FAILED
+    try:
+        folder = manual_uploads.clips_folder(stories, story_id, ep)
+    except KeyError:
+        _err("The episode's assets/clips folder is not a real folder (a symlink is never followed).")
+        return EXIT_FAILED
+    handle, received = tempfile.mkstemp(dir=folder, prefix=".upload-", suffix=".part")
+    os.close(handle)
+    try:
+        shutil.copyfile(args.file, received)
+        result = manual_uploads.accept_clip(stories, story_id, ep, args.shot_id, received,
+                                            filename=os.path.basename(args.file), env=_settings_env(),
+                                            on_log=print, now=_now())
+    except manual_uploads.UploadRefused as exc:
+        _err(f"Refused: {exc}")
+        return EXIT_FAILED
+    finally:
+        if os.path.exists(received):
+            os.unlink(received)
+    take = result.get("take") or {}
+    print(f"✅ Shot {args.shot_id}: {result['state'].replace('_', ' ')}"
+          + (f" ({round((take.get('matched') or 0) * 100)} % of the line heard)" if take.get("matched") is not None
+             else "") + f", {result['duration_s']:g} s on the timeline.")
+    print(result["waiting"] or "Every clip is uploaded: run the assets step (or Continue the paused run) to go on.")
+    return EXIT_OK
+
+
 _COMMANDS = {"new": _cmd_new, "step": _cmd_step, "render": _cmd_render, "fast-track": _cmd_fast_track,
              "agent": _cmd_agent, "feedback": _cmd_feedback, "approve": _cmd_approve,
-             "voice-tails": _cmd_voice_tails, "list": _cmd_list, "prompt-limits": _cmd_prompt_limits}
+             "voice-tails": _cmd_voice_tails, "list": _cmd_list, "prompt-limits": _cmd_prompt_limits,
+             "brief": _cmd_brief, "upload-clip": _cmd_upload_clip}
 
 
 def main(argv=None) -> int:
