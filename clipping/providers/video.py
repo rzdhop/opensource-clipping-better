@@ -3,8 +3,8 @@
 The image adapters' shape (``estimate``, ``probe``, ``generate``, ``resume``),
 registered for ``(VIDEO, "fal")`` and ``(VIDEO, "gemini")``:
 
-* :class:`FalVideoAdapter` -- seedance 1 pro fast, LTX-2.3 fast and kling 2.5
-  turbo std on fal's queue. It is ``images.FalAdapter`` with per-model inputs,
+* :class:`FalVideoAdapter` -- seedance 1 pro fast, LTX-2.3 fast, LTX-2.5 fast
+  and kling 2.5 turbo std on fal's queue. It is ``images.FalAdapter`` with per-model inputs,
   a ``video.url`` answer and a longer poll budget; submit, poll, journal and
   resume are the image path's, unchanged (DEC-151/152).
 * :class:`GeminiVeoAdapter` -- Veo 3.1 lite over REST ``predictLongRunning``,
@@ -27,7 +27,8 @@ Nothing here strips audio: a tier-2 request asks for none where it is optional
 ``GenResult.meta`` records ``has_audio`` and ``seed_honoured``.
 
 Stdlib only, REST through ``transport.py`` (DEC-012). The model facts are
-A-100..A-103, re-read on 2026-09-30.
+A-100..A-103, re-read on 2026-09-30; LTX-2.5 fast's (plan 23 stage C1,
+A-151) are fal's OpenAPI schema of 2026-10-04.
 """
 
 from __future__ import annotations
@@ -52,6 +53,9 @@ CLIP_LENGTHS: dict[str, tuple[int, ...]] = {
     "fal/seedance-1-pro-fast": tuple(range(2, 13)),  # "2".."12" (A-100)
     # 12..20 s exist too, at 25 fps and 1080p only (fal schema, 2026-09-30): not offered.
     "fal/ltx-2.3-fast": (6, 8, 10),
+    # Plan 23 stage C1: "6".."20" step 2 (fal schema, 2026-10-04); 20 s only at 720p/1080p
+    # (the sizes this adapter sends). Its shortest clip is 6 s: a 4 s request is refused.
+    "fal/ltx-2.5-fast": (6, 8, 10, 12, 14, 16, 18, 20),
     "fal/kling-2.5-turbo-std": (5, 10),  # A-102
     "gemini/veo-3.1-lite": (4, 6, 8),  # A-103
     # Plan 22 (the native-speech links, reachable by name from a budget
@@ -70,6 +74,7 @@ REFUSED_LINKS = {
 AUDIO = {
     "fal/seedance-1-pro-fast": "never",
     "fal/ltx-2.3-fast": "optional",
+    "fal/ltx-2.5-fast": "optional",
     "fal/kling-2.5-turbo-std": "never",
     "gemini/veo-3.1-lite": "always",
     "gemini/veo-3.1-fast": "always",
@@ -80,10 +85,16 @@ AUDIO = {
     # the clip's real length is the shot's.
     "manual/upload": "optional",
 }
-# Only seedance takes a seed; kling and LTX have no field, Veo is "not deterministic".
+# Only seedance takes a seed; kling and LTX (2.3, 2.5) have no field, Veo is "not deterministic".
 SEED_HONOURED = frozenset({"fal/seedance-1-pro-fast"})
 
 FAL_VIDEO_POLL_BUDGET_SECONDS = 600.0
+
+# LTX-2.5 fast (plan 23 stage C1): the sizes sold (1440p and 2160p exist on fal but are not
+# priced here, and 20 s is not offered there), and the type of ``duration`` (fal's schema
+# lists the strings "6".."20"; never "auto").
+LTX25_RESOLUTIONS = ("720p", "1080p")
+LTX25_DURATION_TYPE = str  # or int
 
 GEMINI_VIDEO_MODELS = {"veo-3.1-lite": "veo-3.1-lite-generate-preview",
                        "veo-3.1-fast": "veo-3.1-fast-generate-preview",
@@ -203,6 +214,15 @@ class FalVideoAdapter(images.FalAdapter):
             # 1080p is its smallest size; audio only when the clip is to keep it.
             return {**base, "duration": seconds, "aspect_ratio": "9:16", "resolution": "1080p",
                     "generate_audio": bool(request.native_audio)}
+        if link.model == "ltx-2.5-fast":
+            # 720p unless the request asks 1080p (1440p+ is not sold or priced). The server's
+            # generate_audio default is true, so it is always sent: a silent clip is not paid for
+            # as a sounding one. No seed, negative_prompt, fps, camera_motion or end_image_url.
+            resolution = _resolution(request) or "720p"
+            if resolution not in LTX25_RESOLUTIONS:
+                raise ValueError(f"{describe(link)}: clips of {' or '.join(LTX25_RESOLUTIONS)}, not {resolution!r}")
+            return {**base, "duration": LTX25_DURATION_TYPE(seconds), "aspect_ratio": "9:16",
+                    "resolution": resolution, "generate_audio": bool(request.native_audio)}
         if link.model == "kling-2.5-turbo-std":
             # No aspect or size field: the output follows the 9:16 keyframe (A-102); cfg_scale keeps its default.
             inputs = {**base, "duration": str(seconds)}

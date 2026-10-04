@@ -63,6 +63,7 @@ def test_every_hosted_image_video_and_gemini_tts_link_has_a_limit_with_its_sourc
 @pytest.mark.parametrize(("label", "chars", "tokens", "window", "verified"), [
     ("fal/kling-2.5-turbo-std", 2500, None, None, True),
     ("fal/ltx-2-fast", 5000, None, None, True),
+    ("fal/ltx-2.5-fast", 5000, None, None, True),
     ("gemini/veo-3.1-lite", None, 1024, None, True),
     ("cloudflare/flux-1-schnell", 2048, None, None, True),
     ("fal/flux-schnell", None, None, 512, False),
@@ -157,6 +158,17 @@ def test_todays_prompt_budgets_fit_every_default_link():
     for kind, budget in (("image", 283), ("image_edit", 283), ("video", 80)):
         for link in parse_generation_chain(kind, generation.DEFAULT_CHAINS[kind]):
             assert prompt_limits.budget_words(link, default=budget, live=NO_LIVE) >= budget, link
+
+
+def test_ltx25_has_fals_published_5000_and_keeps_the_200_word_speech_budget():
+    """Plan 23 stage C1: fal's schema for fal-ai/ltx-2.5/image-to-video/fast (prompt maxLength 5000, read
+    2026-10-04); the speech prompt budget stays at its 200-word ceiling (5000 chars ~ 770 words)."""
+    from clipping.aistory import prompt_budgets
+
+    limit = prompt_limits.limit_for("fal/ltx-2.5-fast", live=NO_LIVE)
+    assert limit.max_chars == 5000 and limit.verified is True
+    assert "fal-ai/ltx-2.5/image-to-video/fast" in limit.source and "2026-10-04" in limit.source
+    assert prompt_budgets.speech_clip_words("fal/ltx-2.5-fast", live=NO_LIVE) == 200
 
 
 # ------------------------------------------------------------- live limits

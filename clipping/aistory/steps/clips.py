@@ -535,8 +535,9 @@ def pick_hosted(rows, policy, *, want_sound=False):
     (``video.AUDIO`` ``always``: Veo), else -- none keyed -- the first in
     chain order, which the estimate then says is silent; without
     *want_sound* it is :data:`FIRST`. An optional sound (LTX) is not looked
-    for: its smallest size is 1080p, dearer than the episode's cap allows
-    for a whole episode, and its sound is unproven; once it is the
+    for: its sound is unproven and 2.3's smallest size is 1080p, dearer
+    than the episode's cap allows for a whole episode (2.5's 720p is
+    $0.09 a second, still dearer than the silent links); once it is the
     episode's link, its clips ask for sound (``clip_request_parts``). None
     when no row is keyed."""
     keyed = [(index, row) for index, row in enumerate(rows) if row["status"] == "keyed"]

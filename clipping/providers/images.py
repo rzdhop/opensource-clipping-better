@@ -52,6 +52,7 @@ FAL_APPS = {
     "seedance-1-pro-fast": "fal-ai/bytedance/seedance/v1/pro/fast/image-to-video",
     "ltx-2-fast": "fal-ai/ltxv-2/image-to-video/fast",
     "ltx-2.3-fast": "fal-ai/ltx-2.3/image-to-video/fast",
+    "ltx-2.5-fast": "fal-ai/ltx-2.5/image-to-video/fast",
     "kling-2.5-turbo-std": "fal-ai/kling-video/v2.5-turbo/standard/image-to-video",
 }
 OPENAI_MODELS = {"gpt-image-2-low": ("gpt-image-2", "low")}

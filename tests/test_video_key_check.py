@@ -73,6 +73,18 @@ def test_fal_answers_the_key_and_the_live_price_without_a_queue_request():
     assert "0.022" in result["text"] and "fal-test-key" not in result["text"]
 
 
+def test_ltx25_key_check_carries_its_endpoint_id():
+    app = "fal-ai/ltx-2.5/image-to-video/fast"
+    transport = Transport(200, {"prices": [{"endpoint_id": app, "unit_price": 0.09, "unit": "second",
+                                            "currency": "USD"}], "has_more": False})
+
+    result = video.check_key(Link("fal", "ltx-2.5-fast"), FAL, transport=transport)
+
+    call = _only_a_get(transport, "api.fal.ai/v1/models/pricing")
+    assert call["url"].endswith(f"endpoint_id={app}")
+    assert result["status"] == "ok" and result["endpoint"] == app
+
+
 @pytest.mark.parametrize(("status", "expected"), [(401, "bad_key"), (403, "bad_key"), (404, "no_model"),
                                                   (500, "failed")])
 def test_fal_refusals_are_named(status, expected):

@@ -144,3 +144,19 @@ def test_the_veo_speaking_links_are_priced_per_second_at_each_size():
         assert (price.unit, price.usd) == ("second", usd), (spec, resolution)
     assert estimate(link("gemini/veo-3.1-fast"), 6).est_usd == 0.6
     assert estimate(link("gemini/veo-3.1"), 8, resolution="1080p").est_usd == 3.2
+
+
+def test_ltx25_price_ladder():
+    """Plan 23 stage C1 (A-151; third-party listings read 2026-10-04, the highest kept): $0.09 a second
+    at 720p (the row), $0.16 at 1080p (``@1080p``), any other size falls back to the 720p row."""
+    ltx = "fal/ltx-2.5-fast"
+    assert pricing.price_key(link(ltx)) == ltx
+    assert pricing.price_key(link(ltx), "720p") == ltx
+    assert pricing.price_key(link(ltx), "1080p") == f"{ltx}@1080p"
+    assert pricing.price_key(link(ltx), "1440p") == ltx
+    assert (price_for(link(ltx)).unit, price_for(link(ltx)).usd) == ("second", 0.09)
+    assert price_for(link(ltx), "1080p").usd == 0.16
+    assert price_for(link(ltx), "1440p").usd == 0.09
+    assert estimate(link(ltx), 6).est_usd == pytest.approx(0.54)
+    assert estimate(link(ltx), 6, resolution="1080p").est_usd == pytest.approx(0.96)
+    assert "A-151" in pricing.PRICES[ltx].note and "2026-10-04" in pricing.PRICES[ltx].note

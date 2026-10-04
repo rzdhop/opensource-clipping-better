@@ -170,6 +170,14 @@ def test_seedance_submits_once_journals_polls_fetches_and_writes_an_mp4(keyframe
     ("fal/kling-2.5-turbo-std", {"duration_s": 10},
      {"duration": "10", "negative_prompt": NEGATIVE},
      {"has_audio": False, "seed_honoured": False}),
+    # LTX-2.5 fast (plan 23 stage C1): a string duration, 720p unless asked, generate_audio always
+    # explicit (the server's default is true), no seed, negative_prompt or fps.
+    ("fal/ltx-2.5-fast", {"duration_s": 6},
+     {"duration": "6", "aspect_ratio": "9:16", "resolution": "720p", "generate_audio": False},
+     {"has_audio": False, "seed_honoured": False}),
+    ("fal/ltx-2.5-fast", {"duration_s": 10, "native_audio": True, "extra": {"resolution": "1080p"}},
+     {"duration": "10", "aspect_ratio": "9:16", "resolution": "1080p", "generate_audio": True},
+     {"has_audio": True, "seed_honoured": False}),
 ])
 def test_each_fal_model_gets_its_own_fields(keyframe, spec, change, body, meta):
     app = images.FAL_APPS[link(spec).model]
@@ -285,6 +293,29 @@ def test_a_clip_that_cannot_be_keyed_or_bought_as_asked_is_refused_before_sendin
         adapter.generate(link(spec), clip(keyframe, **change), credentials=ENV, on_log=lambda *a: None,
                          transport=transport, sleep_fn=lambda s: None, on_submit=lambda info: None)
     assert transport.calls == []
+
+
+@pytest.mark.parametrize("change,message", [
+    ({"duration_s": 6, "extra": {"resolution": "1440p"}}, "1440p"),
+    ({"duration_s": 6, "extra": {"resolution": "2160p"}}, "2160p"),
+    ({"duration_s": 4}, "6, 8, 10, 12, 14, 16, 18, 20"),
+])
+def test_ltx25_refuses_1440p_and_4s_before_sending(keyframe, change, message):
+    transport = FakeTransport([])
+    with pytest.raises(ValueError, match=message):
+        video.FAL_VIDEO.generate(link("fal/ltx-2.5-fast"), clip(keyframe, **change), credentials=ENV,
+                                 on_log=lambda *a: None, transport=transport, sleep_fn=lambda s: None,
+                                 on_submit=lambda info: None)
+    assert transport.calls == []
+
+
+def test_ltx25_sells_20s(keyframe):
+    assert max(video.CLIP_LENGTHS["fal/ltx-2.5-fast"]) == 20
+    transport = FakeTransport(fal_queue(images.FAL_APPS["ltx-2.5-fast"], answer={"video": {"url": CDN}}))
+    video.FAL_VIDEO.generate(link("fal/ltx-2.5-fast"), clip(keyframe, duration_s=20), credentials=ENV,
+                             on_log=lambda *a: None, transport=transport, sleep_fn=lambda s: None)
+    assert transport.json(0)["duration"] == "20"
+    assert transport.calls[0]["url"] == "https://queue.fal.run/fal-ai/ltx-2.5/image-to-video/fast"
 
 
 # ---------------------------------------------------------------- estimates

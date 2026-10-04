@@ -83,6 +83,9 @@ TABLE = {
     "fal/ltx-2.3-fast": Limit(
         5000, source=f"assumed equal to {_LTX2}; fal-ai/ltx-2.3/image-to-video/fast's own is not in our notes "
                      "(the key check reads it live)", verified=False),
+    "fal/ltx-2.5-fast": Limit(
+        5000, source="fal's OpenAPI schema fal-ai/ltx-2.5/image-to-video/fast: prompt maxLength 5000 (read "
+                     "2026-10-04)", verified=True),
     "fal/seedance-1-pro-fast": Limit(
         1500, source="unpublished on fal (no maxLength in its schema, A-100/A-110); 56-77-word (~470-char) prompts "
                      "were accepted on 2026-10-01 (A-110); 1500 chars (~3x that) is our conservative cap, under the "

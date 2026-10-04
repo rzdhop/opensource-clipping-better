@@ -51,6 +51,16 @@ def test_a_clip_has_a_key_that_moves_with_what_is_bought(keyframe, tmp_path):
     assert gencache.request_key("video", SEEDANCE, clip(keyframe)) != key
 
 
+def test_ltx25_has_its_own_key_distinct_from_ltx23(keyframe):
+    """Plan 23 stage C1: the model id is in the key, so a stored 2.3 clip is never served for 2.5."""
+    ltx23, ltx25 = Link("fal", "ltx-2.3-fast"), Link("fal", "ltx-2.5-fast")
+    key23 = gencache.request_key("video", ltx23, clip(keyframe, duration_s=6))
+    key25 = gencache.request_key("video", ltx25, clip(keyframe, duration_s=6))
+    assert len(key25) == 64 and key25 != key23
+    assert key25 != gencache.request_key("video", ltx25, clip(keyframe, duration_s=8))
+    assert key25 != gencache.request_key("video", ltx25, clip(keyframe, duration_s=6, native_audio=True))
+
+
 # Computed on the code before video joined the key (7fd67ac) and pinned: a
 # stored image or voice line must keep its key, or it is generated -- and,
 # on a paid link, bought -- again.
