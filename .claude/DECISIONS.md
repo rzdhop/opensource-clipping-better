@@ -5540,3 +5540,14 @@ fix; `narrator_errors` reads `narrator_slots` without a fallback; `defaults.spea
 3 judge tests; re-pins on purpose (the template count, the registry rows, the default format for a keyed story, the
 v2 fixtures' `writing` pin); the agent's 133-file selection 5207 local / 4681 + 529 skipped; the merge selection (28
 files) 1049 local, 874 / 175 skipped on the CI env.
+
+## DEC-278 — No full local test run, ever: the selection per change is the whole local verification; CI runs the full suite on every push (amends DEC-234, after DEC-275)
+**Context.** The human (2026-10-04, at plan 22's close, as the full suite ran on main as the close-out baseline):
+"Do not run at one all the tests, run only the necessary one, to gain time." DEC-234 still allowed one full local
+run before main / at a phase close.
+**Decision.** The full suite runs on CI at every push and nowhere else. Locally, every change runs the selection
+DEC-234 defines (the new/edited tests, every test file naming a changed module, the regression guards of the touched
+areas), in both environments at the same time, and nothing more. The close-out baseline of a phase is CI's result
+on the pushed main, named in CHECKPOINT by commit.
+**Consequence.** The full run started on a7ba8dc was stopped at 29 %; the worker fix was verified by its three
+test files instead. CHECKPOINT's Tier-1 baseline from now on reads "CI on <commit>" rather than a local count.

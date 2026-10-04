@@ -26,7 +26,7 @@
   main a7ba8dc, health 200, bundle index-aqOel0O_.js) after a ≈ 10 min restart loop: a Python 3.12-only f-string in
   `web/api/worker.py` (the container runs 3.11; the test envs run 3.12) — fixed in a7ba8dc. **Rule from now on: before
   every deploy, compile the tree with the image's python** (`docker run --rm --entrypoint python -v $PWD:/src:ro
-  <image> -c '…compile()…'`, see the action log). The full local suite on main runs as the close-out baseline; the
+  <image> -c '…compile()…'`, see the action log). No full local suite (DEC-278: CI's run on the pushed main is the baseline); the
   docs section is filled. **Stage 8 = the human's walk** in manual mode (needs the STT key).
 - **Before stage 4 is used live (the human said yes):** `GEMINI_PAID_API_KEY` and a Groq (or Mistral) STT key in
   Settings; caps 10 / 20 / 60. Neither key is set today — Veo has never run on this host.
