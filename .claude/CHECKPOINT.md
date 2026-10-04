@@ -18,19 +18,20 @@
   GPU now (Pinokio documented for the later GPU box); Anthropic provider Sonnet 5.5 default / Opus 5.5 by name / server-side
   fallbacks ON (booked at the served model); universes (all ten, audience notes), two-view sheets at 1080×1920, variants,
   action prompts; NO doctrine prompt; nano-banana-2-lite on sheets; chatterbox before Fish Audio.
-- **Merged on main (all pushed; CI = baseline), 14 stages:** A1–A6 (the whole cap track but A7–A9), B1, B2, B3, B5, B6,
-  C1, D1, D4. **Deployed 23:37 UTC** (image from 658eb5f + the bind-mounted Python of efa271a): health 200, bundle
-  index-C7PPNeAD.js, anthropic 1.11.0 in the image, `GET /api/budget/today` live. **Tier 2 (a) done on the live app:** the cast
-  of e7412a3efcc6 now answers HTTP 409 `budget_daily_cap` with the three numbers and `needed_usd` 4.99; the phone walk of
-  the panel (Allow $4.99 more today → Create cast again) is the human's. Pending for the next rebuild: B2's compose mount
-  and Settings card, and whatever lands next. CI's x86_64 golden keys (B6) still to add from the annotation.
-- **Running now:** D2 (Sonnet, universes), D6 (Sonnet, action prompts), A7 (Opus, the local-midnight day — riskiest). On each
-  report: code-review skill, rebase, the Tier-1 selection in both envs, ff-merge with the exit code checked, action-log line,
-  push.
-- **Next action:** A8 (nano-banana-2-lite on sheets, data) → A9 (gemini-first); D5 (Opus, variants) after D2/D6; B7 (Opus,
-  aspect through generation) → B8 (stock cutaways); C2 only on the human's go ($0.54); then D7 (the A/B on the human's
-  go, ≈ $1.60) and the docs stage (docs/AI_STORY.md, DEC entries per stage, the Pinokio/GPU runbook); a second rebuild at 0
-  jobs when the dashboard stages land. Add CI's x86_64 golden keys when the annotation appears.
+- **Merged on main (all pushed; CI = baseline), 17 stages:** A1–A7 (the cap track but A8/A9), B1, B2, B3, B5, B6, C1, D1,
+  D2, D4. **Deployed 23:37 UTC** (image from 658eb5f; the bind-mounted Python is newer: B2, D2, A7 are live as Python only):
+  health 200, bundle index-C7PPNeAD.js, anthropic 1.11.0 in the image, `GET /api/budget/today` live. **Tier 2 (a) done on the
+  live app:** the cast of e7412a3efcc6 answers 409 `budget_daily_cap` with the three numbers and `needed_usd` 4.99. Pending
+  for the next rebuild: B2's compose mount + card, D2's wizard select, A7's tzdata + Settings field (then the deploy check
+  `docker exec rzc-backend python -c "from zoneinfo import ZoneInfo; ZoneInfo('Europe/Paris')"`), and the zone itself is
+  NOT set (the human sets Europe/Paris in Settings when they want). CI's x86_64 golden keys (B6) still to add.
+- **Running now:** D6 (Sonnet, action prompts), A8 (Sonnet, nano-banana-2-lite on sheets + DEC-280), D5 (Opus, variants —
+  riskiest of track D). On each report: code-review skill, rebase, the Tier-1 selection in both envs, ff-merge with the exit
+  code checked, action-log line, push.
+- **Next action:** A9 (gemini-first) after A8; B7 (Opus, aspect through generation) after D6 → B8 (stock cutaways); C2 only
+  on the human's go ($0.54); then D7 (the A/B on the human's go, ≈ $1.60) and the docs stage (docs/AI_STORY.md, DEC entries
+  per stage, the Pinokio/GPU runbook); a second rebuild at 0 jobs when the dashboard stages land. Add CI's x86_64 golden
+  keys when the annotation appears.
 - **Open questions:** none blocking. One reading to confirm with the human when they look: "No doctrine" was read as
   dropping only the doctrine prompt, keeping all ten universes (A-157).
 
