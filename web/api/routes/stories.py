@@ -1022,13 +1022,14 @@ async def list_styles() -> dict:
 async def list_universes() -> dict:
     """The universes of ``templates/universes.json`` (plan 23 stage D2) and
     which style takes which, for the new-story form's Universe select:
-    ``{"universes": [{id, label, audience_note?}, ...], "by_style":
+    ``{"universes": [{id, label, species, audience_note?}, ...], "by_style":
     {style_id: {"universes": [id, ...], "default": id | null}}}`` -- a style
-    that lists none is absent from ``by_style``. Declared before ``GET
+    that lists none is absent from ``by_style``. Each universe also carries its
+    ``species`` pool (plan 26 stage 7c: the Cast tile's Species select). Declared before ``GET
     /{story_id}`` (as ``/styles``)."""
     entries = []
     for universe in templates.load_universes():
-        entry = {"id": universe["id"], "label": universe["label"]}
+        entry = {"id": universe["id"], "label": universe["label"], "species": list(universe["species"])}
         if universe.get("audience_note"):
             entry["audience_note"] = universe["audience_note"]
         entries.append(entry)

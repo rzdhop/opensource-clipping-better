@@ -382,6 +382,9 @@ def test_the_style_endpoint_payload_and_the_universes_endpoint():
     }
     noted = [u["id"] for u in payload["universes"] if "audience_note" in u]
     assert noted == ["bottles", "gross_funny"]
+    # Plan 26 stage 7c: each entry carries its species pool (the Cast tile's Species select); additive.
+    assert all(set(u) <= {"id", "label", "species", "audience_note"} for u in payload["universes"])
+    assert {u["id"]: u["species"] for u in payload["universes"]} == dict(SPECIES)
     styles = asyncio.run(routes.list_styles())["styles"]
     # The picker's payload keeps its shape: the universes are their own endpoint.
     assert all(set(s) == {"template_id", "version", "name", "palette", "typography", "episode_defaults"}

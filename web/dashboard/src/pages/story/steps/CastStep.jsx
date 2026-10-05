@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  patchStory, runStoryStep, approveStoryDoc, regenerateStory, fetchStoryEstimate,
+  patchStory, fetchUniverses, runStoryStep, approveStoryDoc, regenerateStory, fetchStoryEstimate,
   fetchCharacterVoices, patchCharacter, deleteCharacter, deleteCharacterUpload,
   fetchStoryMediaUrl, uploadCharacterReference, addCharacterVariant,
 } from '../../../api'
@@ -634,7 +634,111 @@ function BlockNotWritten({ what }) {
   return <p className="form-hint">No {what} yet: the Cast step writes it (run it again to fill it).</p>
 }
 
-function LookSection({ storyId, character, disabled, onChange }) {
+const SPECIES_MAX_WORDS = 4 // clipping.aistory.schemas.LOOK_SPECIES_MAX_WORDS
+const SPECIES_OTHER = '__other__'
+
+/** The story's species pool (plan 26 stage 7c): the universe's species list from `GET /stories/universes` --
+ * `generation_profile.universe`, else the story's style default -- or `null` (a human-cast style, no
+ * universe, or the catalogue not loaded): the field is then plain text. */
+function useSpeciesPool(story) {
+  const [catalogue, setCatalogue] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchUniverses().then((data) => { if (!cancelled) setCatalogue(data) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  if (!catalogue) return null
+  const profile = story.generation_profile || {}
+  const styleUniverses = catalogue.by_style[story.style_template_id]
+  const universeId = profile.universe || (styleUniverses ? styleUniverses.default : null)
+  const entry = universeId ? catalogue.universes.find((universe) => universe.id === universeId) : null
+  return entry && entry.species && entry.species.length ? entry.species : null
+}
+
+/** "Species (head)": a select over the universe's pool plus "Other…" (free text, at most 4 words), or a plain
+ * text input when no pool applies. Saved as `look.species` through the look's own patch. The server merges a
+ * look per key and the schema takes no empty or null species, so a blank value is never sent: it cannot be
+ * cleared here, only changed. */
+function SpeciesField({ value, pool, disabled, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [choice, setChoice] = useState('')
+  const [other, setOther] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+
+  const open = () => {
+    const inPool = Boolean(pool && value && pool.includes(value))
+    setChoice(inPool ? value : (pool && value ? SPECIES_OTHER : (pool ? '' : SPECIES_OTHER)))
+    setOther(inPool ? '' : (value || ''))
+    setError('')
+    setErrors(null)
+    setEditing(true)
+  }
+  const typed = choice === SPECIES_OTHER
+  const chosen = (typed ? other : choice).trim().replace(/\s+/g, ' ')
+  const tooLong = chosen.split(' ').filter(Boolean).length > SPECIES_MAX_WORDS
+  const save = async () => {
+    if (!chosen || tooLong) return
+    setSaving(true)
+    setError('')
+    setErrors(null)
+    try {
+      await onSave(chosen)
+      setEditing(false)
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="story-field">
+      <div className="story-field-label">Species (head)</div>
+      {!editing ? (
+        <>
+          <p className="story-field-value">{value ? value : <em>Not set.</em>}</p>
+          {!disabled && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={open}>Edit</button>
+          )}
+        </>
+      ) : (
+        <>
+          {pool && (
+            <select aria-label="Species (head)" className="form-input" value={choice}
+              onChange={(e) => setChoice(e.target.value)}>
+              <option value="" disabled>Choose a species…</option>
+              {pool.map((name) => <option key={name} value={name}>{name}</option>)}
+              <option value={SPECIES_OTHER}>Other…</option>
+            </select>
+          )}
+          {(typed || !pool) && (
+            <input type="text" aria-label="Species (head), your own" className="form-input" value={other}
+              placeholder="At most 4 words, e.g. dragon fruit" onChange={(e) => setOther(e.target.value)} />
+          )}
+          {tooLong && <p className="form-hint">At most {SPECIES_MAX_WORDS} words.</p>}
+          <StepError message={error} errors={errors} />
+          <div className="story-field-actions">
+            <button type="button" className="btn btn-primary btn-sm" onClick={save}
+              disabled={saving || !chosen || tooLong}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(false)} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      <p className="form-hint">
+        In a fruit world every head is a fruit. The sheets, the keyframe judge and every prompt say this head.
+      </p>
+    </div>
+  )
+}
+
+function LookSection({ storyId, character, speciesPool, disabled, onChange }) {
   const look = character.look
   const save = async (patch) => {
     await patchCharacter(storyId, character.char_id, { look: patch })
@@ -647,6 +751,8 @@ function LookSection({ storyId, character, disabled, onChange }) {
   })
   return (
     <>
+      <SpeciesField value={look.species} pool={speciesPool} disabled={disabled}
+        onSave={(value) => save({ species: value })} />
       {LOOK_TEXT_FIELDS.map(([key, label]) => (
         <EditableText key={key} label={label} value={look[key]} disabled={disabled} rows={1}
           onSave={(value) => save({ [key]: value })} />
@@ -721,7 +827,7 @@ function DossierSection({ storyId, character, castNames, disabled, onChange }) {
 // -------------------------------------------------------------- one character
 
 function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames,
-  withVariants, manualImages, brief }) {
+  withVariants, manualImages, brief, speciesPool }) {
   const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
@@ -882,7 +988,8 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
           </details>
           <details className="story-profile">
             <summary>Look — build, face, height, palette, wardrobe</summary>
-            <LookSection storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
+            <LookSection storyId={storyId} character={character} speciesPool={speciesPool} disabled={cardBusy}
+              onChange={onChange} />
           </details>
           {withVariants && (
             <details className="story-profile" open={(character.variants || []).length > 0}>
@@ -1059,6 +1166,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
   const { images: briefImages, reload: reloadBrief } = useImageBrief(storyId, imagesManual(story))
   const onChange = () => { reloadBrief(); onChangeStep() }
   const consistencyMode = story.generation_profile.consistency_mode
+  const speciesPool = useSpeciesPool(story)
   // The open character's editor: the URL's #char_id (one at a time).
   const [openId, toggleOpen] = useHashAccordion((characters || []).map((c) => c.char_id))
 
@@ -1144,6 +1252,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
               withVariants={variantsEnabled(story)}
               manualImages={imagesManual(story)}
               brief={entityBrief(briefImages, 'characters', character.char_id)}
+              speciesPool={speciesPool}
             />
             </>
           )

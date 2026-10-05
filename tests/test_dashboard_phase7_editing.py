@@ -123,6 +123,23 @@ def test_the_cast_step_edits_the_dossier_and_the_look_of_a_v2_story():
         assert f"dossier.{key}" in src or f"'{key}'" in src, key
 
 
+def test_the_look_editor_has_a_species_head_field_over_the_universe_pool():
+    """Plan 26 stage 7c: a select over the story's universe species plus "Other…", saved as ``look.species``."""
+    src = _read(CAST)
+    field = _function(src, "SpeciesField")
+    assert "Species (head)" in field and "Other…" in field and "<select" in field
+    assert "every head is a fruit" in field
+    assert "species" in set(schemas.CHARACTER_LOOK_SCHEMA["properties"])
+    assert "onSave={(value) => save({ species: value })}" in _function(src, "LookSection")
+    # The pool is the story's universe (else its style's default) from the universes route, via the api helper.
+    pool = _function(src, "useSpeciesPool")
+    assert "fetchUniverses" in pool and "profile.universe || (styleUniverses ? styleUniverses.default : null)" in pool
+    assert "entry.species" in pool and "fetchUniverses" in src.split("} from '../../../api'")[0]
+    # The word cap is the schema's, and a blank value is never sent (the schema takes no empty or null species).
+    assert f"SPECIES_MAX_WORDS = {schemas.LOOK_SPECIES_MAX_WORDS}" in src
+    assert "if (!chosen || tooLong) return" in field
+
+
 # ------------------------------------------------------------------ places and props
 
 def test_the_places_step_edits_the_layout_map_the_light_per_variant_and_the_prop_look():
