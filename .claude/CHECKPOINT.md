@@ -1,30 +1,37 @@
-## CURRENT STATE — plan 24 (the timing harness) CODE COMPLETE (stages 1–6) and LIVE (restart from 10defae); stage 7 docs in a worktree; plan 23 follow-ups ALL DONE (2026-10-05, local session)
+## CURRENT STATE — plan 24 (the timing harness) CODE + DOCS COMPLETE and LIVE; close-out pending the human's walk; plan 23 follow-ups ALL DONE (2026-10-05, local session)
 
-- **In-progress header:** phase = DOCUMENT (plan 24 stage 7): a Sonnet agent writes `docs/AI_STORY.md` in worktree
-  plan24-docs (branch docs/plan24); DEC-300 and the VISION paragraph are written; A-166/A-167 stay UNCONFIRMED until the
-  human's Tier-2 walk (regenerate episode 1 of e7412a3efcc6: expect 0 timing warnings, a Trim button on any left).
-  Checkpoint commit = main `10defae` (+ these docs commits), clean tree. **Live:** deployed 11:02 UTC from b0d85ee
-  (bundle index-DU7H2ro8.js) then restarted at 0 jobs from 10defae (stage 5 + the prompts.py hotfix): health 200, the
-  container imports the trim pass and the character_line flag, 361 jobs. CI: green through 8962c37; red on b0d85ee and
-  26d88c7 (the prompts purity pin, fixed in 5e0e892); the runs on 613b88c/10defae must come back green.
-- **Shipped by plan 24 so far (DEC-298):** one speech clock (`timing.seconds_for`, provider overrun, 6.6 chars/word for
-  v3 budgets), a per-line plan on every v3 scene (`slot_s`/`line_plan`; native: character 6 s / 12 words first, the
-  narrator the rest; pauses + 5 % margin paid), the writer told seconds and hard caps (E2v3/E3v3), hard validators
-  with named overshoots, under-only acceptance, a bounded trim pass (4 calls per episode) then one failure sentence,
-  the shots following the plan, the dashboard Trim action. Follow-ups logged: trim calls outside the cost estimate;
-  pooling off-native character caps; reaction shots on top of the plan's clips.
-- **Plan 23 follow-through:** (1) keys + zone: STILL WAITS for the human (`ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`,
-  `PIXABAY_API_KEY`, `BUDGET_TIMEZONE=Europe/Paris`). (2) the A/B: on the delegated go once the Anthropic key is set
-  (`python3 tools/bench_llm.py --episode-ab outputs/stories/d16026f12e77 --episode 1 --chains
-  "gemini-paid/gemini-3.8-flash,anthropic/claude-sonnet-5-5,anthropic/claude-opus-5-5" --allow-paid --max-usd 3.00`).
-  (3) C2's probe: refused by fal (exhausted balance) — the human tops up, then `python3 tools/probe_speech_link.py
-  --image outputs/stories/d16026f12e77/episodes/ep01/assets/shots/shot_01.jpg --allow-paid --max-usd 0.60`; C4/C5
-  only on a pass. (4) A8, D7, B8, A5, D5 all merged and deployed. (5) done; CI green since cc1d734. (6) the walks:
-  the cap panel, a two-view cast on a new Viral 3D story, the action brief on Flow, a 16:9 story on seedance, a
-  variant sheet upload, the Trim button — steps to give at the close-out.
-- **Rules in force:** unchanged (worktrees, DEC-234 both envs, DEC-297 pin files, pins mirrored, deploy at 0 jobs
-  after the 3.11 compile, no full local suite, no source edits during a job, money only on the human's go).
-- **Open questions:** none blocking; the keys and the fal top-up are the human's hands.
+- **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main `f7fcfa4` (+ this docs commit), clean
+  tree. **Live:** deployed 11:02 UTC from b0d85ee (bundle index-DU7H2ro8.js), restarted at 0 jobs from 10defae
+  (stage 5 + the prompts.py hotfix): health 200, the container imports the trim pass and the `character_line` flag,
+  361 jobs. CI: green through 8962c37; red on b0d85ee/26d88c7 (the prompts purity pin, fixed in 5e0e892); the runs on
+  613b88c / 10defae / b4a47a1 / f7fcfa4 were still in progress at the last read — **a fresh session reads them first**.
+- **Shipped today:** plan 23 follow-through (CI's golden keys; the hidden route-test red found by the A-096 replica and
+  fixed; follow-ups A8, D7, B8, A5, D5 merged; the C2 probe tool merged, its paid attempt refused by fal) and plan 24
+  stages 1–7 (DEC-298/300): one speech clock, a per-line plan per scene, the writer told seconds + hard caps, hard
+  validators, a bounded trim pass then one failure sentence, shots following the plan, `character_line` per body scene,
+  the Trim button, docs. Two hotfixes (prompts.py's top-level import; an import-order-dependent test).
+- **The human's hands (nothing else blocks):** (1) Settings: `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`,
+  `PIXABAY_API_KEY`, `BUDGET_TIMEZONE=Europe/Paris` → then the free checks (`POST /api/settings/check-anthropic-key`
+  "listed" rows; ElevenLabs `GET /v1/voices` for A-160; one Pixabay search; `GET /api/budget/today` zone/resets_at)
+  and A-153/A-154/A-160 verdicts. (2) The A/B on the delegated go once the Anthropic key is set (dry-run $1.96 one try,
+  `--max-usd 3.00`); the findings go into plan 23's file and a DEC. (3) fal top-up → the probe re-run (`tools/
+  probe_speech_link.py --image outputs/stories/d16026f12e77/episodes/ep01/assets/shots/shot_01.jpg --allow-paid
+  --max-usd 0.60`); C4/C5 only on a pass (matched ≥ 0.8 + the ear). (4) **The walk (Tier 2 of plan 24 + plan 23's
+  step 6), verdicts to record as assumptions:** (a) e7412a3efcc6 → Script → Regenerate episode 1 (or Trim on a
+  warning): expect 0 timing warnings, every body scene within its slot, 2–4 character lines (A-167); (b) the cap
+  panel: a cast refused shows three numbers and "Allow … more today"; (c) a new Viral 3D story with two-view sheets:
+  the cast draws front+back on one 1080×1920 sheet (A-156); (d) the action brief of one episode on Flow: 3–4 shots made,
+  judged by eye (D6); (e) a 16:9 story on seedance (B7/A-163); (f) a variant sheet uploaded on its tile (D5); (g) a
+  universe menu read (A-157: all ten kept, the doctrine dropped).
+- **Follow-ups logged (not done):** trim calls outside the Script-step cost estimate; pooling off-native per-line caps;
+  reaction shots on top of the plan's clips; cap `character_line` scenes at 3 on native if the share matters; measured
+  per-voice rates fed back into the plan; `_repair_e1_reply`/`_repair_e3_reply` bare reads; Fish Audio (B4).
+- **Rules in force:** unchanged (worktrees, DEC-234 both envs + "prompts.py → test_story_prompts_episode.py", DEC-297
+  pin files, pins mirrored, deploy at 0 jobs after the 3.11 compile, no full local suite, no source edits during a
+  job, money only on the human's go).
+- **Close-out per file:** CHECKPOINT (this header), VISION (the plan-24 paragraph), ASSUMPTIONS (A-164…A-167
+  UNCONFIRMED), DECISIONS (DEC-298…DEC-300), action log (one line per stage, deviation, deploy), docs/AI_STORY.md.
+- **Open questions:** none blocking.
 
 ## CURRENT STATE — plan 23 (the upgrade ideas) CODE COMPLETE and DEPLOYED; phase DOCUMENT / close-out (2026-10-05, local session)
 
