@@ -469,6 +469,16 @@ def medium_of(style_lock) -> str:
     return MEDIUM.get(str(key), "")
 
 
+def rendering_of(style_lock) -> str:
+    """The lock's rendering sentence as every prompt says it: under an animated medium (:func:`medium_of`) its
+    "photorealistic" reads "stylised, high-end" -- it would pull the generator back to a photograph."""
+    medium = medium_of(style_lock)
+    rendering = str(style_lock.get("rendering") or "")
+    if medium and "live-action cinematic" not in medium:
+        rendering = re.sub(r"photo-?realistic", "stylised, high-end", rendering, flags=re.IGNORECASE)
+    return rendering
+
+
 def _style_sections(style_lock, *, image):
     """``style`` (the rendering sentence, the palette line, the forbidden colours: never dropped), ``style_rules``
     (character design and environment rules, the quality tail, the motion and voice direction: the last rung of
@@ -476,10 +486,7 @@ def _style_sections(style_lock, *, image):
     palette = style_lock.get("palette") or {}
     forbidden = _join(palette.get("forbidden"), " or ")
     medium = medium_of(style_lock)
-    rendering = str(style_lock.get("rendering") or "")
-    if medium and "live-action cinematic" not in medium:
-        # An animated medium: the lock's "photorealistic" would pull the generator back to a photograph.
-        rendering = re.sub(r"photo-?realistic", "stylised, high-end", rendering, flags=re.IGNORECASE)
+    rendering = rendering_of(style_lock)
     # The medium and the palette line never drop; the lock's rendering sentence is the very last rung, so a small
     # cap (seedream, 461 words) still says the medium and the present looks before the core.
     style = [_labelled("Medium", medium), _labelled("Palette", palette.get("palette_line"))]

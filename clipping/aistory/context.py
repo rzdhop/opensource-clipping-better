@@ -222,6 +222,13 @@ class Pack:
     # Plan 23 stage D2: a story with a universe (``media_policy.universe``) carries its data block
     # (``universes.species_block``): the species pool and this card's lead species. None otherwise.
     universe: str | None = None
+    # Plan 28 stage E1 (DEC-305 §8): a v2 story's set-up block (``setup_context``: series, art style,
+    # universe, audience, format and timing), rendered first by every set-up writer; None on a legacy
+    # story, so no legacy prompt changes by one byte. With it, ``bible`` holds the premise only (the
+    # logline and the tone are in the block's SERIES) and the one-line ``style`` gives way to the
+    # block's ART STYLE -- K1 keeps the voice direction alone, ``performance``.
+    setup: str | None = None
+    performance: str | None = None
     trimmed: list = field(default_factory=list)
 
 
@@ -238,10 +245,15 @@ def build_pack(
     cast=None,
     places=None,
     universe=None,
+    setup=None,
 ) -> Pack:
     """Assemble a ``Pack`` for one prompt call. Nothing here is a silent
     fallback: every section that had to be cut to fit is named in
-    ``Pack.trimmed`` (spec 0: "No silent fallback, no silent shrinking")."""
+    ``Pack.trimmed`` (spec 0: "No silent fallback, no silent shrinking").
+
+    *setup* (plan 28 stage E1): the story's set-up block (:func:`setup_for`),
+    None on a legacy story. With it the bible section is the premise alone:
+    the block's SERIES already says the logline and the tone."""
     trimmed: list = []
 
     style = style_line(template) if template else None
@@ -251,7 +263,7 @@ def build_pack(
     bible_text = None
     world_text = None
     if story is not None:
-        raw_bible = _bible_text(story)
+        raw_bible = _bible_text(story) if not setup else (story.get("premise") or "")
         if raw_bible:
             bible_text, cut = trim_words(raw_bible, _BIBLE_WORD_LIMIT)
             if cut:
@@ -310,6 +322,8 @@ def build_pack(
         cast=cast_text,
         places=places_text,
         universe=universe or None,
+        setup=setup or None,
+        performance=template["audio"]["voice_direction"] if template else None,
         trimmed=trimmed,
     )
 
@@ -326,6 +340,205 @@ def check_budget(system, user, *, budget=PACK_TOKEN_BUDGET) -> int:
             f"prompt is {tokens} estimated tokens, over the {budget}-token budget"
         )
     return tokens
+
+
+# ============================================================ plan 28 stage E1: the set-up block
+#
+# DEC-305 §8 (the human, 2026-10-05: "the prompts for concepts, places, casts
+# must be upgraded"): every set-up writer of a v2 story (concepts, bible,
+# cast, places, props, season, knowledge) is told what the plan-26 image and
+# clip prompts already say -- the series, the art style, the universe, the
+# audience, the format and its timing -- in one block, built once per call
+# from the records (``setup_for``) and rendered first. A legacy story gets
+# None: its prompts stay byte-identical.
+
+SETUP_HEADING = "SERIES SET-UP (binding: everything you write must fit it)"
+_PLATFORM_NAMES = {"tiktok": "TikTok", "shorts": "YouTube Shorts", "reels": "Instagram Reels"}
+
+
+def _plain(text) -> str:
+    return " ".join(str(text or "").split()).rstrip(" .;,")
+
+
+def _said(label, value) -> str:
+    value = _plain(value)
+    return f"{label}: {value}." if value else ""
+
+
+def _seconds(value) -> str:
+    value = float(value)
+    return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
+def _and_list(items) -> str:
+    items = [item for item in items if item]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _section(heading, parts) -> str:
+    body = " ".join(part for part in parts if part)
+    return f"{heading}: {body}" if body else ""
+
+
+def wants_setup(story) -> bool:
+    """Whether *story*'s set-up writers get the set-up block: a v2 story
+    (``generation_profile.pipeline == "v2"``) or one on the v3 prompts --
+    ``writing == "v3"`` with a brief (``seed_text``), the one way the set-up
+    steps ever read that stamp (``media_policy.writing_v3``; ``store.create``
+    stamps it on every story, so a story with no brief is no v3 story here).
+    Anything else is legacy and stays byte-identical."""
+    from . import media_policy
+
+    story = story or {}
+    return media_policy.is_v2(story) or (media_policy.writing_v3(story) and bool(story.get("seed_text")))
+
+
+def _universe_sentence(story, lock) -> str:
+    """The UNIVERSE section's text: the species world (``media_policy.species_world``) with its head rule,
+    a universe without heads to speak of, or a human cast."""
+    from . import media_policy, templates
+
+    world = media_policy.species_world(story, lock)
+    if world is not None:
+        label = world["label"].get("en") if isinstance(world["label"], dict) else world["label"]
+        kind = world.get("head_kind") or "fruit or vegetable"
+        return (f"{_plain(label)} -- every character is {_plain(world['subject_phrase'])}; each head is one whole "
+                f"{kind} at human head scale, never a human head.")
+    style_id = (lock or {}).get("template_id") or (story or {}).get("style_template_id")
+    chosen = media_policy.universe(story, style_id)
+    if chosen:
+        try:
+            entry = templates.universe(chosen)
+        except KeyError:
+            entry = None
+        if entry is not None:
+            label = entry["label"].get("en") if isinstance(entry["label"], dict) else entry["label"]
+            return f"{_plain(label)} -- every character is {_plain(entry['subject_phrase'])}."
+    return "A human cast -- every character is a person."
+
+
+def _format_parts(story, template, profile) -> list:
+    from . import native_speech, timing
+
+    parts = []
+    if template:
+        label = template.get("label") or {}
+        label = label.get("en") if isinstance(label, dict) else label
+        lo, hi = template["window_s"]
+        parts.append(f"{_plain(label) or template.get('template_id')}: each episode runs {_seconds(lo)} to "
+                     f"{_seconds(hi)} seconds.")
+    native = bool((profile or {}).get("native_speech"))
+    if native:
+        shot_lo, shot_hi = native_speech.SHOT_WINDOW_S
+        parts.append(f"Shots last {_seconds(shot_lo)} to {_seconds(shot_hi)} seconds. The characters speak their "
+                     "own lines on camera, inside the clips: one shot carries an exchange of 1 to "
+                     f"{timing.PLAN_EXCHANGE_LINES_MAX} lines.")
+    elif template and template.get("min_shot_s") and template.get("max_shot_s"):
+        parts.append(f"Shots last {_seconds(template['min_shot_s'])} to {_seconds(template['max_shot_s'])} "
+                     "seconds.")
+    if template and template.get("single_place"):
+        parts.append("Each episode is one continuous scene in one place, in real time.")
+    narrator = bool(((story or {}).get("narrator") or {}).get("enabled"))
+    if not narrator:
+        parts.append("No narrator: the characters' own lines carry the story.")
+    elif template and template.get("narrator_share"):
+        share_lo, share_hi = template["narrator_share"]
+        parts.append(f"A narrator is heard over the picture and carries {round(share_lo * 100)}-"
+                     f"{round(share_hi * 100)}% of the words.")
+    else:
+        parts.append("A narrator is heard over the picture.")
+    return parts
+
+
+def setup_context(story, lock, template, profile, *, episodes=None, hexes=False) -> str:
+    """The set-up block of *story* (plan 28 stage E1), plain sections:
+
+    - SERIES: the title, a serialized vertical drama of *episodes* episodes (when the season is set), the
+      language; the logline, the tone and the genre once the bible has them;
+    - ART STYLE: *lock*'s name, medium (``prompt_templates.medium_of``), rendering sentence (as every image
+      prompt says it, ``prompt_templates.rendering_of``), palette line and forbidden colours; with *hexes*
+      (the look writers: K1, D2, D3, R1v2) the PALETTE COLOURS too;
+    - UNIVERSE: the species world and its head rule, a universe, or a human cast -- always said;
+    - AUDIENCE: the bible's age rating and platforms, once B3 wrote them;
+    - FORMAT AND TIMING: *template*'s (the episode template) name and window in seconds; with
+      *profile*'s ``native_speech`` the 5-10 s shots of 1-4 spoken lines, said in the clips (else the
+      template's own shot lengths); one place in real time when the format says so; the narrator or none
+      (``story["narrator"]["enabled"]``).
+
+    *lock* is the style lock, or before the style step the style template (the same texts); None leaves
+    ART STYLE out. A pure function of its arguments: :func:`setup_for` reads them from the records."""
+    from . import prompt_templates
+
+    story = story or {}
+    series = []
+    series.append(_said("Title", story.get("title")))
+    kind = "A serialized vertical drama"
+    if episodes:
+        kind += f" of {int(episodes)} episodes"
+    language = LANGUAGE_NAMES.get(story.get("language"), story.get("language"))
+    series.append(f"{kind}, written in {language}." if language else f"{kind}.")
+    series += [_said("Logline", story.get("logline")), _said("Tone", story.get("tone")),
+               _said("Genre", ", ".join(_plain(tag) for tag in story.get("genre_tags") or () if _plain(tag)))]
+    sections = [_section("SERIES", series)]
+
+    if lock:
+        palette = lock.get("palette") or {}
+        name = lock.get("name") or lock.get("template_name") or {}
+        name = name.get("en") if isinstance(name, dict) else name
+        forbidden = " or ".join(_plain(item) for item in palette.get("forbidden") or () if _plain(item))
+        sections.append(_section("ART STYLE", [
+            f"{_plain(name)}." if _plain(name) else "",
+            _said("Medium", prompt_templates.medium_of(lock)),
+            _said("Rendering", prompt_templates.rendering_of(lock)),
+            _said("Palette", palette.get("palette_line")),
+            f"Never use {forbidden}." if forbidden else "",
+        ]))
+        if hexes:
+            sections.append(_section("PALETTE COLOURS", [
+                _said("Primary", ", ".join(palette.get("primary") or ())),
+                _said("Accents", ", ".join(palette.get("accents") or ())),
+            ]))
+
+    sections.append(_section("UNIVERSE", [_universe_sentence(story, lock)]))
+
+    audience = story.get("audience") or {}
+    if audience.get("age") or audience.get("platforms"):
+        age = audience.get("age")
+        platforms = _and_list([_PLATFORM_NAMES.get(item, item) for item in audience.get("platforms") or ()])
+        sections.append(_section("AUDIENCE", [
+            (f"Rated {'all ages' if age == 'all' else age}." if age else ""),
+            (f"Posted on {platforms}." if platforms else ""),
+        ]))
+
+    sections.append(_section("FORMAT AND TIMING", _format_parts(story, template, profile)))
+    return "\n".join([SETUP_HEADING] + [section for section in sections if section])
+
+
+def setup_for(story, *, lock=None, episodes=None, hexes=False):
+    """:func:`setup_context` of *story* read from the records, or None when *story* is legacy
+    (:func:`wants_setup`). *lock* is the story's style lock when the caller has it; without one, the style
+    template the story chose (the lock is frozen from it). The episode template is the story's own
+    (``episode_template_id``); native speech is ``media_policy.native_speech``. *episodes*: the season's
+    ``episodes_planned`` once it exists."""
+    if not wants_setup(story):
+        return None
+    from . import media_policy, templates
+
+    if not lock and story.get("style_template_id"):
+        try:
+            lock = templates.load_style(story["style_template_id"])
+        except KeyError:
+            lock = None
+    template = None
+    if story.get("episode_template_id"):
+        try:
+            template = templates.load_episode_template(story["episode_template_id"])
+        except KeyError:
+            template = None
+    profile = {"native_speech": media_policy.native_speech(story)}
+    return setup_context(story, lock, template, profile, episodes=episodes, hexes=hexes)
 
 
 # ============================================================ phase 3 (spec 4.2)
