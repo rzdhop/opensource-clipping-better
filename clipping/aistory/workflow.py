@@ -3734,6 +3734,8 @@ def _assets_view(ec, script, board, doc, derived) -> dict:
                 (doc or {}).get(judge_step.KEYFRAME_VERDICTS, {}).get(shot["shot_id"]),
                 derived["keyframe_current"].get(shot["shot_id"], False))
             shots[-1]["keyframe_fix"] = ((doc or {}).get(assets_step.KEYFRAME_FIXES) or {}).get(shot["shot_id"])
+            # Plan 28 F1: the human's own keyframe -- its check is a warning, never a refusal.
+            shots[-1]["own_keyframe"] = assets_step.image_mode(ec.story, shot, doc) == video_plan.MANUAL
     lines = []
     for scene in (script or {}).get("scenes") or []:
         for line in scene["lines"]:
@@ -3784,6 +3786,9 @@ def _keyframe_verdict_view(entry, current):
             "continuity_issue": entry["continuity_issue"], "checked_at": entry["checked_at"]}
     if entry.get("framing_issue"):
         view["framing_issue"] = entry["framing_issue"]
+    if entry.get("sheet_issues"):
+        # Plan 28 F2: what the review's verdict text says first (judge.verdict_text).
+        view["sheet_issues"] = list(entry["sheet_issues"])
     return view
 
 
@@ -4291,6 +4296,9 @@ def episode_review(page) -> dict:
                 "current": clip.get("state") == "current", "target": clip.get("target"),
                 "blocked": clip.get("blocked"), "continue": bool(clip.get("continue"))},
             "verdict": verdict, "fix": fixes.get(shot["shot_id"]),
+            # Plan 28 F1: the check's issues on the human's own keyframe, a warning (never a refusal).
+            "warning": (f"The check saw: {verdict['issue']}"
+                        if view.get("own_keyframe") and verdict["state"] == "flagged" else None),
             "lines": [lines[line_id] for line_id in shot["lines"] if line_id in lines],
         })
 
@@ -4750,9 +4758,12 @@ def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now, by=US
     it, or upload your own."). *approve_anyway* is still accepted (the API
     and the CLI pass it) and goes over nothing: the way past a refusal is a
     new keyframe -- regenerated, or the human's own upload -- that passes
-    the check. Then ``assets.json`` gains ``keyframes_approved {at, anyway,
-    fingerprint, by, flagged}`` -- ``anyway`` false and ``flagged`` empty
-    (both kept for the approvals recorded before), the fingerprint of the
+    the check. A keyframe the human uploaded themselves is their own
+    consistency decision: judged, warned about, never refused
+    (``assets.keyframe_findings``' ``warnings``). Then ``assets.json`` gains
+    ``keyframes_approved {at, anyway, fingerprint, by, flagged}`` --
+    ``anyway`` false, ``flagged`` the human's own keyframes the check warned
+    about (an older approval's "anyway" stays readable), the fingerprint of the
     keyframes as they are now (``assets.keyframes_fingerprint``): once a
     keyframe changes, the approval is stale
     (:func:`keyframes_approval_state`), derived, never cleared (DEC-155).
@@ -4787,9 +4798,10 @@ def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now, by=US
     if findings["refusal"]:
         # Plan 28 F1: a hard gate -- approve_anyway goes over nothing.
         raise WorkflowError(CONFLICT, f"Episode {ep}'s keyframes are not approved. {findings['refusal']}")
+    # The human's own keyframes the check warned about, approved as theirs (plan 28 F1).
     doc[judge_step.KEYFRAMES_APPROVED] = {"at": now, "anyway": False,
                                           "fingerprint": assets_step.keyframes_fingerprint(ec, board),
-                                          "by": by, "flagged": []}
+                                          "by": by, "flagged": [shot_id for shot_id, _text in findings["warnings"]]}
     try:
         return stories.write_episode_doc(story_id, ep, ASSETS_DOC, doc, now=now)
     except schemas.SchemaError as exc:

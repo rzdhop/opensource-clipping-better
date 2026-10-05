@@ -686,7 +686,8 @@ class _FastTrack:
     def approve_keyframes(self, ec) -> None:
         """Stage C: the keyframe approval the one click records on the
         human's behalf, once the keyframes are made, checked (J2) and
-        auto-fixed -- every one passed; ``by: fast_track`` on the record,
+        auto-fixed -- every one passed (the human's own uploads: judged,
+        warned about, never a stop); ``by: fast_track`` on the record,
         so the review screen says who approved. Plan 28 F1 (DEC-305 §5): a
         shot still flagged after the auto-fix, or not checked, is a stop
         with the approval's own sentences (``workflow.keyframe_findings``:
@@ -700,11 +701,17 @@ class _FastTrack:
         if findings["refusal"]:
             raise StepFailed(f"Episode {ec.ep}'s keyframes are not approved. {findings['refusal']}")
         total = len(board["shots"])
+        own = [shot_id for shot_id, _text in findings["warnings"]]
+        detail = f"{total} keyframe{_s(total)} checked by J2, every one passed"
+        if own:
+            # The human's own keyframes: the check's issues are a warning, never a stop.
+            detail = (f"{total} keyframe{_s(total)} checked by J2; your own keyframe{_s(len(own))} kept with the "
+                      "check's warning: " + "; ".join(f"{shot_id} ({text})" for shot_id, text in findings["warnings"]))
         self.approve(ec, "keyframes",
                      lambda workflow, now: workflow.approve_keyframes(ec.store, ec.story_id, ec.ep, now=now,
                                                                       by=workflow.FAST_TRACK_APPROVED),
-                     f"{total} keyframe{_s(total)} checked by J2, every one passed")
-        self.keyframes = {"auto_approved": True, "anyway": False, "flagged": [], "unchecked": []}
+                     detail)
+        self.keyframes = {"auto_approved": True, "anyway": False, "flagged": own, "unchecked": []}
 
     def stopped(self, number, name, exc) -> StepFailed:
         message = " ".join(str(exc).split())
@@ -934,8 +941,11 @@ class _FastTrack:
                 review += (" (the script was approved for you anyway; still found: "
                            f"{_and(_issue_label(issue) for issue in self.script_anyway)})")
             if self.keyframes is not None:
-                # Plan 28 F1: only keyframes that all passed are approved for the human.
-                review += " (the keyframes were approved for you: every check passed)"
+                # Plan 28 F1: only keyframes that passed (or are the human's own, warned) are approved for them.
+                own = self.keyframes["flagged"]
+                review += (f" (the keyframes were approved for you; your own keyframes kept with the check's "
+                           f"warning: {_and(own)})" if own else " (the keyframes were approved for you: every check "
+                           "passed)")
         self.log(f"🏁 Fast track done: episode {ec.ep} is rendered with its metadata pack{review} "
                  f"({seconds / 60:.1f} min{approved}).")
         result = {"ep": ec.ep, "storyboard": mode, "steps": results, "auto_approved": list(self.auto_approved),

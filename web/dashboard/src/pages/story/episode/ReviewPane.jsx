@@ -124,6 +124,7 @@ function ReviewTile({ storyId, ep, shot, characters, onOpen }) {
       <span className="story-review-tile-head">
         <span className="story-script-scene-id">{shot.shot_id}</span>
         {shot.locked && <span className="chip">locked</span>}
+        {shot.warning && <span className="chip chip-warn" title={shot.warning}>your own</span>}
       </span>
       <span className={chip.className}>{chip.text}</span>
       {first && (
@@ -234,7 +235,10 @@ function ReviewDetail({ storyId, ep, shot, characters, assetsBlocked, busy, onCl
             Clip: {clipName ? `${shot.clip.state}${shot.clip.current ? '' : ' (not this keyframe’s)'}` : 'none yet'}
           </p>
         )}
-        {shot.verdict.issue && <p className="form-hint">Keyframe check (J2): {shot.verdict.issue}</p>}
+        {shot.warning ? (
+          // Plan 28 F1: the human's own keyframe -- the check's issues are a warning, never a refusal.
+          <p className="form-hint">Your own keyframe. {shot.warning}</p>
+        ) : shot.verdict.issue && <p className="form-hint">Keyframe check (J2): {shot.verdict.issue}</p>}
         {shot.fix && (
           <p className="form-hint">
             Auto-fix: {plural(shot.fix.redraws, 'redraw')}, ${formatUsd(shot.fix.spent_usd)}

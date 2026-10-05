@@ -28,8 +28,9 @@ export function pendingApprovals(episode, ep) {
  * The episode studio's "Approve all": the script, the storyboard, the
  * keyframes and the assets, one after the other through the same approvals
  * their own buttons use. It stops at the first one the server refuses and
- * shows that sentence; it never approves anyway (the keyframes' and the
- * script's "Approve anyway" stay a separate, explicit click).
+ * shows that sentence; it never approves anyway (the script's "Approve
+ * anyway" stays a separate, explicit click; the keyframes have none since
+ * plan 28 F1 -- a hard gate, regenerate or upload your own instead).
  */
 export default function EpisodeApproveAll({ storyId, ep, episode, busy, onChange }) {
   const [approving, setApproving] = useState(false)

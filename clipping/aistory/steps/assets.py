@@ -2299,23 +2299,31 @@ def keyframe_findings(ec, storyboard, doc) -> dict:
     """What stands between episode *ec.ep*'s keyframes and their approval,
     shot by shot (``workflow.keyframe_findings``' reading, here so the
     assets step says it too): ``{"failed": [(shot_id, what J2 found)],
-    "unjudged": [shot_id, ...], "refusal": sentence | None}`` -- a current
-    verdict (J2) that failed, a shot with no current verdict (none, or one
-    of other images or of an older J2: ``judge.verdict_current``), and (plan
-    28 F1) the plain sentences that refuse them
-    (``judge.keyframe_refusal``), None when every shot passed. Hashes every
-    image."""
+    "unjudged": [shot_id, ...], "refusal": sentence | None, "warnings":
+    [(shot_id, what J2 found)]}`` -- a current verdict (J2) that failed, a
+    shot with no current verdict (none, or one of other images or of an
+    older J2: ``judge.verdict_current``), and (plan 28 F1) the plain
+    sentences that refuse them (``judge.keyframe_refusal``), None when
+    every shot passed. A keyframe the human uploaded themselves
+    (:func:`image_mode` ``manual``) is their own consistency decision: still
+    judged, its failed verdict is a warning, never a refusal, and an
+    unjudged one never blocks. Hashes every image."""
     verdicts = (doc or {}).get(judge.KEYFRAME_VERDICTS) or {}
-    unjudged, failed, entries = [], [], []
+    unjudged, failed, entries, warnings = [], [], [], []
     for shot, _path, sha, _prev_id, _prev_path, prev_sha in keyframe_items(ec, storyboard, doc):
         entry = verdicts.get(shot["shot_id"])
+        own = image_mode(ec.story, shot, doc) == video_plan.MANUAL
         if not judge.verdict_current(entry, sha, prev_sha):
-            unjudged.append(shot["shot_id"])
+            if not own:
+                unjudged.append(shot["shot_id"])
         elif not judge.verdict_passed(entry):
-            failed.append((shot["shot_id"], judge.verdict_text(entry)))
-            entries.append((shot["shot_id"], entry))
+            if own:
+                warnings.append((shot["shot_id"], judge.verdict_text(entry)))
+            else:
+                failed.append((shot["shot_id"], judge.verdict_text(entry)))
+                entries.append((shot["shot_id"], entry))
     refusal = judge.keyframe_refusal(entries, unjudged) if entries or unjudged else None
-    return {"failed": failed, "unjudged": unjudged, "refusal": refusal}
+    return {"failed": failed, "unjudged": unjudged, "refusal": refusal, "warnings": warnings}
 
 
 def keyframes_fingerprint(ec, storyboard) -> str:
@@ -4960,10 +4968,14 @@ class _Assets(voice_lines.LineMeasurement):
             result["keyframes"] = dict(self.keyframe_check, approval=keyframes_state(ec, board, doc))
             if result["keyframes"]["approval"] != "current":
                 # Plan 28 F1: what the hard gate will refuse, said now -- never a silent stop.
-                refusal = keyframe_findings(ec, board, doc)["refusal"]
+                findings = keyframe_findings(ec, board, doc)
+                refusal = findings["refusal"]
                 if refusal:
                     result["keyframes"]["refusal"] = refusal
                     ctx.on_log(f"⛔ Episode {ec.ep}'s keyframes cannot be approved yet. {refusal}")
+                for shot_id, text in findings["warnings"]:
+                    # The human's own keyframe: the check's issues, a warning.
+                    ctx.on_log(f"⚠️ Shot {shot_id} is your own keyframe. The check saw: {text}.")
             if self.keyframe_fix is not None:
                 # Phase 8 stage B: what the keyframe auto-fix did, with its one-line message.
                 result["keyframes"]["fix"] = dict(self.keyframe_fix)

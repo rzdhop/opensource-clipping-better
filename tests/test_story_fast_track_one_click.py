@@ -350,8 +350,10 @@ def test_the_review_block_reads_the_finished_episode_and_what_is_still_pending(s
     assert by_id[shot["shot_id"]]["lines"] == [
         {"line_id": line_id, "speaker": lines[line_id]["speaker"], "text": lines[line_id]["text"]}
         for line_id in shot["lines"]]
+    # Plan 28 F1, re-pinned on purpose: "warning", the check's issues on the human's own keyframe (else None).
     assert set(review["shots"][0]) == {"shot_id", "scene_id", "order", "image_name", "image_state", "locked",
-                                       "target", "clip", "verdict", "fix", "lines"}
+                                       "target", "clip", "verdict", "fix", "lines", "warning"}
+    assert review["shots"][0]["warning"] is None
 
     # A keyframe changed since: both approvals are stale, pending in order, the render out of date.
     ec = tas._ec(store, story_id)

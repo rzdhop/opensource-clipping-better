@@ -125,3 +125,30 @@ def test_j2_asks_the_head_and_the_outfit_and_sees_the_set_s_plate_and_the_props(
              "sheet_issues": ["Gaston's head is a pear, the sheet shows a pineapple"]}
     assert not judge.verdict_passed(entry)
     assert judge.verdict_text(entry) == "Gaston's head is a pear, the sheet shows a pineapple"
+
+
+def test_a_keyframe_the_human_uploaded_is_judged_and_warned_about_never_refused(store, tmp_path, built):
+    """The human's own keyframe is their consistency decision: J2 still
+    judges it, its issues are a warning on the shot ("The check saw: ..."),
+    and the approval goes through, recording it as flagged."""
+    from PIL import Image
+
+    import test_story_fast_track_one_click as oc
+    from clipping.aistory import manual_uploads, workflow
+
+    story_id = kg._v2_keyframes(store, tmp_path, built)
+    workflow.patch_shot_mode(store, story_id, 1, "sh02", {"image": "manual"}, now=kg.LATER, env=kg.SETTINGS)
+    own = tmp_path / "own.png"
+    Image.new("RGB", (1080, 1920), (200, 40, 40)).save(own, format="PNG")
+    manual_uploads.accept_keyframe(store, story_id, 1, "sh02", str(own), env=kg.SETTINGS)
+    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")), params={"animate": False})
+    assert kg._doc(store, story_id)["keyframe_verdicts"]["sh02"]["sheet_issues"] == [
+        "Gaston's head is a pear, the sheet shows a pineapple"]
+
+    approved = kg._approve_keyframes(store, story_id)["keyframes_approved"]
+
+    assert approved["anyway"] is False and approved["flagged"] == ["sh02"]
+    shot = next(item for item in workflow.episode_review(oc._page(store, story_id))["shots"]
+                if item["shot_id"] == "sh02")
+    assert shot["verdict"]["state"] == "flagged"
+    assert shot["warning"] == "The check saw: Gaston's head is a pear, the sheet shows a pineapple"
