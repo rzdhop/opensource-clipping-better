@@ -90,9 +90,10 @@ def test_the_wizard_and_the_card_offer_your_own_clips_and_images():
     for src in (wizard, card):
         assert '<option value="native_speech_manual">' in src
         assert "value === 'native_speech' || value === 'native_speech_manual'" in src
-    assert "...(manualClips && imagesOwn ? { images: 'manual' } : {})" in wizard
+    # plan 25 stage 5: the checkbox became the "How images are made" control, independent of the clips' mode
+    assert "...(imagesManual ? { images: 'manual' } : {})" in wizard
     assert "offer.native_speech_manual" in wizard
-    assert "save({ images: e.target.checked ? 'manual' : null })" in card
+    assert "save(own ? { images: 'manual' } : { images: null })" in card
 
 
 def test_the_tiles_upload_to_the_paths_the_api_serves():

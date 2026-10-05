@@ -5,6 +5,7 @@ import { StepError } from './fields'
 import { formatUsd } from '../../lib/format'
 import { useConfirm, useToast } from '../../ui'
 import { stepLabel } from './storySteps'
+import HowMadeControls from './HowMadeControls'
 
 // The story's "Visual tier" card (phase 6), moved out of the old wizard shell
 // by the story workspace (dashboard overhaul stage 3, DEC-255): the header
@@ -152,6 +153,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const [promptStyle, setPromptStyle] = useState(profile.prompt_style || 'studio')
   // Plan 23 stage B8: fill establishing wide shots with stock footage (absent: off); patchable any time.
   const [stockCutaways, setStockCutaways] = useState(profile.stock_cutaways || '')
+  // Plan 25 stage 5: the profile the card held before "My own" clips, what "Auto" goes back to.
+  const [profileBeforeManual, setProfileBeforeManual] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // A pipeline switch refused over written episodes (PATCH's structured 409):
@@ -250,6 +253,20 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       save({ budget_profile: value })
     }
   }
+  // Plan 25 stage 5: "How clips are made" -- My own is the native_speech_manual profile (the same PATCH as the
+  // select); Auto goes back to the profile the card held before, else native_speech. A running step answers 409
+  // and save() puts every control back to the server's values.
+  const handleClipsOwn = (own) => {
+    if (own === (budgetProfile === 'native_speech_manual')) return
+    if (own) {
+      setProfileBeforeManual(budgetProfile)
+      handleBudgetProfile('native_speech_manual')
+    } else {
+      handleBudgetProfile(profileBeforeManual || 'native_speech')
+    }
+  }
+  // "How images are made": My own is images: 'manual' (a v2 story only), Auto clears it.
+  const handleImagesOwn = (own) => { save(own ? { images: 'manual' } : { images: null }) }
   const handleSpeechModel = (value) => { setSpeechModel(value); save({ speech_model: value }) }
   // The default is no key at all (null clears it): a story that never chose keeps its documents as they were.
   const handleSheetMode = (value) => { setSheetMode(value); save({ sheet_mode: value === 'three_sheet' ? null : value }) }
@@ -301,6 +318,18 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   return (
     <div className="card story-generation-profile" style={{ marginBottom: '16px' }}>
       <h3 className="card-title">Visual tier</h3>
+      <HowMadeControls
+        clipsOwn={budgetProfile === 'native_speech_manual'}
+        imagesOwn={isV2 && imagesOwn}
+        imagesDisabled={!isV2}
+        imagesNote="Your own images need the v2 pipeline: switch this story to v2 first."
+        disabled={saving}
+        onClips={handleClipsOwn}
+        onImages={handleImagesOwn}
+      />
+      <p className="form-hint">
+        <strong>Clips: {manualClips ? 'my own' : 'auto'} · Images: {isV2 && imagesOwn ? 'my own' : 'auto'}</strong>
+      </p>
       <div className="form-group">
         {fullyAnimated ? (
           <span className="chip">
@@ -351,13 +380,6 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           <option value="native_speech_manual">Native speech — your own clips (Flow / Higgsfield)</option>
         </select>
       </div>
-      {manualClips && (
-        <label className="story-checkbox">
-          <input type="checkbox" checked={imagesOwn} disabled={saving}
-            onChange={(e) => save({ images: e.target.checked ? 'manual' : null })} />
-          My own images too (sheets, plates, props and keyframes: upload them on their tiles)
-        </label>
-      )}
       {isV2 && (
         <div className="form-group">
           <label className="form-label" htmlFor="story-profile-sheet-mode">Character sheets</label>

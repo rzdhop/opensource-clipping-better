@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createStory, fetchNewStoryProfile, fetchSettings, fetchStyles, fetchUniverses } from '../../api'
 import { Button } from '../../ui'
+import HowMadeControls from './HowMadeControls'
 import {
   EPISODE_TEMPLATES, pipelineDefaultTemplate, profileSuggestedTemplate, styleSuggestedTemplate,
 } from './episodeTemplates'
@@ -104,8 +105,11 @@ function CreateStoryForm() {
   const [budgetProfile, setBudgetProfile] = useState(DEFAULT_GENERATION_PROFILE.budget_profile)
   const [pipeline, setPipeline] = useState('')
   const [speechModel, setSpeechModel] = useState('fast')
-  // Plan 22 stage 5: on "your own clips", the sheets, plates, props and keyframes may be yours too.
+  // Plan 22 stage 5: the sheets, plates, props and keyframes may be your own uploads (plan 25 stage 5: the
+  // "How images are made" control; only a v2 story has manual images).
   const [imagesOwn, setImagesOwn] = useState(false)
+  // Plan 25 stage 5: the profile the form had before "My own" clips, what "Auto" goes back to.
+  const [profileBeforeManual, setProfileBeforeManual] = useState('')
   // Plan 23 stage D4: the characters' sheets and bodies; the defaults send nothing.
   const [sheetMode, setSheetMode] = useState('three_sheet')
   const [bodyRule, setBodyRule] = useState('')
@@ -169,6 +173,21 @@ function CreateStoryForm() {
       setConsistencyMode('references')
     }
   }
+  const imagesManual = pipeline === 'v2' && imagesOwn
+  // Plan 25 stage 5: "How clips are made". My own is the native_speech_manual profile; Auto goes back to the
+  // profile the form had, else native_speech (native speech is on), else the server's own default.
+  const handleClipsOwn = (own) => {
+    if (own === manualClips) return
+    if (own) {
+      setProfileBeforeManual(budgetProfile)
+      handleBudgetProfile('native_speech_manual')
+      return
+    }
+    const serverDefault = offer && offer.profile && offer.profile.budget_profile
+    handleBudgetProfile(profileBeforeManual
+      || (nativeSpeech ? 'native_speech' : (serverDefault && serverDefault !== 'native_speech_manual' ? serverDefault : 'free')))
+  }
+  const handleImagesOwn = (own) => { setProfileChosen(true); setImagesOwn(own) }
   const fullyAnimated = pipeline === 'v2' && (budgetProfile === 'quality' || nativeSpeech) && tier >= 2
   // What the native-speech profile costs per speaking-clip model, and the keys it still needs.
   const speech = offer && (manualClips ? offer.native_speech_manual : offer.native_speech)
@@ -236,10 +255,10 @@ function CreateStoryForm() {
           budget_profile: budgetProfile,
           ...(pipeline ? { pipeline } : {}),
           ...(nativeSpeech ? { speech_model: speechModel } : {}),
-          ...(manualClips && imagesOwn ? { images: 'manual' } : {}),
+          ...(imagesManual ? { images: 'manual' } : {}),
           ...(pipeline === 'v2' && sheetMode !== 'three_sheet' ? { sheet_mode: sheetMode } : {}),
           ...(bodyRule ? { body_rule: bodyRule } : {}),
-          ...(pipeline === 'v2' && !(manualClips && imagesOwn) && imagePreference ? { image_preference: imagePreference } : {}),
+          ...(pipeline === 'v2' && !imagesManual && imagePreference ? { image_preference: imagePreference } : {}),
           ...(shownUniverse ? { universe: shownUniverse } : {}),
           ...(pipeline === 'v2' && promptStyle !== 'studio' ? { prompt_style: promptStyle } : {}),
           ...(shownFrame !== '9:16' ? { aspect: shownFrame } : {}),
@@ -308,6 +327,15 @@ function CreateStoryForm() {
             </div>
             <p className="form-hint">{MODE_HELP[mode]}</p>
           </div>
+
+          <HowMadeControls
+            clipsOwn={manualClips}
+            imagesOwn={imagesManual}
+            imagesDisabled={pipeline !== 'v2'}
+            imagesNote="Your own images need the v2 pipeline (Generation profile → Pipeline)."
+            onClips={handleClipsOwn}
+            onImages={handleImagesOwn}
+          />
 
           <div className="form-group">
             <label className="form-label">Seed text (optional)</label>
@@ -385,6 +413,9 @@ function CreateStoryForm() {
           </div>
 
           <div className="form-group">
+            <p className="form-hint">
+              <strong>Clips: {manualClips ? 'my own' : 'auto'} · Images: {imagesManual ? 'my own' : 'auto'}</strong>
+            </p>
             {manualClips ? (
               <p className="chip chip-wrap">
                 Native speech — your own clips: each character line is spoken on camera by its own clip, which you
@@ -478,13 +509,6 @@ function CreateStoryForm() {
                   <option value="native_speech_manual">Native speech — your own clips (Flow / Higgsfield)</option>
                 </select>
               </div>
-              {manualClips && (
-                <label className="story-checkbox">
-                  <input type="checkbox" checked={imagesOwn}
-                    onChange={(e) => { setProfileChosen(true); setImagesOwn(e.target.checked) }} />
-                  My own images too (sheets, plates, props and keyframes, from the image brief)
-                </label>
-              )}
               {pipeline === 'v2' && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-sheet-mode">Character sheets</label>
@@ -507,7 +531,7 @@ function CreateStoryForm() {
                   )}
                 </div>
               )}
-              {pipeline === 'v2' && !(manualClips && imagesOwn) && (
+              {pipeline === 'v2' && !imagesManual && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-image-preference">Image provider</label>
                   <select id="new-story-image-preference" className="form-select" value={imagePreference}
