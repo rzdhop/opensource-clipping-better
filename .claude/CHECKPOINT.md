@@ -1,19 +1,26 @@
-## CURRENT STATE — plan 25 (the handoff): stages 0, 1, 2, 5 MERGED; stages 3 (the Handoff view) and 4 (the tiles) in worktrees (2026-10-05, local session)
+## CURRENT STATE — plan 25 (the handoff) COMPLETE and LIVE; close-out pending the human's Flow walk (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `7634830` (+ this docs commit), clean tree,
-  CI green through e3d8596 (later runs in progress). Running: stage 3 (Opus, `feat/plan25-s3`, worktree plan25-s3:
-  `HandoffPage.jsx` at `/story/:id/episodes/:ep/handoff`, the Shot list retired, `#shots` kept) and stage 4 (Sonnet,
-  `feat/plan25-s4`: `PromptDrawer.jsx` on the Cast / Places / Props tiles from the image brief). Next: merge both →
-  **deploy at 0 jobs (3.11 compile, rm -sfv + rebuild: stages 0, 1, 2 Python + 3, 4, 5 dashboard)** → stage 6 docs
-  (`docs/AI_STORY.md` "Your own clips" around the Handoff; DEC for the shipped shape) → the human's Flow walk from the
-  Handoff + the refresh of e7412a3efcc6's storyboard prompts (stage 0's names; stales its made keyframes — the
-  human's call).
-- **Merged this plan:** stage 0 34b46fe (human casts named), stage 1 597513a (`shot_modes` per shot, the gate prices
-  auto rows only, `PATCH …/shots/{sid}/mode`), stage 5 cc65a66 (How clips / images are made controls), stage 2
-  4041470 (`GET/PATCH …/handoff`, per-shot references.zip, image-brief.zip). None deployed yet.
-- **Live:** main 10defae's code (bundle index-DU7H2ro8.js), health 200. Plan 24's walk and plan 23's human items
-  unchanged.
-- **Rules in force:** unchanged.
+- **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this docs commit), clean tree.
+  **Live:** deployed 13:16 UTC from a07180c (bundle index-3yvxKpRp.js): health 200, the handoff route 200, 361 jobs;
+  the Handoff verified at 375 px on e7412a3efcc6 (no console errors; Copy prompt, references, checks, upload, the Mode
+  control). CI: green through b89ae11; a07180c / fdb27fe / this commit in progress or queued — a fresh session reads
+  them first. DEC-301 (approval), DEC-302 (as shipped).
+- **Shipped today (three plans):** plan 23's follow-through (CI keys, the hidden route-test red, follow-ups A8 D7 B8
+  A5 D5, the C2 probe tool), plan 24 (the timing harness, DEC-298/300), plan 25 (the handoff, DEC-301/302).
+- **The human's hands:** (1) the Flow walk from the Handoff: open e7412a3efcc6 → episode 1 → the "Handoff →" tab,
+  make 3 shots on Flow from the cards (time spent, what was missing — plan 22 stage 8's question), upload them, watch
+  the take verdicts; (2) decide the storyboard prompt refresh of e7412a3efcc6 (stage 0's names; stales the 10 made
+  keyframes): Storyboard tab → the storyboard PATCH with refresh_prompts (the "Rebuild" action) — or leave it and
+  make the clips from the current prompts, whose speaker/listener/Audio sentences are already fixed but whose action
+  text still says "the leather loafers"; (3) plan 24's walk (regenerate ep1 → 0 timing warnings); (4) plan 23's items:
+  the keys + zone, the fal top-up → the probe, the A/B.
+- **Follow-ups logged (not done):** DEC-302's consequence list; plan 24's (trim calls outside the estimate, pooled
+  off-native caps, reaction shots on top of the plan, cap character scenes at 3 on native, measured per-voice rates);
+  `_repair_e1_reply`/`_repair_e3_reply` bare reads; Fish Audio.
+- **Rules in force:** unchanged (worktrees; DEC-234 both envs + prompts.py → test_story_prompts_episode.py; DEC-297;
+  deploy at 0 jobs after the 3.11 compile; no full local suite; no source edits during a job; money only on the go).
+- **Close-out per file:** CHECKPOINT (this header), VISION (plan-25 paragraph added below), ASSUMPTIONS (A-168
+  added), DECISIONS (DEC-301/302), action log (one line per stage, deviation, deploy), docs/AI_STORY.md (the Handoff).
 - **Open questions:** none blocking.
 
 ## CURRENT STATE — plan 24 (the timing harness) CODE + DOCS COMPLETE and LIVE; close-out pending the human's walk; plan 23 follow-ups ALL DONE (2026-10-05, local session)

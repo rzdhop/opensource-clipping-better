@@ -32,6 +32,12 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-30)
+- **2026-10-05 — plan 25 (the handoff, DEC-301/302):** the human makes clips by hand on Flow and Higgsfield from the
+  app's prompts, and the app only offered a long clips-only Shot list, no prompts for images, a hidden mode and no
+  way to mix. Now one Handoff screen per episode, built for the phone, shows every shot's prompts, provider, mode
+  (Auto or My own) and upload, with the images and the sheets beside the clips, and the wizard says plainly how clips
+  and images are made. Human casts are named in every prompt. This is the product's bring-your-own-clips promise made
+  usable: the human's subscriptions do the generating, the app does everything around it.
 - **2026-10-05 — plan 24 (the timing harness, DEC-298/300):** the human's screenshot showed every body scene of a new
   episode over its slot with no retry logged: nothing enforced the word budget, two clocks disagreed, the budget forgot
   the pauses, and the writer was never told seconds. Now every writing-v3 scene is written to a line plan derived from
