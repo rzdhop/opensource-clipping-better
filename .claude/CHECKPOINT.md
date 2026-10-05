@@ -3,8 +3,8 @@
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this docs commit), clean tree.
   **Live:** deployed 13:16 UTC from a07180c (bundle index-3yvxKpRp.js): health 200, the handoff route 200, 361 jobs;
   the Handoff verified at 375 px on e7412a3efcc6 (no console errors; Copy prompt, references, checks, upload, the Mode
-  control). CI: green through b89ae11; a07180c / fdb27fe / this commit in progress or queued — a fresh session reads
-  them first. DEC-301 (approval), DEC-302 (as shipped).
+  control). CI: GREEN on a07180c (the deployed code) and fdb27fe; the later docs-only commits were still running at the
+  last read. DEC-301 (approval), DEC-302 (as shipped).
 - **Shipped today (three plans):** plan 23's follow-through (CI keys, the hidden route-test red, follow-ups A8 D7 B8
   A5 D5, the C2 probe tool), plan 24 (the timing harness, DEC-298/300), plan 25 (the handoff, DEC-301/302).
 - **The human's hands:** (1) the Flow walk from the Handoff: open e7412a3efcc6 → episode 1 → the "Handoff →" tab,
