@@ -1252,10 +1252,37 @@ def _approve_complete(stories, story_id, kinds) -> None:
             print(f"✅ {doc['name']} approved.")
 
 
+def _generation_refusal(stories, story, units):
+    """The sentence the cast or places gate refuses with, or None: the API's
+    gate in this process (plan 23 A5, RC-V6). The image chain's verdict on
+    the portraits, plates and props first; then ``workflow.generation_budget``
+    -- the one sum of the images and the sheet edits, checked once, that the
+    API's estimate and gate share (DEC-283). A v2 story it blocks is refused
+    here, before any portrait is bought: a sum over a cap in its message, an
+    edit the budget refuses in the editor's words. A legacy story never
+    blocks here: DEC-117's stop-and-ask before its edits stays the step's.
+    Books nothing, calls nothing."""
+    env = _settings_env()
+    images = edit = None
+    if units["images"]:
+        images = workflow.image_verdict(stories, story, units["images"], env=env)
+        if not images["ready"]:
+            return images["message"]
+    if units["edit_images"]:
+        edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"])
+    budget = workflow.generation_budget(stories, story, units, images, edit, env=env)
+    if not budget["blocks"]:
+        return None
+    if budget["refusal"]:
+        return budget["message"]
+    return f"{edit['message']} {refimages.editor_advice(story, edit)}"
+
+
 def _phase2_step(args, stories, story, items) -> int:
     """``cast``, ``places_proposal``, ``places``, ``season`` or ``knowledge``, in this
     process: the API's rules (``_phase2_params``), the key gate, the image
-    chain's verdict when a picture would be made, then ``--prompt-only``,
+    chain's verdict and the one budget check of the images and edits when a
+    picture would be made (:func:`_generation_refusal`), then ``--prompt-only``,
     the run, what the cast still lacks, and ``--auto-approve``."""
     step, story_id = args.step, story["story_id"]
     params, checked, units, default_cast = _phase2_params(args, stories, story, items)
@@ -1264,10 +1291,10 @@ def _phase2_step(args, stories, story, items) -> int:
     if refusal:
         _err(refusal)
         return EXIT_FAILED
-    if units is not None and units["images"]:
-        verdict = workflow.image_verdict(stories, checked, units["images"], env=_settings_env())
-        if not verdict["ready"]:
-            _err(verdict["message"])
+    if units is not None and (units["images"] or units["edit_images"]):
+        refusal = _generation_refusal(stories, checked, units)
+        if refusal:
+            _err(refusal)
             return EXIT_FAILED
 
     if args.prompt_only:
