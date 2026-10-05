@@ -832,7 +832,7 @@ export default function ScriptPane({ episode, storyDoc, characters, places, epis
 
       {script && script.scenes.length > 0 && (
         <>
-          <TimingWarnings timing={script.timing} />
+          <TimingWarnings timing={script.timing} scenes={script.scenes} storyId={storyId} ep={ep} busy={busy} onChange={onChange} />
 
           <div className="card">
             <DurationBar template={episode.template} scenes={script.scenes} timing={script.timing} />

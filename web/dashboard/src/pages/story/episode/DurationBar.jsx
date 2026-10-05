@@ -6,6 +6,9 @@
 // names, so a phone-width page can jump straight to it instead of hunting
 // the scene list.
 
+import { useState } from 'react'
+import { regenerateStory } from '../../../api'
+import { StepError } from '../fields'
 import { AlertTriangle, ChevronRight } from '../../../ui/icons'
 
 const SCENE_FUNCTION_LABELS = {
@@ -19,6 +22,85 @@ function targetOf(flag) {
   if (flag.scene_id) return `scene-${flag.scene_id}`
   if (flag.line_id) return `line-${flag.line_id}`
   return null
+}
+
+// Plan 24 stage 6: a "Trim" action on a timing warning. It asks the writer
+// to rewrite the flagged scene through the scene regenerate that already
+// exists (POST /regenerate, target scene:<ep>:<sid>) with a note built here
+// from the scene's slot and its line plan; no new route.
+
+const SLOT_IN_MESSAGE = /its (\d+(?:\.\d+)?) s slot/
+
+// The scene's upper slot bound: the stored slot_s when the scene carries one,
+// else the figure a flag of the same scene names in its message ("Scene s02
+// is 2.1 s over its 13 s slot." -- the scene_over flag; a trim_line flag's own
+// message omits it), else null.
+export function sceneSlotHi(flag, scene, flags = []) {
+  if (scene && Array.isArray(scene.slot_s) && scene.slot_s.length === 2) return scene.slot_s[1]
+  for (const f of [flag, ...flags]) {
+    if (!f || f.scene_id !== flag.scene_id) continue
+    const found = SLOT_IN_MESSAGE.exec(f.message || '')
+    if (found) return Number(found[1])
+  }
+  return null
+}
+
+function plannedLine(plan, index) {
+  const line = plan && Array.isArray(plan.lines) ? plan.lines[index] : null
+  if (!line) return null
+  return `line ${index + 1} (${line.speaker || 'narrator'}) at most ${line.max_words} words`
+}
+
+// "Trim to the slot: scene s02 lasts at most 13 s, line 1 (narrator) at most
+// 14 words; keep the meaning and the speaker, cut words." The line part is
+// the flagged line's cap, or every planned line's when the flag names none;
+// a scene without a line plan gets the slot alone.
+export function trimNote(flag, scene, flags = []) {
+  const hi = sceneSlotHi(flag, scene, flags)
+  let note = `Trim to the slot: scene ${flag.scene_id} ` + (hi == null ? 'is over its slot' : `lasts at most ${hi} s`)
+  const plan = scene && scene.line_plan
+  if (plan && Array.isArray(plan.lines) && plan.lines.length > 0) {
+    const lines = (scene.lines || [])
+    const at = flag.line_id ? lines.findIndex((line) => line.line_id === flag.line_id) : -1
+    const parts = at >= 0
+      ? [plannedLine(plan, at)]
+      : plan.lines.map((_, i) => plannedLine(plan, i))
+    const named = parts.filter(Boolean)
+    if (named.length > 0) note += `, ${named.join(', ')}`
+  }
+  return `${note}; keep the meaning and the speaker, cut words.`
+}
+
+function TrimButton({ storyId, ep, flag, flags, scene, disabled, onChange }) {
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+
+  const run = async () => {
+    setRunning(true)
+    setError('')
+    setErrors(null)
+    try {
+      await regenerateStory(storyId, { target: `scene:${ep}:${flag.scene_id}`, note: trimNote(flag, scene, flags) })
+      if (onChange) onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <>
+      {' '}
+      <button type="button" className="btn btn-secondary btn-sm duration-bar-trim" onClick={run}
+              disabled={disabled || running}>
+        {running ? 'Trimming…' : 'Trim'}
+      </button>
+      <StepError message={error} errors={errors} className="story-step-error" />
+    </>
+  )
 }
 
 export default function DurationBar({ template, scenes, timing }) {
@@ -78,9 +160,15 @@ export default function DurationBar({ template, scenes, timing }) {
  * same messages as before, each a link to the scene or line it names.
  * Nothing at all while the episode has no flag.
  */
-export function TimingWarnings({ timing }) {
+export function TimingWarnings({ timing, scenes, storyId, ep, busy, onChange }) {
   const flags = (timing && timing.flags) || []
   if (flags.length === 0) return null
+  const sceneById = Object.fromEntries((scenes || []).map((scene) => [scene.scene_id, scene]))
+  const trimmed = new Set(flags.filter((f) => f.kind === 'trim_line' && f.scene_id).map((f) => f.scene_id))
+  // A trim_line flag is trimmable; so is a scene_over flag whose scene has no
+  // trim_line flag of its own (the same scene is not offered twice).
+  const trimmable = (flag) => Boolean(storyId && flag.scene_id && sceneById[flag.scene_id]) && (
+    flag.kind === 'trim_line' || (flag.kind === 'scene_over' && !trimmed.has(flag.scene_id)))
   return (
     <details className="story-script-warnings">
       <summary className="story-script-warnings-summary">
@@ -94,6 +182,10 @@ export function TimingWarnings({ timing }) {
           return (
             <li key={i}>
               {anchor ? <a href={`#${anchor}`}>{flag.message}</a> : flag.message}
+              {trimmable(flag) && (
+                <TrimButton storyId={storyId} ep={ep} flag={flag} flags={flags} scene={sceneById[flag.scene_id]}
+                            disabled={busy} onChange={onChange} />
+              )}
             </li>
           )
         })}

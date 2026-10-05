@@ -4780,6 +4780,10 @@ button.activity-group-head:focus-visible {
   padding: 0 14px 12px 36px;
 }
 
+.story-script-warnings .duration-bar-trim {
+  margin-left: 6px;
+}
+
 .story-script-warnings a {
   color: var(--text-primary);
   text-decoration: underline;
