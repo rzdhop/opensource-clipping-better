@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { downloadApiFile, fetchHandoff, patchHandoff } from '../../../api'
 import { Button, Spinner, useToast } from '../../../ui'
-import { ArrowDownToLine, FileText, FastForward } from '../../../ui/icons'
-import { EntityHandoffCard, ShotHandoffCard } from './HandoffCard'
+import { ArrowDownToLine, Copy, FileText, FastForward } from '../../../ui/icons'
+import { EntityHandoffCard, ShotHandoffCard, useCopy } from './HandoffCard'
 
 // The Handoff view (plan 25 stage 3, D-3; DEC-301 retired the Shot list for
 // it): everything of one episode that is made outside the app -- or could
@@ -183,6 +183,38 @@ function PlatformRow({ platformInfo, aspect, saving, onChoose }) {
   )
 }
 
+/**
+ * The master prompt of a v2 story (`doc.master_prompt`: `{text, words,
+ * sections: [{key, label, words}]}`; null on a v1 story, then nothing shows):
+ * the block every shot prompt already carries, folded by default, with one
+ * "Copy master prompt" and a chip per section.
+ */
+function MasterPromptCard({ master }) {
+  const { copy, fallback } = useCopy()
+  if (!master || !master.text) return null
+  return (
+    <details className="handoff-master">
+      <summary className="handoff-master-title">Master prompt · {master.words} words</summary>
+      <div className="handoff-master-body">
+        {(master.sections || []).length > 0 && (
+          <p className="handoff-master-sections">
+            {master.sections.map((section) => (
+              <span key={section.key} className="chip handoff-master-chip">{section.label} {section.words}</span>
+            ))}
+          </p>
+        )}
+        <Button variant="primary" icon={Copy} className="handoff-copy-main" onClick={() => copy(master.text, 'master prompt')}>
+          Copy master prompt
+        </Button>
+        <p className="form-hint">
+          Every shot prompt below already carries this block. Paste it alone in a chat that keeps context (Gemini), not on Flow.
+        </p>
+        {fallback}
+      </div>
+    </details>
+  )
+}
+
 export default function HandoffPage() {
   const { storyId, ep } = useParams()
   const toast = useToast()
@@ -333,6 +365,8 @@ export default function HandoffPage() {
       {error && <p className="story-error">{error}</p>}
 
       <PlatformRow platformInfo={platformInfo} aspect={aspect} saving={saving} onChoose={choosePlatform} />
+
+      <MasterPromptCard master={doc.master_prompt} />
 
       {section('Clips', cards.clips, (card) => (
         <ShotHandoffCard key={card.key} storyId={storyId} ep={ep} shot={card.shot} which="clip"

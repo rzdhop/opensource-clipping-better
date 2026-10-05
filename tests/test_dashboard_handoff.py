@@ -114,9 +114,12 @@ def test_the_page_reads_only_what_the_handoff_writes(store):
     blocks = [shot["clip"] for shot in shots if shot["clip"]] + [shot["image"] for shot in shots]
     assert read("doc") and read("doc") <= set(doc) | {"export"}, read("doc") - set(doc)
     assert read("shot") <= set().union(*map(set, shots)), read("shot") - set().union(*map(set, shots))
-    block_keys = set().union(*map(set, blocks))
+    # Plan 26: ``fit`` and ``prompt_warning`` are written on a v2 story only (stage 4 adds them to
+    # the image block and the entity rows too): the page reads them when present.
+    optional = {"fit", "prompt_warning"}
+    block_keys = set().union(*map(set, blocks)) | optional
     assert read("block") and read("block") <= block_keys, read("block") - block_keys
-    entity_keys = set().union(*map(set, doc["entities"])) | {"variant_id", "variant_label", "reference"}
+    entity_keys = set().union(*map(set, doc["entities"])) | {"variant_id", "variant_label", "reference"} | optional
     assert read("entity") <= entity_keys, read("entity") - entity_keys
     assert read("platformInfo") <= set(doc["platform"]), read("platformInfo") - set(doc["platform"])
     assert read("gate") <= {"link", "est_usd", "allowed", "reason"}
@@ -176,3 +179,31 @@ def test_one_copy_helper_works_over_plain_http():
         if path != SRC / "lib" / "clipboard.js" and "navigator.clipboard" in _read(path)
     ]
     assert offenders == [], offenders
+
+
+def test_the_handoff_shows_the_master_prompt_word_counts_and_the_fit_notes():
+    """(plan 26 stage 5) The page's "Master prompt" card reads the document's
+    ``master_prompt`` (``{text, words, sections}``, null on a v1 story: hidden),
+    folded by default, with one "Copy master prompt" and a chip per section.
+    Every shot card says its prompt's word count next to Copy prompt, notes a
+    fit that dropped something ("Fitted to ...") and shows ``prompt_warning`` as
+    a warning row. Everything newer than stage 3 is read defensively: a block
+    without ``fit`` shows nothing extra."""
+    page = _read(PAGE)
+    card = _read(CARD)
+    helper = _read(SRC / "lib" / "promptFit.js")
+    assert "doc.master_prompt" in page and "function MasterPromptCard" in page
+    assert "Master prompt" in page and "Copy master prompt" in page
+    assert "master_prompt.sections" in page or "master.sections" in page
+    assert "Paste it alone in a chat that keeps context (Gemini), not on Flow." in page
+    assert "Every shot prompt below already carries this block." in page
+    assert "master prompt" in page  # the toast: Copied — master prompt
+    assert "<details" in page.split("function MasterPromptCard", 1)[1].split("\nexport default", 1)[0]
+    assert "block.prompt_warning" in card and "block.fit" in card
+    assert "entity.fit" in card
+    assert "chip chip-warn" in card.split("function FitNote", 1)[1].split("\n}\n", 1)[0]
+    assert "words" in helper and "Fitted to" in helper and "fit.dropped" in helper
+    assert "full_words" in helper and "fit.limit" in helper
+    assert "import { copyLabel, fitNote } from '../../../lib/promptFit'" in card
+    # The fetch returns the whole document: nothing strips the new fields.
+    assert "return res.json()" in _function_body(_read(API), "fetchHandoff")

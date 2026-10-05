@@ -90,3 +90,15 @@ def test_the_drawer_adds_no_bare_fetch_and_no_sign_in():
         src = _read(path)
         assert not re.search(r"(?<![A-Za-z_.])fetch\(", src), path.name
         assert "token" not in src.lower() and "sign in" not in src.lower(), path.name
+
+
+def test_the_drawer_shows_the_word_count_and_the_fit_note():
+    """(plan 26 stage 5) The Copy prompt button says the entry's ``fit.words``
+    and a fit that dropped something shows its "Fitted to" note; an entry
+    without ``fit`` renders as before."""
+    src = _read(DRAWER)
+    assert "entry.fit" in src
+    assert "import { copyLabel, fitNote } from '../../../lib/promptFit'" in src
+    assert "copyLabel('Copy prompt'" in src and "fitNote(entry.fit)" in src
+    helper = _read(SRC / "lib" / "promptFit.js")
+    assert "words" in helper and "Fitted to" in helper

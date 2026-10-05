@@ -3,6 +3,7 @@ import { fetchImageBrief, fetchStoryMediaUrl } from '../../../api'
 import { Badge, Button, useToast } from '../../../ui'
 import { ArrowDownToLine, Copy } from '../../../ui/icons'
 import { copyText, revealForManualCopy } from '../../../lib/clipboard'
+import { copyLabel, fitNote } from '../../../lib/promptFit'
 import { useStoryMediaUrl } from '../EntityGallery'
 import ManualUploadSlot from '../ManualUploadSlot'
 import './PromptDrawer.css'
@@ -154,9 +155,10 @@ export default function PromptDrawer({ storyId, entry, disabled, onDone }) {
       </div>
       <p className="form-hint">Make it at {sizeLine(entry)}.</p>
       <div className="prompt-drawer-actions">
-        <CopyText text={entry.prompt} primary>Copy prompt</CopyText>
+        <CopyText text={entry.prompt} primary>{copyLabel('Copy prompt', entry.fit)}</CopyText>
         {entry.negative_prompt && <CopyText text={entry.negative_prompt}>Copy negative</CopyText>}
       </div>
+      {fitNote(entry.fit) && <p className="form-hint prompt-drawer-fit">{fitNote(entry.fit)}</p>}
       <details className="prompt-drawer-prompt">
         <summary>Prompt</summary>
         <pre>{entry.prompt}</pre>

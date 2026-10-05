@@ -4,6 +4,7 @@ import { Badge, Button, useToast } from '../../../ui'
 import { AlertTriangle, ArrowDownToLine, ChevronDown, Copy, Sparkles } from '../../../ui/icons'
 import { copyText, revealForManualCopy } from '../../../lib/clipboard'
 import { formatUsd } from '../../../lib/format'
+import { copyLabel, fitNote } from '../../../lib/promptFit'
 import BudgetRefusal, { isBudgetRefusal } from '../BudgetRefusal'
 import ManualUploadSlot from '../ManualUploadSlot'
 
@@ -191,6 +192,22 @@ function PromptText({ prompt, negative }) {
   )
 }
 
+/**
+ * What the fit of a prompt to its link did ("Fitted to 1800 words for this
+ * link: ..."), and its short-prompt warning, as a warning row. Nothing when
+ * the block carries neither (a v1 story).
+ */
+function FitNote({ fit, warning }) {
+  const note = fitNote(fit)
+  if (!note && !warning) return null
+  return (
+    <>
+      {note && <p className="form-hint handoff-fit-note">{note}</p>}
+      {warning && <p className="chip chip-warn chip-wrap handoff-prompt-warning" role="status">{warning}</p>}
+    </>
+  )
+}
+
 /** The take's verdict on an uploaded clip: what the speech check heard. */
 function TakeVerdict({ take }) {
   if (!take) return null
@@ -323,7 +340,7 @@ function ManualBody({ shot, which, block, platformInfo, onUploaded, copy }) {
       )}
       <div className="handoff-copy-row">
         <Button variant="primary" icon={Copy} className="handoff-copy-main" onClick={() => copy(block.prompt, 'prompt')}>
-          Copy prompt
+          {copyLabel('Copy prompt', block.fit)}
         </Button>
         {clip && block.line && (
           <Button size="sm" icon={Copy} onClick={() => copy(block.line, 'line')}>Copy line</Button>
@@ -332,6 +349,7 @@ function ManualBody({ shot, which, block, platformInfo, onUploaded, copy }) {
           <Button size="sm" icon={Copy} onClick={() => copy(block.negative_prompt, 'negative')}>Copy negative</Button>
         )}
       </div>
+      <FitNote fit={block.fit} warning={block.prompt_warning} />
       <PromptText prompt={block.prompt} />
       <References references={block.references} zipUrl={block.zip_url}
         zipName={`${shot.shot_id}_${which}_references.zip`} />
@@ -423,12 +441,13 @@ export function EntityHandoffCard({ entity, domId, open, onToggle, onUploaded })
           </p>
           <div className="handoff-copy-row">
             <Button variant="primary" icon={Copy} className="handoff-copy-main" onClick={() => copy(entity.prompt, 'prompt')}>
-              Copy prompt
+              {copyLabel('Copy prompt', entity.fit)}
             </Button>
             {entity.negative_prompt && (
               <Button size="sm" icon={Copy} onClick={() => copy(entity.negative_prompt, 'negative')}>Copy negative</Button>
             )}
           </div>
+          <FitNote fit={entity.fit} />
           <PromptText prompt={entity.prompt} />
           {hasReference && (entity.reference ? (
             <div className="handoff-refs-block">

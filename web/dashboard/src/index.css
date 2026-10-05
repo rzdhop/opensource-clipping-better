@@ -5668,6 +5668,48 @@ button.activity-group-head:focus-visible {
   gap: var(--space-2);
   width: 100%;
 }
+.handoff-master {
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.handoff-master[open] {
+  border-color: var(--border-color-hover);
+}
+.handoff-master-title {
+  min-height: 48px;
+  padding: var(--space-3);
+  font-weight: 600;
+  cursor: pointer;
+}
+.handoff-master-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+.handoff-master-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+}
+.handoff-master-chip {
+  text-transform: uppercase;
+  font-size: var(--text-xs);
+}
+.handoff-master-body .handoff-copy-main {
+  flex: none;
+}
+.handoff-fit-note,
+.handoff-prompt-warning {
+  width: 100%;
+  margin: 0;
+}
+.prompt-drawer-fit {
+  margin: 0;
+}
 .handoff-copy-main {
   min-height: 44px;
   flex: 1 1 100%;
