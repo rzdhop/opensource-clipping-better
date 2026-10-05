@@ -102,7 +102,7 @@ job.
 | **Cinematic Teaser Hook** | 3-second hook with dark overlay, cinematic bars, and **TV Glitch** transition |
 | **Karaoke Subtitles** | Word-by-word highlighted `.ASS` subtitles (Alex Hormozi / Veed style) |
 | **Kinetic Typography** | AI-driven word emphasis with bounce/stagger animations & dual-font system |
-| **B-Roll Integration** | Auto-fetches contextual stock footage from **Pexels** with crossfade & Ken Burns (Supports Hybrid, Split-Screen & Camera-Switch) |
+| **B-Roll Integration** | Auto-fetches contextual stock footage from **Pexels**, **Pixabay** or your own folder, with credits kept in the clip's manifest, crossfade & Ken Burns (Supports Hybrid, Split-Screen & Camera-Switch) |
 | **Multi-Hook Intro (V2)** | Creates high-retention 3-4 micro-hook intros with flash/glitch transitions |
 | **Smart Segment Trimming** | AI dynamically selects the best segments to cut out boring/silent parts |
 | **Auto-BGM & Ducking** | Local BGM asset pool (`assets/bgm/`) with 2 modes: *sidechain ducking* (BGM auto-lowers during speech) or *background* (constant low volume). MP3 files auto-loop if shorter than the video |
@@ -281,7 +281,17 @@ Episode 1 is what this MVP delivers; episode 2 and later wait on a memory
 step still to come. Output lands under
 `outputs/stories/<id>/episodes/ep01/` — see
 [docs/AI_STORY.md](docs/AI_STORY.md) for the full walkthrough, the CLI and
-what's kept on disk.
+what's kept on disk. Added since, each described there:
+
+- The daily spending cap names three numbers when it refuses a job, offers
+  "allow more for today only", and counts its day in your time zone
+  (`BUDGET_TIMEZONE`).
+- Optional paid providers, never used unless you set the key and allow paid
+  spending: Claude as the premium writer (`ANTHROPIC_API_KEY`), ElevenLabs
+  voices (`ELEVENLABS_API_KEY`), Gemini as a second image link, and
+  `fal/ltx-2.5-fast` as the last video link.
+- Per-story choices: a subtitle look, ten universes with a Viral 3D style, a
+  one-image front-and-back character sheet, and action-style clip prompts.
 
 ---
 

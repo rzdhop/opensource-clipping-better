@@ -82,6 +82,24 @@ on their own Google Flow or Higgsfield / Freepik subscription and uploads it
 ("Your own clips (the manual mode)"). The fully automated Veo API route for
 native speech is still there, a per-story switch, bounded by the same caps.
 
+**2026-10-05.** A cast the app refused with a sentence nobody could read
+("would bring today to $8.58 of the $4.00 daily cap", for a cast that costs
+$0.60) led to a second round, on the cap first and then on a list of
+upgrades. The cap now says three numbers (what was spent today, what this
+job costs, the cap), offers to allow more for today only, and counts its day
+in your own time zone ("Budget: today's limit"). Gemini became a second link
+for the character sheets, the place plates and the props, and a story may
+prefer it ("Costs and providers"). Around that: Clips mode takes B-roll from
+Pexels, Pixabay and a folder of your own ("Stock footage for Clips mode");
+ElevenLabs voices exist, paid and never chosen for you; a story carries its
+own subtitle look ("11. Render"); the renderer can draw 16:9 and 1:1, though
+no story can choose them yet; `fal/ltx-2.5-fast` ends the video chain;
+Claude can write the premium calls; and the creators' method came in as
+choices on a v2 story, not as a new pipeline: ten universes and a Viral 3D
+style, one front-and-back character sheet, bodies made of the character's
+own matter, clip prompts written as one continuous action, and appearance
+variants of a character ("What else the form decides").
+
 ## The quality pipeline (v2)
 
 Phase 7 rebuilt how an episode looks and reads, after the first episodes
@@ -145,6 +163,20 @@ for the turnaround, expressions and variants), keyframes on
 (cloudflare, pollinations, flux-schnell, gpt-image-2-low) are never used for
 these; the style preview stays a free draft. A v2 keyframe is centre-cropped
 to an exact 9:16 when it is made.
+
+Since plan 23 the sheet, plate and prop roles have a second link:
+`gemini/nano-banana-2-lite` ($0.0336 an image, 1K output), after
+`fal/seedream-4.5` and `fal/seedream-4.5-edit`. Fal stays first. Lite is the
+link a cast falls to when a fal call is refused (near the daily cap a $0.04
+call can be refused where $0.0336 still fits) or when fal is down. It needs
+`GEMINI_PAID_API_KEY` and is skipped, with the reason shown, while that key is
+missing (the free `GOOGLE_API_KEY` never serves it). Within one cast or places
+job the provider that answered first is tried first for the rest of the job, so
+one job does not mix providers; a later run, or one regenerated image, starts
+from fal again, so a portrait and its sheets can come from different
+providers. Gemini keeps no seed, so a portrait it draws is not reproducible
+by seed. A story can put Gemini first instead (`image_preference:
+gemini_first`, "What else the form decides").
 
 **Writing.** AI Story writes on its own chain (`STORY_LLM_CHAIN`, default:
 NVIDIA NIM nemotron-3 ultra, then super, then OpenRouter mistral-medium-3.1 —
@@ -398,6 +430,18 @@ seconds × its link's price, plus silent seconds × Lite's, plus a small
 per-shot retake contingency (one free retake of a mismatched take, bounded
 by its own small cap) and the premium text cost.
 
+**A fourth speaking model, not yet.** `fal/ltx-2.5-fast` (open weights,
+native audio; the last link of the video chain, "Costs and providers") could
+speak as well, but it is not offered as a speaking-clips model, and
+`speech_model` has no `ltx` value. It is not cheaper for speech: its
+shortest clip is 6 s where Veo sells 4 s, so a nine-line episode is about
+$5.46 of clips against about $4.60 on Veo Fast, at $0.09 a second. And
+nobody has heard it speak French. Before it becomes a speaking model, a
+one-clip probe (about $0.54, run only on your go) has to show that at least
+80 % of the line's words come back in the take and that it sounds right to
+you; that probe has not been run. Its value would be a second speaking
+provider that is not Google, and clips of 10 s for a long line.
+
 **Why it is refused, and how to allow it.** Caps are global Settings →
 Budget numbers (per-episode / daily / per-story); this host's are set to
 **$2 / $4 / $10**. Every native-speech API price is well over the $2
@@ -528,10 +572,10 @@ stories as cards (title, status, style, language); **New story** starts one.
   you, so a story is never silently written in the wrong language.
 - **Seed text** (optional) — a rough idea, a scene, a vibe; up to 2000
   characters. It seeds the concepts, nothing more.
-- **Style** (optional) — pick one of the seven shipped templates now, or
-  "Decide later" and pick it at step 4. The seven: Fruit Drama, 3D Animated
-  Family Film, Anime/Manga, Realistic Cinematic, 2D Cartoon/Flat, Storybook
-  Watercolor, Claymation/Stop-motion.
+- **Style** (optional) — pick one of the eight shipped templates now, or
+  "Decide later" and pick it at step 4. The eight: Fruit Drama, Viral 3D,
+  3D Animated Family Film, Anime/Manga, Realistic Cinematic, 2D Cartoon/Flat,
+  Storybook Watercolor, Claymation/Stop-motion.
 - **Episode format** — the episode template the story is written on (see
   "Episode formats" below). It follows the style's suggestion when the
   suggestion fits the pipeline (Fruit Drama suggests the narrated drama on
@@ -549,6 +593,117 @@ stories as cards (title, status, style, language); **New story** starts one.
   `one_dollar` animates key shots, `quality` — "Quality (billed APIs)" —
   animates every shot). A line above it says whether the story will be fully
   animated, and why not.
+
+**What else the form decides (v2 stories).** Six optional keys of the
+generation profile carry the choices below. Each one left out leaves the
+story exactly as it was before the key existed, and only a v2 story reads
+them. The wizard has a select for each but `variants` (the universe's list
+follows the style), the story's Visual tier card shows them and changes all
+but the universe and `variants`, and they can be patched with `PATCH
+/api/stories/{id}` (`{"generation_profile": {...}}`); a key is cleared by
+patching `null`.
+
+| Key | Values | What it does |
+|---|---|---|
+| `universe` | an id of `GET /api/stories/universes` | what the cast is made of |
+| `sheet_mode` | `three_sheet` (default), `two_view`, `two_view_expressions` | how a character's sheets are drawn |
+| `body_rule` | `human_body` (default), `all_matter` | whether the bodies are the character's own matter |
+| `image_preference` | `gemini_first` | which provider the images try first |
+| `prompt_style` | `studio` (default), `action` | how a clip's prompt is written |
+| `variants` | `on` | lets characters carry appearance variants without choosing a sheet mode |
+
+**Universes.** A universe says what a story's cast is made of. Ten ship in
+`templates/universes.json`, each with a French and an English label and a
+pool of generic species (a cola can, a smartphone, a chocolate bar, a
+burger, a wine bottle, a light bulb...): fruits, vegetables, drinks and
+sodas, tech gadgets, snacks and sweets, fast food, bottles, household
+objects, melting materials, and gross and funny. Bottles and gross-and-funny
+carry an audience note (adult audience and no drinking shown as a reward;
+cartoon-clean, no bodily fluids). The Viral 3D style takes all ten; Fruit
+Drama takes fruits and vegetables only; the other styles take none, and a
+universe that does not fit the style is refused when the story is made or
+patched, naming both. The universe enters the writing only when you chose
+it: the concepts' prompt then carries the species pool and a lead species
+for each card, assigned in a fixed order that depends on the story and the
+batch, so ten cards open on ten different species while the pool allows, and
+a character's species is a field of the card. The style lock records the
+universe when you lock the style. A story that never chose one (Fruit
+Drama's default, fruits, only pre-selects the form) is written exactly as
+before. No generated text may name a brand once a universe is chosen: a
+reply that says "Coca", "iPhone", "Lego" and so on (the list lives in
+`schemas.BRAND_DENYLIST`; "monster" and "sprite" count only beside a drink
+word) is asked again with the brand named and told to write the generic
+thing instead.
+
+**Character sheets.** The default is three images per character: a portrait,
+a turnaround and an expressions sheet, about $0.12 a character at Seedream's
+$0.04 an image. `two_view` draws one 9:16 image (1080×1920 where the link
+allows) with the front on the left half and the back on the right, head to
+toe and never cut across the middle line, about $0.04 a character;
+`two_view_expressions` adds an expressions sheet, about $0.08. The sheet is
+stored as the character's portrait, so keyframes, the first-watch check and
+the shot brief need no change, and a keyframe's prompt says the image shows
+the character twice and to draw it once. The wizard shows each mode's price
+from the estimate. Regenerate a character's images to draw them again in
+another mode; a story that is not v2 keeps three sheets whatever the key
+says.
+
+**Bodies.** `all_matter` replaces the style's character-design rules, once,
+when you approve and lock the style, with a rule saying the whole body,
+hands and legs included, is made of the character's own matter and no human
+skin shows anywhere (the matter comes from the universe, else from the
+style: for Fruit Drama, the character's own fruit or vegetable flesh). Only
+a style that defines the rule can be approved with it (Fruit Drama and Viral
+3D; Viral 3D has it by default), and a style that is already locked is never
+touched.
+
+**Image provider.** `gemini_first` makes every image role of the story try
+its Gemini link before its fal link (nothing is removed, so a link an
+episode already uses stays valid). It needs `GEMINI_PAID_API_KEY`: the
+select is disabled with the hint while the key is missing. See "Costs and
+providers" for the links and their prices.
+
+**Clip prompts.** `studio` is the layered prompt every story has had.
+`action` writes the clip prompt as one continuous physical action in the
+present tense (what the shot's motion does), naming every character at every
+mention by an anchor built from its look (its colours, whether it is a
+fruit, a can, a gadget, its name, its first outfit item: "the green-yellow
+female strawberry character in a dirty burlap dress"), the place once in ten
+words at most, the sounds in the sentence, and exactly one camera phrase;
+the quoted line and the closing "Audio: only … no other voice" sentences are
+never cut, and over the link's budget the sounds go first, then the
+reaction, the place, the listener, the action and last the camera. **A
+clip's prompt is part of what makes it current, so changing the style makes
+every clip already made, uploads included, stale.** The patch answers with
+the count and a warning ("Switching the clip prompts to action rewrites
+every clip's prompt: 6 current clips (uploads included) will be marked stale
+and must be made again.") and the card shows it as a toast. Native audio
+kept on a clip keeps the studio prompt.
+
+**Appearance variants.** A character may carry up to three named variants of
+its look, such as a "ghost version": a label (40 characters at most) and
+what changes in the look (60 words at most, no name). Variants exist on a v2
+story that has chosen a sheet mode, or with `variants: "on"`; any other
+story is untouched, down to the byte. In Cast, each character has **Add
+variant**; **Make sheets** then draws the variant's sheets as edits of the
+character's base portrait, one per sheet of the story's mode, priced like
+the sheets ("N variant sheets" in the estimate), and **Approve variant**
+approves them on their own: the character's own approval is never reopened.
+A variant's id is a slug of its label, fixed when it is added. In an
+episode, a scene can say which variant each character wears and every shot
+inherits it; a shot card has a look select to override it for one shot (the
+shot's keyframe is then stale, on purpose). A shot that names a variant that
+is not approved refuses to make its keyframe, with one sentence. The
+variant's sheet is the identity image of its keyframes, the delta is said
+after the look (and in the action anchor under `action`), and the keyframe
+check and the shot brief use the variant's sheet. The script's writing
+prompt offers the states only when the cast has an approved variant, and the
+next-episode proposals may bring a twist as a variant: accepting it creates
+the record and queues its sheets behind the usual estimate. Adding or
+approving a variant marks the storyboards that have the character as
+outdated; their prompts refresh, and a shot without a variant is byte for
+byte what it was. The image brief for manual uploads does not list variant
+sheets yet.
 
 **Episode formats.** Five templates ship, each a story-level choice
 (`episode_template_id`, sent on creation or patched while no episode has a
@@ -657,12 +812,15 @@ what's missing. Approving unlocks the style step.
 
 ### 4. Style
 
-Pick a **style template** (the same seven), then tweak:
+Pick a **style template** (the same eight), then tweak:
 
 - **Primary palette** / **Accent palette** — colour swatches, add/remove.
 - **Font family**, **Highlight colour**, **Subtitle mode** (`word_pop` /
   `two_line` / `none`).
 - **AI label** — the on-screen "AI-generated" disclosure, on by default.
+- **Subtitle look** — size, position, colours, outline and a box behind the
+  text, saved on its own and editable at any time, the lock included (see
+  "11. Render").
 - **Consistency mode** — `references` (image generation is given reference
   images so characters/places stay visually consistent) or `prompt_only`, an
   explicitly labelled degraded mode where only the text prompt holds them
@@ -1224,6 +1382,27 @@ one committed face each — Bangers, Bebas Neue and Patrick Hand (OFL-1.1),
 Luckiest Guy and Chewy (Apache-2.0) — or your own font in `custom_fonts/`
 when you drop one in there.
 
+**Subtitle look.** A story can carry its own subtitle look, set in the Style
+step ("Subtitle look") or on the episode page, in the **Subtitles** panel
+(which also has the font). The fields: the font (Montserrat, Bangers,
+Luckiest Guy, Bebas Neue, Chewy or Patrick Hand), the size (60–160 % of the
+style's), the position (15–95 % of the frame's height from the top: the
+word's centre in word pop, the block's bottom edge in two line), the text
+colour (word pop only: two line keeps each speaker's own colour), the
+highlight colour (two line: the word being spoken), the outline width (0–8
+px) and colour, and an optional box behind the text (colour and an opacity
+of 0–100 %). A box replaces the outline: the outline fields are kept but not
+drawn. A field left empty keeps the style's own value. Text and highlight
+must reach a contrast ratio of at least 4.5 against what they are drawn on
+(the box, else the outline; no outline and no box means no check), or the
+save is refused with the ratio named. The look is saved on its own, at any
+time and after the style is locked, and it touches no image, clip or cache
+and clears no approval; it is refused while a render runs. **Render again**
+burns it: only the final pass runs, with the cover and the end card taking
+the story's font. A story with no look renders exactly as before. `PATCH
+/api/stories/{id}/subtitle-style` sets it (see `docs/api.md`); `null`
+clears it.
+
 **Framing.** Every still and, since phase 6, every Tier ≥ 2 clip is fit to
 the vertical frame the same way: centred and **cropped** to an exact 9:16
 when it isn't already close to one — a still more than 2% off, or any clip,
@@ -1232,6 +1411,16 @@ was asked for (Kling, for one, keeps the input keyframe's own aspect ratio
 rather than cropping or padding to what was requested) — never stretched and
 never letterboxed. A source already at 9:16, or within 2% of it, keeps
 exactly the encode it had before.
+
+**Frame geometry.** The renderer can draw three frames: 9:16 (1080×1920),
+16:9 (1920×1080) and 1:1 (1080×1080), with the text sizes unchanged (the
+short side is 1080 in all three). Only 9:16 is reachable today. Nothing in a
+story, the dashboard or the API selects another frame yet, because a 16:9
+episode also needs its pictures and clips made at 16:9 (a 9:16 keyframe cut
+to a 16:9 frame loses the characters), and that is a later stage; the cover
+stays 9:16 as well. The 9:16 render is byte for byte what it was before the
+change. The other two frames exist as tested builders and reference frames
+(`python3 tools/render_golden.py --aspect 16:9`).
 
 The finished video plays back in a player below (its poster is the cover),
 with a summary strip — duration, size and fps, loudness (I / TP / LRA),
@@ -1700,6 +1889,35 @@ link, printed rather than silently dropped, and the free chain still writes
 the whole episode; the estimate's `text_usd` line counts every premium call
 before the step runs.
 
+**Claude as the writer (optional).** With an Anthropic key
+(`ANTHROPIC_API_KEY`, in Settings → Providers or `.env`), the premium chain
+can name Claude: put `anthropic/claude-sonnet-5-5` ($2 / $10 per million
+input/output tokens, the provider's default model) or
+`anthropic/claude-opus-5-5` ($4 / $20) in **Story premium writing chain**,
+for example `anthropic/claude-sonnet-5-5,gemini-paid/gemini-3.8-flash`. The
+shipped chain does not name Claude: it is used only when you do. An effort
+can follow the model after an `@` (`low`, `medium`, `high`, `xhigh`, as in
+`anthropic/claude-opus-5-5@xhigh`); without one each call takes its own,
+high for the script calls (E1, E2, E3), medium for the concepts and the
+bible, low for the two judges. Every request is billed: a Claude link runs
+only with `allow_paid` on, inside the caps, and its estimate is counted
+before the step runs. Cached input is priced at its own read and write
+rates.
+
+Anthropic's server-side fallback is on: when Claude declines a request,
+Anthropic runs it again on the model it recommends inside the same call, and
+the reply is booked at the price of the model that actually answered (the
+ledger row says which); the pre-call estimate prices the request at the
+dearest model that might answer, never low. When the whole fallback chain
+declines, the step does not retry the same link at full price: it moves to
+the next link of your chain. Claude takes no temperature, so a retry cannot
+"cool off" as it does on other links. Settings has a **Check the Anthropic
+key (free)** button (`POST /api/settings/check-anthropic-key`): it asks
+Anthropic whether the key is accepted and each `anthropic/` model of the
+chain is available, which sends no request and bills nothing ("key valid,
+model available — not exercised: every request is billed"). The provider
+chain test lists Anthropic rows as "listed" for the same reason.
+
 **Image calls** — the style preview, a character's portrait, a place's day
 plate, a prop's image — go through `IMAGE_CHAIN` (text to image). The
 shipped default is:
@@ -1731,6 +1949,20 @@ you switch the story to `prompt_only` consistency, which routes the same
 images back through `IMAGE_CHAIN` (free, but degraded: the character or
 place may drift slightly across shots) instead.
 
+**Image links of a v2 story, by role.** A v2 story on a billed profile does
+not use the two chains above for its sheets, plates, props and keyframes:
+each role has its own short list (`budget_profiles.json`), and the preset's
+estimate prices the first link of each.
+
+| Role | Links, in order | Price per image |
+|---|---|---|
+| sheet, plate, prop | `fal/seedream-4.5`, `fal/seedream-4.5-edit`, `gemini/nano-banana-2-lite` | $0.04, $0.04, $0.0336 |
+| keyframe | `fal/seedream-4.5-edit`, `gemini/nano-banana-2-lite` | $0.04, $0.0336 |
+
+`gemini/nano-banana-2` ($0.067) is a paid Gemini image link too, used by the
+legacy edit chain above and by no v2 role. `gemini_first` puts the Gemini
+link first in every role of one story.
+
 **Voice calls** run on `TTS_CHAIN`: **Edge** (free, keyless, many
 languages, the shipped default's first link), Gemini's TTS model (needs
 `GOOGLE_API_KEY`, still free), or a local engine (`piper` / `kokoro` /
@@ -1738,6 +1970,19 @@ languages, the shipped default's first link), Gemini's TTS model (needs
 fixed-link chain built from the character's *pinned* voice alone — it never
 falls through to another provider or another voice; a failure names other
 voices to try instead of the one that failed.
+
+**ElevenLabs (paid, the last link).** With `ELEVENLABS_API_KEY` set,
+`elevenlabs/flash` ends `TTS_CHAIN` (`elevenlabs/multilingual-v2` can be
+named in the chain too). It is billed per character: flash $0.04,
+multilingual v2 $0.08 per 1,000 characters (read on ElevenLabs's price page,
+2026-10-04). It needs `allow_paid` on, counts against the caps, and books
+every line. It returns word timings, so the subtitles follow the voice. Its
+eight premade voices appear in a character's **Other voices** only while the
+key is set, each badged "paid · ≈ $x per episode" with the refusal that
+applies when a cap blocks it; the app never proposes one for you, you choose
+it. Speaking rate, pitch and direction are noted and not applied. A refused
+key, a spent character quota or a rate limit is named with its status. A
+keyless install, or `allow_paid` off, skips the link and nothing changes.
 
 **Design-reference descriptions** (a character's uploaded image, described
 once through vision) run on `VISION_CHAIN`: Gemini's `flash-lite` model by
@@ -1758,13 +2003,13 @@ only within the per-episode, daily and per-story caps; the fast track goes
 further and stops before spending anything paid unless every cap fits, with
 the numbers, before the first call.
 
-**At tier ≥ 2, video calls** run on `VIDEO_CHAIN` — local ComfyUI, or four
+**At tier ≥ 2, video calls** run on `VIDEO_CHAIN` — local ComfyUI, or five
 hosted links, each adapted the same way an image link is, but priced and
 billed by the second instead of per image. The shipped default chain:
 
 ```
 local/comfyui, fal/seedance-1-pro-fast, fal/ltx-2.3-fast,
-fal/kling-2.5-turbo-std, gemini/veo-3.1-lite
+fal/kling-2.5-turbo-std, gemini/veo-3.1-lite, fal/ltx-2.5-fast
 ```
 
 | Link | Price | Clip lengths |
@@ -1773,9 +2018,11 @@ fal/kling-2.5-turbo-std, gemini/veo-3.1-lite
 | `fal/ltx-2.3-fast` | $0.06/s at 1080p | 6, 8 or 10 s |
 | `fal/kling-2.5-turbo-std` | $0.21 for 5 s, then $0.042/extra s | 5 or 10 s |
 | `gemini/veo-3.1-lite` | $0.05/s at 720p; $0.08/s at 1080p (8 s only) | 4, 6 or 8 s |
+| `fal/ltx-2.5-fast` | $0.09/s at 720p; $0.16/s at 1080p | 6 to 20 s, even |
 
-Prices as of 2026-09-30. Seedance's 720p price only applies when 720p is
-requested explicitly — left unset, it defaults to 1080p at $0.049/s.
+Prices as of 2026-09-30 (LTX-2.5: 2026-10-04). Seedance's 720p price only
+applies when 720p is requested explicitly — left unset, it defaults to 1080p
+at $0.049/s.
 Seedance and kling send no negative prompt; kling and veo take no seed.
 `ltx-2.3-fast` sends `generate_audio` only for a Tier-3 shot; veo's audio is
 always on and included, with no free tier, through its own
@@ -1783,6 +2030,25 @@ always on and included, with no free tier, through its own
 keeps the **input keyframe's own aspect ratio** rather than a requested
 one — measured live: a 1024×1024 keyframe gave a 960×960 clip (see
 "Framing" under Render, above).
+
+**LTX-2.5 Fast, last in the chain.** `fal/ltx-2.5-fast` (Lightricks'
+image-to-video model on fal, open weights) sells clips of 6 to 20 s in even
+steps at 720p or 1080p: a shorter shot is rounded up to 6 s, as for every
+link, and a request for 1440p or more is refused before anything is sent.
+Its audio is optional and always asked for explicitly: an ambience clip asks
+for sound, a plain tier-2 clip asks for none. It takes no seed, so a
+regenerated clip is a different clip. The prices are the highest of the
+third-party listings read on 2026-10-04, because fal's own page shows a
+placeholder where the price should be: an estimate checked against a cap is
+never low, and Settings → Video's free key check shows fal's live price for
+the link. It is last on purpose: no automatic pick moves (`one_dollar` stays
+on seedance, `quality` on Veo lite or seedance), and an episode reaches it
+from its own video-link switch ("Tier 2/3: animating shots"). It is not a
+saving: at $0.09 a second it is Veo money, with a 6 s floor (see "Native
+speech (API route)" for what that does to speech, and why it is not a
+speaking model yet). An old install that pins its own `VIDEO_CHAIN` keeps
+its chain; the new link applies where the chain is not pinned, at the next
+restart.
 
 **Two more Veo links, for native speech.** Alongside `gemini/veo-3.1-lite`
 above, the **native speech** budget profile also reaches
@@ -1831,28 +2097,160 @@ is sent once more in the same run, gated and booked again.
 | Setting | Default |
 |---|---|
 | `allow_paid` | off |
-| `per_episode_cap_usd` | $1.00 |
-| `daily_cap_usd` | $3.00 |
-| `per_story_cap_usd` | $10.00 |
+| `per_episode_cap_usd` | $4.00 |
+| `daily_cap_usd` | $12.00 |
+| `per_story_cap_usd` | $40.00 |
+| `budget_timezone` | UTC |
 | budget profile | `free` while paid is off, `one_dollar` once it's on (or pick `quality`) |
 
-Turning `allow_paid` on does not spend anything by itself — it only lets a
-paid link be *reached*, still bounded by the three caps above, still shown
-as an estimate before anything runs.
+Caps you saved earlier win over these defaults (this host's are $2 / $4 /
+$10). Turning `allow_paid` on does not spend anything by itself — it only
+lets a paid link be *reached*, still bounded by the three caps above, still
+shown as an estimate before anything runs. The daily cap has its own section
+below, "Budget: today's limit".
 
 **Where spend is recorded:**
 
 - `outputs/stories/<id>/cost_ledger.json` — every call the story has made,
   free or paid, one entry each. The story page's cost total reads this.
 - `data/spend.json` — today's *paid* total across the whole app (clips and
-  stories together), against which `daily_cap_usd` is checked.
+  stories together), against which `daily_cap_usd` is checked, plus what was
+  allowed for today only and the log of those grants.
 - `data/usage.json` — free-tier daily call counters (Cloudflare, Gemini,
   Pollinations, …), shared with clip jobs. A paid call never touches this
   file — it's proof a paid call didn't quietly eat into a free allowance.
 
+## Budget: today's limit
+
+Three caps bound paid spending: per episode, per story and per day. The
+per-episode and per-story caps count one thing's ledger; **the daily cap
+counts everything the app paid for during one day, every story and every
+clip job together**. That is why a refusal can read like nonsense when it is
+not: a cast that costs $0.60 is refused because other stories already spent
+the day's money. This section is the daily cap.
+
+### What a day is
+
+A budget day runs from 00:00 to 24:00 in the time zone set by
+`BUDGET_TIMEZONE` (Settings → Budget → **Day time zone**, or `.env`): an IANA
+name such as `Europe/Paris`. Empty, unset or unrecognised means UTC, and an
+unrecognised name is shown in Settings with the reason and ignored until
+fixed. A save with an unknown zone is refused (400, naming the variable).
+
+What the zone moves: the cap's day, the "resets at" time, the day a refund
+goes back to, and the day each story's "spent today" is counted on. What stays on UTC on purpose: the free
+allowances of Cloudflare, Gemini, Pollinations and the others (their
+providers reset at 00:00 UTC), the price table's dates, and the timestamps
+in every ledger. Nothing is migrated when you change the zone: `spend.json`
+keeps one total per day, not the instant of each booking, so earlier days
+keep the keys they had, the first write under the new zone records the
+change, and at most one boundary moves (two hours for Paris): that day may
+hold a little more or less than one local day's spending. A refund of a
+booking made just before the change may land on the neighbouring day, and
+never takes a day below zero. Clearing the setting puts UTC back.
+
+### The refusal
+
+When the daily cap alone stops a paid job, the answer names three numbers
+and what to do:
+
+```
+Today's paid spending is already $8.38, over the $4.00 daily cap: this cast
+(est $0.60: 5 portraits $0.20 + 10 sheet edits $0.40) would bring it to
+$8.98. Allow $4.99 more for today only, raise the daily cap in Settings, or
+wait for the day to reset at 00:00 Europe/Paris.
+```
+
+Under the cap it reads "Today's paid spending is $3.70 of the $4.00 daily
+cap: …". The estimate lists the job's parts (portraits, sheet edits,
+images, clips) and, for a billed writer, the LLM calls' worst case. "Allow
+$X more" is the amount that lets this job through (today's spend, plus the
+job, plus its LLM calls' worst case, minus what is already allowed, rounded
+up to the cent). A job that would still meet another cap (the episode's or
+the story's) says so, since allowing more for today would not lift that one.
+The dashboard shows the same numbers as a panel, **Over today's spending
+limit**, with the rows Spent today (and which stories), This cast (or
+this step), Daily cap, and "Needs $4.99 more today." The API's answer is a
+409 with an object `detail` (see "AI Story: the daily cap" in `docs/api.md`).
+A paid call the runner refuses meanwhile uses the older plain sentence, with
+the allowance named when one exists ("… of the $4.00 daily cap + $4.99 allowed
+today").
+
+### Allowing more for today
+
+The panel's buttons: **Allow $X more today** (the exact amount), **Other
+amount…** (from $0.01 to $25.00) and **Budget settings**. An allowance is
+**for today only**: it is stored beside today's total in `data/spend.json`,
+it ends with the day (at the next 00:00 in your zone), the saved cap stays
+what it was, and the total allowed in one day cannot pass **$25**. Each grant
+is logged three ways: a line on the server's output, an entry in
+`spend.json`'s grants list (the last 200), and, when it comes from a story's
+panel, a line in that story's activity log. The button only grants: you
+press the step again, because a person still says go. Settings shows "Allowed
+for today only: +$X" with a **Remove** button that takes it back; the API is
+`POST` and `DELETE /api/budget/today/extra`.
+
+### Where you see it
+
+- The **today chip**, beside the estimate chip on every step: `today $8.38 /
+  $4.00`, with `+ $4.99` once something is allowed, and in the warning colour
+  once spending is over what is allowed.
+- **Settings → Budget** shows the day card: the zone (the Daily row says
+  "Europe/Paris day"), "Day of 5 Oct (Europe/Paris); it resets at 00:00
+  Europe/Paris.", what is allowed for today only, and the five stories that
+  spent the most today. When the saved cap is below what was already spent,
+  it warns, before and after you save: "This cap is below what was already
+  spent today ($8.38). Every paid call is refused until 00:00 Europe/Paris
+  unless you allow more for today."
+- `GET /api/budget/today` answers the same numbers, and every estimate route
+  carries them as `today`.
+
+### The whole cast is checked first
+
+A cast (portraits, then each character's sheet edits) used to check only its
+portraits at the gate, so a sheet edit refused later could waste the portraits
+already bought. On a v2 story the estimate and the gate now sum the
+portraits and the sheet edits and check them as one: a cast that would cross a
+cap is refused before the first portrait is bought, and the estimate shows the
+same total as the refusal. A legacy story keeps the earlier behaviour: it
+stops and asks before its edits. The gate books nothing; each image is still
+checked as it runs.
+
+## Stock footage for Clips mode
+
+This is Clips mode's B-roll, listed here because it shares Settings, and
+because it spends nothing. Where Clips used to fetch B-roll from Pexels alone,
+it now tries up to three sources, in order:
+
+- **`local`** — your own clips. Put `mp4`, `mov` or `webm` files in `./broll`
+  (`/app/broll` in Docker; the compose file mounts it read-only) and set
+  `BROLL_LOCAL_DIR` to that folder or one inside it (any other place is
+  refused). A clip is found by the words of its file name and, better, by an
+  optional sidecar `<name>.json` next to it or a folder `index.json`
+  (file name → the same fields): `keywords`, `licence`, `author`,
+  `source_url`. Symlinks are ignored, and a clip with no licence is used with
+  a warning.
+- **`pexels`** — `PEXELS_API_KEY`, as before (the Pexels License).
+- **`pixabay`** — `PIXABAY_API_KEY`, a free key (the Pixabay Content License;
+  100 requests a minute, so answers are kept for 24 hours).
+
+`BROLL_SOURCES` sets the order (default `local,pexels,pixabay`). A source with
+no key or no folder is skipped, so an install with a Pexels key alone behaves
+as it always did, and with no source at all B-roll is skipped and the clips
+still render (the new-job form says so). **Credits:** each stock clip used in
+a render is listed under `broll_credits` in that clip's `render_manifest.json`
+with a ready line ("Video by {author} on Pexels ({page}), Pexels License"),
+the licence and its link; a local clip with an unknown licence carries a
+warning to add one before you publish. The credit is data, not burned into the
+picture: putting it in a description is up to you. Settings →
+**B-roll sources** shows the order, the key and the folder, and
+`GET /api/broll/status` answers which sources can serve now and how many clips
+the folder holds.
+
 ## Not yet
 
-A few things phase 5 deliberately leaves for later:
+A few things phase 5 deliberately leaves for later, and what plan 23 has
+not shipped yet:
 
 - **Exporting or importing a story as a bundle** — a folder you can move to
   another install, or share — isn't here. It's a deliberate follow-up, not
@@ -1865,6 +2263,11 @@ A few things phase 5 deliberately leaves for later:
   the dashboard's Settings store, for any step — including the ones this
   phase adds. If you keep your keys in Settings, either mirror them into
   `.env` for a CLI session or use the dashboard for the steps that need one.
+- **16:9 and 1:1 in a story.** The renderer can draw them ("11. Render");
+  choosing one when a story is made, and making its images and clips at that
+  frame, is a later stage.
+- **LTX-2.5 as a speaking model.** It waits for a one-clip French probe that
+  has not been run ("Native speech (API route)").
 - **Per-character LoRA training** — teaching a model's own weights a
   character's look, instead of leaning on a keyframe and a prompt for every
   shot — isn't here. It's a deliberate future extension, flagged but not
@@ -1938,6 +2341,38 @@ ComfyUI's own published default graphs and are proven only against a fake
 ComfyUI server in this repository's own tests; nothing has run them against
 a real daemon, because this deployment has no GPU anywhere (the human's
 standing choice). First contact with a real ComfyUI is the actual test.
+
+### The future GPU box (Pinokio)
+
+This host is an Oracle Ampere A1 (aarch64, four cores, no GPU), and so is
+the container on it: nothing here can run a local model, whatever the
+settings say. When you have a computer with a GPU of your own, the local
+route works from that machine for $0 of cash, and Pinokio is the way to set
+it up. **Pinokio** is an open-source launcher that installs local AI apps in
+one click: ComfyUI, Wan2GP (Wan on GPUs from 6 GB of VRAM) and Maestro
+(LTX-2.5 and Wan). It is not free video: it runs on your hardware. Renting
+an hourly GPU is not set up.
+
+- Install Pinokio on the GPU machine, and ComfyUI from it (ComfyUI must
+  listen on an address the server can reach: its `--listen` option).
+- Join the machine to the same tailnet as this server
+  ([deploy-tailscale.md](deploy-tailscale.md)).
+- Set `LOCAL_COMFYUI_URL` (Settings, or `.env`) to ComfyUI's address on the
+  tailnet, for example `http://<machine>:8188`.
+- Open Settings → Local hardware. The profiler asks that ComfyUI for
+  `/system_stats` and trusts it over every other probe: the GPU it reports
+  picks the workflow of the table above (`i2v_wan22_5b` for 8–16 GB,
+  `i2v_wan22_14b_lightning` for 16–24 GB, `i2v_ltx2` for 24 GB and more,
+  silent), and each workflow's model files are named when missing.
+
+All three templates are still unverified against a real ComfyUI (the
+paragraph above): the first run on your machine is their first test, and
+`i2v_ltx2` makes silent clips only. **LTX-2.5** would make speaking clips
+locally: its open weights carry native audio and need 16 GB of VRAM at least
+(24–32 GB for comfort), and Lightricks' licence is free below ten million
+dollars of annual revenue (read it before you rely on that). It would need a
+new template, `i2v_ltx25`, with the audio decode that `i2v_ltx2` lacks. That
+template is not written, because it cannot be tested until the box exists.
 
 ## Where your story lives on disk
 
@@ -2230,3 +2665,62 @@ the assets step again) for a checked take instead — a **mismatch** or **no
 speech** badge, by contrast, means a key did check it and the clip did not
 match the line well enough; one retake is yours to try from the shot's
 card.
+
+**"Today's paid spending is already $8.38, over the $4.00 daily cap: this
+cast (est $0.60 …) would bring it to $8.98."** — read it as three numbers,
+not one: $8.38 is what the whole app already paid today (every story and
+clip job; Settings → Budget lists the stories), $0.60 is this cast, $4.00 is
+the daily cap. Nothing is wrong and nothing was spent. Press **Allow $4.99
+more today** (the amount that lets it through, for today only), raise the
+daily cap in Settings, or wait for the reset the message names. If the cap
+was lowered after the day's spending, Settings warns about it and every paid
+call is refused until the reset unless you allow more. See "Budget: today's
+limit".
+
+**The refusal names another cap, or "Allow" is greyed** — the job would also
+go over the per-episode or the per-story cap, which an allowance for today
+does not lift. Raise that cap in Settings → Budget (it is global: lower it
+afterwards if you do not want every story to reach it).
+
+**The day resets at the wrong hour, or "spent today" looks off after a
+change** — the day is UTC until `BUDGET_TIMEZONE` is set (Settings → Budget
+→ Day time zone: `Europe/Paris`). A name that is not an IANA zone is shown
+with its reason and the day stays UTC. Changing the zone moves at most one
+boundary of the history (two hours for Paris), because earlier days are not
+re-split; clear the setting to get UTC back.
+
+**A cast refused on a v2 story before any image was made** — the gate checks
+the whole cast, portraits and sheet edits together, before it buys the first
+portrait: the sum would cross a cap, so nothing is generated or spent. The
+message names the images and the edits and the cap; the estimate showed the
+same total. Allow more for today, raise the cap, or cast fewer characters
+("Cast", the selection). A legacy story instead stops and asks before its
+edits.
+
+**A concept, a cast text or a place refused for naming a brand** — on a
+story with a universe, a generated text that names a brand ("names the brand
+'coca'; write the generic thing instead") is asked again once with the brand
+named and told to use the generic thing; a model that keeps naming it fails
+the step like any other validation, and running the step again tries
+afresh. A story with no
+universe is never checked.
+
+**A subtitle look refused: "contrast ratio … is below the 4.5 minimum"** —
+the text or highlight colour would not read against the outline or the box
+behind it. Change the colour (or the outline's, or the box's) until the
+ratio reaches 4.5; the message gives both colours and the ratio. A save is
+also refused with 409 while a render of the story runs: wait for it, or
+cancel it.
+
+**ElevenLabs: "the character quota of this ElevenLabs account is used up"**
+— or a refused key or a rate limit, each named with its status. A
+character's pinned ElevenLabs voice is never swapped for another voice, so
+its line fails until the quota resets or you pick another voice for the
+character; the free voices are not affected.
+
+**"Switching the clip prompts to action rewrites every clip's prompt: N
+current clips … will be marked stale"** — the clip's prompt is part of what
+makes a clip current, so a different `prompt_style` makes every clip already
+made, uploads included, stale, and the next assets run buys them again (a
+manual story asks for them again). The message comes with the patch, before
+anything is lost to you; patch the style back to undo it.

@@ -32,6 +32,15 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-30)
+- **2026-10-05 — plan 23 (the upgrade ideas of 2026-10-04, DEC-279…293):** a cast refused as "$8.58 of the $4.00 daily
+  cap" (it costs $0.60; the rest was other stories' money, on a UTC day) became the first fix: the refusal states three
+  numbers, one click allows more for today only (ceiling $25, logged), the day follows `BUDGET_TIMEZONE`, a v2 cast is
+  checked whole before any portrait is bought, and Gemini is a second sheet link. Beside it: Clips B-roll from Pexels,
+  Pixabay and a local folder with credits; ElevenLabs voices (paid, never auto-picked); a per-story subtitle look; a
+  renderer that can draw 16:9 and 1:1 (no story can choose them yet); `fal/ltx-2.5-fast` last in the video chain, its
+  speaking use gated on a probe not yet run; Claude (Sonnet 5.5 default) as an optional premium writer; and the creators'
+  method as per-story choices — ten universes, one front-and-back sheet, all-matter bodies, action clip prompts, appearance variants — with no
+  doctrine prompt. Every key is optional, absent = unchanged; no GPU box exists, so local LTX-2.5 stays a runbook.
 - **2026-10-04 — three tasks after the competitive analysis (plan 18, DEC-263):** the episode-2 walk's six defects
   fixed (bookings released on unbilled refusals, stable shot ids across re-plans, framing orders in redraws, a check-only
   script run, the one click approving over spent repairs; DEC-264…266); the **fruit-drama pack** (narrated-drama and
