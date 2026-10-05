@@ -425,17 +425,22 @@ reused) and the last good final stays in place.
 ## Native speech (API route)
 
 The **Native speech (Veo)** budget profile (`native_speech`; v2, tier 3) gives
-each character's spoken line its own clip instead of a silent clip whose
-mouth is guessed and relipped afterward. The storyboard plans one `speaks`
-shot per line — the speaker in frame, the listener reacting beside them —
-sized to the shortest sold length (4, 6 or 8 s) that holds the line's words;
-a narrator line, or a reaction with nobody speaking, stays a silent shot on
-the cheaper Lite link. Each speaking shot's prompt follows Google's own Veo
-syntax in one sentence: who looks at whom and says the line, in which voice,
-over the place's camera and style, closing with "Audio: only {speaker}'s
-voice speaking {language}… no music, no narrator, no other voice. No
-subtitles, no captions, no on-screen text." — the quoted line and that audio
-sentence are never dropped.
+its characters' spoken lines a clip of their own instead of a silent clip
+whose mouth is guessed and relipped afterward. The storyboard plans one
+`speaks` shot per **exchange** (plan 27): one to four consecutive character
+lines that answer each other, the speaker of the first in frame and the
+others beside them, sized to the shortest sold length from 5 to 10 s that
+holds their words (Veo sells 6 or 8 s; see "Exchanges: 5–10 s shots that
+carry several lines" under the timing harness). A scene with a narrator keeps
+one shot per line, and a narrator line, or a reaction with nobody speaking,
+stays a silent shot on the cheaper Lite link. Each speaking shot's prompt
+follows Google's own Veo syntax: who looks at whom and says the line, in which
+voice (for an exchange, each line in turn), over the place's camera and
+style, closing with "Audio: only {speaker}'s voice speaking {language}… no
+music, no narrator, no other voice. No subtitles, no captions, no on-screen
+text." (an exchange: "Audio: the voices of {A} and {B} only, speaking
+{language} in turn, lips in sync with the words, no overlap.") — every quoted
+line and that audio sentence are never dropped.
 
 No text-to-speech and no lipsync run for an on-screen line: Veo's own clip is
 the voice and the lips together, one take. The narrator, when the story has
@@ -443,7 +448,10 @@ one, stays exactly as before — a voice-over read by its own TTS voice, never
 a shot of its own. Subtitles are never guessed from the written line: the
 clip's own soundtrack is transcribed and aligned word by word (the **native
 take**), so the burned-in words follow what the clip actually says, and the
-shot's final length follows the take, trimmed to the last word plus 0.3 s.
+shot's final length follows the take, trimmed to the last word plus 0.3 s
+(an exchange's last word is its last line's) and never below 5 s. An
+exchange's take is checked line by line, not as one blob of text ("A shot with
+several lines", under "Your own clips").
 
 The per-story **speaking-clips model** (the generation profile's
 `speech_model`, a select on the story's Visual tier card and the new-story
@@ -459,13 +467,15 @@ by its own small cap) and the premium text cost.
 native audio; the last link of the video chain, "Costs and providers") could
 speak as well, but it is not offered as a speaking-clips model, and
 `speech_model` has no `ltx` value. It is not cheaper for speech: its
-shortest clip is 6 s where Veo sells 4 s, so a nine-line episode is about
-$5.46 of clips against about $4.60 on Veo Fast, at $0.09 a second. And
+shortest clip is 6 s, and Veo's own 4 s no longer plays (plan 27: shots are
+5–10 s, and Veo sells 6 or 8 s inside that), so, counted at one line a clip as
+before plan 27, a nine-line episode is about $5.46 of clips against about $4.60 on Veo Fast, at $0.09 a second. And
 nobody has heard it speak French. Before it becomes a speaking model, a
 one-clip probe (about $0.54, run only on your go) has to show that at least
 80 % of the line's words come back in the take and that it sounds right to
 you; that probe has not produced a result yet. Its value would be a second
-speaking provider that is not Google, and clips of 10 s for a long line.
+speaking provider that is not Google, and clips of 10 s for an exchange of
+three or four lines.
 
 The probe is `tools/probe_speech_link.py` (plan 23 C2). It buys one 6 s,
 720p, 9:16 clip on one link (`fal/ltx-2.5-fast` by default) from a reference
@@ -691,9 +701,10 @@ then, under **My own**:
   Frames to Video with the keyframe as the first frame, else Ingredients to
   Video);
 - for a speaking clip, the **line** in the story's language with the
-  speaker's name and the voice direction;
-- a big **Copy prompt · N words**, with **Copy line** and **Copy negative**
-  next to it, and the prompt itself under "Show the prompt"; under it, the
+  speaker's name and the voice direction (an exchange: its lines in order, a
+  numbered list, each with its speaker and voice direction);
+- a big **Copy prompt · N words**, with **Copy line** (an exchange: every line,
+  one "Speaker: text" a line) and **Copy negative** next to it, and the prompt itself under "Show the prompt"; under it, the
   fit line when the prompt had to be shortened for the link and, when the
   story's records are thin, the "Short prompt" warning (both explained in
   "The master prompt and the templates");
@@ -728,6 +739,46 @@ shown selected, so long-press and copy (Ctrl+C or Cmd+C on a computer).
 (markdown)**, **The clip brief (zip)** (the `.md`, the `.json` and every
 reference image) and **The image brief (zip)** (`image_brief.md`,
 `image_brief.json` and its references).
+
+### A shot with several lines
+
+A shot that carries an exchange (plan 27; "Exchanges: 5–10 s shots that carry
+several lines" under the timing harness) is one clip with two to four lines
+spoken in turn by two characters. Three things change for you; a one-line shot
+is exactly what it was, its prompt byte for byte.
+
+**The clip prompt.** Each line is quoted in order with its speaker, a
+speaker's voice is said the first time they speak, and the same speaker coming
+back "goes on". The listeners are named once:
+
+> Marie-Jeanne, … looks at Rida and says in French, in a sharp whisper, "…".
+> Rida answers at once, in a low voice, "…". Marie-Jeanne goes on, "…". Each of
+> Marie-Jeanne and Rida listens without speaking, mouth closed, while the other
+> speaks, … Audio: the voices of Marie-Jeanne and Rida only, speaking French in
+> turn, lips in sync with the words, no overlap. No music, no narrator, no
+> other voice. No subtitles, no captions, no on-screen text.
+
+Every quoted line, the voices and those closing sentences are never cut; over
+the link's budget the context layers go first (the sounds, the reaction, the
+place…), as for one line. The `action` prompt style writes the same sentences
+around its one continuous action. The master prompt's pacing line says that
+the exchange fills the whole clip.
+
+**The Handoff row.** The shot's card lists its lines in order, a numbered list,
+each with its speaker and voice direction; **Copy line** copies every line, one
+"Speaker: text" a line. The checks to tick read "N lines, spoken as written,
+the speakers in turn (A, then B) — nobody else talks", "the lines follow each
+other without a pause; the last line ends the clip" and the usual ones. The
+markdown brief says the same ("Lines (French, one exchange, in turn)", then
+each speaker's voice once).
+
+**The take, checked per line.** Once the clip is stored its audio is
+transcribed, and every line of the exchange is matched against it and placed
+in order: the take holds only when every line is found, one after the other,
+not as one blob of text. The shot is trimmed to 0.3 s after the last line's
+last word, never below 5 s. A line that is missing from the take is named in
+the retake note, so you know which line to ask the platform for again. A take
+with no speech-to-text key is *approximate* as before.
 
 ### The Cast, Places and Props tiles
 
@@ -876,7 +927,8 @@ wrote it, with no template in front.
    and place sheets), paste the prompt, and generate on **Veo 3.1 Fast** (20
    Flow credits a clip on AI Pro, 10 on Ultra). Download the take you like
    as an MP4 — Flow always renders 8 s; the app keeps the clip's real length
-   and trims a speaking shot to 0.3 s past its last word.
+   and trims a speaking shot to 0.3 s past its last word (an exchange's last
+   line's, and never below 5 s).
 6. Upload the file on the card (or `aistory upload-clip <story> <ep>
    <shot_id> <file>`). The upload is checked before it is stored and
    refused, with the reason, rather than silently cropped or accepted: not
@@ -887,7 +939,8 @@ wrote it, with no template in front.
    refused instead of cropped), or a speaking shot's clip with **no sound
    track**.
 7. Once stored, the clip is **taken** for free: its audio is transcribed and
-   aligned against the line, and the card shows the result: **matched 92 %**
+   aligned against the line (an exchange: against each of its lines in turn,
+   see "A shot with several lines"), and the card shows the result: **matched 92 %**
    when most of the line was heard and ends in time, a **mismatch** when it
    wasn't (one retake is yours to try, nothing stops the run otherwise), or
    **approximate** when no speech-to-text key is set to check it at all (the
@@ -921,13 +974,13 @@ design).
 
 | Route | What it does | Refusals |
 |---|---|---|
-| `GET /api/stories/{id}/episodes/{ep}/handoff?platform=&model=` | The handoff document (`handoff_v1`): the platform and its models, `counts`, `missing` and `next_missing`, the `master_prompt` of a v2 story (`{text, words, sections}`), per shot `{image, clip}` blocks (mode, state, prompt, its `fit` and, when the records are thin, its `prompt_warning`, negative prompt, size, references and a per-shot zip, upload slot, and for Auto the link, the estimate and the gate's verdict), the entities (sheets, plates, props, variants) and the export links. With no query it reads what `PATCH …/handoff` remembered. Calls nothing. | 404 unknown story or episode; 400 unknown platform or model; 409 no storyboard, or a frame the platform cannot make |
+| `GET /api/stories/{id}/episodes/{ep}/handoff?platform=&model=` | The handoff document (`handoff_v1`): the platform and its models, `counts`, `missing` and `next_missing`, the `master_prompt` of a v2 story (`{text, words, sections}`), per shot `{image, clip}` blocks (mode, state, prompt, its `fit` and, when the records are thin, its `prompt_warning`, negative prompt, size, references and a per-shot zip, upload slot, and for Auto the link, the estimate and the gate's verdict; a speaking clip's `line`, `speaker` and `voice_line`, and, for an exchange of two or more lines, `speakers` (the names in the order they first speak) and `lines` (`[{line_id, speaker, text, voice_line}]`, in turn), with `line` then holding them joined as "A: … / B: …"), the entities (sheets, plates, props, variants) and the export links. With no query it reads what `PATCH …/handoff` remembered. Calls nothing. | 404 unknown story or episode; 400 unknown platform or model; 409 no storyboard, or a frame the platform cannot make |
 | `PATCH /api/stories/{id}/episodes/{ep}/handoff` | `{"platform": "flow"\|"higgsfield", "model"?}` into `assets.json`'s `handoff`; answers `{handoff, platform, model}`. | 404; 400 no platform, an unknown one or a model it does not list; 409 while a step is queued or running |
 | `PATCH /api/stories/{id}/episodes/{ep}/shots/{shot_id}/mode` | `{"clip"?, "image"?}`: `"auto"`, `"manual"` or `null`; answers the modes, what became stale and the gate's verdict for an Auto kind (see above). | 404 unknown story, episode or shot; 400 bad value or a mode the story cannot take; 409 while a step runs, or no storyboard |
 | `GET /api/stories/{id}/episodes/{ep}/shots/{shot_id}/references.zip?kind=clip\|image&platform=&model=` | One shot's reference files under `references/` (a clip's, cut to what the platform's model takes; `kind=image` for the keyframe's own). A file not on disk is left out. | 404 unknown story, episode or shot, or a shot kept still (no clip to brief); 400 bad platform, model or kind |
 | `GET /api/stories/{id}/image-brief?ep=` | The images made by hand: cast sheets, place plates, props and, with `ep`, each keyframe; per image the prompt, references, size, upload slot and whether it is there. Calls nothing. | 404 unknown episode; 409 a reference it cannot resolve |
 | `GET /api/stories/{id}/image-brief.zip?ep=` | The same as a zip: `image_brief.md`, `image_brief.json` and every reference under `references/`. | as above |
-| `GET /api/stories/{id}/episodes/{ep}/brief?platform=` and `…/brief.zip` | The clip brief (JSON, and the zip with the `.md`, the `.json` and the references), as the Handoff's Export menu gives it. | 404; 400 unknown platform; 409 no storyboard |
+| `GET /api/stories/{id}/episodes/{ep}/brief?platform=` and `…/brief.zip` | The clip brief (JSON, and the zip with the `.md`, the `.json` and the references), as the Handoff's Export menu gives it. A shot that carries an exchange has `line_ids`, `speakers` and `lines` beside `line`; the markdown lists its lines numbered, in turn, with each speaker's voice once, and its checks read "N lines, the speakers in turn". | 404; 400 unknown platform; 409 no storyboard |
 | `POST /api/stories/{id}/episodes/{ep}/shots/{shot_id}/clip` and `…/keyframe` (the Handoff's upload buttons); `POST /api/stories/{id}/cast/{char_id}/sheet`, `…/places/{place_id}/plate`, `…/props/{prop_id}/image` (the tiles' and the entity cards' uploads) | The uploads, with the checks of step 6 of the walkthrough; a clip or a keyframe of an Auto shot is now refused with the sentences under "The mode of one shot". | 400/409 as in "Limits and troubleshooting" |
 
 ### Human casts
@@ -1085,8 +1138,9 @@ mention by an anchor built from its look (its colours, whether it is a
 fruit, a can, a gadget, its name, its first outfit item: "the green-yellow
 female strawberry character in a dirty burlap dress"), the place once in ten
 words at most, the sounds in the sentence, and exactly one camera phrase;
-the quoted line and the closing "Audio: only … no other voice" sentences are
-never cut, and over the link's budget the sounds go first, then the
+the quoted line (every quoted line of an exchange) and the closing "Audio:
+only … no other voice" sentence (an exchange's: "Audio: the voices of … only")
+are never cut, and over the link's budget the sounds go first, then the
 reaction, the place, the listener, the action and last the camera. **A
 clip's prompt is part of what makes it current, so changing the style makes
 every clip already made, uploads included, stale.** The patch answers with
@@ -1198,11 +1252,11 @@ that adds nothing, an incomplete sentence, scenes that do not tell the
 logline), and the script pane shows the spine as "What happens" above the
 scenes. The sixth template, `confrontation_50s_v2`, is a continuous,
 one-place, real-time confrontation of about 50 seconds (4–6 scenes, 9–16
-shots of 2–8 s, 95–125 spoken words, lines of 5–17 words, every boundary a
+shots of 5–10 s, 95–125 spoken words, lines of 5–17 words, every boundary a
 cut, the narrator only in a later episode's recap, the cliffhanger's last
 line stating the act about to happen). It is the format a new story on a
 native-speech profile starts on — preselected in the wizard, still a choice
-— because one shot per line only fits a script written for it. A story
+— because a shot that carries an exchange only fits a script written for it. A story
 whose episodes began on the older prompts keeps them; an older story opts
 in through its generation profile's `writing: v3`.
 
@@ -1747,18 +1801,20 @@ pre-roll, 0.25 s between lines, and the tail floor, raised to the longest
 dissolve the neighbouring scenes may give it), keeps 5 % of what is left as a
 margin, and turns each line's seconds into a hard word cap on the one clock.
 
-- On a native-speech story a character line is planned first, at a 6 s clip
-  (12 words); the narrator takes the seconds left, over one silent clip. A
-  13 s body scene with a narrator and one character line is the narrator at 6 s
-  and 11 words plus the character at 6 s and 12 words, 23 words in all. The
-  clips always sum to no more than the slot.
+- On a native-speech story the character lines of a scene with no narrator
+  are planned as exchanges, several lines to a shot (next section). With a
+  narrator, a character line is planned first, at an 8 s clip (17 words, at
+  least 13), each line its own shot; the narrator takes the seconds left, over
+  one silent clip. A 16 s body scene with a narrator and one character line is
+  the narrator at 8 s (3 to 13 words) plus the character at 8 s (13 to 17
+  words), 30 words at most. The clips always sum to no more than the slot.
 - The narrated format says which body scenes carry a character line (below).
   A scene without one is one narrator line taking the whole allowed speech: a
-  13 s scene is 25 words off native speech, 15 words on native speech (one
+  16 s scene is 31 words off native speech, 15 words on native speech (one
   8 s clip; a line never spans two clips, and the reaction shot fills the
   rest of the slot).
 - On the narrated format the hook, the cliffhanger and the recap are one
-  line each, always the narrator's. The 6 s hook holds 11 words.
+  line each, always the narrator's. The hook (a 5–8 s slot) holds 14 words.
 
 The plan is stored on the scene as `slot_s` (the slot's low and high end) and
 `line_plan` (each line's kind, speaker, seconds, clip length on native speech
@@ -1767,28 +1823,32 @@ gave it (`shots.planned_line_entries` pairs plan entries with the written
 lines by kind and speaker), so the writer's plan and the shots cannot disagree.
 If the written lines no longer match the plan (a line added or removed, a
 speaker swapped) the plan is ignored for that scene, with one note, and each
-line is planned by its own words as before. Reaction shots (one silent 4 s at
+line is planned by its own words as before. Reaction shots (one silent 6 s at
 most a scene) are not part of the plan: they sit on top of its clips.
 
 **What the writer is told, and what is refused.** The prompt for a body scene
 carries the plan in seconds and words:
 
-> This scene lasts at most 13 s. Line 1 (narrator): at most 11 words, heard
-> over one 6 s shot. Line 2 (Rida): at most 12 words, spoken in one 6 s shot.
-> Hard limits: 23 words in total; a longer line is refused.
+> This scene lasts at most 16 s. Line 1 (narrator): between 3 and 13 words,
+> heard over one 8 s shot. Line 2 (Rida): between 13 and 17 words, spoken in
+> one 8 s shot. Hard limits: 30 words in total; a line shorter or longer than
+> its range is refused.
 
 The hook, cliffhanger and recap call gets the same for each part: "The hook
-lasts at most 6 s: at most 11 words." (the part's name and its own seconds
-and cap). Validation is hard. A line over its cap, a scene over its total, or
+lasts at most 8 s: between 3 and 14 words." (the part's name, its own seconds
+and its range). Validation is hard. A line over its cap, a scene over its total, a line under
+its floor on a plan that has floors (native speech: `$.lines[1].text: 5 words,
+the plan asks for 6–10 (an 8 s shot)`), an exchange over its shot's words, or
 a character line in a scene planned without one is refused, and the error
 names the line, its words, its cap and its seconds, for example `$.lines[1].text:
 15 words, at most 12 (a 6 s shot)` or `$.lines: 30 words in total, at most 23
 (a 13 s scene)` or `$.lines[1]: one character line too many: this scene's
 plan holds 0 character lines`. Over-cap errors come first in the retry, so the
-writer is told the overshoot whole. The lower bound is unchanged (half the
-planned words, a line of at least a few words); the fill pass still handles a
-scene that comes back short, and a short reply is still accepted on the second
-attempt. A reply over the cap never is.
+writer is told the overshoot whole. Without floors in the
+plan (a story off native speech) the lower bound is unchanged (half the planned
+words, a line of at least a few words); the fill pass still handles a scene that
+comes back short, and a short reply is still accepted on the second attempt. A
+reply over the cap never is.
 
 **Retry, trim, then failure.** A refused reply is asked again once with the
 errors. If it is still over its caps, a trim pass makes one more call that
@@ -1851,6 +1911,113 @@ an error appears under it if the job is refused. No new route is involved.
   shot on top of what the plan counted.
 - It does not fix a script already on disk. Regenerate its scenes (or press
   Trim) to bring them inside a plan.
+
+#### Exchanges: 5–10 s shots that carry several lines
+
+**Why.** Until plan 27 (2026-10-05) a native-speech board made one shot per
+character line, sized to the shortest clip (4, 6 or 8 s) that held it, and the
+plan gave a line only a ceiling. A 5-word line in a 6 s clip was legal: it
+landed early and the clip ended on dead air, and a quick exchange of short
+lines became a string of short clips. A shot is now 5 to 10 s and carries as
+many lines as it holds. Scripts written before it, and stories off native
+speech, are untouched.
+
+**The window.** On a native-speech story a shot is 5 to 10 s, clamped to the
+lengths the clip's link sells; a link none of whose lengths fall inside keeps
+its nearest ones, so no link is left selling nothing.
+
+| Link | Lengths a shot is planned at |
+|---|---|
+| Veo (Lite, Fast, Premium) | 6 or 8 s (Veo never sells 10 s) |
+| Flow (your own clips) | 8 s only |
+| kling | 5 or 10 s |
+| seedance | 5 to 10 s |
+| ltx | 6, 8 or 10 s |
+| An uploaded clip, planned | 6 or 8 s (Flow sells 8) |
+
+A silent reaction shot is 6 s. The two v2 templates carry `min_shot_s` 5 and
+`max_shot_s` 10 with the slots recap 5–6 s, hook 5–8 s, body 10–16 s and
+cliffhanger 6–10 s, and the take's trim never cuts a shot below 5 s (the
+template's `min_shot_s`).
+
+**Capacity.** A clip of L seconds speaks `floor((L − 0.7) × 2.4)` words (2.4
+words a second after 0.7 s of breath, the figure until the probe measures it).
+An exchange fills 75 to 100 % of that, in one to four lines about six words
+each:
+
+| Clip | Words it holds | An exchange fills | Lines |
+|---|---|---|---|
+| 5 s | 10 | 8–10 | 1–2 |
+| 6 s | 12 | 9–12 | 2 |
+| 8 s | 17 | 13–17 | 2–3 |
+| 10 s | 22 | 17–22 | 3–4 |
+
+**How lines are grouped and sized.** On a native-speech scene with no narrator
+`timing.scene_plan` groups the character lines into exchanges, the longest
+clips first (8 s is the default): each shot gets a sold length and a word
+budget from the table, split over its lines. The speakers alternate, one
+speaker has at most two lines in a shot, and each line gets a **floor and a
+cap** (never under 4 words) while the shot's own total stays the hard limit,
+so the lines have some play without the clip overrunning. The hook, the
+cliffhanger and the recap keep their one line. The plan is stored on the
+scene as `line_plan.shots`, one `{clip_s, line_ids, words_min, words_max,
+speaks}` a shot, and each planned line carries its `min_words`. A 16 s body
+scene between Rida and Marie-Jeanne is two exchanges of two lines: an 8 s shot
+(13 to 17 words; line 1 at 6 to 10, line 2 at 7 to 11) and a 6 s shot (9 to 12
+words; 4 to 7 and 5 to 8), 14 s of clips in a 16 s slot. With the narrator on
+the scene, nothing is grouped: each line stays its own shot, the character's
+at its own clip and the narrator's over one silent clip, as above.
+
+**What the writer is told.** Each line is asked "between lo and hi words", and
+the lines of one shot are named once, after the last of them:
+
+> This scene lasts at most 16 s.
+> Line 1 (Rida): between 6 and 10 words.
+> Line 2 (Marie-Jeanne): between 7 and 11 words.
+> Lines 1 and 2 are ONE continuous exchange in one shot of 8 seconds: they
+> answer each other without a pause, the last line ends the shot; together
+> they fill 13–17 words.
+> Line 3 (Rida): between 4 and 7 words.
+> Line 4 (Marie-Jeanne): between 5 and 8 words.
+> Lines 3 and 4 are ONE continuous exchange in one shot of 6 seconds: they
+> answer each other without a pause, the last line ends the shot; together
+> they fill 9–12 words.
+> Hard limits: 29 words in total; a line shorter or longer than its range is
+> refused.
+> Write at least 22 and at most 29 words of dialogue in total.
+
+The validator holds each line to its range and each exchange to its shot's
+words (`$.lines[0-1]: 20 words in total, at most 17 (one 8 s shot)`). The trim
+pass of "Retry, trim, then failure" lengthens as well as shortens: a line
+under its floor is sent back with "rewrite it in 6 to 10 words, same meaning,
+same speaker, one or two complete sentences: say more of what the line needs
+(its reason, its demand)", and an exchange over its shot's words is trimmed as
+one. It is the same single request, inside the same 4 calls an episode.
+
+**What the storyboard does.** `shots.speech_shot_plan` makes **one shot per
+planned exchange**: its lines in order, its length the plan's, the speaker of
+its first line the subject and the others after, and `speakers` (the
+characters, in the order they first speak) on the shot. Three rules keep what
+was made:
+
+- A scene whose shots are kept from an earlier storyboard merges lines only
+  where its stored plan names the whole exchange, so a shot already made keeps
+  its id, its keyframe and its clip.
+- An exchange that outgrew its clip (a line edited longer) moves to the next
+  sold length that holds it, or splits back into one shot a line when none
+  does, and the storyboard says so in its notes.
+- A stored plan whose clip length the link does not sell (see "Limits and
+  troubleshooting") is replanned line by line, with one note naming the scene.
+
+A script written before plan 27 keeps its one-line plan and its shots. It
+picks up exchanges when its scenes are written again, which gives new lines,
+so new shot ids and new keyframes.
+
+**What this does not do yet.** A close-up on a two-speaker exchange is not
+forced to a two-shot: the framing the shot writer picks stands, so the second
+speaker can be off frame while talking. The T1v2 shot writer is not told about
+exchanges (the planned ask is); the shot plan still comes from the lines the
+script gives it.
 
 ### 9. Storyboard
 
@@ -3418,13 +3585,24 @@ a name that is not also its own description, and try again.
 
 **"line shNN has N words, more than an 8 s clip can speak (17 words at
 most)"** — on a native-speech story (API or manual), a character line longer
-than the longest sold clip's capacity (17 words at 2.4 words/s, the figure
-until the probe measures it for real) cannot become one speaking shot, and
+than the longest sold clip's capacity (17 words at 8 s, 22 at 10 s on a link
+that sells it, at 2.4 words/s, the figure until the probe measures it for
+real) cannot become one speaking shot, and
 the storyboard refuses it naming the line and the fix: shorten it, or split
 it into two lines, in the script. This gate runs for every speech story. A
-v3 script is written inside it (a character line is capped at its planned
-clip, 12 words at 6 s), so it meets this mostly after a hand edit or on a
-script written before plan 22; keep an eye on line length when you edit.
+v3 script is written inside it (a character line has a range inside its
+planned shot, 6 to 10 words in an 8 s exchange of two lines), so it meets this
+mostly after a hand edit or on a script written before plan 22; keep an eye on line length when you edit.
+
+**"scene s02: the stored 4 s plan is not sold on <link>; replanned"** — a
+note in the storyboard step, not an error. A scene planned before plan 27 may
+carry a 4 s clip in its stored line plan, and the clip's link (Veo, now 6 or
+8 s inside the 5–10 s window, or another) does not sell it. The storyboard
+drops that plan for the scene and plans each of its lines on its own words, as
+it did before the plan existed, with this one note naming the scene. Nothing
+is refused and no clip already made is touched. To get exchanges on that scene,
+regenerate it (new lines, so new shot ids and new keyframes); see "Exchanges:
+5–10 s shots that carry several lines".
 
 **"Scene s02 is still over its caps after the retry and the trim: line 2
 (Rida) has 15 words, at most 12 (a 6 s shot). Regenerate the scene with a
