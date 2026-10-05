@@ -1127,12 +1127,166 @@ def speech_clip_prompt(style_lock: dict, *, speaker: str, look: str, action: str
 
 def speech_prompt_sentences(prompt: str) -> dict:
     """The never-dropped parts of a speech clip *prompt*, found in it (for
-    the brief and the checks): the quoted line, the Audio sentence, the
-    no-other-sound and the no-on-screen-text sentences."""
-    quoted = re.search(r'"([^"]*)"', prompt)
+    the brief and the checks): the quoted line (an exchange's first), every
+    quoted line in order (``lines``, plan 27 stage 3: one for a shot of one
+    line), the Audio sentence, the no-other-sound and the
+    no-on-screen-text sentences."""
+    quotes = re.findall(r'"([^"]*)"', prompt)
     audio = re.search(r"Audio: [^.]*\.", prompt)
-    return {"line": quoted.group(1) if quoted else None, "audio": audio.group(0) if audio else None,
+    return {"line": quotes[0] if quotes else None, "lines": quotes, "audio": audio.group(0) if audio else None,
             "no_other_sound": SPEECH_NO_OTHER_SOUND in prompt, "no_on_screen_text": NO_ON_SCREEN_TEXT in prompt}
+
+
+# ============================================== plan 27 stage 3 (the exchange)
+#
+# A speaking shot that carries an exchange of 2-4 lines (``shots.speech_shot_plan``
+# grouped them from the scene's line plan): every line quoted in order, each by
+# its speaker, the speakers heard in turn. A shot of one line never comes here:
+# its prompt is the builders' above, byte for byte.
+
+def _and_names(names) -> str:
+    """"A", "A and B", "A, B and C"."""
+    names = list(names)
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _capital(text: str) -> str:
+    return text[0].upper() + text[1:] if text else text
+
+
+def _quote(text: str) -> str:
+    """"{text}" with its closing full stop when the line has none."""
+    return f'"{text}"' + ("" if text[-1:] in ".!?…" else ".")
+
+
+def _exchange_said(lines) -> list:
+    """Each line of an exchange as ``{key, who, voice, quoted, heard}``: *key*
+    who speaks it (its character id, else its name), *who* how it is named
+    at that line, *heard* how the Audio sentence names it."""
+    out = []
+    for item in lines:
+        who = _collapse_ws(str(item.get("speaker") or "")) or "the character"
+        out.append({"key": item.get("speaker_id") or who, "who": who,
+                    "voice": _collapse_ws(str(item.get("voice_line") or "")) or "a clear voice",
+                    "quoted": _collapse_ws(str(item.get("text") or "")).replace('"', "'"),
+                    "heard": _collapse_ws(str(item.get("voice_of") or "")) or who})
+    return out
+
+
+def _exchange_turns(said) -> list:
+    """The sentences of an exchange's lines after its first: a new speaker
+    "answers at once" (in its voice the first time it speaks), the same
+    speaker "goes on"."""
+    voiced = {said[0]["key"]}
+    sentences = []
+    for before, item in zip(said, said[1:]):
+        name = _capital(item["who"])
+        if item["key"] == before["key"]:
+            sentences.append(f"{name} goes on, {_quote(item['quoted'])}")
+        elif item["key"] in voiced:
+            sentences.append(f"{name} answers at once, {_quote(item['quoted'])}")
+        else:
+            sentences.append(f"{name} answers at once, in {item['voice']}, {_quote(item['quoted'])}")
+        voiced.add(item["key"])
+    return sentences
+
+
+def _exchange_voices(said) -> list:
+    """The exchange's speakers as the Audio sentence hears them, each once, in the order they first speak."""
+    heard = {}
+    for item in said:
+        heard.setdefault(item["key"], item["heard"])
+    return list(heard.values())
+
+
+def _exchange_audio(said, lang) -> str:
+    """"Audio: the voices of A and B only, speaking French in turn, ..." (one
+    speaker going on: the one-line Audio sentence)."""
+    voices = _exchange_voices(said)
+    if len(voices) == 1:
+        return f"Audio: only {voices[0]}'s voice speaking {lang}, close and clear, lips in sync with the words."
+    return (f"Audio: the voices of {_and_names(voices)} only, speaking {lang} in turn, lips in sync with the words, "
+            "no overlap.")
+
+
+def _exchange_listens(said, listener, reaction) -> str:
+    """Who listens, said once for the whole exchange: each speaker while
+    another speaks (and a listener who never speaks with them); one speaker
+    going on, its listener as in a one-line shot. '' with no one listening."""
+    voices = _exchange_voices(said)
+    other = _collapse_ws(listener)
+    if len(voices) == 1:
+        if not other:
+            return ""
+        text = f"{_capital(other)} listens without speaking, mouth closed"
+    else:
+        names = voices + ([other] if other and other not in voices else [])
+        text = (f"Each of {_and_names(names)} listens without speaking, mouth closed, while "
+                f"{'the other' if len(names) == 2 else 'another'} speaks")
+    return as_sentence(f"{text}, {reaction}" if reaction else text)
+
+
+def speech_exchange_clip_prompt(style_lock: dict, *, lines, speaker: str, look: str, action: str, listener: str,
+                                language: str, reaction: str, camera_phrase: str, place: str, ambience: str,
+                                budget: int = SPEECH_CLIP_MAX_WORDS, note: str = "", voice: str = "",
+                                line: str = "") -> str:
+    """A speaking clip's prompt for an exchange (plan 27 stage 3: a shot of
+    2-4 *lines*, each ``{speaker, voice_line, text}`` -- the speaker a
+    handle, as :func:`speech_clip_prompt`'s), at most *budget* words:
+
+    "{Camera}. {Speaker}, {look}, {action}, looks at {listener} and says in
+    {language}, in {voice}, "{line 1}". {B} answers at once, in {B's voice},
+    "{line 2}". {A} answers at once, "{line 3}". Each of {A} and {B} listens
+    without speaking, mouth closed, while the other speaks, {reaction}.
+    {Place}. {IDENTITY_KEEPS} {style motion suffix} Audio: the voices of
+    {A} and {B} only, speaking {language} in turn, lips in sync with the
+    words, no overlap. Ambient noise: {ambience}, low underneath. No music,
+    no narrator, no other voice. No subtitles, no captions, no on-screen
+    text."
+
+    A speaker's voice is said at its first line; the same speaker again
+    "goes on". Every quoted line, the voices, the Audio sentence and the
+    closing sentences are never cut (DEC-300's rule for the one line,
+    extended to all); over the budget the context layers go first, in
+    :data:`_SPEECH_DROP_ORDER`, as for one line. *speaker*, *look*,
+    *action*, *listener* are the first line's (:func:`speech_clip_prompt`'s);
+    *voice* and *line* (the first line's) are read from *lines*."""
+    lang = LANGUAGE_NAMES.get(language, language)
+    said = _exchange_said(lines)
+    who = _collapse_ws(speaker) or said[0]["who"]
+    other = _collapse_ws(listener)
+    ambient = as_sentence(f"Ambient noise: {_fit(ambience, SPEECH_PLACE_MAX_WORDS) or 'the room tone'}, low underneath")
+    closing = [_exchange_audio(said, lang), ambient, SPEECH_NO_OTHER_SOUND, NO_ON_SCREEN_TEXT]
+    note_text = as_sentence(note) if note else ""
+    turns = _exchange_turns(said)
+    layers = {
+        "camera": as_sentence(camera_phrase),
+        "look": _strip_trailing_period(_fit(_collapse_ws(look), SPEECH_LOOK_MAX_WORDS)),
+        "action": _strip_trailing_period(_fit(_collapse_ws(action), SPEECH_ACTION_MAX_WORDS)),
+        "reaction": _strip_trailing_period(_fit(_collapse_ws(reaction), SPEECH_REACTION_MAX_WORDS)),
+        "context": as_sentence(_fit(_collapse_ws(place), SPEECH_PLACE_MAX_WORDS)),
+        "identity": IDENTITY_KEEPS,
+        "style": as_sentence(clip_motion_suffix(style_lock)),
+    }
+
+    def build(kept):
+        head = [_capital(who)]
+        for name in ("look", "action"):
+            if kept.get(name):
+                head.append(kept[name])
+        target = f"looks at {other}" if other else "looks straight ahead"
+        first = f"{', '.join(head)}, {target} and says in {lang}, in {said[0]['voice']}, {_quote(said[0]['quoted'])}"
+        listens = _exchange_listens(said, other, kept.get("reaction", ""))
+        parts = [kept.get("camera", ""), first, *turns, listens, kept.get("context", ""), note_text,
+                 kept.get("identity", ""), kept.get("style", "")] + closing
+        return _collapse_ws(" ".join(part for part in parts if part))
+
+    for dropped in range(len(_SPEECH_DROP_ORDER) + 1):
+        kept = {name: text for name, text in layers.items() if text and name not in _SPEECH_DROP_ORDER[:dropped]}
+        prompt = build(kept)
+        if _word_count(prompt) <= budget:
+            return prompt
+    return prompt
 
 
 # ============================== plan 23 stage D6 (action-dense clip prompts)
@@ -1294,6 +1448,67 @@ def speech_clip_prompt_action(*, speaker: str, listener: str, action: str, langu
             listens = as_sentence(f"{listens}, {react}" if react and "reaction" not in drop else listens)
         parts = ["" if "camera" in drop else camera, scene, speech, listens, "" if "sounds" in drop else sounds,
                  note_text] + closing
+        return _collapse_ws(" ".join(part for part in parts if part))
+
+    ladder = (((), ACTION_MAX_WORDS), (("sounds",), ACTION_MAX_WORDS), (("sounds", "reaction"), ACTION_MAX_WORDS),
+              (("sounds", "reaction", "place"), ACTION_MAX_WORDS),
+              (("sounds", "reaction", "place", "listens"), ACTION_MAX_WORDS),
+              (("sounds", "reaction", "place", "listens"), ACTION_SHORT_WORDS),
+              (("sounds", "reaction", "place", "listens", "camera"), ACTION_SHORT_WORDS),
+              (("sounds", "reaction", "place", "listens", "camera"), 0))
+    for drop, action_words in ladder:
+        prompt = build(drop, action_words)
+        if _word_count(prompt) <= budget:
+            return prompt
+    return prompt
+
+
+def speech_exchange_clip_prompt_action(*, lines, speaker: str, listener: str, action: str, language: str,
+                                       reaction: str, camera_phrase: str, place: str, sfx=(), ambience: str = "",
+                                       budget: int = SPEECH_CLIP_MAX_WORDS, note: str = "", voice: str = "",
+                                       line: str = "", voice_of: str = "") -> str:
+    """An exchange's speaking clip prompt in the action style (plan 27 stage
+    3; :func:`speech_clip_prompt_action`'s shape, *lines* as
+    ``steps/clips.action_inputs`` gives them -- each ``{speaker, voice_of,
+    voice_line, text}``, a speaker by its anchor, a named one by its name
+    once its anchor is said):
+
+    "{Camera}. In {place}, {action}. {Speaker} looks at {listener} and says
+    in {language}, in {voice}, "{line 1}". {B} answers at once, in {B's
+    voice}, "{line 2}". Each of {A} and {B} listens without speaking, mouth
+    closed, while the other speaks, {reaction}. Sounds: {sfx}, {ambience}.
+    {note} Audio: the voices of {A} and {B} only, speaking {language} in
+    turn, lips in sync with the words, no overlap. No music, no narrator,
+    no other voice. No subtitles, no captions, no on-screen text."
+
+    Every quoted line, the speakers' sentences and the three closing
+    sentences are never cut; over the budget the same ladder as one line's
+    (the sounds, the reaction, the place, the listeners' sentence, then the
+    action shorter and not at all, the camera)."""
+    lang = LANGUAGE_NAMES.get(language, language)
+    said = _exchange_said(lines)
+    who = _collapse_ws(speaker) or said[0]["who"]
+    other = _collapse_ws(listener)
+    closing = [_exchange_audio(said, lang), SPEECH_NO_OTHER_SOUND, NO_ON_SCREEN_TEXT]
+    note_text = as_sentence(note) if note else ""
+    where = place_anchor(place)
+    moving = action_sentence(action)
+    sounds = _action_sounds(sfx, ambience)
+    camera = as_sentence(camera_phrase)
+    react = _strip_trailing_period(_fit(_collapse_ws(reaction), SPEECH_REACTION_MAX_WORDS))
+    target = f"looks at {other}" if other else "looks straight ahead"
+    first = f"{_capital(who)} {target} and says in {lang}, in {said[0]['voice']}, {_quote(said[0]['quoted'])}"
+    turns = _exchange_turns(said)
+
+    def build(drop, action_words):
+        scene = _scene_head("" if "place" in drop else where,
+                            action_sentence(moving, action_words, clauses=action_words < ACTION_MAX_WORDS)
+                            if action_words else "")
+        listens = ""
+        if "listens" not in drop:
+            listens = _exchange_listens(said, other, react if "reaction" not in drop else "")
+        parts = ["" if "camera" in drop else camera, scene, first, *turns, listens,
+                 "" if "sounds" in drop else sounds, note_text] + closing
         return _collapse_ws(" ".join(part for part in parts if part))
 
     ladder = (((), ACTION_MAX_WORDS), (("sounds",), ACTION_MAX_WORDS), (("sounds", "reaction"), ACTION_MAX_WORDS),

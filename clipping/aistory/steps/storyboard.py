@@ -212,7 +212,10 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
     if native:
         # Plan 22: one shot a character line, planned at the length its clip sells.
         plan_notes = []
-        plans = speech_plans(ec, script, plans, notes=plan_notes)
+        # Plan 27 stage 3: a scene whose shots the board keeps keeps how they group its lines.
+        kept_scenes = ({shot["scene_id"] for shot in previous["shots"]} - set(replanned)
+                       if previous is not None else set())
+        plans = speech_plans(ec, script, plans, notes=plan_notes, kept=kept_scenes)
     else:
         plan_notes = []
     keep = kept_shots(previous, plans, replanned=replanned, replanned_shots=replanned_shots)
@@ -247,15 +250,20 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
     return board, notes
 
 
-def speech_plans(ec, script, plans, notes=None) -> dict:
+def speech_plans(ec, script, plans, notes=None, kept=()) -> dict:
     """*plans* as a native-speech story plans them (plan 22,
     ``shots.speech_shot_plan``): each character line one speaking shot at
     the length its speech link sells, the reactions and narrator shots
     silent on the silent link's lengths, up to the template's
     ``reaction_shots`` (default 0 to 1) a scene. A scene's stored line plan
-    sets its clips (plan 24 stage 4); what it could not set is named in
-    *notes*. ``StepFailed`` naming a line no clip can speak, with the fix."""
+    sets its clips (plan 24 stage 4) and, plan 27 stage 3, groups its lines
+    into exchanges (``line_plan.shots``: one speaking shot an exchange,
+    planned whole -- but in a scene of *kept* (ids of the scenes whose
+    shots the board keeps), only where a plan already names the whole
+    exchange); what it could not set is named in *notes*. ``StepFailed``
+    naming a line no clip can speak, with the fix."""
     speech_lengths, silent_lengths = clips.speech_lengths(ec.story)
+    links = (media_policy.speech_link(ec.story) or "", media_policy.silent_link(ec.story) or "")
     reactions = tuple(ec.template.get("reaction_shots") or (0, 1))
     by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
     out = {}
@@ -267,7 +275,7 @@ def speech_plans(ec, script, plans, notes=None) -> dict:
         try:
             out[sid] = shots.speech_shot_plan(scene, scene_plans, language=ec.language, speech_lengths=speech_lengths,
                                               silent_lengths=silent_lengths, reaction_shots=reactions,
-                                              notes=notes)
+                                              notes=notes, whole_exchanges=sid not in kept, links=links)
         except shots.SpeechLineTooLong as exc:
             raise StepFailed(f"Episode {ec.ep}'s storyboard cannot be planned as speaking clips: {exc}.") from None
     return out

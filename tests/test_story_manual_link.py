@@ -245,6 +245,46 @@ def test_a_thin_story_s_brief_warns_of_a_short_prompt(store):
     assert [item["checks"] for item in brief["shots"]] == [item["checks"] for item in full["shots"]]
 
 
+def test_an_exchange_row_says_its_lines_its_speakers_and_the_checks_in_turn(store):
+    """Plan 27 stage 3, fail-first. The brief's row of an exchange shot
+    (scene s02's two lines in one clip): ``line`` the lines joined
+    ("A: ... / B: ..."), ``speaker`` the first speaker, ``speakers`` both in
+    turn, ``lines`` each line with its speaker and voice; the checks say the
+    two lines, the speakers in turn, nobody else, the last line ending the
+    clip; the prompt quotes both lines; the markdown lists each line. A
+    one-line row is as before (no ``speakers``)."""
+    from clipping.aistory.steps import brief as brief_mod
+
+    story_id = nsp.exchange_story(store, profile=PROFILE)
+    _planted(store, story_id)
+    shot = nsp.exchange_shot(store, story_id)
+    brief = _brief(store, story_id, "flow")
+    entry = next(item for item in brief["shots"] if item["shot_id"] == shot["shot_id"])
+    script = tas.eps._script(store, story_id)
+    said = [line for scene in script["scenes"] for line in scene["lines"] if line["line_id"] in shot["lines"]]
+    names = [store.read_entity(story_id, "characters", line["speaker"])["name"] for line in said]
+    assert entry["line"] == f"{names[0]}: {said[0]['text']} / {names[1]}: {said[1]['text']}"
+    assert (entry["speaker"], entry["speakers"], entry["line_ids"]) == (names[0], names, ["l08", "l09"])
+    assert [(row["speaker"], row["text"]) for row in entry["lines"]] == [(name, line["text"])
+                                                                         for name, line in zip(names, said)]
+    assert entry["checks"][:3] == [
+        "the lips move on the words, in sync, for every line",
+        f"2 lines, spoken as written, in French, the speakers in turn ({names[0]}, then {names[1]}) -- "
+        "nobody else talks",
+        "the lines follow each other without a pause; the last line ends the clip"]
+    assert "the clip has its sound (the voices)" in entry["checks"]
+    assert entry["clip_s"] == 8 and entry["length_s"] == 8
+    assert entry["prompt"].index(said[0]["text"]) < entry["prompt"].index(said[1]["text"])
+    assert "Pacing: the exchange fills the whole 8-second clip: 2 lines" in entry["prompt"]
+    assert "the last line ends the shot" in entry["prompt"]
+    markdown = brief_mod.render_markdown(brief)
+    assert "**Lines (fr, one exchange, in turn):**" in markdown
+    assert f"1. {names[0]} — “{said[0]['text']}”" in markdown and f"2. {names[1]} — “{said[1]['text']}”" in markdown
+    single = next(item for item in brief["shots"] if item["speaks"] and item["shot_id"] != shot["shot_id"])
+    assert "speakers" not in single and "lines" not in single and " / " not in single["line"]
+    assert any("by the one speaker -- nobody else talks" in check for check in single["checks"])
+
+
 def test_a_bad_preset_is_refused_by_its_schema():
     from clipping.aistory import platforms
 

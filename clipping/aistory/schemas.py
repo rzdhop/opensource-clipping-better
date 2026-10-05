@@ -3744,6 +3744,11 @@ _STORYBOARD_SHOT_SCHEMA = _document({
     # was planned at (a length its link sells). Absent on every other shot.
     "speaks": {"type": "boolean"},
     "clip_s": {"type": "integer", "minimum": 1},
+    # Plan 27 stage 3: a speaking shot that carries an exchange of several
+    # lines (``shots.speech_shot_plan``): its speakers, in the order they
+    # first speak. Absent on every shot of one line.
+    "speakers": {"type": "array", "items": {"type": "string", "pattern": SPEAKER_PATTERN}, "minItems": 1,
+                 "maxItems": 4},
     # Plan 23 stage D5: the appearance variant each framed character wears in this shot
     # ({char_id: variant_id}): inherited from its scene's ``states`` when the shot is
     # planned, the human's own once overridden (kept by a re-plan, like the shot's

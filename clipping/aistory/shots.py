@@ -2358,6 +2358,9 @@ def _speech_fields(shot, plan, kept) -> None:
     shot["speaks"] = bool(plan.get("speaks"))
     shot["clip_s"] = clip_s
     shot["duration_s"] = float(clip_s)
+    if plan.get("speakers"):
+        # Plan 27 stage 3: an exchange's speakers, in the order they first speak.
+        shot["speakers"] = list(plan["speakers"])
     clip = ((kept or {}).get("assets") or {}).get("clip") or {}
     if kept is not None and clip.get("state") == "current":
         if int(kept.get("clip_s") or 0) > 0:
@@ -2682,7 +2685,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
 _SHOT_RECORD_KEYS = ("shot_id", "scene_id", "prompt_override", "keep_still", "assets", "variants")
 # The derived keys a build writes only sometimes: dropped from a kept shot
 # when the build no longer writes them.
-_SHOT_OPTIONAL_DERIVED_KEYS = ("prompt_layout", "clip_motion", "staging")
+_SHOT_OPTIONAL_DERIVED_KEYS = ("prompt_layout", "clip_motion", "staging", "speakers")
 
 
 def _carried_shot(previous_shot, built) -> dict:
@@ -2923,8 +2926,56 @@ def _planned_clip(entry):
     return int(entry["clip_s"])
 
 
+def planned_exchanges(scene, *, speech_lengths=native_speech.SPEECH_LENGTHS,
+                      silent_lengths=native_speech.SPEECH_LENGTHS, links=("", ""), notes=None):
+    """The shots *scene*'s stored line plan groups its lines into (plan 27
+    stage 3: ``line_plan.shots``, stage 2's exchanges), as ``[(numbers,
+    clip_s, speaks)]`` in line order -- *numbers* the 1-based numbers of its
+    lines -- or None: no stored shots (a plan made before plan 27, a TTS
+    story's), shots that no longer name the written lines in order or by
+    their kind (a speaking shot holds character lines only, a silent one
+    the narrator's one line), or a stored ``clip_s`` its link does not sell
+    (*speech_lengths* for a speaking shot, *silent_lengths* for a silent
+    one; *links* their labels ``(speech, silent)``) -- then ONE note in
+    *notes* names it and each line is planned on its own, as before."""
+    stored = (scene.get("line_plan") or {}).get("shots") or []
+    if not stored:
+        return None
+    lines = scene["lines"]
+    sid = scene["scene_id"]
+    ids = [line["line_id"] for line in lines]
+    named = [line_id for shot in stored for line_id in shot.get("line_ids") or ()]
+    if named != ids:
+        if notes is not None and len(named) == len(ids):
+            # (a plan of another line count is named once already, by planned_line_entries)
+            notes.append(f"scene {sid}: its planned shots name the lines {', '.join(named)}, the script holds "
+                         f"{', '.join(ids)}: each line is planned on its own")
+        return None
+    out, position = [], 0
+    for shot in stored:
+        numbers = list(range(position + 1, position + len(shot["line_ids"]) + 1))
+        position += len(numbers)
+        speaks = bool(shot.get("speaks"))
+        narrated = [lines[n - 1]["speaker"] == "narrator" for n in numbers]
+        if (speaks and any(narrated)) or (not speaks and (len(numbers) != 1 or not narrated[0])):
+            if notes is not None:
+                notes.append(f"scene {sid}: its planned shot of lines {', '.join(shot['line_ids'])} no longer "
+                             "matches who speaks them: each line is planned on its own")
+            return None
+        clip_s = int(shot["clip_s"])
+        lengths, link = (speech_lengths, links[0]) if speaks else (silent_lengths, links[1])
+        if clip_s not in tuple(lengths or ()):
+            if notes is not None:
+                notes.append(f"scene {sid}: the stored {clip_s} s plan is not sold on {link or 'its link'}; "
+                             "replanned")
+            return None
+        out.append((numbers, clip_s, speaks))
+    return out
+
+
 def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPEECH_LENGTHS,
-                     silent_lengths=native_speech.SPEECH_LENGTHS, reaction_shots=(0, 1), notes=None) -> list:
+                     silent_lengths=native_speech.SPEECH_LENGTHS, reaction_shots=(0, 1), notes=None,
+                     whole_exchanges=True, links=("", "")) -> list:
     """A native-speech story's plans for *scene* (plan 22) from its beat
     *plans* (T1 v2's, or a fast plan; framing, action, camera and staging
     are theirs): one shot a character line, ``speaks: true``, the speaker
@@ -2946,16 +2997,37 @@ def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPE
     within the clip less its lead) and the clip is one of the story's
     lengths; a line that no longer fits keeps the rule above and is
     named in *notes* (a list the caller owns). A scene with no plan is
-    planned exactly as before."""
+    planned exactly as before.
+
+    Plan 27 stage 3 (the exchange): a scene whose stored plan groups its
+    lines into shots (:func:`planned_exchanges`) plans each planned shot of
+    two or more lines as ONE speaking shot -- ``lines`` its line numbers in
+    order, ``clip_s`` its planned clip (the smallest length that holds the
+    exchange's words when they outgrew it, named in *notes*; split into one
+    shot a line, named, when none does), the speaker of its first line its
+    subject, the other speakers after it, and ``speakers`` (the character
+    ids in the order they first speak). *whole_exchanges* (a scene planned
+    now): an exchange is planned whole at the first beat plan naming one of
+    its lines; False (a scene whose shots are kept from the board, built
+    before): only a beat plan naming every line of an exchange makes it one
+    shot, so a board that split it keeps its shots. A one-line planned shot
+    is planned exactly as above; *links* (``(speech, silent)`` labels) name
+    the link in the note of a stored length it does not sell."""
     lines = scene["lines"]
     entries = planned_line_entries(scene, notes)
+    groups = planned_exchanges(scene, speech_lengths=speech_lengths, silent_lengths=silent_lengths, links=links,
+                               notes=notes)
+    exchange_of = {n: numbers for numbers, _clip, speaks in groups or () if speaks and len(numbers) > 1
+                   for n in numbers}
+    exchange_clip = {tuple(numbers): clip for numbers, clip, _speaks in groups or ()}
     lo, hi = (list(reaction_shots) + [0, 1])[:2] if reaction_shots else (0, 1)
     place_tags = [tag for plan in plans for tag in plan["subjects"] if not tag.startswith("@")]
     place_tags = list(dict.fromkeys(place_tags)) or [f"#{scene['place_id']}:{scene['time_variant']}"]
     characters = set(scene["characters"])
 
     def from_plan(plan, **changes):
-        out = {key: (list(value) if isinstance(value, list) else value) for key, value in plan.items()}
+        out = {key: (list(value) if isinstance(value, list) else value) for key, value in plan.items()
+               if key != "speakers"}
         out.update(changes)
         return out
 
@@ -2994,13 +3066,57 @@ def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPE
             framing = "medium_single"
         return from_plan(plan, lines=[n], subjects=subjects, framing=framing, speaks=True, clip_s=clip_s)
 
+    def exchange(plan, numbers):
+        """Plan 27 stage 3: the planned exchange of lines *numbers* as one speaking shot (a list of plans)."""
+        said = [lines[n - 1] for n in numbers]
+        words = sum(native_speech.words_of(line["text"]) for line in said)
+        clip_s = exchange_clip[tuple(numbers)]
+        if words > native_speech.capacity(clip_s):
+            longer = [length for length in sorted(speech_lengths) if native_speech.capacity(length) >= words]
+            where = f"scene {scene['scene_id']} lines {numbers[0]}-{numbers[-1]}"
+            if not longer:
+                if notes is not None:
+                    notes.append(f"{where}: {words} words fit no clip as one exchange: one shot a line")
+                return [speaking(plan, n) for n in numbers]
+            if notes is not None:
+                notes.append(f"{where}: {words} words do not fit their planned {clip_s} s exchange: "
+                             f"planned at {longer[0]} s")
+            clip_s = longer[0]
+        speakers = list(dict.fromkeys(line["speaker"] for line in said))
+        first = speakers[0]
+        if first in characters:
+            listener = _listener(scene, numbers[0] - 1, first)
+            framed = [cid for cid in speakers if cid in characters]
+            if listener and listener in characters and listener not in framed:
+                framed.append(listener)
+            others = [tag for tag in plan["subjects"] if not tag.startswith("@")] or place_tags
+            subjects = [f"@{cid}" for cid in framed] + others
+        else:
+            subjects = list(plan["subjects"])
+        framing = _SPEECH_FRAMING_OVER.get(plan["framing"], plan["framing"])
+        if framing == "medium_two_shot" and len([tag for tag in subjects if tag.startswith("@")]) < 2:
+            framing = "medium_single"
+        return [from_plan(plan, lines=list(numbers), subjects=subjects, framing=framing, speaks=True, clip_s=clip_s,
+                          speakers=speakers)]
+
     out, placed, reactions = [], set(), 0
+
+    def place(plan, n, named):
+        """Line *n* planned from *plan* (*named*: the lines *plan* itself names)."""
+        group = exchange_of.get(n)
+        if group is not None and (whole_exchanges or all(m in named for m in group)):
+            out.extend(exchange(plan, group))
+            placed.update(group)
+        else:
+            out.append(speaking(plan, n))
+            placed.add(n)
+
     for plan in plans:
         numbers = [n for n in plan.get("lines") or () if 1 <= n <= len(lines) and n not in placed]
         if numbers:
             for n in sorted(numbers):
-                out.append(speaking(plan, n))
-                placed.add(n)
+                if n not in placed:
+                    place(plan, n, numbers)
         elif lines and reactions < hi:
             out.append(from_plan(plan, lines=[], speaks=False,
                                  clip_s=native_speech.silent_clip_s(native_speech.REACTION_S, silent_lengths)))
@@ -3009,8 +3125,7 @@ def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPE
                                                  action="", subjects=place_tags, lines=[])
     for n in range(1, len(lines) + 1):
         if n not in placed:
-            out.append(speaking(template_plan, n))
-            placed.add(n)
+            place(template_plan, n, range(1, len(lines) + 1))
     if not lines:
         target = float(scene.get("target_duration_s") or native_speech.REACTION_S)
         out = [from_plan(template_plan, lines=[], speaks=False,

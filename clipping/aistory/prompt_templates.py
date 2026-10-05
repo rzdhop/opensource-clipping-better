@@ -512,7 +512,8 @@ def master_sections(story, style_lock, entities, *, language, present=(), place_
     relationships of the present ones are their own sections. Without one
     (the series master) every listed entity is a full paragraph.
     *speaker*: the character whose voice direction is said (never with
-    *image*). *image*: no title, no dialogue language, no motion, no voice.
+    *image*; a tuple of ids: an exchange's speakers, plan 27 stage 3).
+    *image*: no title, no dialogue language, no motion, no voice.
     *negative*: the shot's negative, added to the style's in AVOID.
     *variants* (``{char_id: variant_id}``, a shot's appearance variants) and
     *wardrobe* (``{char_id: wardrobe set id}``) choose what each wears (the
@@ -548,7 +549,8 @@ def master_sections(story, style_lock, entities, *, language, present=(), place_
         humans = humans or human
         parts, detail = _look_parts(doc, style_lock, handle + (" (in this shot)" if is_present else ""),
                                     wardrobe_id=(wardrobe or {}).get(cid), all_outfits=not shot,
-                                    speaker=cid == speaker, image=image)
+                                    speaker=(cid in speaker) if isinstance(speaker, tuple) else cid == speaker,
+                                    image=image)
         name = _bare(doc.get("name")) or cid
         if shot and is_present:
             personalities.append(_personality_text(doc, handle, image=image))
@@ -701,6 +703,12 @@ def _shot_line(scene, shot):
                 None)
 
 
+def _shot_lines(scene, shot) -> list:
+    """The shot's lines in its order (``clips.speech_lines``'): an exchange's 2-4, plan 27 stage 3."""
+    by_id = {line.get("line_id"): line for line in scene.get("lines") or ()}
+    return [by_id[line_id] for line_id in shot.get("lines") or () if line_id in by_id]
+
+
 def _episode(script, chars, places, props) -> dict:
     """``{kind: [ids]}`` of the episode's own entities: every scene's, plus the shot's."""
     out = {"characters": list(chars), "places": list(places), "props": list(props)}
@@ -729,12 +737,16 @@ def _resolve_tag(tag, who) -> str:
 
 
 def _scene_sections(ec, shot, script, *, image) -> tuple:
-    """``(sections, speaker)``: the shot's SCENE SUMMARY and SCENE, and its speaker's id (None if it speaks none)."""
+    """``(sections, speaker)``: the shot's SCENE SUMMARY and SCENE, and its speaker's id (None if it speaks none;
+    an exchange's speakers, a tuple of ids in the order they first speak -- plan 27 stage 3)."""
     scene, number, total = _scene_of(script, shot)
     who = _Who(getattr(ec, "entities", None))
     chars, places, _props, variant = _shot_subjects(shot)
     line = _shot_line(scene, shot) if shot.get("speaks") else None
     speaker = line.get("speaker") if line and line.get("speaker") in who.entities["characters"] else None
+    exchange = _shot_lines(scene, shot) if speaker else []
+    if len(exchange) < 2:
+        exchange = []
 
     ep = getattr(ec, "ep", None)
     head = []
@@ -768,7 +780,17 @@ def _scene_sections(ec, shot, script, *, image) -> tuple:
     camera = shot.get("camera_motion")
     if camera:
         head.append(_labelled("Camera", prompting.CAMERA_PHRASES.get(camera, str(camera).replace("_", " "))))
-    if speaker and not image:
+    if exchange and not image:
+        # Plan 27 stage 3: each line of the exchange its own delivery and emotion, by its number.
+        for k, item in enumerate(exchange, start=1):
+            if item.get("speaker") not in who.entities["characters"]:
+                continue
+            said = who.char(item["speaker"])
+            if _bare(item.get("delivery")):
+                head.append(_labelled(f"Delivery of line {k} by {said}", _bare(item["delivery"])))
+            if _bare(item.get("emotion")):
+                head.append(_labelled(f"Emotion of {said} on line {k}", _bare(item["emotion"])))
+    elif speaker and not image:
         delivery = _bare(line.get("delivery"))
         emotion = _bare(line.get("emotion"))
         said = who.char(speaker)
@@ -779,7 +801,14 @@ def _scene_sections(ec, shot, script, *, image) -> tuple:
     if not image:
         seconds = shot.get("clip_s") or shot.get("duration_s")
         length = f"the whole {int(round(float(seconds)))}-second clip" if seconds else "the whole clip"
-        if speaker:
+        if exchange:
+            voices = [who.char(cid) for cid in dict.fromkeys(item.get("speaker") for item in exchange)
+                      if cid in who.entities["characters"]]
+            voices = voices[0] if len(voices) == 1 else ", ".join(voices[:-1]) + " and " + voices[-1]
+            head.append(f"Pacing: the exchange fills {length}: {len(exchange)} lines, {voices} "
+                        "speaking in turn; the lines follow each other without a pause; the last line ends the "
+                        "shot; nobody freezes, the ambience never drops, no dead air, no empty hold.")
+        elif speaker:
             said = who.char(speaker)
             others = [who.char(cid) for cid in chars if cid != speaker]
             react = (f"{others[0]} reacts" if len(others) == 1 else f"{_join(others, ' and ')} react") if others \
@@ -793,6 +822,9 @@ def _scene_sections(ec, shot, script, *, image) -> tuple:
     summary = _paragraph("SCENE SUMMARY", [_sentence(scene.get("summary"))])
     sections = [Section("scene_summary", "scene summary", summary, _rank("scene_summary")),
                 Section("scene", "scene", _paragraph("SCENE", head), None)]
+    if exchange:
+        speaker = tuple(cid for cid in dict.fromkeys(item.get("speaker") for item in exchange)
+                        if cid in who.entities["characters"])
     return _finish(sections, who), speaker
 
 

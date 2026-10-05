@@ -150,6 +150,25 @@ def test_the_handoff_composes_each_shot_from_the_two_briefs(api):
         assert shot["image"].get("prompt_warning") == keyframe.get("prompt_warning")
 
 
+def test_an_exchange_shot_s_clip_row_names_its_speakers_and_its_lines(api):
+    """Plan 27 stage 3: the handoff's clip block of an exchange shot carries
+    the brief's own ``line`` (joined), ``speaker`` (the first), ``speakers``,
+    ``lines`` and checks; a one-line shot's block has no ``speakers``."""
+    story_id = nsp.exchange_story(api.store, profile="native_speech_manual")
+    shot = nsp.exchange_shot(api.store, story_id)
+    body = _get(api, story_id)
+    clip_brief, _image_brief = _briefs(api, story_id)
+    entry = next(item for item in clip_brief["shots"] if item["shot_id"] == shot["shot_id"])
+    clip = next(item for item in body["shots"] if item["shot_id"] == shot["shot_id"])["clip"]
+    assert (clip["line"], clip["speaker"], clip["speakers"], clip["checks"]) == (
+        entry["line"], entry["speaker"], entry["speakers"], entry["checks"])
+    assert len(clip["speakers"]) == 2 and clip["line"].startswith(f"{clip['speakers'][0]}: ")
+    assert [row["line_id"] for row in clip["lines"]] == shot["lines"]
+    assert clip["checks"][1].startswith("2 lines, spoken as written")
+    single = next(item for item in body["shots"] if item["speaks"] and item["shot_id"] != shot["shot_id"])
+    assert "speakers" not in single["clip"] and "lines" not in single["clip"]
+
+
 def test_the_handoff_leaves_the_briefs_as_they_were(api):
     """The existing briefs are untouched: the same JSON before and after the
     handoff was asked, with the platform remembered."""

@@ -376,3 +376,29 @@ def test_t1_v2_reply_still_refuses_a_name_that_is_not_a_scene_cast_member():
     assert added == [] and reply["shots"][0]["action"] == shot["action"]
     errors = prompts.validate_t1_v2(reply, **check)
     assert any("names the character 'Broccolia'" in e for e in errors)
+
+
+# ============================================= plan 27 stage 3 (the exchange)
+
+def test_a_t1_v2_shot_listing_a_planned_exchange_s_lines_is_valid_and_stays_one_shot():
+    """A T1 v2 shot that lists every line of one planned exchange passes the
+    repair and the validator as it is, and the native plan
+    (``storyboard.speech_plans``' ``shots.speech_shot_plan``, reading the
+    scene's ``line_plan.shots``) keeps it ONE speaking shot -- no longer split
+    one shot a line."""
+    from clipping.aistory import shots
+
+    import test_story_native_speech_plan as nsp
+
+    check = _t1_v2_check(n_lines=2)
+    shot = tpe._good_t1_v2_shot(lines=[1, 2], subjects=["@char_kiwilo", "@char_mangella", "%prop_phone",
+                                                        "#place_pool:day"])
+    reply = {"shots": [copy.deepcopy(shot)]}
+    storyboard._repair_t1_v2_reply(reply, tags_allowed=check["tags_allowed"])
+    assert prompts.validate_t1_v2(reply, **check) == []
+    scene = nsp._with_shots(nsp._scene([("char_kiwilo", "Tu caches la clé."), ("char_mangella", "Et alors ?")],
+                                       characters=("char_kiwilo", "char_mangella")), [(8, [1, 2], True)])
+    planned = shots.speech_shot_plan(scene, [storyboard.t1_v2_plan(reply["shots"][0])], language="fr")
+    assert [(plan["lines"], plan["clip_s"], plan["speakers"]) for plan in planned] == [
+        ([1, 2], 8, ["char_kiwilo", "char_mangella"])]
+    assert planned[0]["clip_motion"] == shot["motion"]

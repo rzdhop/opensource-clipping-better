@@ -344,10 +344,20 @@ def clip_request_parts(ec, shot, script, *, tier, flags, note=None, link=None) -
 
 
 def speech_line(script, shot):
-    """``(scene, line)`` of a speaking shot's one line, or ``(scene, None)``."""
+    """``(scene, line)`` of a speaking shot's one line, or ``(scene, None)``
+    (an exchange's: its first, :func:`speech_lines`)."""
     scene = next((item for item in script["scenes"] if item["scene_id"] == shot["scene_id"]), None) or {}
     line = next((item for item in scene.get("lines") or () if item["line_id"] in shot["lines"]), None)
     return scene, line
+
+
+def speech_lines(script, shot) -> list:
+    """The line dicts a speaking *shot* speaks, in the shot's order (plan 27
+    stage 3: an exchange holds 2-4); a line id its scene no longer has is
+    left out. One line for every shot of one line."""
+    scene = next((item for item in script["scenes"] if item["scene_id"] == shot["scene_id"]), None) or {}
+    by_id = {item["line_id"]: item for item in scene.get("lines") or ()}
+    return [by_id[line_id] for line_id in shot.get("lines") or () if line_id in by_id]
 
 
 def speech_prompt_inputs(ec, shot, script) -> dict:
@@ -381,11 +391,26 @@ def speech_prompt_inputs(ec, shot, script) -> dict:
     if shots_mod.named_character(speaker) and action.startswith(who + " "):
         # Plan 25 stage 0: "Marie-Jeanne, a woman in her thirties in a charcoal blazer, grips the pen", said once.
         action = action[len(who) + 1:]
-    return {"speaker": who, "look": look, "action": action, "listener": listener,
-            "language": ec.language, "voice": prompting.voice_line(speaker.get("voice_hints")),
-            "line": line["text"], "reaction": shots_mod._reaction(scene, [line]),
-            "camera_phrase": prompting.CAMERA_PHRASES[shot["camera_motion"]],
-            "place": (place.get("descriptor") or "").strip(), "ambience": brief["place"]}
+    inputs = {"speaker": who, "look": look, "action": action, "listener": listener,
+              "language": ec.language, "voice": prompting.voice_line(speaker.get("voice_hints")),
+              "line": line["text"], "reaction": shots_mod._reaction(scene, [line]),
+              "camera_phrase": prompting.CAMERA_PHRASES[shot["camera_motion"]],
+              "place": (place.get("descriptor") or "").strip(), "ambience": brief["place"]}
+    said = speech_lines(script, shot)
+    if len(said) > 1:
+        # Plan 27 stage 3: an exchange -- every line in order, each by its speaker's handle and voice.
+        inputs["lines"] = [_exchange_line(characters, handles, shot, item) for item in said]
+    return inputs
+
+
+def _exchange_line(characters, handles, shot, line) -> dict:
+    """One line of an exchange (:func:`speech_prompt_inputs`' ``lines``):
+    ``{speaker_id, speaker (its handle), voice_line, text, delivery, emotion}``."""
+    doc = shots_mod.variant_view(characters.get(line["speaker"]) or {},
+                                 (shot.get("variants") or {}).get(line["speaker"]))
+    return {"speaker_id": line["speaker"], "speaker": handles.get(line["speaker"], "the character"),
+            "voice_line": prompting.voice_line(doc.get("voice_hints")), "text": line["text"],
+            "delivery": line.get("delivery") or "", "emotion": line.get("emotion") or ""}
 
 
 def speech_request_parts(ec, shot, script, *, note=None, link=None) -> dict:
@@ -397,12 +422,16 @@ def speech_request_parts(ec, shot, script, *, note=None, link=None) -> dict:
     line); the hash is of that prompt, so a line rewritten makes its clip
     stale. ``over`` as ``clip_request_parts``' (the link's limit)."""
     budget = prompt_budgets.speech_clip_words(link)
+    exchange = len(speech_lines(script, shot)) > 1
     if media_policy.action_prompts(getattr(ec, "story", None)):
         # Plan 23 stage D6: the action style (``prompting.speech_clip_prompt_action``).
-        prompt = prompting.speech_clip_prompt_action(budget=budget, note=note or "", **action_inputs(ec, shot, script))
+        build = prompting.speech_exchange_clip_prompt_action if exchange else prompting.speech_clip_prompt_action
+        prompt = build(budget=budget, note=note or "", **action_inputs(ec, shot, script))
     else:
         inputs = speech_prompt_inputs(ec, shot, script)
-        prompt = prompting.speech_clip_prompt(ec.style_lock, budget=budget, note=note or "", **inputs)
+        # Plan 27 stage 3: a shot of 2+ lines is an exchange, quoted line by line; one line, as before.
+        build = prompting.speech_exchange_clip_prompt if exchange else prompting.speech_clip_prompt
+        prompt = build(ec.style_lock, budget=budget, note=note or "", **inputs)
     _visual, negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=3)
     resolution = media_policy.video_resolution(getattr(ec, "story", None))
     over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, prompt, budget=budget) if link else None
@@ -435,11 +464,26 @@ def action_inputs(ec, shot, script) -> dict:
     speaker = anchors.get(line["speaker"], "the character")
     if line["speaker"] in named and speaker in action:
         speaker = handles[line["speaker"]]  # its anchor is already said, at its first mention in the action
-    return {"speaker": speaker, "voice_of": handles[line["speaker"]] if line["speaker"] in named else "",
-            "listener": prompting.swap_phrases(inputs["listener"], swap),
-            "action": action, "language": inputs["language"], "voice": inputs["voice"], "line": inputs["line"],
-            "reaction": prompting.swap_phrases(inputs["reaction"], swap), "camera_phrase": inputs["camera_phrase"],
-            "place": inputs["place"], "sfx": parts["sfx"], "ambience": _ambience_phrase(parts["variant"])}
+    out = {"speaker": speaker, "voice_of": handles[line["speaker"]] if line["speaker"] in named else "",
+           "listener": prompting.swap_phrases(inputs["listener"], swap),
+           "action": action, "language": inputs["language"], "voice": inputs["voice"], "line": inputs["line"],
+           "reaction": prompting.swap_phrases(inputs["reaction"], swap), "camera_phrase": inputs["camera_phrase"],
+           "place": inputs["place"], "sfx": parts["sfx"], "ambience": _ambience_phrase(parts["variant"])}
+    if inputs.get("lines"):
+        # Plan 27 stage 3: an exchange's lines -- each speaker by its anchor, a named one by its name once its
+        # anchor is said (in the action, or at its first line); ``voice_of`` who the Audio sentence hears.
+        said = {cid for cid in named if anchors.get(cid) and anchors[cid] in action}
+        said.add(line["speaker"])
+        lines = []
+        for k, item in enumerate(inputs["lines"]):
+            cid = item["speaker_id"]
+            who = speaker if k == 0 else (handles.get(cid, "the character") if cid in named and cid in said
+                                          else anchors.get(cid, "the character"))
+            said.add(cid)
+            lines.append(dict(item, speaker=who,
+                              voice_of=handles.get(cid, "") if cid in named else anchors.get(cid, "the character")))
+        out["lines"] = lines
+    return out
 
 
 def _ambience_phrase(variant) -> str:

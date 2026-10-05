@@ -361,9 +361,17 @@ def where_to_paste(preset, aspect=ASPECT) -> str:
     return preset["where_to_paste"].replace("{aspect}", aspect)
 
 
-def _checks(ec, shot, line, clip_s, length, preset) -> list:
+def _checks(ec, shot, line, clip_s, length, preset, speakers=None, count=1) -> list:
     look = "the look kept: the faces, outfits and colours of the reference sheets"
     size = f"{aspect_of(ec)}, at least {max(2, int(clip_s))} s (pick {length} s on {preset['name']})"
+    if shot.get("speaks") and line is not None and count > 1:
+        # Plan 27 stage 3: an exchange of *count* lines by *speakers* (their names, in the order they first speak).
+        return ["the lips move on the words, in sync, for every line",
+                f"{count} lines, spoken as written, in {_language(ec)}, the speakers in turn "
+                f"({', then '.join(speakers or ())}) -- nobody else talks",
+                "the lines follow each other without a pause; the last line ends the clip",
+                "no subtitles, captions or on-screen text burned in",
+                look, "the clip has its sound (the voices)", size]
     if shot.get("speaks") and line is not None:
         return ["the lips move on the words, in sync, for the whole line",
                 f"the line is spoken as written, in {_language(ec)}, by the one speaker -- nobody else talks",
@@ -423,11 +431,24 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None, wardrobe=None) -> d
         warning = prompt_templates.short_warning(sent["full_words"]) if entry["state"] != "stock" else None
         if warning:
             entry["prompt_warning"] = warning
+    said = clips.speech_lines(script, shot) if speaks and line is not None else []
     if speaks and line is not None:
         character = ((ec.entities or {}).get("characters") or {}).get(line["speaker"]) or {}
         entry.update(line=line["text"], line_id=line["line_id"], speaker=character.get("name") or line["speaker"],
                      voice_line=prompting.voice_line(character.get("voice_hints")))
-    entry["checks"] = _checks(ec, shot, line if speaks else None, clip_s, length, preset)
+    speakers = None
+    if len(said) > 1:
+        # Plan 27 stage 3: an exchange -- every line, by its speaker, in turn; the first speaker is the row's.
+        cast = (ec.entities or {}).get("characters") or {}
+        rows = [{"line_id": item["line_id"], "speaker": (cast.get(item["speaker"]) or {}).get("name")
+                 or item["speaker"], "text": item["text"],
+                 "voice_line": prompting.voice_line((cast.get(item["speaker"]) or {}).get("voice_hints"))}
+                for item in said]
+        speakers = list(dict.fromkeys(row["speaker"] for row in rows))
+        entry.update(line=" / ".join(f"{row['speaker']}: {row['text']}" for row in rows),
+                     line_ids=[row["line_id"] for row in rows], speakers=speakers, lines=rows)
+    entry["checks"] = _checks(ec, shot, line if speaks else None, clip_s, length, preset, speakers=speakers,
+                              count=len(said))
     take = ((shot.get("assets") or {}).get("clip") or {}).get("native_speech")
     entry["take"] = ({key: take.get(key) for key in ("state", "matched", "heard", "start_s", "end_s", "reason")}
                      if take else None)
@@ -545,7 +566,15 @@ def render_markdown(brief) -> str:
                  f"**Model:** {entry['model_label']} · **Length:** pick {entry['length_s']} s "
                  f"(planned {entry['clip_s']} s) · **Aspect:** {entry['aspect']}", "",
                  f"**Mode:** {entry['mode']}", ""]
-        if entry.get("line"):
+        if entry.get("lines"):
+            # Plan 27 stage 3: an exchange -- each line by its speaker, in turn, and each speaker's voice once.
+            body += [f"**Lines ({brief['language']}, one exchange, in turn):**", ""]
+            body += [f"{k}. {row['speaker']} — “{row['text']}”" for k, row in enumerate(entry["lines"], start=1)]
+            voices = {}
+            for row in entry["lines"]:
+                voices.setdefault(row["speaker"], row["voice_line"])
+            body += [""] + [f"**Voice of {name}:** {voice}" for name, voice in voices.items()] + [""]
+        elif entry.get("line"):
             body += [f"**Line ({brief['language']}):** {entry['speaker']} — “{entry['line']}”", "",
                      f"**Voice:** {entry['voice_line']}", ""]
         if entry.get("prompt_warning"):
@@ -985,7 +1014,8 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
                     "clip": {mode, mode_explicit, mode_editable, state, source, link, est_usd, gate,
                              model, model_label, how, prompt, negative_prompt, length_s, line, speaker,
                              voice_line, checks, references, upload_slot, zip_url, take, stock,
-                             fit: {limit, words, full_words, dropped} | None, prompt_warning?}
+                             fit: {limit, words, full_words, dropped} | None, prompt_warning?,
+                             speakers?, lines? (an exchange, plan 27 stage 3)}
                             | None for a shot kept still}],
          "entities": [the image brief's sheet / plate / prop entries, variants included],
          "export": {"brief_md", "brief_zip", "image_brief_zip"}}
@@ -1088,6 +1118,9 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
                 # Plan 26: the brief's own fit (None on a v1 story) and its short-prompt warning.
                 "fit": entry.get("fit"),
             }
+            if entry.get("speakers"):
+                # Plan 27 stage 3: an exchange's speakers and lines (``line`` holds them joined).
+                clip.update(speakers=list(entry["speakers"]), lines=[dict(row) for row in entry["lines"]])
             if entry.get("prompt_warning"):
                 clip["prompt_warning"] = entry["prompt_warning"]
             if clip_mode == video_plan.AUTO and native:

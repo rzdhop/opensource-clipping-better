@@ -198,3 +198,94 @@ def test_a_silent_shot_keeps_the_ambience_prompt_and_asks_for_its_sound(store):
                                      link=LITE)
     assert parts["prompt"].endswith(prompting.AUDIO_CLOSING) and parts["native_audio"] is True
     assert "says in" not in parts["prompt"]
+
+
+# ================================================================ the exchange (plan 27 stage 3)
+
+CLOSING = "No music, no narrator, no other voice. No subtitles, no captions, no on-screen text."
+
+
+def test_an_exchange_shots_prompt_quotes_every_line_in_turn_and_hears_both_voices(store):
+    """Fail-first. The board's exchange shot (scene s02's two lines, one 8 s
+    clip): its prompt quotes both lines in order -- the first speaker's in
+    its voice, the answer in the other's --, says ``Audio: the voices of A
+    and B only`` exactly once, ends with the two closings, fits the link's
+    cap and names no character by its name. ``speech_prompt_sentences``
+    finds the quotes in order."""
+    from clipping.aistory import prompting
+    from clipping.aistory.steps import clips
+
+    story_id = nsp.exchange_story(store)
+    shot = nsp.exchange_shot(store, story_id)
+    script = eps._script(store, story_id)
+    said = clips.speech_lines(script, shot)
+    assert [line["line_id"] for line in said] == shot["lines"] and len(said) == 2
+    for line in said:
+        _give_voice_hints(store, story_id, line["speaker"])
+    ec = tas._ec(store, story_id)
+    parts = clips.clip_request_parts(ec, shot, script, tier=3, flags={}, link=FAST)
+    prompt = parts["prompt"]
+    voice = prompting.voice_line(HINTS)
+    handles = clips.shots_mod.character_handles(ec.entities["characters"])
+    first, second = (handles[line["speaker"]] for line in said)
+    assert f'looks at {second} and says in French, in {voice}, "{said[0]["text"]}"' in prompt
+    assert f'{second[0].upper() + second[1:]} answers at once, in {voice}, "{said[1]["text"]}"' in prompt
+    assert prompt.index(said[0]["text"]) < prompt.index(said[1]["text"])
+    assert prompt.count(f"Audio: the voices of {first} and {second} only, speaking French in turn, lips in sync "
+                        "with the words, no overlap.") == 1
+    assert prompt.count("Audio:") == 1 and prompt.count("listens without speaking, mouth closed") == 1
+    assert prompt.endswith(CLOSING)
+    assert parts["native_audio"] is True and parts["over"] is None
+    assert len(prompt.split()) <= clips.prompt_budgets.speech_clip_words(FAST)
+    names = {doc["name"] for doc in ec.entities["characters"].values()}
+    assert not any(name in prompt for name in names)
+    kept = prompting.speech_prompt_sentences(prompt)
+    assert kept["lines"] == [line["text"] for line in said] and kept["line"] == said[0]["text"]
+    # a one-line shot of the same board keeps its one-line prompt
+    single = next(item for item in tas._board(store, story_id)["shots"] if item["speaks"] and len(item["lines"]) == 1)
+    one = clips.clip_request_parts(ec, single, script, tier=3, flags={}, link=FAST)["prompt"]
+    assert one.count("Audio: only ") == 1 and "answers at once" not in one
+    assert prompting.speech_prompt_sentences(one)["lines"] == [prompting.speech_prompt_sentences(one)["line"]]
+
+
+def _three_lines():
+    return [{"speaker_id": "char_a", "speaker": "a red lipstick", "voice_line": "a sharp voice", "text": "Tu mens."},
+            {"speaker_id": "char_b", "speaker": "a nude lipstick", "voice_line": "a soft voice",
+             "text": "Prouve-le, alors."},
+            {"speaker_id": "char_a", "speaker": "a red lipstick", "voice_line": "a sharp voice",
+             "text": "Je l'ai vu"}]
+
+
+def test_an_exchange_of_three_lines_keeps_every_quote_and_each_voice_once_whatever_the_budget():
+    from clipping.aistory import prompting
+
+    lock = {"motion_rules": {"tier2_prompt_suffix": "x", "tier2_prompt_suffix_v2": "Bold cartoon acting."}}
+    long = " ".join(["word"] * 60)
+    lines = _three_lines()
+    for budget in (200, 110):
+        prompt = prompting.speech_exchange_clip_prompt(
+            lock, lines=lines, speaker="a red lipstick", look=long, action=long, listener="a nude lipstick",
+            language="fr", voice="a sharp voice", line="Tu mens.", reaction=long, camera_phrase=long, place=long,
+            ambience="a marble hall", budget=budget)
+        assert prompting.speech_prompt_sentences(prompt)["lines"] == ["Tu mens.", "Prouve-le, alors.", "Je l'ai vu"]
+        assert 'says in French, in a sharp voice, "Tu mens."' in prompt
+        assert 'A nude lipstick answers at once, in a soft voice, "Prouve-le, alors."' in prompt
+        assert 'A red lipstick answers at once, "Je l\'ai vu".' in prompt
+        assert prompt.count("Audio: the voices of a red lipstick and a nude lipstick only") == 1
+        assert prompt.count("a sharp voice") == 1 and prompt.endswith(CLOSING)
+    assert len(prompt.split()) <= 110 and "word word" not in prompt  # every context layer went first
+    # the same speaker going on, and the action style
+    lines[2]["speaker_id"], lines[1]["speaker_id"] = "char_a", "char_a"
+    lines[1].update(speaker="a red lipstick", voice_line="a sharp voice")
+    alone = prompting.speech_exchange_clip_prompt(
+        lock, lines=lines, speaker="a red lipstick", look="", action="", listener="a nude lipstick", language="fr",
+        reaction="", camera_phrase="Slow push in", place="", ambience="")
+    assert 'A red lipstick goes on, "Prouve-le, alors."' in alone
+    assert "Audio: only a red lipstick's voice speaking French" in alone
+    assert "A nude lipstick listens without speaking, mouth closed." in alone
+    action = prompting.speech_exchange_clip_prompt_action(
+        lines=_three_lines(), speaker="a red lipstick", listener="a nude lipstick", action="@x grips the pen",
+        language="fr", reaction="", camera_phrase="Slow push in", place="a marble hall", ambience="the ambience")
+    assert prompting.speech_prompt_sentences(action)["lines"] == ["Tu mens.", "Prouve-le, alors.", "Je l'ai vu"]
+    assert action.count("Audio: the voices of a red lipstick and a nude lipstick only") == 1
+    assert action.endswith(CLOSING)

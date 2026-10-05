@@ -67,6 +67,28 @@ def planned_story(store, **kwargs):
     return story_id
 
 
+def exchange_story(store, *, scene_id="s02", clip_s=8, **kwargs):
+    """:func:`planned_story` whose scene *scene_id* carries plan 27 stage 2's
+    line plan grouping all its lines into one *clip_s* exchange, planned
+    (fast) and approved: its board holds one speaking shot for the exchange."""
+    from clipping.aistory.steps import storyboard
+
+    story_id = native_story(store, **kwargs)
+    script = eps._script(store, story_id)
+    scene = next(item for item in script["scenes"] if item["scene_id"] == scene_id)
+    _with_shots(scene, [(clip_s, list(range(1, len(scene["lines"]) + 1)), True)])
+    store.write_episode_doc(story_id, 1, "script.json", script, now=NOW)
+    storyboard.build_fast(store, story_id, 1, now=NOW, on_log=lambda _line: None)
+    tas._approve(store, story_id)
+    return story_id
+
+
+def exchange_shot(store, story_id, scene_id="s02"):
+    """The board's speaking shot of *scene_id* that carries its exchange."""
+    board = tas._board(store, story_id)
+    return next(shot for shot in board["shots"] if shot["scene_id"] == scene_id and len(shot["lines"]) > 1)
+
+
 def _story_doc(**profile):
     base = {"tier": 3, "route": "api", "consistency_mode": "references", "budget_profile": "native_speech",
             "pipeline": "v2"}
@@ -271,6 +293,106 @@ def test_a_line_longer_than_the_longest_clip_is_refused_with_the_fix():
     assert "shorten it, or split it into two lines" in str(caught.value)
 
 
+def _with_shots(scene, shots):
+    """*scene* carrying plan 27 stage 2's stored line plan: *shots* ``(clip_s,
+    [line numbers], speaks)`` over its lines, each line's ``clip_s`` its shot's."""
+    lines = scene["lines"]
+    entries, stored = [], []
+    for clip, numbers, speaks in shots:
+        for n in numbers:
+            line = lines[n - 1]
+            kind = "narrator" if line["speaker"] == "narrator" else "character"
+            entries.append({"kind": kind, "speaker": line["speaker"], "seconds": float(clip) / len(numbers),
+                            "clip_s": clip, "max_words": 12, "min_words": 3})
+        stored.append({"clip_s": clip, "line_ids": [lines[n - 1]["line_id"] for n in numbers], "words_min": 6,
+                       "words_max": 17, "speaks": speaks})
+    scene["line_plan"] = {"allowed_speech_s": 12.0, "max_words": 34, "min_words": 12, "lines": entries,
+                          "shots": stored}
+    return scene
+
+
+EXCHANGE = [("char_a", "Tu caches la clé depuis lundi."), ("char_b", "Et alors, tu vas me dénoncer ?"),
+            ("char_a", "Non. Je vais la prendre."), ("narrator", "Personne ne bouge.")]
+
+
+def test_a_planned_exchange_is_one_speaking_shot_with_its_lines_its_clip_and_its_speakers():
+    """Plan 27 stage 3, fail-first. The stored plan groups lines 1-2 into one
+    8 s exchange and line 3 into its own 6 s shot: two speaking shots, the
+    first carrying both lines in order (its first speaker its subject, the
+    other after it, ``speakers`` in turn), the narrator's line its silent
+    shot -- even though the beat plan named lines 1-3 together. Given back,
+    nothing moves."""
+    from clipping.aistory import shots
+
+    scene = _with_shots(_scene(EXCHANGE), [(8, [1, 2], True), (6, [3], True), (6, [4], False)])
+    plans = [_beat([1, 2, 3]), _beat([4], framing="wide_establishing")]
+    notes = []
+    planned = shots.speech_shot_plan(scene, plans, language="fr", notes=notes)
+    assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [
+        ([1, 2], True, 8), ([3], True, 6), ([4], False, 6)]
+    assert planned[0]["speakers"] == ["char_a", "char_b"]
+    assert planned[0]["subjects"][:2] == ["@char_a", "@char_b"]
+    assert "speakers" not in planned[1] and "speakers" not in planned[2]
+    assert notes == []
+    assert shots.speech_shot_plan(scene, planned, language="fr") == planned
+
+
+def test_an_exchange_of_three_lines_and_the_one_line_shot_beside_it_as_today():
+    from clipping.aistory import shots
+
+    lines = [("char_a", "Tu caches la clé."), ("char_b", "Et alors ?"), ("char_a", "Je la prends.")]
+    scene = _with_shots(_scene(lines), [(8, [1, 2, 3], True)])
+    planned = shots.speech_shot_plan(scene, [_beat([1]), _beat([2]), _beat([3])], language="fr")
+    # the whole exchange at the first beat naming one of its lines; the beats left are a reaction at most
+    assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [([1, 2, 3], True, 8),
+                                                                                     ([], False, 6)]
+    assert planned[0]["speakers"] == ["char_a", "char_b"]
+    # a one-line planned shot is exactly the plan-24 path's shot
+    single = _with_shots(_scene(lines[:1]), [(8, [1], True)])
+    bare = _with_plan(_scene(lines[:1]), [("character", "char_a", 8)])
+    assert shots.speech_shot_plan(single, [_beat([1])], language="fr") == shots.speech_shot_plan(
+        bare, [_beat([1])], language="fr")
+
+
+def test_a_kept_board_that_split_an_exchange_keeps_its_shots():
+    """A scene whose shots the board keeps (``whole_exchanges=False``): only a
+    plan naming the whole exchange makes it one shot -- a board built one
+    shot a line keeps them, so nothing made is lost."""
+    from clipping.aistory import shots
+
+    scene = _with_shots(_scene(EXCHANGE[:2]), [(8, [1, 2], True)])
+    split = shots.speech_shot_plan(scene, [_beat([1]), _beat([2])], language="fr", whole_exchanges=False)
+    assert [(plan["lines"], plan["clip_s"]) for plan in split] == [([1], 8), ([2], 8)]
+    whole = shots.speech_shot_plan(scene, [_beat([1, 2])], language="fr", whole_exchanges=False)
+    assert [(plan["lines"], plan["clip_s"]) for plan in whole] == [([1, 2], 8)]
+
+
+def test_a_stored_length_the_link_does_not_sell_is_named_once_and_each_line_planned_on_its_own():
+    from clipping.aistory import shots
+
+    scene = _with_shots(_scene(EXCHANGE[:2]), [(4, [1, 2], True)])
+    notes = []
+    planned = shots.speech_shot_plan(scene, [_beat([1, 2])], language="fr", notes=notes,
+                                     links=("gemini/veo-3.1-fast", "gemini/veo-3.1-lite"))
+    assert [(plan["lines"], plan["clip_s"]) for plan in planned] == [([1], 6), ([2], 6)]
+    assert notes == ["scene s02: the stored 4 s plan is not sold on gemini/veo-3.1-fast; replanned"]
+
+
+def test_an_exchange_that_outgrew_its_clip_takes_the_next_length_or_splits():
+    from clipping.aistory import shots
+
+    long_two = [("char_a", "Tu caches la clé depuis lundi soir."), ("char_b", "Et alors, tu vas me dénoncer ?")]
+    scene = _with_shots(_scene(long_two), [(6, [1, 2], True)])
+    notes = []
+    planned = shots.speech_shot_plan(scene, [_beat([1, 2])], language="fr", notes=notes)
+    assert [(plan["lines"], plan["clip_s"]) for plan in planned] == [([1, 2], 8)]
+    assert len(notes) == 1 and "planned at 8 s" in notes[0]
+    notes = []
+    split = shots.speech_shot_plan(scene, [_beat([1, 2])], language="fr", notes=notes, speech_lengths=(6,))
+    assert [(plan["lines"], plan["clip_s"]) for plan in split] == [([1], 6), ([2], 6)]
+    assert len(notes) == 1 and "one shot a line" in notes[0]
+
+
 # ================================================================ the storyboard
 
 def test_the_storyboard_of_a_native_speech_story_is_one_clip_a_line_every_shot_its_clip(store):
@@ -296,6 +418,44 @@ def test_the_storyboard_of_a_native_speech_story_is_one_clip_a_line_every_shot_i
     for shot in speaking:
         line = next(line for line in lines if line["line_id"] == shot["lines"][0])
         assert shot["subject_tags"][0] == f"@{line['speaker']}"
+
+
+def test_the_storyboard_holds_one_shot_for_a_planned_exchange_with_its_speakers(store):
+    """Plan 27 stage 3, through the storyboard step: scene s02's stored plan
+    groups its two lines into one 8 s exchange -- one speaking shot holding
+    both line ids in order, lasting its clip, ``speakers`` the two
+    characters in turn; every other scene one shot a line, as before."""
+    story_id = exchange_story(store)
+    board, script = tas._board(store, story_id), eps._script(store, story_id)
+    s02 = next(scene for scene in script["scenes"] if scene["scene_id"] == "s02")
+    shot = exchange_shot(store, story_id)
+    assert shot["lines"] == [line["line_id"] for line in s02["lines"]] == ["l08", "l09"]
+    assert (shot["speaks"], shot["clip_s"], shot["duration_s"]) == (True, 8, 8.0)
+    assert shot["speakers"] == [line["speaker"] for line in s02["lines"]]
+    assert shot["subject_tags"][:2] == [f"@{cid}" for cid in shot["speakers"]]
+    others = [item for item in board["shots"] if item["shot_id"] != shot["shot_id"] and item["speaks"]]
+    assert others and all(len(item["lines"]) == 1 and "speakers" not in item for item in others)
+
+
+def test_a_board_that_spoke_an_exchange_one_shot_a_line_keeps_its_shots_until_its_scene_is_planned_again(store):
+    """Nothing made is touched: a board built one shot a line, its scene now
+    carrying an exchange plan, rebuilt with that scene kept keeps every shot
+    id and its split; planned again (``replanned``), the exchange is one shot."""
+    from clipping.aistory.steps import storyboard
+
+    story_id = planned_story(store)
+    before = tas._board(store, story_id)
+    script = eps._script(store, story_id)
+    s02 = next(scene for scene in script["scenes"] if scene["scene_id"] == "s02")
+    _with_shots(s02, [(8, [1, 2], True)])
+    ec = tas._ec(store, story_id)
+    plans, sources, stale = storyboard.current_plans(before, script)
+    kept, _notes = storyboard.build(ec, script, plans, sources, before, stale=stale, now=NOW)
+    assert [shot["shot_id"] for shot in kept["shots"]] == [shot["shot_id"] for shot in before["shots"]]
+    assert all(len(shot["lines"]) <= 1 and "speakers" not in shot for shot in kept["shots"])
+    again, _notes = storyboard.build(ec, script, plans, sources, before, stale=stale, now=NOW, replanned={"s02"})
+    assert [shot["lines"] for shot in again["shots"] if shot["scene_id"] == "s02" and shot["speaks"]] == [
+        ["l08", "l09"]]
 
 
 def test_the_storyboard_step_refuses_a_line_no_clip_can_speak_before_any_call(store):
