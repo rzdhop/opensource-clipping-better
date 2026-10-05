@@ -1,8 +1,9 @@
 ## CURRENT STATE — plan 27 (5–10 s shots carrying an exchange) CODE + DOCS COMPLETE and LIVE; close-out pending the human's regen (2026-10-05, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this commit), clean tree
-  (`FETCH_HEAD` untracked). **Live:** f0dfc29 deployed (bundle index-DpbPJMw0.js), health 200, 0 jobs. CI: to read on
-  `actions/runs?branch=main` (not polled).
+  (`FETCH_HEAD` untracked). **Live:** e2c8b46 (f0dfc29 rebuilt, then the keyframe-consistency pins and the prop-phrase fix restarted at
+  0 jobs; bundle index-DpbPJMw0.js), health 200, 0 jobs. **CI GREEN** on dcd68d7 and e2c8b46 (the reds from 0b444c3
+  to 53946ab were two request-level pins in test_story_keyframe_consistency.py that stage 4a's symbol grep missed).
 - **Shipped (DEC-304, A-177…A-180; plan `.claude/plans/ai-story/27-exchanges-plan.md`):** stage 1 the 5–10 s window
   clamped to the link (Veo/Flow 6–8, kling 5/10, seedance 5–10, ltx 6/8/10), reactions 6 s, the templates' floors and
   slots, the trim floor, kept shots grandfathered · 2 the exchange plan (1–4 lines per shot sized to the clip, a floor
