@@ -1,30 +1,37 @@
-## CURRENT STATE — plan 25 (the handoff) COMPLETE and LIVE; close-out pending the human's Flow walk (2026-10-05, local session)
+## CURRENT STATE — SESSION CLOSED 2026-10-05 ~14:15 UTC: plans 23 (follow-through), 24 (timing harness) and 25 (the handoff) shipped and live; the next session upgrades from here
 
-- **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this docs commit), clean tree.
-  **Live:** deployed 13:16 UTC from a07180c (bundle index-3yvxKpRp.js): health 200, the handoff route 200, 361 jobs;
-  the Handoff verified at 375 px on e7412a3efcc6 (no console errors; Copy prompt, references, checks, upload, the Mode
-  control). CI: GREEN on a07180c (the deployed code) and fdb27fe; the later docs-only commits were still running at the
-  last read. DEC-301 (approval), DEC-302 (as shipped).
-- **Shipped today (three plans):** plan 23's follow-through (CI keys, the hidden route-test red, follow-ups A8 D7 B8
-  A5 D5, the C2 probe tool), plan 24 (the timing harness, DEC-298/300), plan 25 (the handoff, DEC-301/302).
-- **Done on the human's ask (13:41–14:05 UTC):** e7412a3efcc6 ep1 rewritten by parts through the caps (0 flags,
-  60.0 s, A-167 confirmed), script approved with approve_anyway (2 E4 issues left for the human to read),
-  storyboard rebuilt + approved, 10 keyframes drawn ($0.39), the Handoff ready with 10 clips missing.
-- **The human's hands:** (1) the Flow walk from the Handoff: open e7412a3efcc6 → episode 1 → the "Handoff →" tab,
-  make 3 shots on Flow from the cards (time spent, what was missing — plan 22 stage 8's question), upload them, watch
-  the take verdicts; (2) decide the storyboard prompt refresh of e7412a3efcc6 (stage 0's names; stales the 10 made
-  keyframes): Storyboard tab → the storyboard PATCH with refresh_prompts (the "Rebuild" action) — or leave it and
-  make the clips from the current prompts, whose speaker/listener/Audio sentences are already fixed but whose action
-  text still says "the leather loafers"; (3) plan 24's walk (regenerate ep1 → 0 timing warnings); (4) plan 23's items:
-  the keys + zone, the fal top-up → the probe, the A/B.
-- **Follow-ups logged (not done):** DEC-302's consequence list; plan 24's (trim calls outside the estimate, pooled
-  off-native caps, reaction shots on top of the plan, cap character scenes at 3 on native, measured per-voice rates);
-  `_repair_e1_reply`/`_repair_e3_reply` bare reads; Fish Audio.
-- **Rules in force:** unchanged (worktrees; DEC-234 both envs + prompts.py → test_story_prompts_episode.py; DEC-297;
-  deploy at 0 jobs after the 3.11 compile; no full local suite; no source edits during a job; money only on the go).
-- **Close-out per file:** CHECKPOINT (this header), VISION (plan-25 paragraph added below), ASSUMPTIONS (A-168
-  added), DECISIONS (DEC-301/302), action log (one line per stage, deviation, deploy), docs/AI_STORY.md (the Handoff).
-- **Open questions:** none blocking.
+- **In-progress header:** phase = none in flight (close-out done). Checkpoint commit = main (this commit), clean tree,
+  no worktree of this session left (`git worktree list` shows only older ones). **Live:** a07180c's code, bundle
+  index-3yvxKpRp.js, health 200. CI: green on a07180c and fdb27fe; the docs-only commits after them unverified at the
+  close (read `actions/runs?branch=main` first — the GitHub API rate-limited this session's polling).
+- **Where the product stands (read DEC-298/300 for plan 24, DEC-301/302 for plan 25, docs/AI_STORY.md "The timing
+  harness" and "Your own clips"):** every writing-v3 scene is written to a per-line plan (hard caps, trim pass, one
+  failure sentence; the shots follow the plan; a Trim button on warnings); the Handoff screen replaces the Shot list
+  (per-shot Auto / My own, Copy prompt, references zip, checks, upload, the gate verdict); prompts on the Cast /
+  Places / Props tiles; the wizard says how clips and images are made; human casts are named in prompts.
+- **e7412a3efcc6 (Dragon Fruit) episode 1 was regenerated end to end on the human's ask:** 60.0 s, 0 timing warnings
+  (A-167 confirmed), script approved with approve_anyway (2 E4 notes left to read), storyboard rebuilt, 10 keyframes
+  drawn and awaiting the human's approval, the Handoff shows 10 clips missing (sh11…sh20). The human makes the clips on
+  Flow/Gemini from the Handoff (A-168 is their verdict).
+- **The human's open items:** the Flow walk (A-168); plan 24's other walk items (a two-view cast, the action brief,
+  a 16:9 seedance story, a variant sheet upload); plan 23's: `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`,
+  `PIXABAY_API_KEY`, `BUDGET_TIMEZONE=Europe/Paris` in Settings → the free checks; the fal top-up → the probe
+  (`tools/probe_speech_link.py --image outputs/stories/d16026f12e77/episodes/ep01/assets/shots/shot_01.jpg
+  --allow-paid --max-usd 0.60`) → C4/C5 on a pass; the A/B (`tools/bench_llm.py --episode-ab … --max-usd 3.00`).
+- **Follow-ups logged for the next upgrade (not done):** DEC-302's list (CLI --mode; clip regenerate on a my-own shot
+  should refuse; the stock fill on a my-own establishing shot; entity modes per item; in-flight job state in the
+  handoff document; unused api.js helpers; profileBeforeManual local state; legacy `_name_map`; the handoff refetch
+  cadence); plan 24's (trim calls outside the estimate; pooled off-native caps; reaction shots on top of the plan;
+  cap character scenes at 3 on native; measured per-voice rates into the plan); the T1v2 storyboard writer names
+  human characters instead of tags and burns retries (seen 10:40 on e7412a3efcc6 — map names to tags in the
+  validator); `_repair_e1_reply`/`_repair_e3_reply` bare reads; Fish Audio; d16026f12e77's storyboard prompts still
+  carry the old handles until refreshed.
+- **Rules in force (unchanged):** worktrees off main; DEC-234 selections in both envs per stage (+ prompts.py →
+  tests/test_story_prompts_episode.py); DEC-297 pin files; pins mirrored in pyproject; deploy only at 0 running jobs
+  after compiling the tree with the image's Python 3.11 (`rm -sfv` + rebuild for the dashboard, `restart` for
+  Python); no full local suite (DEC-278; the A-096 replica for an annotation-free CI red); no edits to main's source
+  while a job runs; money only on the human's go.
+- **Open questions:** none.
 
 ## CURRENT STATE — plan 24 (the timing harness) CODE + DOCS COMPLETE and LIVE; close-out pending the human's walk; plan 23 follow-ups ALL DONE (2026-10-05, local session)
 
