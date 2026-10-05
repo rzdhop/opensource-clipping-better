@@ -1674,7 +1674,10 @@ def test_the_cast_estimate_on_a_v2_story_points_to_the_quality_keys_not_prompt_o
     assert body["units"] == {"llm_calls": 6, "images": 3, "edit_images": 6, "tts_chars": 0}
     assert body["ready"] is False and body["edit"]["ready"] is False
     assert "prompt-only" not in body["message"] and "prompt_only" not in body["message"]
-    assert "FAL_KEY" in body["message"] and "GEMINI_PAID_API_KEY" not in body["message"]
+    # Re-pinned 2026-10-05 (plan 23 A8, DEC-280): the sheet role's third link is
+    # gemini/nano-banana-2-lite, so a keyless install's message names both keys
+    # (FAL_KEY first; the quality preset's own keys stay FAL_KEY alone).
+    assert "FAL_KEY" in body["message"] and body["message"].index("FAL_KEY") < body["message"].index("GEMINI_PAID_API_KEY")
 
     # Once the looks are written over the portraits they were drawn from, only
     # the sheets wait: the edit's stop-and-ask.
@@ -1696,7 +1699,10 @@ def test_the_cast_estimate_on_a_v2_story_points_to_the_quality_keys_not_prompt_o
     # Re-pinned (stage 2c, DEC-235: "fal only"): the quality sheet role's
     # IMAGE_EDIT link is fal/seedream-4.5-edit alone now, and QUALITY_KEYS is
     # FAL_KEY alone, so the stop-and-ask never names GEMINI_PAID_API_KEY.
-    assert "FAL_KEY" in body["message"] and "GEMINI_PAID_API_KEY" not in body["message"]
+    # Re-pinned 2026-10-05 (plan 23 A8, DEC-280): the sheet role's third link is
+    # gemini/nano-banana-2-lite, so a keyless install's message names both keys
+    # (FAL_KEY first; the quality preset's own keys stay FAL_KEY alone).
+    assert "FAL_KEY" in body["message"] and body["message"].index("FAL_KEY") < body["message"].index("GEMINI_PAID_API_KEY")
     assert "allow paid providers" in body["message"]
 
 

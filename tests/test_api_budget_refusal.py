@@ -32,6 +32,7 @@ SKETCH = ["Kiwilo", "Mangella", "Broccolia", "Pepperino", "Avocardo"]
 QUALITY = dict(p2.BASE, FAL_KEY="test-fal-key", ALLOW_PAID="1", DAILY_CAP_USD="4.00")
 PORTRAITS = "fal/seedream-4.5"
 EDITS = "fal/seedream-4.5-edit"
+LITE = "gemini/nano-banana-2-lite"  # the sheet role's third link since plan 23 A8 (DEC-280)
 
 
 # ------------------------------------------------------------------ helpers
@@ -95,8 +96,10 @@ def test_cast_409_daily_cap_detail_has_today_estimate_and_cap(api, day):
                     "5 portraits $0.20 + 10 sheet edits $0.40) would bring it to $8.98. Allow $4.98 more for "
                     "today only, raise the daily cap in Settings, or wait for the day to reset at 00:00 UTC."),
         "code": "budget_daily_cap",
+        # Re-pinned 2026-10-05 (plan 23 A8, DEC-280): the sheet role's third link is
+        # gemini/nano-banana-2-lite, keyless here, so its reason follows fal's.
         "errors": [f"{PORTRAITS}: refused: est $0.200 on {PORTRAITS} would bring today to $8.58 of the $4.00 "
-                   "daily cap"],
+                   "daily cap", f"{LITE}: no API key (GEMINI_PAID_API_KEY is not set)"],
         "today": {"day": DAY, "zone": "UTC", "spent_usd": 8.38, "extra_usd": 0.0,
                   "stories": [{"story_id": beach, "title": "La plage", "usd": 5.5},
                               {"story_id": market, "title": "Le marché", "usd": 2.0}],
@@ -188,8 +191,10 @@ def test_story_cap_refusal_is_not_offered_a_day_extra(api, day):
     assert response.status_code == 409
     detail = response.json()["detail"]
     assert isinstance(detail, str)
+    # Re-pinned 2026-10-05 (plan 23 A8, DEC-280): the keyless lite link's reason joins the sentence.
     assert detail == (f"No link of the quality sheet links (quality budget profile) can make a reference image on route auto: {PORTRAITS}: "
-                      f"refused: est $0.200 on {PORTRAITS} would bring this story to $0.20 of its $0.10 cap.")
+                      f"refused: est $0.200 on {PORTRAITS} would bring this story to $0.20 of its $0.10 cap; "
+                      f"{LITE}: no API key (GEMINI_PAID_API_KEY is not set).")
 
     day.add(8.38)
     detail = _cast(api, story_id).json()["detail"]
@@ -242,7 +247,9 @@ def test_link_reasons_unchanged_in_errors(api, day):
     assert detail["errors"] == [f"{row['link']}: {row['reason']}" for row in rows]
     with pytest.raises(budget.BudgetRefused) as caught:
         budget.check(0.2, budget=budget.budget_from_env(QUALITY), day_spent=8.38)
-    assert detail["errors"] == [f"{PORTRAITS}: {str(caught.value).replace('this call', PORTRAITS)}"]
+    # Re-pinned 2026-10-05 (plan 23 A8, DEC-280): lite's keyless reason follows fal's refusal.
+    assert detail["errors"] == [f"{PORTRAITS}: {str(caught.value).replace('this call', PORTRAITS)}",
+                                f"{LITE}: no API key (GEMINI_PAID_API_KEY is not set)"]
     assert (caught.value.cap, caught.value.usd, caught.value.spent, caught.value.cap_usd, caught.value.extra) == (
         "day", 0.2, 8.38, 4.0, 0.0)
 
