@@ -117,6 +117,32 @@ def prop_words(link, *, live=None) -> int:
     return words_for(link, default=prompting.PROP_V2_MAX_WORDS, ceiling=PROP_CEILING_WORDS, live=live)
 
 
+# ------------------------------------------------- the whole prompt, unbounded but by its link (plan 26)
+
+# Links whose prompt only the human or our own hardware reads: no limit bounds it.
+UNBOUNDED_PREFIXES = ("manual/", "local/")
+
+
+def link_words(link, *, live=None):
+    """The words a whole prompt (the template of ``prompt_templates``, the
+    core inside it) may take on *link*: ``prompt_limits.budget_words`` with
+    no quality ceiling (plan 26: the ceilings above bound the hashed core,
+    the link bounds the prompt). None -- no bound -- with no link, on a
+    ``manual/*`` or ``local/*`` link, or a link with no known limit."""
+    label = _label(link)
+    if not label or label.startswith(UNBOUNDED_PREFIXES):
+        return None
+    return prompt_limits.budget_words(label, default=None, live=live)
+
+
+def chain_words(labels, *, live=None):
+    """:func:`link_words` of a role chain: the smallest bound over its links
+    (a prompt fitted to the first would be refused by a smaller fallback),
+    None when none of them bounds it."""
+    bounds = [words for words in (link_words(label, live=live) for label in labels or ()) if words is not None]
+    return min(bounds) if bounds else None
+
+
 def for_links(image_link=None, video_link=None, *, live=None) -> prompting.Budgets:
     """The ``prompting.Budgets`` of a shot whose keyframe goes to *image_link*
     and whose clip to *video_link* (links or labels; None: not known yet,
