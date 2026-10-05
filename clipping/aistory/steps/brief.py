@@ -200,15 +200,18 @@ def references(ec, script, shot) -> list:
         order.insert(0, line["speaker"])
     characters = (ec.entities or {}).get("characters") or {}
     for char_id in order:
-        doc = characters.get(char_id)
+        # Plan 23 stage D5: the sheet of the appearance variant the shot names, labelled with it.
+        doc = shots_mod.variant_view(characters.get(char_id), (shot.get("variants") or {}).get(char_id))
         if not doc:
             continue
         refs_doc = doc.get("refs") or {}
+        worn = doc.get(shots_mod.VARIANT_KEY)
+        who = f"{names.get(char_id, char_id)} ({worn['label']})" if worn else names.get(char_id, char_id)
         for which in ("portrait", "turnaround"):
             # Plan 23 stage D4: a two-view story's portrait is its front+back sheet.
             kind_of_sheet = "front and back" if which == "portrait" and media_policy.two_view(ec.story) else which
             entry = _entity_ref(ec, "characters", char_id, refs_doc.get(which),
-                                f"{names.get(char_id, char_id)} — character sheet ({kind_of_sheet})")
+                                f"{who} — character sheet ({kind_of_sheet})")
             if entry is not None:
                 refs.append(dict(entry, kind="sheet"))
                 break

@@ -801,6 +801,22 @@ export async function patchCharacter(storyId, charId, payload) {
   return res.json()
 }
 
+/**
+ * A new appearance variant of a character (plan 23 stage D5): `{label,
+ * delta_text}`; answers `{character, variant, target}` -- `target` is the
+ * regenerate that makes its sheets (`character:<id>:variant:<vid>`), priced
+ * by `fetchStoryEstimate(storyId, 'regenerate', { target })`.
+ */
+export async function addCharacterVariant(storyId, charId, payload) {
+  const res = await request(`/stories/${storyId}/characters/${charId}/variants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to add the variant')
+  return res.json()
+}
+
 /** Delete a character (its folder, its id from the story); 409 while a step is in flight. */
 export async function deleteCharacter(storyId, charId) {
   const res = await request(`/stories/${storyId}/characters/${charId}`, { method: 'DELETE' })

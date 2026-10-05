@@ -160,6 +160,18 @@ def two_view(story) -> bool:
     return sheet_mode(story) != defaults.SHEET_THREE
 
 
+def variants_enabled(story) -> bool:
+    """Whether *story*'s characters may carry appearance variants (plan 23
+    stage D5): a v2 story whose ``generation_profile.sheet_mode`` is set, or
+    one that opts in explicitly (``generation_profile.variants: "on"``).
+    What gates the variant records, their sheets and N1v2's twist variant;
+    every other story is byte-identical to before."""
+    profile = (story or {}).get("generation_profile") or {}
+    if not is_v2(story):
+        return False
+    return profile.get("sheet_mode") in defaults.SHEET_MODES or profile.get("variants") == defaults.VARIANTS_ON
+
+
 def sheet_edits(story_or_mode) -> int:
     """How many of a character's sheets are edits of its portrait in a sheet
     mode (a story's, or the mode's name): two in ``three_sheet`` (turnaround,

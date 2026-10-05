@@ -120,6 +120,13 @@ BODY_HUMAN = "human_body"
 BODY_ALL_MATTER = "all_matter"
 BODY_RULES = (BODY_HUMAN, BODY_ALL_MATTER)
 
+# Plan 23 stage D5: the optional ``generation_profile.variants``, an explicit
+# opt-in to a character's appearance variants (a "ghost version", each an
+# edit of its base sheet) on a v2 story whose ``sheet_mode`` is not set;
+# absent, variants follow ``sheet_mode`` alone (``media_policy.variants_enabled``).
+VARIANTS_ON = "on"
+VARIANTS_MODES = (VARIANTS_ON,)
+
 
 def _universe_ids() -> tuple:
     path = Path(__file__).resolve().parent / "templates" / "universes.json"

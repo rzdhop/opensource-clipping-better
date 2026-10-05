@@ -322,9 +322,12 @@ _PROFILE_CHOICES = {
     "image_preference": defaults.IMAGE_PREFERENCES,
     # Plan 23 stage D6: how a clip's prompt is written (absent: studio, today's prompts).
     "prompt_style": defaults.PROMPT_STYLES,
+    # Plan 23 stage D5: the explicit opt-in to appearance variants (absent: sheet_mode decides).
+    "variants": defaults.VARIANTS_MODES,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
-_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe", "image_preference", "prompt_style")
+_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe", "image_preference", "prompt_style",
+                      "variants")
 
 _INDEX_ENTRY_SCHEMA = {
     "type": "object",

@@ -28,6 +28,11 @@ Phase 2 (the entity targets; each touches its own item only):
   keeps its old image until it is regenerated. ``...:image:turnaround`` and
   ``...:image:expressions`` -- that sheet only, a fresh seed and the note.
   ``...:image:extra:<n>`` arrives in a later phase.
+- ``character:<id>:variant:<variant_id>`` (plan 23 stage D5) -- every sheet of
+  that appearance variant the story's sheet mode draws, each an edit of the
+  base portrait (``refimages.variant_image``), a fresh seed and the note; the
+  variant's ``approved_at`` is cleared, the character's own approval never
+  (the job ends awaiting ``variant:<id>:<variant_id>``).
 - ``character:<id>:voice`` -- ``params.voice = {provider, voice_id, rate?,
   pitch?}`` (a voice of the story's language on ``TTS_CHAIN``, not another
   lead's or support's) or, without it, the best other voice; pinned (rate and
@@ -107,6 +112,7 @@ ENTITY_TARGETS = (
     "character:<char_id>:text",
     "character:<char_id>:image:portrait|turnaround|expressions",
     "character:<char_id>:voice",
+    "character:<char_id>:variant:<variant_id>",
     "place:<place_id>:text",
     f"place:<place_id>:image:{'|'.join(PLACE_VARIANTS)}",
     "prop:<prop_id>:text",
@@ -123,6 +129,9 @@ _SCENE = re.compile(schemas.SCENE_ID_PATTERN)
 _SHOT = re.compile(schemas.SHOT_ID_PATTERN)
 _LINE = re.compile(schemas.LINE_ID_PATTERN)
 _EXTRA = re.compile(r"^extra:[0-9]+$")
+_VARIANT = re.compile(schemas.VARIANT_ID_PATTERN)
+# Plan 23 stage D5: the third word of an appearance variant's target.
+VARIANT_WORD = "variant"
 
 
 def _note(params):
@@ -203,6 +212,8 @@ def parse_target(target):
             return ("character", eid, "voice")
         if len(rest) == 2 and rest[0] == "image" and rest[1] in refimages.CHARACTER_IMAGES:
             return ("character", eid, "image", rest[1])
+        if len(rest) == 2 and rest[0] == VARIANT_WORD and _VARIANT.fullmatch(rest[1]):
+            return ("character", eid, VARIANT_WORD, rest[1])
     elif kind == PLACES:
         if len(rest) == 2 and rest[0] == "image" and rest[1] in PLACE_VARIANTS:
             return ("place", eid, "image", rest[1])
@@ -267,6 +278,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
         return _regenerate_text(ctx, store, target, kind, eid, note, tools)
     if what == "voice":
         return _regenerate_voice(ctx, store, story, target, eid, params, tools)
+    if what == VARIANT_WORD:
+        return _regenerate_variant(ctx, store, target, eid, parsed[3], note, tools)
     slot = parsed[3] if len(parsed) > 3 else "image"
     return _regenerate_image(ctx, store, target, kind, eid, slot, note, tools)
 
@@ -378,6 +391,39 @@ def _regenerate_image(ctx, store, target, kind, eid, slot, note, tools) -> dict:
         raise StepFailed(f"The portrait of {character['name']} was made again, but {parts}. Regenerate "
                          f"{entities.quoted_list(targets)} to finish it.")
     return summary
+
+
+def _regenerate_variant(ctx, store, target, char_id, variant_id, note, tools) -> dict:
+    """Every sheet of appearance variant *variant_id* the story's sheet mode
+    draws (plan 23 stage D5, ``refimages.variant_image``), on one seed (the
+    variant's own the first time, a fresh one when they are drawn again),
+    the note on each. The variant's approval is cleared by each image; the
+    character's is never touched. A sheet that fails stops the job naming
+    what was made and the target that finishes it."""
+    character = store.read_entity(ctx.story_id, CHARACTERS, char_id)
+    variant = refimages.variant_record(character, variant_id)
+    if variant is None:
+        raise StepFailed(f"Cannot regenerate {target!r}: {character['name']} has no appearance variant "
+                         f"{variant_id!r}.")
+    kwargs = tools.image_kwargs(ctx)
+    # The first sheets of a variant are drawn on its own seed (refimages.variant_seed); drawn again, on a
+    # fresh one, so a provider that honours seeds does not answer the same picture.
+    made_before = any(ref is not None for ref in variant["refs"].values())
+    seed = entities.fresh_seed() if made_before else None
+    images = {}
+    for which in refimages.character_images(store.get(ctx.story_id)):
+        ctx.cancel.check()
+        ctx.on_log(f"👤 {character['name']} ({variant['label']}): {which}, an edit of the portrait")
+        try:
+            ref = refimages.variant_image(store, ctx.story_id, char_id, variant_id, which, note=note, seed=seed,
+                                          **kwargs)
+        except refimages.RefImageError as exc:
+            made = f" ({', '.join(images)} made)" if images else ""
+            raise StepFailed(f"Cannot regenerate {target!r}{made}: {exc}") from None
+        images[which] = ref["consistency"]
+    used = seed if seed is not None else refimages.variant_seed(ctx.story_id, char_id, variant_id)
+    ctx.on_log(f"🔁 Regenerated {target} (seed {used}){_noted(note)}: approve it (variant:{char_id}:{variant_id})")
+    return {"target": target, "images": images, "needs_editor": []}
 
 
 def _voice_key(voice) -> tuple:

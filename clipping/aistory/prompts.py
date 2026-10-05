@@ -280,6 +280,13 @@ SCHEMA_NAMES = {
 # ("incomplete_sentence") on 6 issues: 854.1. Input budgets: INPUT_BUDGET's
 # update after PREMIUM_PROMPT_IDS below.
 MAX_TOKENS.update({"E1v3": 2570, "E2v3": 700, "E3v3": 720, "J1v3": 990})
+# Plan 23 stage D5: N1v2 (N1 with a twist's appearance variant). Its largest
+# French reply -- N1's (1,237.6) with both twists bringing a variant at its caps
+# (a 40-character label, a 60-word delta) -- needs 1,601.6 tokens (chars/4 x
+# 1.3); + 15 %, rounded up to ten (tests/test_story_variant_twist.py).
+MAX_TOKENS["N1v2"] = 1850
+TEMPERATURE["N1v2"] = IDEATION_TEMPERATURE
+SCHEMA_NAMES["N1v2"] = "next_episode_proposals_v2"
 E1V3_PAYOFF_MAX_TOKENS = 3190
 TEMPERATURE.update({"E1v3": WRITING_TEMPERATURE, "E2v3": WRITING_TEMPERATURE, "E3v3": WRITING_TEMPERATURE,
                     "J1v3": ANALYTIC_TEMPERATURE})
@@ -489,14 +496,23 @@ def anthropic_effort(prompt_id):
 # are pinned by the RC-M1 file (tests/test_story_prompts_episode.py), which
 # stays unedited; every reader goes through :func:`input_budget`.
 WRITING_V3_INPUT_BUDGET = {"E1v3": 3230, "E2v3": 3030, "E3v3": 4000, "J1v3": 4700}
+# Plan 23 stage D5: N1v2's input -- N1's French worst case with the variant
+# block at its caps (eight characters, each with two 40-character variants
+# and room for a third, and the ask) measures 3,613; + 15 %, rounded up to ten
+# (tests/test_story_variant_twist.py). Like J1v3 it passes the spec's 4,000:
+# nothing of N1's own input is trimmed to fit. Beside INPUT_BUDGET for the
+# same reason as the writing-v3 rows.
+VARIANTS_INPUT_BUDGET = {"N1v2": 4160}
 
 
 def input_budget(prompt_id) -> int:
     """The input budget *prompt_id* is sent with (``context.check_budget``):
     its :data:`INPUT_BUDGET` row, else its :data:`WRITING_V3_INPUT_BUDGET`
-    row, else the default pack budget."""
+    or :data:`VARIANTS_INPUT_BUDGET` row, else the default pack budget."""
     if prompt_id in INPUT_BUDGET:
         return INPUT_BUDGET[prompt_id]
+    if prompt_id in VARIANTS_INPUT_BUDGET:
+        return VARIANTS_INPUT_BUDGET[prompt_id]
     return WRITING_V3_INPUT_BUDGET.get(prompt_id, context.PACK_TOKEN_BUDGET)
 
 # The ``bible:<field>`` grammar of spec 9.2: which prompt a regenerate note
@@ -4861,6 +4877,47 @@ def build_n1(pack, *, memory_ep, arc, cast, memory, direction=None, open_hooks=N
     return _system(pack), user, schemas.n1_schema(target_eps)
 
 
+# ------------------------------------------------------------------ N1v2 (plan 23 stage D5)
+#
+# N1 for a story whose characters may carry appearance variants
+# (``media_policy.variants_enabled``): a twist may also bring the appearance
+# variant of one existing character ("ghost version"); accepting the twist
+# creates it (``workflow.decide_proposal``). A new id: N1 stays byte for byte
+# what it was (its goldens, tests/test_story_prompts_series.py).
+
+N1V2_VARIANTS_LINE = (
+    "A twist may also change how one existing character looks from its target episode on (a ghost version, a "
+    "burned version, a disguise...). For each twist give variant: null when no one's look changes, else "
+    "{{char_id (one of the characters listed above), label (at most {label_chars} characters, e.g. \"Ghost "
+    "version\"), delta_text (what changes in their appearance, at most {delta_words} words: the look only, never "
+    "a name)}}; at most one variant a character."
+)
+
+
+def _n1_variant_block(variant_cast) -> str:
+    """The characters a twist may give an appearance variant, with the ones
+    they have (*variant_cast*: ``[{char_id, name, variants: [label]}]``)."""
+    lines = [f"- {entry['char_id']} ({entry['name']}): " + ("; ".join(entry["variants"]) or "no variant yet")
+             for entry in variant_cast]
+    return "Characters a twist may give an appearance variant (their variants so far):\n" + "\n".join(lines)
+
+
+def build_n1_v2(pack, *, memory_ep, arc, cast, memory, variant_cast, direction=None, open_hooks=None):
+    """N1v2 (module section above): :func:`build_n1`'s prompt, then -- when
+    the arc has an episode a twist may target and *variant_cast* (the
+    characters that may still gain a variant) is not empty -- the variant
+    block and its ask; the schema :func:`schemas.n1_v2_schema`."""
+    system, user, _schema = build_n1(pack, memory_ep=memory_ep, arc=arc, cast=cast, memory=memory,
+                                     direction=direction, open_hooks=open_hooks)
+    target_eps = sorted(entry["ep"] for entry in arc if entry["ep"] > memory_ep)
+    char_ids = [entry["char_id"] for entry in variant_cast] if target_eps else []
+    if char_ids:
+        user += ("\n\n" + _n1_variant_block(variant_cast) + "\n\n"
+                 + N1V2_VARIANTS_LINE.format(label_chars=schemas.VARIANT_LABEL_MAX_CHARS,
+                                             delta_words=schemas.VARIANT_DELTA_MAX_WORDS))
+    return system, user, schemas.n1_v2_schema(target_eps, char_ids)
+
+
 # ======================================================== writing v3 (plan 22 stage 3)
 #
 # The human (2026-10-04), on the agent-mode episodes: the lines the characters
@@ -5035,26 +5092,67 @@ _E1_V3_SINGLE_PLACE_SHAPE = (
 )
 
 
-def e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None, new_objects_allowed=False) -> dict:
+# Plan 23 stage D5: the optional "character states" block -- offered only when
+# the cast has approved appearance variants (absent: E1v3 byte-identical) --
+# lets a scene say which of its characters wear one of their variants
+# (``scene.states``, ``{char_id: variant_id}``), what its shots inherit.
+E1V3_STATES_LINE = (
+    "Character states: a character listed below may appear in a scene in one of its appearance variants (its "
+    "look changed by the story so far). For each scene give states: [] when everyone looks as usual, else one "
+    "entry {char_id, variant_id} for each character of that scene who wears one of its own listed variants -- "
+    "only where the story says so, never more than once a character."
+)
+# Each scene may name up to two states: 12 scenes x 2 entries of ~20 tokens, + 15 %, rounded up to ten.
+E1V3_STATES_MAX_TOKENS = 560
+
+
+def character_states_block(variants) -> str:
+    """The cast's appearance variants as E1v3 reads them (*variants*:
+    ``[{char_id, name, variants: [{variant_id, label}]}]``), "" without any."""
+    rows = [entry for entry in variants or () if entry.get("variants")]
+    if not rows:
+        return ""
+    lines = [f"- {entry['char_id']} ({entry['name']}): "
+             + "; ".join(f"{variant['variant_id']} = {variant['label']}" for variant in entry["variants"])
+             for entry in rows]
+    return "Appearance variants of the cast:\n" + "\n".join(lines)
+
+
+def e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None, new_objects_allowed=False, variants=None) -> dict:
     """E1v2's schema (:func:`e1_schema`, v2) with the ``spine`` first and the
-    scene ``summary`` described as v3 asks it."""
+    scene ``summary`` described as v3 asks it. *variants* (plan 23 stage D5,
+    :func:`character_states_block`'s list) adds each scene's ``states``;
+    None or empty leaves the schema as it was."""
     base = e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=payoff_hooks, new_objects_allowed=new_objects_allowed)
     scene = base["properties"]["scenes"]["items"]
     scene["properties"]["summary"] = {
         "type": "string", "description": "one or two complete sentences, at most 30 words: what happens and why"}
+    rows = [entry for entry in variants or () if entry.get("variants")]
+    if rows:
+        state = _llm_obj({
+            "char_id": {"type": "string", "enum": [entry["char_id"] for entry in rows]},
+            "variant_id": {"type": "string", "enum": sorted({variant["variant_id"] for entry in rows
+                                                             for variant in entry["variants"]})},
+        })
+        scene["properties"]["states"] = {"type": "array", "description": "[] or who wears a listed variant here",
+                                         "items": state}
+        scene["required"] = list(scene["properties"])
     spine = _llm_obj({key: {"type": "string", "description": f"at most {words} words"}
                       for key, words in SPINE_MAX_WORDS.items()})
     return _llm_obj({"spine": spine, **base["properties"]})
 
 
 def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
-                slice_text, open_hooks=None, audience_direction=None, narration=None):
+                slice_text, open_hooks=None, audience_direction=None, narration=None, variants=None):
     """E1 for a writing-v3 story (module section above): E1v2's inputs
     (:func:`build_e1_v2`, the episode slice and the first-watch rules), the
     spine asked first, the v3 summary, and -- on a ``single_place``
     template -- the one continuous place in real time. *narration*
     (:func:`narration_of`) adds the v3 narrated line
-    (:func:`narration_e1_line_v3`)."""
+    (:func:`narration_e1_line_v3`). *variants* (plan 23 stage D5: the cast's
+    approved appearance variants, :func:`character_states_block`) adds the
+    character states block and each scene's ``states``; None or empty: the
+    prompt and the schema exactly as before."""
     hooks = offered_hooks(ep, open_hooks)
     new_objects = offers_new_objects(ep, True)
     memory_text, was_cut = context.memory_section(memory, ep, open_hooks=None if open_hooks is None else [])
@@ -5096,14 +5194,36 @@ def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places
         payoff_line=_E1_PAYOFF_LINE if hooks else "",
         v2_lines=_E1_V2_LINES + narration_e1_line_v3(narration),
     )
+    states = character_states_block(variants)
+    if states:
+        user += f"\n\n{states}\n\n{E1V3_STATES_LINE}"
     cast_ids = [c["char_id"] for c in cast]
     place_ids = [p["place_id"] for p in places]
     prop_ids = [p["prop_id"] for p in props]
     return _system(pack), user, e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=hooks,
-                                             new_objects_allowed=new_objects)
+                                             new_objects_allowed=new_objects, variants=variants if states else None)
 
 
-def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids, open_hooks=None) -> list:
+def _states_errors(errors, reply, variants) -> None:
+    """Each scene's ``states`` (plan 23 stage D5): a character of the scene,
+    in one of its own listed variants, at most once."""
+    own = {entry["char_id"]: {variant["variant_id"] for variant in entry["variants"]} for entry in variants or ()}
+    for i, scene in enumerate(reply["scenes"]):
+        seen = set()
+        for k, state in enumerate(scene.get("states") or ()):
+            path = f"$.scenes[{i}].states[{k}]"
+            cid, vid = state["char_id"], state["variant_id"]
+            if cid not in scene["characters"]:
+                errors.append(f"{path}.char_id: {cid!r} is not one of this scene's characters")
+            elif vid not in own.get(cid, ()):
+                errors.append(f"{path}.variant_id: {vid!r} is not one of {cid}'s listed variants")
+            if cid in seen:
+                errors.append(f"{path}.char_id: {cid!r} is listed twice")
+            seen.add(cid)
+
+
+def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids, open_hooks=None,
+                   variants=None) -> list:
     """Post-validation for an E1v3 reply: its schema (:func:`e1_v3_schema`),
     the spine's caps (:data:`SPINE_MAX_WORDS`), each summary within
     :data:`SUMMARY_V3_MAX_WORDS` words, then every check of
@@ -5111,8 +5231,9 @@ def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, p
     spine whose summaries are cut to E1v2's 15 words, their own cap checked
     here."""
     hooks = offered_hooks(ep, open_hooks)
+    offered = [entry for entry in variants or () if entry.get("variants")] or None
     schema = e1_v3_schema(list(cast_ids), list(places), list(prop_ids), payoff_hooks=hooks,
-                          new_objects_allowed=offers_new_objects(ep, True))
+                          new_objects_allowed=offers_new_objects(ep, True), variants=offered)
     errors = schemas.validate(reply, schema)
     if errors:
         return errors
@@ -5121,7 +5242,10 @@ def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, p
         _text_errors(errors, f"$.spine.{key}", reply["spine"][key], max_words=words)
     for i, scene in enumerate(reply["scenes"]):
         _text_errors(errors, f"$.scenes[{i}].summary", scene["summary"], max_words=SUMMARY_V3_MAX_WORDS)
-    scenes = [dict(scene, summary=" ".join(scene["summary"].split()[:15]) or scene["summary"])
+    if offered:
+        _states_errors(errors, reply, offered)
+    scenes = [{key: value for key, value in dict(scene, summary=" ".join(scene["summary"].split()[:15])
+                                                 or scene["summary"]).items() if key != "states"}
               for scene in reply["scenes"]]
     v2_reply = {key: value for key, value in reply.items() if key != "spine"}
     v2_reply["scenes"] = scenes

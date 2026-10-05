@@ -424,8 +424,107 @@ def render_look(doc, *, wardrobe_set=None, others=(), max_words=LOOK_MAX_WORDS) 
     if max_words < LOOK_MAX_WORDS and len(words) > max_words:
         # A tighter cap (a layered shot prompt's, phase 7 stage 3b) ends on a
         # whole part, never inside one ("wearing stiff rectangular blue").
-        return prompting.fit_words(text(), max_words) or " ".join(words[:max_words]).rstrip(",;")
-    return " ".join(words[:max_words]).rstrip(",;")
+        return _with_delta(doc, prompting.fit_words(text(), max_words) or " ".join(words[:max_words]).rstrip(",;"))
+    return _with_delta(doc, " ".join(words[:max_words]).rstrip(",;"))
+
+
+# ------------------------------------------------- appearance variants (plan 23 stage D5)
+#
+# A character's named appearance variant ("ghost version", ``variants`` on its
+# document) is worn per shot: a shot's ``variants`` (``{char_id: variant_id}``,
+# inherited from its scene's ``states``) makes :func:`_layered` resolve the
+# shot with each such character's *variant view* (:func:`variant_view`): its
+# variant's sheets in its ``refs`` -- so the identity image sent is the
+# variant's portrait, its turnaround and expressions the variant's or none --
+# and its delta said after its look (:func:`render_look`). A shot or a scene
+# with no ``variants`` resolves exactly as before. The view is never stored.
+
+VARIANT_KEY = "variant_worn"
+_VARIANT_SLOTS = ("portrait", "turnaround", "expressions")
+
+
+def _with_delta(doc, text) -> str:
+    """*text* (a character's rendered look), then ", now <delta>" when *doc*
+    is a variant view: the delta is whole, whatever the look's cap."""
+    variant = doc.get(VARIANT_KEY)
+    if not variant:
+        return text
+    delta = _strip_period(_collapse_ws(variant["delta_text"]))
+    return f"{text}, now {delta}" if text else f"now {delta}"
+
+
+def variant_record(doc, variant_id):
+    """The appearance variant *variant_id* of character *doc*, or None."""
+    return next((variant for variant in (doc or {}).get("variants") or () if variant["variant_id"] == variant_id),
+                None)
+
+
+def variant_view(doc, variant_id):
+    """Character *doc* as it looks in its variant *variant_id*: a copy whose
+    ``refs`` hold the variant's sheets (a slot the variant has not made is
+    empty: the base's sheet is never sent for it) and whose
+    :data:`VARIANT_KEY` carries ``{variant_id, label, delta_text}``. *doc*
+    itself when *variant_id* is None or names no variant of it (the
+    keyframe refuses such a shot: :func:`variant_refusal`)."""
+    variant = variant_record(doc, variant_id) if variant_id else None
+    if variant is None:
+        return doc
+    view = dict(doc)
+    refs = dict(doc.get("refs") or {})
+    for slot in _VARIANT_SLOTS:
+        refs[slot] = (variant.get("refs") or {}).get(slot)
+    view["refs"] = refs
+    view[VARIANT_KEY] = {key: variant[key] for key in ("variant_id", "label", "delta_text")}
+    return view
+
+
+def with_variants(characters, variants) -> dict:
+    """*characters* (``{char_id: doc}``) with each one *variants* names in
+    its variant view (:func:`variant_view`); *characters* itself without
+    *variants*."""
+    if not variants:
+        return characters
+    return {cid: variant_view(doc, variants.get(cid)) for cid, doc in characters.items()}
+
+
+def speech_look(doc, *, max_words) -> str:
+    """A speaking clip's look of character *doc* (plan 22's speech prompt,
+    at most *max_words*): :func:`render_look`, or -- a variant view -- the
+    variant's delta ("now ..."), which the identity image cannot say: the
+    keyframe already shows the rest."""
+    variant = doc.get(VARIANT_KEY)
+    if not variant:
+        return render_look(doc, max_words=max_words)
+    text = f"now {_strip_period(_collapse_ws(variant['delta_text']))}"
+    return prompting.fit_words(text, max_words) or " ".join(text.split()[:max_words]).rstrip(",;")
+
+
+def shot_variants(scene, subject_tags) -> dict:
+    """The variants a new shot of *scene* inherits (``scene.states``),
+    for the characters it frames (*subject_tags*); {} for none."""
+    states = scene.get("states") or {}
+    if not states:
+        return {}
+    framed = [tag[1:] for tag in subject_tags if tag.startswith("@")]
+    return {cid: states[cid] for cid in framed if cid in states}
+
+
+def variant_refusal(shot, characters):
+    """Why *shot*'s keyframe cannot be made for the variants it names (its
+    ``variants``), in one sentence, or None: a variant its character does
+    not have, or one not approved yet (its sheets not all made and
+    approved) -- never a silent fallback to the base look."""
+    for cid, variant_id in (shot.get("variants") or {}).items():
+        doc = characters.get(cid) or {}
+        name = doc.get("name") or cid
+        variant = variant_record(doc, variant_id)
+        if variant is None:
+            return (f"shot {shot['shot_id']} shows {name} as {variant_id!r}, a variant {name} does not have: set "
+                    "the shot back to the base look, or pick one of the character's variants")
+        if not variant.get("approved_at"):
+            return (f"shot {shot['shot_id']} shows {name} as '{variant['label']}', a variant not approved yet: make "
+                    f"its sheets and approve it (variant:{cid}:{variant_id}), or set the shot back to the base look")
+    return None
 
 
 # ------------------------------------------- the anchors of an action prompt (plan 23 D6)
@@ -510,6 +609,20 @@ def character_anchors(characters) -> dict:
     """``{char_id: anchor}`` for every character (:func:`character_anchor` of its handle)."""
     handles = character_handles(characters) if characters else {}
     return {cid: character_anchor(doc, handles[cid]) for cid, doc in characters.items()}
+
+
+def worn_anchors(characters, variants=None) -> dict:
+    """:func:`character_anchors`, each character a shot's *variants* names
+    (plan 23 stage D5: ``{char_id: variant_id}``) followed by its variant's
+    delta -- "the brown female kiwi character in green sundress (now a
+    translucent glowing ghost)" -- at every mention, as the anchor is. Without
+    *variants*, exactly :func:`character_anchors`."""
+    anchors = character_anchors(characters)
+    for cid, variant_id in (variants or {}).items():
+        variant = variant_record(characters.get(cid), variant_id)
+        if variant is not None and cid in anchors:
+            anchors[cid] = f"{anchors[cid]} (now {_strip_period(_collapse_ws(variant['delta_text']))})"
+    return anchors
 
 
 def action_text(shot, entities, anchors) -> str:
@@ -1380,7 +1493,8 @@ def _layered(plan, *, scene, entities, style_lock, consistency_mode, video_actio
     :class:`PromptOverBudget` when even the ladder's last rung is over the
     keyframe's budget, or the clip's fixed parts alone are over its own."""
     budgets = budgets or prompting.Budgets()
-    characters = entities.get("characters", {})
+    # Plan 23 stage D5: each character the plan's ``variants`` names in its variant view.
+    characters = with_variants(entities.get("characters", {}), plan.get("variants"))
     places = entities.get("places", {})
     props = entities.get("props", {})
     framing = plan["framing"]
@@ -2200,6 +2314,9 @@ def plan_of(shot, *, v2=False) -> dict:
         plan.update(lines=list(shot["lines"]), camera_motion=shot["camera_motion"],
                     modifiers=list(shot["modifiers"]))
         _keep_t1_v2(plan, shot)
+        if shot.get("variants"):
+            # Plan 23 stage D5: the appearance variants the shot's characters wear.
+            plan["variants"] = dict(shot["variants"])
     return plan
 
 
@@ -2290,6 +2407,12 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
                 next_number += 1
             line_ids = [scene["lines"][n - 1]["line_id"] for n in plan["lines"]]
             motion = motion_for(plan["framing"], plan["camera_motion"], scene["function"], style_lock, v2=v2)
+            # Plan 23 stage D5: a kept shot wears the variants it has (the human's override kept);
+            # a new one inherits its scene's states. Neither: the plan as it always was.
+            variants = (kept["variants"] if kept is not None and "variants" in kept
+                        else shot_variants(scene, plan["subjects"]))
+            if variants:
+                plan = dict(plan, variants=dict(variants))
             try:
                 resolved = resolve_shot(plan, scene=scene, entities=entities, style_lock=style_lock,
                                         consistency_mode=consistency_mode, v2=v2, ledger=ledger,
@@ -2313,10 +2436,14 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
             if "prompt_layout" in resolved:
                 shot["prompt_layout"] = resolved["prompt_layout"]
             _keep_t1_v2(shot, plan)
+            if variants:
+                shot["variants"] = dict(variants)
             if timing_mode is not None:
                 _speech_fields(shot, plan, kept)
             if kept is not None:
                 shot = _carried_shot(kept, shot)
+                if variants and "variants" not in shot:
+                    shot["variants"] = dict(variants)
             shots.append(shot)
 
     if timing_mode is not None:
@@ -2360,7 +2487,7 @@ def build_storyboard(script, plans, sources, *, entities, style_lock, template, 
 # The keys of a storyboard shot that are the shot's own record, never derived
 # from its plan: a shot kept by a re-plan (build_storyboard's *keep*) carries
 # them as they are -- with every key the build does not write at all.
-_SHOT_RECORD_KEYS = ("shot_id", "scene_id", "prompt_override", "keep_still", "assets")
+_SHOT_RECORD_KEYS = ("shot_id", "scene_id", "prompt_override", "keep_still", "assets", "variants")
 # The derived keys a build writes only sometimes: dropped from a kept shot
 # when the build no longer writes them.
 _SHOT_OPTIONAL_DERIVED_KEYS = ("prompt_layout", "clip_motion", "staging")

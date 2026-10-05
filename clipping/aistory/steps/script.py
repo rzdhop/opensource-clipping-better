@@ -629,6 +629,11 @@ def apply_e1(ec, script, reply) -> tuple:
         }
         lo, hi = timing.slot_range(scene, ec.template, ec.style_lock)
         scene["target_duration_s"] = round(min(max(float(stub["target_duration_s"]), lo), hi), 3)
+        # Plan 23 stage D5: who wears an appearance variant in the scene (E1v3's states); nothing for none.
+        states = {state["char_id"]: state["variant_id"] for state in stub.get("states") or ()
+                  if state.get("char_id") in scene["characters"]}
+        if states:
+            scene["states"] = states
         # Phase 5 stage 3: the open hooks the scene pays off, verbatim (never
         # repaired: each must stay the exact text of a hook), each once;
         # nothing is stored for none.
@@ -671,6 +676,23 @@ def e1_cast(ec) -> list:
     return [doc for doc in ec.cast if doc.get("approved_at")]
 
 
+def e1_variants(ec, cast) -> list:
+    """The appearance variants E1v3's character states block offers (plan 23
+    stage D5): the *cast*'s approved variants, ``[{char_id, name, variants:
+    [{variant_id, label}]}]``, on a story whose characters may carry them
+    (``media_policy.variants_enabled``); [] otherwise -- the block and the
+    scenes' ``states`` are then not asked at all (E1v3 byte-identical)."""
+    if not media_policy.variants_enabled(ec.story):
+        return []
+    out = []
+    for doc in cast:
+        approved = [{"variant_id": variant["variant_id"], "label": variant["label"]}
+                    for variant in doc.get("variants") or () if variant.get("approved_at")]
+        if approved:
+            out.append({"char_id": doc["char_id"], "name": doc["name"], "variants": approved})
+    return out
+
+
 def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     """E1 into *script* (in place; the caller writes it), offered the
     approved characters (:func:`e1_cast`). From episode 2 on,
@@ -698,13 +720,15 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
         memory=ec.season, slots=slots, open_hooks=hooks, audience_direction=audience_direction(ec),
     )
     v3 = writes_v3(ec)  # a new beat sheet: the story's own choice
+    variants = e1_variants(ec, cast) if v3 else None
     if v3:
         # Plan 22 stage 3: E1v3 -- the spine first, cause-and-effect summaries.
         prompt_id = "E1v3"
         slice_text = context.slice_for_episode(ec, knowledge=knowledge_of(ec),
                                                char_ids=[doc["char_id"] for doc in cast])
         system, user, schema = prompts.build_e1_v3(
-            pack, slice_text=slice_text, narration=prompts.narration_of(ec.template, ec.narrator), **kwargs)
+            pack, slice_text=slice_text, narration=prompts.narration_of(ec.template, ec.narrator),
+            variants=variants, **kwargs)
     elif v2:
         # Phase 7 stage 5c (A13): E1v2, with the episode's slice of the knowledge base.
         prompt_id = "E1v2"
@@ -724,7 +748,7 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
             errors = prompts.validate_e1_v3(reply, ep=ec.ep, template=ec.template,
                                             episode_defaults=ec.episode_defaults,
                                             cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
-                                            prop_ids=ec.prop_ids, open_hooks=hooks)
+                                            prop_ids=ec.prop_ids, open_hooks=hooks, variants=variants)
         else:
             errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
                                          cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
@@ -740,6 +764,10 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     payoff_cap = (prompts.E1V3_PAYOFF_MAX_TOKENS if v3 else prompts.E1V2_PAYOFF_MAX_TOKENS if v2
                   else prompts.E1_PAYOFF_MAX_TOKENS)
     cap = payoff_cap if prompts.offered_hooks(ec.ep, hooks) else None
+    if variants:
+        # Plan 23 stage D5: the states' room (E1V3_STATES_MAX_TOKENS) on E1v3's cap fits under the payoff
+        # variant's (2,570 + 560 <= 3,190), the widest E1v3 call the worst-case booking already prices.
+        cap = prompts.E1V3_PAYOFF_MAX_TOKENS
     reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn, max_tokens=cap)
     before, after = apply_e1(ec, script, reply)

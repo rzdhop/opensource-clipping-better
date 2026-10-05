@@ -487,12 +487,16 @@ class KeyframeContext:
     ``{char_id: path}`` of the identity sheets on disk; *ledger*, the
     episode's continuity ledger (``context.ledger_before``: each character's
     wardrobe set; None without one); *scenes*, ``{shot_id: scene_id}`` of
-    the storyboard."""
+    the storyboard. *variant_sheets* (plan 23 stage D5): ``{(char_id,
+    variant_id): path}`` of the appearance variants' sheets the shots name
+    (a shot's ``variants``): such a character is judged against its
+    variant's sheet, labelled with the variant."""
 
-    def __init__(self, *, sheets=None, ledger=None, scenes=None):
+    def __init__(self, *, sheets=None, ledger=None, scenes=None, variant_sheets=None):
         self.sheets = dict(sheets or {})
         self.ledger = ledger
         self.scenes = dict(scenes or {})
+        self.variant_sheets = dict(variant_sheets or {})
 
     def characters(self, ec, shot) -> list:
         """``[(char_id, doc)]`` of *shot*'s character tags, each once, in
@@ -507,8 +511,16 @@ class KeyframeContext:
     def sheets_of(self, ec, shot) -> list:
         """``[(name, path)]``: the identity sheet of each character on
         screen, in subject order, at most ``prompts.J2_MAX_SHEETS``."""
-        found = [(doc.get("name") or cid, self.sheets[cid]) for cid, doc in self.characters(ec, shot)
-                 if self.sheets.get(cid)]
+        worn = shot.get("variants") or {}
+        found = []
+        for cid, doc in self.characters(ec, shot):
+            variant_id = worn.get(cid)
+            if variant_id and self.variant_sheets.get((cid, variant_id)):
+                label = next((variant["label"] for variant in doc.get("variants") or ()
+                              if variant["variant_id"] == variant_id), variant_id)
+                found.append((f"{doc.get('name') or cid} ({label})", self.variant_sheets[(cid, variant_id)]))
+            elif self.sheets.get(cid):
+                found.append((doc.get("name") or cid, self.sheets[cid]))
         return found[:prompts.J2_MAX_SHEETS]
 
     def same_scene(self, shot_id, previous_shot_id):
@@ -581,6 +593,10 @@ def keyframe_brief(ec, shot, *, ledger=None) -> str:
         for tag in people:
             doc = ec.entities["characters"].get(tag[1:]) or {}
             line = f"- {_tag_name(ec, tag)}: {_character_look(doc, shots.shot_wardrobe(doc, ledger, tag[1:]))}"
+            variant = shots.variant_record(doc, (shot.get("variants") or {}).get(tag[1:]))
+            if variant is not None:
+                # Plan 23 stage D5: the character wears an appearance variant in this shot.
+                line += f"; now {_clipped(variant['delta_text'], _BRIEF_LOOK_CHARS)} ({variant['label']})"
             place = staging.get(tag)
             if place:
                 line += (f" -- {place['position']}, facing {_clipped(place['facing'], _BRIEF_STAGING_CHARS)}, "

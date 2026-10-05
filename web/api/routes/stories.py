@@ -172,6 +172,7 @@ from ..models import (
     StoryPatchRequest,
     SubtitleStylePatchRequest,
     StoryProposalDecisionRequest,
+    CharacterVariantRequest,
     StoryRegenerateRequest,
     StoryStepRequest,
     StorySwitchPipelineRequest,
@@ -352,6 +353,9 @@ def _job_doc(step, params, ep=None):
             return f"{workflow.EPISODE_TARGET_DOCS[parsed[0]]}:{parsed[1]}"
         if parsed is not None and parsed[0] in regenerate_step.EPISODE_KINDS:
             return None
+        if parsed is not None and parsed[0] == "character" and parsed[2] == regenerate_step.VARIANT_WORD:
+            # Plan 23 stage D5: a variant's sheets await the variant's own approval, never the character's.
+            return f"{workflow.VARIANT_APPROVAL}:{parsed[1]}:{parsed[3]}"
         if parsed is not None:
             return "season" if parsed[0] == "season" else f"{parsed[0]}:{parsed[1]}"
     return None
@@ -1997,6 +2001,16 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
             _complete_awaiting(story_id, group)
         return story
 
+    variant = workflow.parse_variant_approval(doc)
+    if variant is not None:
+        # Plan 23 stage D5: one appearance variant, its sheets made; the character's approval never moves.
+        _entity(stories, story_id, CHARACTERS, variant[0])
+        _refuse_busy(story_id, f"approve {doc} once it is done, or cancel it first.", docs=(doc,))
+        with _answering():
+            character = workflow.approve_variant(stories, story_id, variant[0], variant[1], now=_now())
+        _complete_awaiting(story_id, doc)
+        return character
+
     if doc == "knowledge":
         _refuse_busy(story_id, "approve the knowledge base once that step is done, or cancel it first.",
                      docs=("knowledge",))
@@ -2376,6 +2390,12 @@ async def _estimate_body(story_id, step, *, target=None, selected=None, episodes
             units = workflow.target_units(stories, story, parsed)
         if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
             return await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
+        if parsed[0] == "character" and parsed[2] == regenerate_step.VARIANT_WORD:
+            # Plan 23 stage D5: an appearance variant's sheets, priced like the sheets.
+            body = _generation_estimate(stories, story, step, units, env=env)
+            phrase = workflow.variant_sheets_phrase(story)
+            return {**body, "variant_sheets": units["images"] + units["edit_images"],
+                    "message": f"{phrase}: {body['message']}"}
         if not units["llm_calls"]:
             return _generation_estimate(stories, story, step, units, env=env)
 
@@ -2688,12 +2708,24 @@ async def post_proposal_decision(story_id: str, ep: str, item_id: str,
         units = workflow.cast_units(stories, story, selected=(), custom=preview["cast"]["params"]["custom"])
         gate = _generation_gate(stories, story, units, env=env, step="cast")
         gate()  # before anything is decided: an accept that cannot be fulfilled records nothing
+    elif preview.get("variant_job") is not None:
+        # Plan 23 stage D5: a twist's appearance variant -- its sheets meet the regenerate's estimate gate first.
+        units = workflow.variant_units(story)
+        gate = _generation_gate(stories, story, units, env=env, llm=False,
+                                needs_editor=workflow.target_needs_editor(
+                                    story, regenerate_step.parse_target(preview["variant_job"]["params"]["target"])),
+                                step="regenerate")
+        gate()
     _refuse_busy(story_id, "decide it once that step is done, or cancel it first.")
     with _answering():
         result = workflow.decide_proposal(stories, story_id, number, item_id, accept=req.accept, role=req.role,
                                           now=_now())
     if result.get("cast") is not None:
         job = await _create_step_job(story_id, result["cast"]["step"], result["cast"]["params"], gate=gate)
+        result = {**result, "job": job.model_dump(mode="json")}
+    elif result.get("variant_job") is not None:
+        job = await _create_step_job(story_id, result["variant_job"]["step"], result["variant_job"]["params"],
+                                     gate=gate)
         result = {**result, "job": job.model_dump(mode="json")}
     return result
 
@@ -3231,6 +3263,27 @@ def _delete_entity(story_id, kind, eid) -> dict:
 async def patch_character(story_id: str, char_id: str, req: CharacterPatchRequest) -> dict:
     """Edit a character inline (``CharacterPatchRequest``); see ``_patch_entity``."""
     return _patch_entity(story_id, CHARACTERS, char_id, req)
+
+
+@router.post("/{story_id}/characters/{char_id}/variants", status_code=201)
+async def add_character_variant(story_id: str, char_id: str, req: CharacterVariantRequest) -> dict:
+    """A new appearance variant of a character (plan 23 stage D5,
+    ``workflow.add_variant``): ``{label, delta_text}``; its id is a slug of
+    the label, fixed now. No image is made here: the answer's ``target``
+    (``character:<id>:variant:<vid>``) is the regenerate that makes its
+    sheets, behind the estimate gate (``GET /estimate/regenerate?target=``
+    says "N variant sheets" and the price). 404 unknown story or character;
+    409 a story without variants (no sheet mode, no ``variants: "on"``), a
+    character not written yet or with three variants, while a step runs;
+    400 a label or delta that is missing, too long or names an entity.
+    Answers ``{character, variant, target}``."""
+    stories = _stories()
+    _load(stories, story_id)
+    _entity(stories, story_id, CHARACTERS, char_id)
+    _refuse_busy(story_id, "add the variant once that step is done, or cancel it first.")
+    with _answering():
+        return workflow.add_variant(stories, story_id, char_id, {"label": req.label, "delta_text": req.delta_text},
+                                    now=_now())
 
 
 @router.patch("/{story_id}/places/{place_id}")

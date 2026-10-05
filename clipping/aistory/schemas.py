@@ -779,6 +779,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # writes one continuous action with a colour/species anchor per character
         # (defaults.PROMPT_STYLES).
         "prompt_style": {"type": "string", "enum": list(defaults.PROMPT_STYLES)},
+        # Optional (plan 23 stage D5): "on" lets a v2 story's characters carry
+        # appearance variants without a sheet_mode (media_policy.variants_enabled).
+        "variants": {"type": "string", "enum": list(defaults.VARIANTS_MODES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -1480,13 +1483,19 @@ TIME_VARIANT_PATTERN = r"^[a-z][a-z0-9_]{0,19}$"
 # truth, no separate master_plate field.
 MASTER_PLATE_VARIANT = "day"
 
+# Plan 23 stage D5: a character's appearance variant ("ghost version") is named
+# by a slug fixed when it is created (never renamed); its sheets sit beside the
+# base ones as ``<slot>_<variant_id>.<ext>`` (``portrait_ghost_version.png``).
+VARIANT_ID_PATTERN = r"^[a-z][a-z0-9_]{0,23}$"
+_VARIANT_STEM = r"(portrait|turnaround|expressions)_[a-z][a-z0-9_]{0,23}"
 # Any reference image, whatever its entity (the name field of an image ref)...
 REF_IMAGE_NAME_PATTERN = (
-    r"^(portrait|turnaround|expressions|variant_[a-z][a-z0-9_]{0,19}|image|extra_[0-9]{2})"
+    r"^(portrait|turnaround|expressions|variant_[a-z][a-z0-9_]{0,19}|image|extra_[0-9]{2}|" + _VARIANT_STEM + r")"
     r"\.(png|jpg|jpeg|webp)$"
 )
 # ... and the ones each kind may keep in its refs/ folder.
-CHARACTER_REF_NAME_PATTERN = r"^(portrait|turnaround|expressions|extra_[0-9]{2})\.(png|jpg|jpeg|webp)$"
+CHARACTER_REF_NAME_PATTERN = (r"^(portrait|turnaround|expressions|extra_[0-9]{2}|" + _VARIANT_STEM
+                              + r")\.(png|jpg|jpeg|webp)$")
 PLACE_REF_NAME_PATTERN = r"^variant_[a-z][a-z0-9_]{0,19}\.(png|jpg|jpeg|webp)$"
 PROP_REF_NAME_PATTERN = r"^image\.(png|jpg|jpeg|webp)$"
 EXTRA_REF_NAME_PATTERN = r"^extra_[0-9]{2}\.(png|jpg|jpeg|webp)$"
@@ -1815,6 +1824,47 @@ def prop_look_errors(look, path="$.look") -> list:
     return errors
 
 
+# Plan 23 stage D5: a character's named appearance variants, each an edit of
+# its base sheet(s) (``refimages.variant_image``) picked per shot by the
+# storyboard (``shots.variant_view``). ``variant_id`` is a slug fixed at
+# creation and never renamed (what shots, scenes and the sheet files name);
+# ``refs`` holds the slots of the story's sheet mode (``portrait`` always, the
+# turnaround and the expressions sheet when the mode draws them), each null
+# until made; ``source`` says who asked for it (the human, or an accepted N1v2
+# twist); a variant is approved on its own, the character's approval never
+# reopened by it.
+VARIANTS_MAX = 3
+VARIANT_LABEL_MAX_CHARS = 40
+VARIANT_DELTA_MAX_WORDS = 60
+VARIANT_SOURCES = ("human", "twist")
+VARIANT_SLOTS = ("portrait", "turnaround", "expressions")
+_VARIANT_SCHEMA = _document({
+    "variant_id": {"type": "string", "pattern": VARIANT_ID_PATTERN},
+    "label": _text(VARIANT_LABEL_MAX_CHARS),
+    "delta_text": _NON_EMPTY_STRING,
+    "refs": _document({"portrait": _IMAGE_REF_OR_NULL}, optional={
+        "turnaround": _IMAGE_REF_OR_NULL, "expressions": _IMAGE_REF_OR_NULL}),
+    "source": {"type": "string", "enum": list(VARIANT_SOURCES)},
+    "created_at": _NON_EMPTY_STRING,
+    "approved_at": _TIMESTAMP_OR_NULL,
+})
+
+
+def variant_errors(variant, path="$.variant") -> list:
+    """``validate()`` against the variant schema, plus the label's and the
+    delta's caps (:data:`VARIANT_LABEL_MAX_CHARS`, :data:`VARIANT_DELTA_MAX_WORDS`)
+    and each sheet named ``<slot>_<variant_id>.<ext>`` and labelled as an edit
+    of the base portrait (``references``/``prompt_only``)."""
+    errors = validate(variant, _VARIANT_SCHEMA, path)
+    if errors:
+        return errors
+    _check_text(errors, f"{path}.label", variant["label"])
+    _check_text(errors, f"{path}.delta_text", variant["delta_text"], max_words=VARIANT_DELTA_MAX_WORDS)
+    for slot, ref in variant["refs"].items():
+        _slot_errors(errors, f"{path}.refs.{slot}", ref, stem=f"{slot}_{variant['variant_id']}", allowed=_DERIVED)
+    return errors
+
+
 CHARACTER_SCHEMA = _document({
     "$schema": {"type": "string", "const": CHARACTER_SCHEMA_NAME},
     "char_id": {"type": "string", "pattern": CHAR_ID_PATTERN},
@@ -1861,6 +1911,8 @@ CHARACTER_SCHEMA = _document({
     "dossier": CHARACTER_DOSSIER_SCHEMA,
     # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
     "approved_by": _AGENT_APPROVED_SCHEMA,
+    # Plan 23 stage D5: the character's appearance variants (_VARIANT_SCHEMA, at most VARIANTS_MAX).
+    "variants": {"type": "array", "items": _VARIANT_SCHEMA, "maxItems": VARIANTS_MAX},
 })
 
 
@@ -1908,6 +1960,12 @@ def character_errors(doc) -> list:
         errors.extend(character_look_errors(doc["look"]))
     if "dossier" in doc:
         errors.extend(character_dossier_errors(doc["dossier"], doc["char_id"]))
+    seen = set()
+    for i, variant in enumerate(doc.get("variants") or ()):
+        errors.extend(variant_errors(variant, f"$.variants[{i}]"))
+        if variant["variant_id"] in seen:
+            errors.append(f"$.variants[{i}].variant_id: {variant['variant_id']!r} is used twice")
+        seen.add(variant["variant_id"])
     return errors
 
 
@@ -2974,6 +3032,10 @@ _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     # never here: the document does not know the season). Absent means none,
     # and so does an empty list; a script written before it validates as is.
     "pays_off": {"type": "array", "items": _text(HOOK_MAX_LENGTH), "maxItems": PAYOFF_HOOKS_MAX},
+    # Plan 23 stage D5: the appearance variant a character of the scene wears in it
+    # ({char_id: variant_id}, E1v3's character states block, offered only when the cast
+    # has variants). Absent on every other scene: each character in its base look.
+    "states": {"type": "object"},
 })
 
 _EPISODE_SCRIPT_HOOK_SCHEMA = _document({"on_screen_text": {"type": ["string", "null"]}})
@@ -3164,6 +3226,17 @@ def _word_cap_errors(errors, path, value, max_words) -> None:
         errors.append(f"{path}: {_words(value)} words, expected at most {max_words}")
 
 
+def _variant_map_errors(errors, path, mapping, char_ids) -> None:
+    """A ``{char_id: variant_id}`` map (plan 23 stage D5: a scene's
+    ``states``, a shot's ``variants``): each key one of *char_ids* (the
+    scene's characters, the shot's framed ones), each value a variant id."""
+    for key, value in mapping.items():
+        if key not in char_ids:
+            errors.append(f"{path}: {key!r} is not one of its characters")
+        if not (isinstance(value, str) and _search(VARIANT_ID_PATTERN, value)):
+            errors.append(f"{path}.{key}: {value!r} is not a variant id ({VARIANT_ID_PATTERN})")
+
+
 def episode_script_errors(doc) -> list:
     """``validate()`` against ``EPISODE_SCRIPT_SCHEMA``, plus the cross-field
     checks the subset schema cannot express (spec 2.7): scene/line id
@@ -3265,6 +3338,8 @@ def episode_script_errors(doc) -> list:
             _check_text(errors, f"$.scenes[{scene['scene_id']}].pays_off[{k}]", hook)
         for hook in sorted({hook for hook in paid if paid.count(hook) > 1}):
             errors.append(f"$.scenes[{scene['scene_id']}].pays_off: {hook!r} is listed twice")
+        if "states" in scene:
+            _variant_map_errors(errors, f"$.scenes[{scene['scene_id']}].states", scene["states"], chars)
 
     cliff_scene_id = doc["cliffhanger"]["scene_id"]
     if cliff_scene_id is not None:
@@ -3574,6 +3649,11 @@ _STORYBOARD_SHOT_SCHEMA = _document({
     # was planned at (a length its link sells). Absent on every other shot.
     "speaks": {"type": "boolean"},
     "clip_s": {"type": "integer", "minimum": 1},
+    # Plan 23 stage D5: the appearance variant each framed character wears in this shot
+    # ({char_id: variant_id}): inherited from its scene's ``states`` when the shot is
+    # planned, the human's own once overridden (kept by a re-plan, like the shot's
+    # assets). Absent on every other shot: each character in its base look.
+    "variants": {"type": "object"},
 })
 
 _STORYBOARD_TRANSITION_SCHEMA = _document({
@@ -3697,6 +3777,11 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             elif name == manual and clip.get("link") != MANUAL_LINK:
                 errors.append(f"$.shots[{i}].assets.video: an uploaded clip is set only with a clip on {MANUAL_LINK} "
                               f"(assets.clip.link {MANUAL_LINK!r})")
+
+    for i, shot in enumerate(shots):
+        if "variants" in shot:
+            framed = {tag[1:] for tag in shot["subject_tags"] if tag.startswith("@")}
+            _variant_map_errors(errors, f"$.shots[{i}].variants", shot["variants"], framed)
 
     seen_scenes = []
     for shot in shots:
@@ -4500,6 +4585,14 @@ _PROPOSED_TWIST_SCHEMA = _document({
     "summary": _NON_EMPTY_STRING,
     "open_hooks_out": {"type": "array", "items": _text(HOOK_MAX_LENGTH), "maxItems": TWIST_HOOKS_MAX},
     "why": _text(300),
+}, optional={
+    # Plan 23 stage D5 (N1v2): the appearance variant of an existing character the
+    # twist brings; accepting the twist creates it (``workflow.decide_proposal``).
+    "variant": _document({
+        "char_id": {"type": "string", "pattern": CHAR_ID_PATTERN},
+        "label": _text(VARIANT_LABEL_MAX_CHARS),
+        "delta_text": _NON_EMPTY_STRING,
+    }),
 })
 
 NEXT_PROPOSALS_SCHEMA = _document({
@@ -5869,6 +5962,54 @@ def n1_errors(reply, *, target_eps) -> list:
     return errors
 
 
+def n1_v2_schema(target_eps, variant_char_ids) -> dict:
+    """N1v2's schema (plan 23 stage D5): :func:`n1_schema` with each twist's
+    ``variant`` -- null, or the appearance variant of one existing character
+    (*variant_char_ids*: the ones that may gain one) it brings ``{char_id,
+    label, delta_text}``. Without such a character the twist's variant is
+    always null."""
+    schema = n1_schema(target_eps)
+    twist = schema["properties"]["twists"]["items"]
+    char_item = ({"type": "string", "enum": list(variant_char_ids)} if variant_char_ids else {"type": "string"})
+    variant = _llm_obj({
+        "char_id": char_item,
+        "label": {"type": "string", "description": f"at most {VARIANT_LABEL_MAX_CHARS} characters"},
+        "delta_text": {"type": "string",
+                       "description": f"what changes in the look, at most {VARIANT_DELTA_MAX_WORDS} words, no name"},
+    })
+    variant["type"] = ["object", "null"]
+    twist["properties"]["variant"] = variant
+    twist["required"] = list(twist["properties"])
+    return schema
+
+
+def n1_v2_errors(reply, *, target_eps, variant_char_ids) -> list:
+    """Post-validation for an N1v2 reply: :func:`n1_errors`' checks on the
+    reply without the twists' variants, then each variant's: a character of
+    *variant_char_ids*, the label's character cap, the delta's word cap, at
+    most one variant per character in the reply."""
+    errors = validate(reply, n1_v2_schema(target_eps, variant_char_ids))
+    if errors:
+        return errors
+    bare = dict(reply, twists=[{key: value for key, value in twist.items() if key != "variant"}
+                               for twist in reply["twists"]])
+    errors = n1_errors(bare, target_eps=target_eps)
+    seen = set()
+    for i, twist in enumerate(reply["twists"]):
+        variant = twist.get("variant")
+        if variant is None:
+            continue
+        path = f"$.twists[{i}].variant"
+        if variant["char_id"] not in variant_char_ids:
+            errors.append(f"{path}.char_id: {variant['char_id']!r} is not one of {list(variant_char_ids)}")
+        elif variant["char_id"] in seen:
+            errors.append(f"{path}.char_id: {variant['char_id']!r} gains a variant in another twist already")
+        seen.add(variant["char_id"])
+        _check_chars(errors, f"{path}.label", variant["label"], VARIANT_LABEL_MAX_CHARS)
+        _check_text(errors, f"{path}.delta_text", variant["delta_text"], max_words=VARIANT_DELTA_MAX_WORDS)
+    return errors
+
+
 def repair_n1_reply(reply, language):
     """A copy of *reply* with the French elision fix applied to every
     proposed character's ``name``/``one_line``/``why``/``archetype`` and
@@ -5891,4 +6032,9 @@ def repair_n1_reply(reply, language):
                 item[field] = repair_fr_elisions(item[field])
         if isinstance(item.get("open_hooks_out"), list):
             item["open_hooks_out"] = [_repair_text_field(hook) for hook in item["open_hooks_out"]]
+        variant = item.get("variant")  # N1v2 (plan 23 stage D5)
+        if isinstance(variant, dict):
+            for field in ("label", "delta_text"):
+                if isinstance(variant.get(field), str):
+                    variant[field] = repair_fr_elisions(variant[field])
     return reply

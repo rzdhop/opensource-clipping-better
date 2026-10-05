@@ -279,9 +279,12 @@ def _cast_regenerate_target_templates() -> set[str]:
 
 def test_cast_step_regenerate_targets_match_the_entity_target_shapes():
     templates = _cast_regenerate_target_templates()
-    assert templates == {"character:<x>:text", "character:<x>:image:<x>", "character:<x>:voice"}
+    # Plan 23 stage D5, re-pinned on purpose: an appearance variant's sheets (its own target shape).
+    assert templates == {"character:<x>:text", "character:<x>:image:<x>", "character:<x>:voice",
+                         "character:<x>:variant:<x>"}
     assert "character:<char_id>:text" in regenerate_step.ENTITY_TARGETS
     assert "character:<char_id>:voice" in regenerate_step.ENTITY_TARGETS
+    assert "character:<char_id>:variant:<variant_id>" in regenerate_step.ENTITY_TARGETS
     assert any(shape.startswith("character:<char_id>:image:") for shape in regenerate_step.ENTITY_TARGETS)
 
 

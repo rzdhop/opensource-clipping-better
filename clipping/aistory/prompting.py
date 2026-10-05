@@ -392,6 +392,29 @@ def _sheet_v2(style_lock, *, head, look_text, signature_items, tail, constraints
                    rules=style_lock["character_design_rules"] if rules else "", cues=cues)
 
 
+# Each sheet's skeleton (its layout head and its closing tail), shared with the
+# appearance variants' (plan 23 stage D5, :func:`variant_prompt_v2`).
+_PORTRAIT_HEAD = ("Full-body character reference sheet, head to toe, front three-quarter view, neutral standing "
+                  "pose, arms relaxed")
+_TURNAROUND_HEAD = ("Turnaround sheet of this character, four full-body views side by side in one row, front, "
+                    "three-quarter, profile and back, head to toe in each")
+_EXPRESSIONS_HEAD = ("Every cell shows the same head as image 1, never a different face. Expression sheet of this "
+                     "character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, "
+                     "happy, angry, shocked, sad and scheming, same face and outfit in every cell")
+
+
+def _portrait_tail(style_lock) -> str:
+    return f"Plain {style_lock['sheet_background']} background, even soft studio light. Vertical 9:16."
+
+
+def _turnaround_tail(style_lock) -> str:
+    return f"Plain {style_lock['sheet_background']} background, flat even light, no labels."
+
+
+def _expressions_tail(style_lock) -> str:
+    return f"Plain {style_lock['sheet_background']} background, even soft light, no labels."
+
+
 def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS,
                        cues: str = "") -> str:
     """A v2 character's base reference: full body, head to toe, front
@@ -402,10 +425,9 @@ def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items, bud
     distinctive marks and bearing) follow the look when they fit."""
     return _sheet_v2(
         style_lock,
-        head=("Full-body character reference sheet, head to toe, front three-quarter view, neutral standing "
-              "pose, arms relaxed"),
+        head=_PORTRAIT_HEAD,
         look_text=look_text, signature_items=signature_items,
-        tail=f"Plain {style_lock['sheet_background']} background, even soft studio light. Vertical 9:16.",
+        tail=_portrait_tail(style_lock),
         constraints=CONSTRAINTS_ONE_CHARACTER, budget=budget, cues=cues,
     )
 
@@ -417,10 +439,9 @@ def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items, b
     :func:`portrait_prompt_v2`'s."""
     return _sheet_v2(
         style_lock,
-        head=(f"{ROLE_TEXT_PORTRAIT} Turnaround sheet of this character, four full-body views side by side "
-              "in one row, front, three-quarter, profile and back, head to toe in each"),
+        head=f"{ROLE_TEXT_PORTRAIT} {_TURNAROUND_HEAD}",
         look_text=look_text, signature_items=signature_items,
-        tail=f"Plain {style_lock['sheet_background']} background, flat even light, no labels.",
+        tail=_turnaround_tail(style_lock),
         constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues,
     )
 
@@ -435,12 +456,9 @@ def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, 
     cell, another came out with five cells."""
     return _sheet_v2(
         style_lock,
-        head=(f"{ROLE_TEXT_PORTRAIT} Every cell shows the same head as image 1, never a different face. "
-              "Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a "
-              "head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and "
-              "outfit in every cell"),
+        head=f"{ROLE_TEXT_PORTRAIT} {_EXPRESSIONS_HEAD}",
         look_text=look_text, signature_items=signature_items,
-        tail=f"Plain {style_lock['sheet_background']} background, even soft light, no labels.",
+        tail=_expressions_tail(style_lock),
         constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False, budget=budget, cues=cues,
     )
 
@@ -480,10 +498,52 @@ def two_view_prompt_v2(style_lock: dict, *, look_text: str, signature_items, bud
         style_lock,
         head=TWO_VIEW_HEAD,
         look_text=look_text, signature_items=signature_items,
-        tail=(f"{DRESS_RULE} Plain {style_lock['sheet_background']} background, soft uniform light, no text, no "
-              "grid, no labels. Adult proportions, never chibi. Vertical 9:16."),
+        tail=_two_view_tail(style_lock),
         constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues,
     )
+
+
+def _two_view_tail(style_lock) -> str:
+    return (f"{DRESS_RULE} Plain {style_lock['sheet_background']} background, soft uniform light, no text, no "
+            "grid, no labels. Adult proportions, never chibi. Vertical 9:16.")
+
+
+# Plan 23 stage D5: a character's appearance variant ("ghost version") is an
+# edit of its BASE portrait (image 1), whatever sheet it is: the role sentence
+# says what changes, then the slot's own skeleton (its layout head and closing
+# tail, the very ones above) follows, through :func:`_sheet_v2` so the budget,
+# the style and the constraints apply as to any sheet.
+VARIANT_ROLE = "Image 1 is this character's reference: same character, same identity and proportions, now {delta}."
+
+
+def variant_prompt_v2(style_lock: dict, *, which: str, delta_text: str, look_text: str, signature_items,
+                      budget=SHEET_V2_MAX_WORDS, cues: str = "", two_view: bool = False) -> str:
+    """The prompt of a character's appearance variant's sheet *which*
+    (``portrait``, ``turnaround`` or ``expressions``), an edit of its base
+    portrait (image 1): :data:`VARIANT_ROLE` with *delta_text* (what is
+    different now, never cut), then the slot's skeleton -- the two-view
+    sheet's when *two_view* (the portrait slot of a two-view story), else
+    the full-body portrait's, the turnaround's or the expression sheet's --
+    over the character's rendered look, at most *budget* words; *cues* as
+    :func:`portrait_prompt_v2`'s."""
+    delta = _strip_trailing_period(_collapse_ws(delta_text))
+    if not delta:
+        raise ValueError("variant_prompt_v2: an appearance variant needs its delta text")
+    role = VARIANT_ROLE.format(delta=delta[0].lower() + delta[1:] if delta[1:2].islower() else delta)
+    if which == "portrait" and two_view:
+        head, tail, constraints, rules = TWO_VIEW_HEAD, _two_view_tail(style_lock), _CONSTRAINTS_SAME_CHARACTER, True
+    elif which == "portrait":
+        head, tail, constraints, rules = _PORTRAIT_HEAD, _portrait_tail(style_lock), CONSTRAINTS_ONE_CHARACTER, True
+    elif which == "turnaround":
+        head, tail, constraints, rules = (_TURNAROUND_HEAD, _turnaround_tail(style_lock), _CONSTRAINTS_SAME_CHARACTER,
+                                          True)
+    elif which == "expressions":
+        head, tail, constraints, rules = (_EXPRESSIONS_HEAD, _expressions_tail(style_lock),
+                                          _CONSTRAINTS_SAME_CHARACTER, False)
+    else:
+        raise ValueError(f"variant_prompt_v2: {which!r} is not a character sheet")
+    return _sheet_v2(style_lock, head=f"{role} {head}", look_text=look_text, signature_items=signature_items,
+                     tail=tail, constraints=constraints, rules=rules, budget=budget, cues=cues)
 
 
 def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=PLATE_V2_MAX_WORDS) -> str:

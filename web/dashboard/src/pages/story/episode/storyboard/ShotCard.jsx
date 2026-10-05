@@ -322,6 +322,25 @@ function ShotCard({ storyId, ep, shot, assetShot, tier, scene, maps, assetsBlock
     }
   }
 
+  // Plan 23 stage D5: the look a framed character wears in this shot (its base look, or one of its
+  // appearance variants) -- the human's override of the scene's states; the keyframe goes stale on purpose.
+  const saveVariant = async (charId, value) => {
+    setFieldError('')
+    setFieldErrors(null)
+    const variants = { [charId]: value || null }
+    try {
+      await patchEpisodeStoryboard(storyId, ep, { shots: [{ shot_id: shot.shot_id, variants }] })
+      onChange()
+    } catch (err) {
+      setFieldError(err.message)
+      setFieldErrors(err.errors || null)
+    }
+  }
+  const variantCharacters = shot.subject_tags
+    .filter((tag) => tag.startsWith('@'))
+    .map((tag) => maps.characters.get(tag.slice(1)))
+    .filter((doc) => doc && (doc.variants || []).length > 0)
+
   const savePromptOverride = async (value) => {
     await patchEpisodeStoryboard(storyId, ep, { shots: [{ shot_id: shot.shot_id, prompt_override: value }] })
     onChange()
@@ -414,6 +433,32 @@ function ShotCard({ storyId, ep, shot, assetShot, tier, scene, maps, assetsBlock
           </label>
         )}
       </div>
+
+      {variantCharacters.length > 0 && (
+        <div className="story-shot-controls">
+          {variantCharacters.map((doc) => (
+            <div key={doc.char_id} className="form-group story-shot-control">
+              <label className="form-label" htmlFor={`shot-${shot.shot_id}-variant-${doc.char_id}`}>
+                {doc.name}&apos;s look
+              </label>
+              <select
+                id={`shot-${shot.shot_id}-variant-${doc.char_id}`}
+                className="form-select"
+                value={(shot.variants || {})[doc.char_id] || ''}
+                onChange={(e) => saveVariant(doc.char_id, e.target.value)}
+                disabled={busy}
+              >
+                <option value="">base look</option>
+                {doc.variants.map((variant) => (
+                  <option key={variant.variant_id} value={variant.variant_id}>
+                    {variant.label}{variant.approved_at ? '' : ' (not approved)'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
 
       <StepError message={fieldError} errors={fieldErrors} />
 

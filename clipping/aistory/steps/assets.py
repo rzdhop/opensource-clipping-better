@@ -1939,19 +1939,31 @@ def keyframe_context(ec, storyboard, *, ledger=None):
     phase 8 stage B): each character's identity sheet on disk (its
     portrait: the full-body sheet on a v2 story), the episode's continuity
     *ledger* (its wardrobe sets) and the scene of every shot."""
+    def on_disk(cid, ref):
+        if not ref or not ref.get("name"):
+            return None
+        try:
+            path = ec.store.media_path(ec.story_id, "characters", cid, ref["name"])
+        except KeyError:
+            return None
+        return path if path and os.path.isfile(path) and not os.path.islink(path) else None
+
     sheets = {}
     for cid, doc in ec.entities["characters"].items():
-        portrait = (doc.get("refs") or {}).get("portrait")
-        if not portrait or not portrait.get("name"):
-            continue
-        try:
-            path = ec.store.media_path(ec.story_id, "characters", cid, portrait["name"])
-        except KeyError:
-            continue
-        if path and os.path.isfile(path) and not os.path.islink(path):
+        path = on_disk(cid, (doc.get("refs") or {}).get("portrait"))
+        if path:
             sheets[cid] = path
+    # Plan 23 stage D5: a shot whose character wears a variant is judged against the variant's sheet.
+    variant_sheets = {}
+    for shot in storyboard["shots"]:
+        for cid, variant_id in (shot.get("variants") or {}).items():
+            variant = shots_mod.variant_record(ec.entities["characters"].get(cid), variant_id)
+            path = on_disk(cid, ((variant or {}).get("refs") or {}).get("portrait"))
+            if path:
+                variant_sheets[(cid, variant_id)] = path
     return judge.KeyframeContext(sheets=sheets, ledger=ledger,
-                                 scenes={shot["shot_id"]: shot["scene_id"] for shot in storyboard["shots"]})
+                                 scenes={shot["shot_id"]: shot["scene_id"] for shot in storyboard["shots"]},
+                                 variant_sheets=variant_sheets)
 
 
 def keyframes_fingerprint(ec, storyboard) -> str:
@@ -2634,6 +2646,10 @@ class _Assets(voice_lines.LineMeasurement):
         for this shot alone; ``gencache.JournalError`` passes through."""
         ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
         shot_id = shot["shot_id"]
+        # Plan 23 stage D5: a shot naming a variant not approved yet is refused, never drawn in the base look.
+        refusal = shots_mod.variant_refusal(shot, ec.entities["characters"])
+        if refusal:
+            raise ShotFailed(refusal)
         # Phase 8 stage B: the previous keyframe of the scene in a v2 shot's continuity slot.
         source, alone = self.continuity_for(shot)
         parts = request_parts(ec, shot, note=note, link=self.link, continuity=source[1] if source else None,

@@ -46,13 +46,16 @@ import copy
 import dataclasses
 import time
 
-from .. import context, prompts, schemas, series_memory
+from .. import context, media_policy, prompts, schemas, series_memory
 from .. import store as store_mod
 from . import entities, episode_common, llm_call
 from .llm_call import StepFailed
 
 STEP = "propose-next"
 PROMPT = "N1"
+# Plan 23 stage D5: a story whose characters may carry appearance variants
+# (``media_policy.variants_enabled``) asks N1v2, whose twists may bring one.
+PROMPT_V2 = "N1v2"
 PROPOSALS_DOC = store_mod.EPISODE_PROPOSALS_DOC
 
 
@@ -121,12 +124,28 @@ def proposals_doc(reply, ep, entry, *, now) -> dict:
     twists = [{"item_id": f"twist_{number}", "target_ep": item["target_ep"], "summary": _text(item["summary"]),
                "open_hooks_out": [_text(hook) for hook in item["open_hooks_out"]], "why": _text(item["why"])}
               for number, item in enumerate(reply["twists"], start=1)]
+    for twist, item in zip(twists, reply["twists"]):
+        variant = item.get("variant")  # N1v2 (plan 23 stage D5): only when the twist brings one
+        if isinstance(variant, dict):
+            twist["variant"] = {"char_id": variant["char_id"], "label": " ".join(variant["label"].split()),
+                                "delta_text": " ".join(variant["delta_text"].split())}
     return {
         "$schema": schemas.NEXT_PROPOSALS_SCHEMA_NAME, "for_ep": ep + 1,
         "based_on": {"memory_ep": ep, "script_rev": entry["script_rev"]},
         "characters": characters, "twists": twists, "decisions": {},
         "created_at": now, "updated_at": now,
     }
+
+
+def variant_candidates(cast) -> list:
+    """The characters an N1v2 twist may give an appearance variant (plan 23
+    stage D5): every written character with a look and room for one more
+    (fewer than ``schemas.VARIANTS_MAX``), ``[{char_id, name, variants:
+    [label]}]`` in cast order."""
+    return [{"char_id": doc["char_id"], "name": doc["name"],
+             "variants": [variant["label"] for variant in doc.get("variants") or ()]}
+            for doc in cast if doc.get("descriptor") and doc.get("look")
+            and len(doc.get("variants") or ()) < schemas.VARIANTS_MAX]
 
 
 def cast_errors(reply, cast) -> list:
@@ -190,16 +209,28 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
 
     pack = context.build_pack(language=ec.language, story=ec.story)
     llm_call.announce_trimmed(ctx, pack, set())
-    system, user, schema = prompts.build_n1(
-        pack, memory_ep=ep, arc=ec.season["arc"],
+    n1_kwargs = dict(
+        memory_ep=ep, arc=ec.season["arc"],
         cast=[{"name": doc["name"], "role": doc["role"], "one_line": doc["one_line"]} for doc in ec.cast],
         memory=ec.season, direction=series_memory.chosen_direction(ec.season, ep),
         open_hooks=series_memory.open_hooks_before(ec.season, ep + 1),
     )
+    variants = media_policy.variants_enabled(ec.story)
+    variant_cast = variant_candidates(ec.cast) if variants else []
+    variant_ids = [entry["char_id"] for entry in variant_cast] if targets else []
+    if variants:
+        prompt = PROMPT_V2
+        system, user, schema = prompts.build_n1_v2(pack, variant_cast=variant_cast, **n1_kwargs)
+    else:
+        prompt = PROMPT
+        system, user, schema = prompts.build_n1(pack, **n1_kwargs)
 
     def validate(reply):
         _repaired(reply, ec.language)
-        errors = schemas.n1_errors(reply, target_eps=targets)
+        if variants:
+            errors = schemas.n1_v2_errors(reply, target_eps=targets, variant_char_ids=variant_ids)
+        else:
+            errors = schemas.n1_errors(reply, target_eps=targets)
         if errors:
             return errors
         errors = cast_errors(reply, ec.cast)
@@ -207,8 +238,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
             return errors
         return schemas.next_proposals_errors(proposals_doc(reply, ep, entry, now="check"))
 
-    ctx.on_log(f"💡 Episode {ep + 1}: new characters and twists (N1), from episode {ep}'s memory")
-    reply = llm_call.call_json(ctx, PROMPT, system, user, schema, validator=validate, runner=tools.runner,
+    ctx.on_log(f"💡 Episode {ep + 1}: new characters and twists ({prompt}), from episode {ep}'s memory")
+    reply = llm_call.call_json(ctx, prompt, system, user, schema, validator=validate, runner=tools.runner,
                                time_fn=tools.time_fn)
     now = llm_call.utc_now()
     doc = save_proposals(ctx, ec, proposals_doc(reply, ep, entry, now=now), now=now)

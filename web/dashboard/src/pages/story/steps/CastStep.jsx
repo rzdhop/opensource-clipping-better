@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   patchStory, runStoryStep, approveStoryDoc, regenerateStory, fetchStoryEstimate,
   fetchCharacterVoices, patchCharacter, deleteCharacter, deleteCharacterUpload,
-  fetchStoryMediaUrl, uploadCharacterReference,
+  fetchStoryMediaUrl, uploadCharacterReference, addCharacterVariant,
 } from '../../../api'
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
@@ -243,6 +243,161 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange, consist
         empty={!ref}
         label={SLOT_LABELS[slot]}
       />
+    </div>
+  )
+}
+
+// ------------------------------------------------------- appearance variants
+
+/** Whether the story's characters may carry appearance variants (plan 23
+ * stage D5, clipping.aistory.media_policy.variants_enabled): a v2 story
+ * with a character sheets mode, or `generation_profile.variants: "on"`. */
+export function variantsEnabled(story) {
+  const profile = (story && story.generation_profile) || {}
+  return profile.pipeline === 'v2' && (Boolean(profile.sheet_mode) || profile.variants === 'on')
+}
+
+const VARIANTS_MAX = 3
+
+function VariantThumb({ storyId, character, slot, refDoc }) {
+  const [url, setUrl] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    let fresh = null
+    setUrl(null)
+    if (refDoc) {
+      fetchStoryMediaUrl(storyId, 'characters', character.char_id, refDoc.name).then((made) => {
+        if (cancelled) { URL.revokeObjectURL(made); return }
+        fresh = made
+        setUrl(made)
+      }).catch(() => {})
+    }
+    return () => {
+      cancelled = true
+      if (fresh) URL.revokeObjectURL(fresh)
+    }
+  }, [storyId, character.char_id, refDoc && refDoc.name])
+  return (
+    <div className="story-cast-image-slot">
+      <div className="story-cast-image-box">
+        {url ? <img src={url} alt={`${character.name} ${slot}`} />
+          : <div className="story-cast-image-empty">{SLOT_LABELS[slot]}: not made yet</div>}
+      </div>
+    </div>
+  )
+}
+
+function VariantRow({ storyId, character, variant, disabled, onChange }) {
+  const target = `character:${character.char_id}:variant:${variant.variant_id}`
+  const [estimate, setEstimate] = useState(null)
+  const [error, setError] = useState('')
+  const [working, setWorking] = useState(false)
+  const slots = Object.keys(variant.refs || {})
+  const made = slots.every((slot) => variant.refs[slot])
+
+  useEffect(() => {
+    fetchStoryEstimate(storyId, 'regenerate', { target }).then(setEstimate).catch(() => setEstimate(null))
+  }, [storyId, target, made])
+
+  const run = async (call) => {
+    setWorking(true)
+    setError('')
+    try {
+      await call()
+      onChange()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <div className="story-variant">
+      <div className="story-cast-card-header">
+        <strong>{variant.label}</strong>
+        <span className="chip">{variant.variant_id}</span>
+        {variant.source === 'twist' && <span className="chip">from a twist</span>}
+        {variant.approved_at ? <span className="chip chip-accent">approved</span>
+          : <span className="chip chip-warn">not approved</span>}
+      </div>
+      <p className="form-hint">{variant.delta_text}</p>
+      <div className="story-cast-images">
+        {slots.map((slot) => (
+          <VariantThumb key={slot} storyId={storyId} character={character} slot={slot} refDoc={variant.refs[slot]} />
+        ))}
+      </div>
+      <div className="story-step-actions">
+        <button type="button" className="btn btn-secondary btn-sm" disabled={disabled || working}
+          onClick={() => run(() => regenerateStory(storyId, { target }))}>
+          {made ? 'Make sheets again' : 'Make sheets'}
+        </button>
+        <EstimateChip estimate={estimate} />
+        <button type="button" className="btn btn-primary btn-sm"
+          disabled={disabled || working || !made || Boolean(variant.approved_at)}
+          onClick={() => run(() => approveStoryDoc(storyId, `variant:${character.char_id}:${variant.variant_id}`))}>
+          {variant.approved_at ? 'Approved' : 'Approve variant'}
+        </button>
+      </div>
+      <StepError message={error} className="story-step-error" />
+    </div>
+  )
+}
+
+function VariantsSection({ storyId, character, disabled, onChange }) {
+  const variants = character.variants || []
+  const [label, setLabel] = useState('')
+  const [delta, setDelta] = useState('')
+  const [error, setError] = useState('')
+  const [errors, setErrors] = useState(null)
+  const [adding, setAdding] = useState(false)
+
+  const add = async (event) => {
+    event.preventDefault()
+    setAdding(true)
+    setError('')
+    setErrors(null)
+    try {
+      await addCharacterVariant(storyId, character.char_id, { label, delta_text: delta })
+      setLabel('')
+      setDelta('')
+      onChange()
+    } catch (err) {
+      setError(err.message)
+      setErrors(err.errors || null)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  return (
+    <div className="story-variants">
+      {variants.length === 0 && (
+        <p className="form-hint">No variant yet: a variant is the same character in another look ("ghost version"),
+          each sheet an edit of the portrait.</p>
+      )}
+      {variants.map((variant) => (
+        <VariantRow key={variant.variant_id} storyId={storyId} character={character} variant={variant}
+          disabled={disabled} onChange={onChange} />
+      ))}
+      {variants.length < VARIANTS_MAX && (
+        <form className="story-variant-add" onSubmit={add}>
+          <label className="story-field-label" htmlFor={`variant-label-${character.char_id}`}>Label</label>
+          <input id={`variant-label-${character.char_id}`} className="input" value={label} maxLength={40}
+            placeholder="Ghost version" onChange={(event) => setLabel(event.target.value)} disabled={disabled} />
+          <label className="story-field-label" htmlFor={`variant-delta-${character.char_id}`}>
+            What changes in the look (at most 60 words, no name)
+          </label>
+          <textarea id={`variant-delta-${character.char_id}`} className="input" rows={2} value={delta}
+            placeholder="a translucent pale-blue glowing ghost, feet fading into mist"
+            onChange={(event) => setDelta(event.target.value)} disabled={disabled} />
+          <button type="submit" className="btn btn-secondary btn-sm"
+            disabled={disabled || adding || !label.trim() || !delta.trim()}>
+            {adding ? 'Adding…' : 'Add variant'}
+          </button>
+        </form>
+      )}
+      <StepError message={error} errors={errors} className="story-step-error" />
     </div>
   )
 }
@@ -539,7 +694,8 @@ function DossierSection({ storyId, character, castNames, disabled, onChange }) {
 
 // -------------------------------------------------------------- one character
 
-function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames }) {
+function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames,
+  withVariants }) {
   const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
@@ -702,6 +858,12 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
             <summary>Look — build, face, height, palette, wardrobe</summary>
             <LookSection storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
           </details>
+          {withVariants && (
+            <details className="story-profile" open={(character.variants || []).length > 0}>
+              <summary>Variants — the same character in another look ({(character.variants || []).length}/3)</summary>
+              <VariantsSection storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
+            </details>
+          )}
         </>
       )}
 
@@ -947,6 +1109,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
               consistencyMode={consistencyMode}
               isV2={isV2}
               castNames={castNames}
+              withVariants={variantsEnabled(story)}
             />
             </>
           )

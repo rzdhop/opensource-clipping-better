@@ -681,6 +681,8 @@ class GenerationProfileModel(BaseModel):
     image_preference: Optional[Literal["gemini_first"]] = None
     # Optional (plan 23 stage D6): left out, today's clip prompts (studio).
     prompt_style: Optional[Literal["studio","action"]] = None
+    # Optional (plan 23 stage D5): "on" lets the characters carry appearance variants without a sheet mode.
+    variants: Optional[Literal["on"]] = None
 
     @model_serializer(mode="wrap")
     def _without_unset_pipeline(self, handler):
@@ -692,7 +694,7 @@ class GenerationProfileModel(BaseModel):
             data.pop("speech_model", None)
         if isinstance(data, dict) and data.get("images") is None:
             data.pop("images", None)
-        for key in ("sheet_mode", "body_rule", "universe", "image_preference", "prompt_style"):
+        for key in ("sheet_mode", "body_rule", "universe", "image_preference", "prompt_style", "variants"):
             if isinstance(data, dict) and data.get(key) is None:
                 data.pop(key, None)
         return data
@@ -955,6 +957,9 @@ class StoryboardShotPatch(BaseModel):
     action: Optional[str] = None
     keep_still: Optional[bool] = None
     prompt_override: Optional[str] = None
+    # Plan 23 stage D5: the appearance variant each framed character wears in this shot
+    # ({char_id: variant_id}, null for the base look) -- the human's override of its scene's states.
+    variants: Optional[dict[str, Optional[str]]] = None
 
 
 class StoryboardTransitionPatch(BaseModel):
@@ -1083,6 +1088,16 @@ class StoryEpisodeFeedbackRequest(BaseModel):
     cap for a caller that skips this model (the CLI)."""
     text: str = Field(..., max_length=6000)
     stats: Optional[str] = Field(None, max_length=6000)
+
+
+class CharacterVariantRequest(BaseModel):
+    """POST /api/stories/{id}/characters/{char_id}/variants (plan 23 stage
+    D5): a new appearance variant of the character -- its ``label`` ("Ghost
+    version", at most 40 characters) and ``delta_text`` (what changes in its
+    look, at most 60 words, no name). Checked by ``workflow.add_variant``;
+    sent as they are (``Any``) so a wrong type answers its 400."""
+    label: Any = None
+    delta_text: Any = None
 
 
 class StoryProposalDecisionRequest(BaseModel):

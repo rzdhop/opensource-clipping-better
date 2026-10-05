@@ -145,6 +145,10 @@ EPISODE_APPROVALS = ("script", "storyboard", "assets")
 SERIES_APPROVALS = ("memory", "feedback", "proposals")
 # A v2 episode's keyframe approval (phase 7 stage 6b, DEC-230).
 KEYFRAMES_APPROVAL = judge_step.KEYFRAMES_APPROVAL
+# A character's appearance variant's own approval (plan 23 stage D5):
+# ``variant:<char_id>:<variant_id>`` (:func:`approve_variant`); the variant's
+# sheets job (``character:<id>:variant:<vid>``) awaits it.
+VARIANT_APPROVAL = "variant"
 # Who recorded an approval of the assets or the keyframes (stage C,
 # ``schemas.APPROVED_BY``): the human, or the fast track's one click.
 USER_APPROVED, FAST_TRACK_APPROVED = schemas.APPROVED_BY
@@ -1783,6 +1787,8 @@ def target_units(stories, story, parsed) -> dict:
         if not media_policy.is_v2(story):
             return _units(llm_calls=1)
         return _units(llm_calls=3 if ENTITY_KINDS_BY_WORD[parsed[0]] == CHARACTERS else 2)
+    if parsed[2] == regenerate_step.VARIANT_WORD:
+        return variant_units(story)
     kind = ENTITY_KINDS_BY_WORD[parsed[0]]
     doc = read_entity(stories, story["story_id"], kind, parsed[1])
     if parsed[2] == "voice":
@@ -1806,6 +1812,8 @@ def target_needs_editor(story, parsed) -> bool:
         return False
     if parsed[0] == regenerate_step.SHOT_IMAGE_KIND:
         return True
+    if parsed[0] == "character" and parsed[2] == regenerate_step.VARIANT_WORD:
+        return True  # plan 23 stage D5: every variant sheet is an edit of the base portrait
     if parsed[0] in regenerate_step.EPISODE_KINDS or parsed[0] == "season" or parsed[2] != "image":
         return False
     slot = parsed[3] if len(parsed) > 3 else "image"
@@ -1935,6 +1943,9 @@ def check_entity_target(stories, story, parsed, *, voice=None, env=None):
             raise WorkflowError(CONFLICT, (f"Write {name} first: the voice's sample line comes from the "
                                            f"character's text (regenerate 'character:{eid}:text')."))
         return None if voice is None else check_voice_choice(stories, story, eid, voice, env=env)
+    if parsed[2] == regenerate_step.VARIANT_WORD:
+        _check_variant_target(stories, story, doc, parsed[3])
+        return None
     if parsed[2] != "image":
         return None
     written = character_written(doc) if kind == CHARACTERS else bool(doc["descriptor"])
@@ -1951,6 +1962,191 @@ def check_entity_target(stories, story, parsed, *, voice=None, env=None):
             stories, story_id, kind, eid, doc["time_variants"].get(MASTER_PLATE)):
         raise WorkflowError(CONFLICT, f"Make {name}'s day plate first: every other variant is made from it.")
     return None
+
+
+# ------------------------------------------------------- appearance variants (plan 23 stage D5)
+
+def require_variants_enabled(story) -> None:
+    """``conflict`` unless *story*'s characters may carry appearance variants
+    (``media_policy.variants_enabled``)."""
+    if not media_policy.variants_enabled(story):
+        raise WorkflowError(CONFLICT, ("This story's characters carry no appearance variants: they come with a v2 "
+                                       "story's character sheets mode (or generation_profile.variants \"on\")."))
+
+
+def variant_units(story) -> dict:
+    """What one appearance variant's sheets job makes: every sheet the
+    story's sheet mode draws (``refimages.character_images``: one in
+    ``two_view``), each an edit of the base portrait in ``references`` mode
+    -- priced like the sheets -- or an image from text in ``prompt_only``."""
+    count = len(refimages.character_images(story))
+    if story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY:
+        return _units(images=count)
+    return _units(edit_images=count)
+
+
+def variant_sheets_phrase(story) -> str:
+    """"N variant sheet(s)": what the estimate calls a variant's job."""
+    count = len(refimages.character_images(story))
+    return f"{count} variant sheet{'' if count == 1 else 's'}"
+
+
+def _check_variant_target(stories, story, doc, variant_id) -> None:
+    """``character:<id>:variant:<vid>`` checked before its job exists:
+    variants enabled (``conflict``), the variant (``not_found``), the
+    character written with a look and its base portrait on disk
+    (``conflict``)."""
+    require_variants_enabled(story)
+    name = doc["name"]
+    if shots.variant_record(doc, variant_id) is None:
+        raise WorkflowError(NOT_FOUND, f"{name} has no appearance variant {variant_id!r}.")
+    if not character_written(doc) or not doc.get("look"):
+        raise WorkflowError(CONFLICT, f"Write {name} first: a variant's sheets are drawn from its look.")
+    if not _has(stories, story["story_id"], CHARACTERS, doc["char_id"], doc["refs"]["portrait"]):
+        raise WorkflowError(CONFLICT, f"Make {name}'s portrait first: every variant sheet is an edit of it.")
+
+
+def variant_target(char_id, variant_id) -> str:
+    """The regenerate target of a variant's sheets job."""
+    return f"character:{char_id}:{regenerate_step.VARIANT_WORD}:{variant_id}"
+
+
+def _variant_id(label, taken) -> str:
+    """A new variant id from *label*: its slug (``schemas.slugify``) cut to
+    the pattern, ``v_`` first when it would start with a digit, then ``_2``,
+    ``_3``... until it is not in *taken*."""
+    slug = schemas.slugify(label)
+    if not slug[0].isalpha():
+        slug = f"v_{slug}"
+    slug = slug[:24].rstrip("_")
+    candidate, n = slug, 1
+    while candidate in taken:
+        n += 1
+        suffix = f"_{n}"
+        candidate = slug[:24 - len(suffix)].rstrip("_") + suffix
+    return candidate
+
+
+def check_variant_fields(stories, story, char_id, fields, *, doc=None) -> dict:
+    """*fields* (``{label, delta_text}``) checked for a new variant of
+    *char_id*; returns them cleaned. ``invalid`` for anything else sent, a
+    label that is empty or over :data:`schemas.VARIANT_LABEL_MAX_CHARS`
+    characters, a delta that is empty, over
+    :data:`schemas.VARIANT_DELTA_MAX_WORDS` words or naming a character, a
+    place or a prop of the story (it describes the look only: no name enters
+    an image prompt, spec 2.3); ``conflict`` without variants on the story,
+    for a character not written yet, or one with
+    :data:`schemas.VARIANTS_MAX` variants already; ``not_found`` for an
+    unknown character."""
+    require_variants_enabled(story)
+    if not isinstance(fields, dict):
+        raise WorkflowError(INVALID, "A variant is {label, delta_text}.")
+    _unknown_keys(fields, ("label", "delta_text"), "a variant")
+    errors = []
+    label, delta = fields.get("label"), fields.get("delta_text")
+    _text_error(errors, "label", label, limit=schemas.VARIANT_LABEL_MAX_CHARS)
+    if not isinstance(delta, str) or not delta.strip():
+        errors.append("delta_text: required -- what changes in the character's appearance")
+    elif len(delta.split()) > schemas.VARIANT_DELTA_MAX_WORDS:
+        errors.append(f"delta_text: {len(delta.split())} words, at most {schemas.VARIANT_DELTA_MAX_WORDS}")
+    else:
+        lowered = delta.lower()
+        for kind in (CHARACTERS, PLACES, PROPS):
+            for entity in list_entities(stories, story["story_id"], kind):
+                if re.search(rf"\b{re.escape(entity['name'].lower())}\b", lowered):
+                    errors.append(f"delta_text: names {entity['name']!r} -- describe the look only, never a name")
+    if errors:
+        raise _invalid_values("The variant would not be valid with these values.", errors)
+    doc = doc if doc is not None else read_entity(stories, story["story_id"], CHARACTERS, char_id)
+    if not character_written(doc):
+        raise WorkflowError(CONFLICT, f"Write {doc['name']} first: a variant is an edit of its sheets.")
+    if len(doc.get("variants") or ()) >= schemas.VARIANTS_MAX:
+        raise WorkflowError(CONFLICT, (f"{doc['name']} has {schemas.VARIANTS_MAX} appearance variants already, the "
+                                       "most a character carries."))
+    return {"label": " ".join(label.split()), "delta_text": " ".join(delta.split())}
+
+
+def add_variant(stories, story_id, char_id, fields, *, now, source="human") -> dict:
+    """Create an appearance variant of character *char_id* (*fields*:
+    ``{label, delta_text}``, :func:`check_variant_fields`) with no image
+    yet; returns ``{"character", "variant", "target"}`` -- *target* the
+    regenerate target that makes its sheets (``character:<id>:variant:<vid>``,
+    queued behind the estimate gate like any regenerate). Its
+    ``variant_id`` is a slug of the label, fixed now and never renamed
+    (:func:`_variant_id`); *source* ``human`` or ``twist`` (an accepted N1v2
+    proposal). The character's approval is never touched; the variant
+    waits for its own (:func:`approve_variant`)."""
+    story = load(stories, story_id)
+    clean = check_variant_fields(stories, story, char_id, fields)
+    created = {}
+
+    def write(current):
+        if len(current.get("variants") or ()) >= schemas.VARIANTS_MAX:
+            raise WorkflowError(CONFLICT, (f"{current['name']} has {schemas.VARIANTS_MAX} appearance variants "
+                                           "already, the most a character carries."))
+        taken = {variant["variant_id"] for variant in current.get("variants") or ()}
+        variant = {"variant_id": _variant_id(clean["label"], taken), "label": clean["label"],
+                   "delta_text": clean["delta_text"],
+                   "refs": {slot: None for slot in refimages.character_images(story)},
+                   "source": source, "created_at": now, "approved_at": None}
+        current.setdefault("variants", []).append(variant)
+        created.update(variant)
+
+    try:
+        doc = entities_step.write_character(stories, story_id, char_id, write, now=now)
+    except KeyError:
+        raise WorkflowError(NOT_FOUND, f"This story has no character {char_id!r}.") from None
+    except schemas.SchemaError as exc:
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+    return {"character": doc, "variant": copy.deepcopy(created),
+            "target": variant_target(char_id, created["variant_id"])}
+
+
+def variant_missing(stories, story, doc, variant) -> list:
+    """The sheets of *variant* the story's sheet mode draws that are not
+    made (or not on disk), in order."""
+    return [which for which in refimages.character_images(story)
+            if not _has(stories, story["story_id"], CHARACTERS, doc["char_id"], (variant["refs"] or {}).get(which))]
+
+
+def approve_variant(stories, story_id, char_id, variant_id, *, now) -> dict:
+    """Approve one appearance variant (``variant:<char_id>:<variant_id>``);
+    returns the character. ``not_found`` for an unknown character or
+    variant; ``conflict`` naming the sheets it still lacks. Its
+    ``approved_at`` becomes *now*; the character's own approval and the
+    story's approvals never move."""
+    story = load(stories, story_id)
+    doc = read_entity(stories, story_id, CHARACTERS, char_id)
+    variant = shots.variant_record(doc, variant_id)
+    if variant is None:
+        raise WorkflowError(NOT_FOUND, f"{doc['name']} has no appearance variant {variant_id!r}.")
+    missing = variant_missing(stories, story, doc, variant)
+    if missing:
+        raise WorkflowError(CONFLICT, (f"{doc['name']} ({variant['label']}) cannot be approved yet; missing: "
+                                       f"{', '.join(missing)} (regenerate '{variant_target(char_id, variant_id)}')."))
+
+    def approve(current):
+        record = shots.variant_record(current, variant_id)
+        if record is None:
+            raise WorkflowError(NOT_FOUND, f"{current['name']} has no appearance variant {variant_id!r}.")
+        record["approved_at"] = now
+
+    try:
+        return entities_step.write_character(stories, story_id, char_id, approve, now=now)
+    except schemas.SchemaError as exc:
+        raise StoryUnreadable(story_id, exc.name, exc.errors) from None
+
+
+def parse_variant_approval(doc):
+    """``(char_id, variant_id)`` of an approval ``variant:<cid>:<vid>``, or None."""
+    if not isinstance(doc, str):
+        return None
+    parts = doc.split(":")
+    if (len(parts) != 3 or parts[0] != VARIANT_APPROVAL
+            or story_store.ENTITY_KINDS[CHARACTERS].pattern.fullmatch(parts[1]) is None
+            or re.fullmatch(schemas.VARIANT_ID_PATTERN, parts[2]) is None):
+        return None
+    return parts[1], parts[2]
 
 
 # ---------------------------------------------------------------- approvals
@@ -2475,7 +2671,8 @@ SCRIPT_LINE_PATCH_FIELDS = ("text", "speaker", "emotion", "delivery")
 # against the hooks open before the episode (``_edit_pays_off``).
 SCRIPT_SCENE_PATCH_FIELDS = ("summary", "on_screen_text", "pays_off")
 STORYBOARD_PATCH_FIELDS = ("shots", "transitions", "refresh_prompts")
-STORYBOARD_SHOT_PATCH_FIELDS = ("framing", "camera_motion", "modifiers", "action", "keep_still", "prompt_override")
+STORYBOARD_SHOT_PATCH_FIELDS = ("framing", "camera_motion", "modifiers", "action", "keep_still", "prompt_override",
+                               "variants")
 STORYBOARD_TRANSITION_PATCH_FIELDS = ("type",)
 
 # An episode number in a URL: 1..99, written as the store writes its folders
@@ -4700,6 +4897,43 @@ def _edit_action(ec, path, shot, scene, value, errors) -> None:
         shot["subject_tags"] = subjects
 
 
+def _edit_shot_variants(ec, path, shot, value, errors) -> None:
+    """A shot's appearance variants, the human's override of its scene's
+    states (plan 23 stage D5): ``{char_id: variant_id | null}`` -- each a
+    character the shot frames, each variant one that character has (null:
+    its base look). Merged over what the shot wears, and kept as the shot's
+    own (a re-plan keeps it, like its assets); its keyframe goes stale on
+    purpose (the prompt and the identity image change). A variant not
+    approved yet is accepted here and refused at the keyframe, with the
+    sentence that says so (``shots.variant_refusal``)."""
+    if not media_policy.variants_enabled(ec.story):
+        errors.append(f"{path}.variants: this story's characters carry no appearance variants (set its character "
+                      "sheets mode first)")
+        return
+    if not isinstance(value, dict):
+        errors.append(f"{path}.variants: expected {{char_id: variant_id or null}}")
+        return
+    framed = {tag[1:] for tag in shot["subject_tags"] if tag.startswith("@")}
+    wanted = dict(shot.get("variants") or {})
+    before = len(errors)
+    for cid, variant_id in value.items():
+        if cid not in framed:
+            errors.append(f"{path}.variants: {cid!r} is not a character shot {shot['shot_id']} frames")
+            continue
+        if variant_id is None:
+            wanted.pop(cid, None)
+            continue
+        doc = ec.entities[CHARACTERS].get(cid) or {}
+        if not isinstance(variant_id, str) or shots.variant_record(doc, variant_id) is None:
+            have = ", ".join(variant["variant_id"] for variant in doc.get("variants") or ()) or "none"
+            errors.append(f"{path}.variants.{cid}: {variant_id!r} is not one of {doc.get('name', cid)}'s variants "
+                          f"({have})")
+            continue
+        wanted[cid] = variant_id
+    if len(errors) == before:
+        shot["variants"] = wanted
+
+
 def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
     """*fields* into *board* (in place): the shots and transitions edited.
     Returns ``(to_resolve, retime)``: ``{shot_id: (path, camera motion sent
@@ -4762,7 +4996,14 @@ def _edit_storyboard(ec, script, board, fields, errors) -> tuple:
                 errors.append(f"{path}.prompt_override: expected a text or null")
             else:
                 shot["prompt_override"] = _optional_text(value)
-        if (shot["framing"], shot["action"], shot["subject_tags"]) != before:
+        variants_before = copy.deepcopy(shot.get("variants"))
+        if "variants" in item:
+            _edit_shot_variants(ec, path, shot, item["variants"], errors)
+        if "variants" in shot:
+            # A character the shot no longer frames wears nothing in it.
+            framed = {tag[1:] for tag in shot["subject_tags"] if tag.startswith("@")}
+            shot["variants"] = {cid: vid for cid, vid in shot["variants"].items() if cid in framed}
+        if (shot["framing"], shot["action"], shot["subject_tags"]) != before or shot.get("variants") != variants_before:
             _path, wanted, _prompt = to_resolve.get(shot["shot_id"], (path, None, True))
             to_resolve[shot["shot_id"]] = (path, wanted, True)
 
@@ -4842,6 +5083,9 @@ def _resolve_again(ec, script, board, to_resolve, errors) -> None:
         plan = {"framing": shot["framing"], "action": shot["action"], "subjects": shot["subject_tags"]}
         if v2:
             plan.update(lines=list(shot["lines"]), camera_motion=motion["type"], modifiers=list(shot["modifiers"]))
+            if shot.get("variants"):
+                # Plan 23 stage D5: the appearance variants the shot's characters wear.
+                plan["variants"] = dict(shot["variants"])
         try:
             # Phase 8 stage B: a v2 shot after another of its scene keeps its continuity reference.
             index = board["shots"].index(shot)
@@ -5636,6 +5880,8 @@ def proposal_request(stories, story, ep, item_id, *, accept, role=None) -> dict:
                                            "twist, or run propose-next again."))
         request["message"] = (f"Episode {item['target_ep']}'s arc entry now tells this twist; what it said before is "
                               "kept in its history. Accepting the twist is its approval: the season stays approved.")
+        if item.get("variant"):
+            _twist_variant_request(stories, story, item["variant"], request)
         return request
 
     role = role or item["role"]
@@ -5660,6 +5906,31 @@ def proposal_request(stories, story, ep, item_id, *, accept, role=None) -> dict:
     return request
 
 
+def _twist_variant_request(stories, story, proposed, request) -> None:
+    """An N1v2 twist's appearance variant (plan 23 stage D5) checked as
+    :func:`add_variant` will create it (:func:`check_variant_fields`; the
+    character gone is a ``conflict``: reject the twist), and the payload's
+    ``variant`` (``{char_id, variant_id, label}``) and ``variant_job`` (the
+    regenerate job of its sheets, which the caller queues behind the
+    estimate gate) added."""
+    char_id = proposed["char_id"]
+    try:
+        doc = read_entity(stories, story["story_id"], CHARACTERS, char_id)
+    except WorkflowError:
+        raise WorkflowError(CONFLICT, (f"This twist gives {char_id!r} an appearance variant, and the story has no "
+                                       "such character any more: reject it, or run propose-next again.")) from None
+    clean = check_variant_fields(stories, story, char_id, {"label": proposed["label"],
+                                                           "delta_text": proposed["delta_text"]}, doc=doc)
+    variant_id = _variant_id(clean["label"], {variant["variant_id"] for variant in doc.get("variants") or ()})
+    request["variant"] = {"char_id": char_id, "variant_id": variant_id, "label": clean["label"]}
+    request["variant_job"] = {"step": "regenerate",
+                              "params": {"target": variant_target(char_id, variant_id), "note": None}}
+    many = len(refimages.character_images(story)) > 1
+    request["message"] += (f" {doc['name']} gains the appearance variant '{clean['label']}': its "
+                           f"{variant_sheets_phrase(story)} {'are' if many else 'is'} made next, then approve it "
+                           f"({VARIANT_APPROVAL}:{char_id}:{variant_id}).")
+
+
 def decide_proposal(stories, story_id, ep, item_id, *, accept, role=None, now) -> dict:
     """Accept or reject item *item_id* of episode *ep*'s proposals (*ep* is
     the proposals' ``for_ep``: the folder they sit in); returns
@@ -5675,7 +5946,11 @@ def decide_proposal(stories, story_id, ep, item_id, *, accept, role=None, now) -
       ``open_hooks_out`` become the twist's, the old ones pushed onto its
       ``history`` (``{summary, open_hooks_out, replaced_at: now, source:
       "proposal"}``); the acceptance *is* the approval: ``season.json``'s
-      ``approved_at`` and ``approvals.season`` never move;
+      ``approved_at`` and ``approvals.season`` never move; a twist with an
+      appearance variant (N1v2, plan 23 stage D5) first creates it
+      (:func:`add_variant`, ``source: "twist"``) and the payload's
+      ``variant_job`` names the job of its sheets, which the caller queues
+      behind the estimate gate;
     - **accept a character**: the decision is recorded and the payload's
       ``cast`` names the job to queue -- the existing cast path, ``params =
       {"custom": [{name, role, one_line, archetype?}], "introduced_in": ep}``
@@ -5727,6 +6002,19 @@ def decide_proposal(stories, story_id, ep, item_id, *, accept, role=None, now) -
         raise StoryUnreadable(story_id, exc.name, exc.errors) from None
     except ValueError as exc:
         raise WorkflowError(CONFLICT, f"The proposals cannot be written: {exc}.") from None
+    if request.get("variant"):
+        # Plan 23 stage D5: the twist's appearance variant, once the decision is recorded (outside the
+        # store lock: a character is written under the uploads' lock first, never the other way round).
+        proposed = checked["variant"]
+        try:
+            made = add_variant(stories, story_id, proposed["char_id"],
+                               {"label": proposed["label"], "delta_text": proposed["delta_text"]}, now=now,
+                               source="twist")
+        except WorkflowError as exc:
+            raise WorkflowError(CONFLICT, (f"The twist is accepted, but its appearance variant could not be "
+                                           f"created: {exc} Add it by hand on the cast page.")) from None
+        request["variant"]["variant_id"] = made["variant"]["variant_id"]
+        request["variant_job"]["params"]["target"] = made["target"]
     return request
 
 

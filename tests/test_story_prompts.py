@@ -307,6 +307,10 @@ def test_max_tokens():
         # Plan 22 stage 3: re-pinned on purpose -- writing v3, new ids (the v1/v2 rows unchanged): E1v3 and
         # J1v3 measured on their French worst cases, E2v3/E3v3 reply as E2/E3 (tests/test_story_prompts_v3.py).
         "E1v3": 2570, "E2v3": 700, "E3v3": 720, "J1v3": 990,
+        # Plan 23 stage D5: re-pinned on purpose -- N1v2 (a twist may bring an appearance variant), a new id
+        # (N1's row unchanged), measured on N1's French worst case plus two variants
+        # (tests/test_story_variant_twist.py).
+        "N1v2": 1850,
     }
 
 
@@ -358,6 +362,8 @@ def test_schema_names():
         # Plan 22 stage 3: re-pinned on purpose -- writing v3's prompts, each its own schema name.
         "E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dialogue_v3", "E3v3": "episode_framing_scenes_v3",
         "J1v3": "first_watch_check_v3",
+        # Plan 23 stage D5: re-pinned on purpose -- N1v2, a new id (N1's row unchanged).
+        "N1v2": "next_episode_proposals_v2",
     }
 
 

@@ -728,6 +728,121 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     return _done(on_log, plan, ref, label, est, paid)
 
 
+# ------------------------------------------------------------- appearance variants
+
+def variant_record(character, variant_id):
+    """The appearance variant *variant_id* of *character* (plan 23 stage D5,
+    ``schemas._VARIANT_SCHEMA``), or None."""
+    return next((variant for variant in character.get("variants") or () if variant["variant_id"] == variant_id),
+                None)
+
+
+def variant_seed(story_id, char_id, variant_id) -> int:
+    """The first seed of a variant's sheets: :func:`image_seed` of
+    ``<char_id>:<variant_id>``, the same on every run."""
+    return image_seed(story_id, CHARACTERS, f"{char_id}:{variant_id}")
+
+
+def variant_step(char_id, variant_id, which) -> str:
+    """The ledger's step of a variant's sheet: ``character_image:<cid>:variant:<vid>:<which>``."""
+    return f"character_image:{char_id}:variant:{variant_id}:{which}"
+
+
+def variant_prompt(story, character, variant, which, *, env, lock, names=None) -> str:
+    """The prompt of *variant*'s sheet *which*, as :func:`variant_image` asks
+    it (``prompting.variant_prompt_v2``): an edit of the base portrait, the
+    slot's skeleton over the character's rendered look, to the budget of the
+    link it goes to (the two-view sheet's in the portrait slot of a two-view
+    story). The name of any entity of the story in the delta becomes a
+    neutral word (*names*, :func:`_entity_names`; no name enters an image
+    prompt, spec 2.3)."""
+    if not character.get("look"):
+        raise RefImageError(f"{character['name']}: write the character's look first -- a variant is drawn from it.")
+    edit = story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
+    link = _first_link(story, "sheet", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
+    two_view = which == "portrait" and media_policy.two_view(story)
+    budget = prompt_budgets.two_view_words(link) if two_view else prompt_budgets.sheet_words(link)
+    delta = _without_names(variant["delta_text"], names or {})
+    return prompting.variant_prompt_v2(lock, which=which, delta_text=delta, look_text=shots.render_look(character),
+                                       signature_items=character["signature_items"], budget=budget,
+                                       cues=shots.visual_cues(character), two_view=two_view)
+
+
+def variant_image(stories, story_id, char_id, variant_id, which, *, env, on_log, cancel, note=None, seed=None,
+                  adapters=None, transport=None, sleep_fn=time.sleep, time_fn=time.monotonic, sticky=None) -> dict:
+    """Make one sheet of a character's appearance variant (plan 23 stage
+    D5); returns its image ref, now ``variants[i].refs[which]``.
+
+    Every variant sheet is an edit of the character's BASE portrait (image 1,
+    alone), whatever slot it fills -- :func:`_derived` on the edit chain of
+    the ``sheet`` role (the DEC-219 quality links), ``prompt_only`` the
+    user's choice as for any sheet -- asked :func:`variant_prompt`, sized as
+    the slot is in the story's sheet mode (:func:`character_size`), booked
+    as ``character_image:<cid>:variant:<vid>:<which>`` and stored as
+    ``refs/<which>_<vid>.<ext>``. Its seed is the slot's recorded one, else
+    :func:`variant_seed` (*seed* overrides, as in :func:`character_image`).
+    The variant's ``approved_at`` is cleared (what it approved changed); the
+    character's own approval is never touched.
+
+    ``RefImageError`` before anything is spent: variants not enabled for the
+    story (``media_policy.variants_enabled``), a slot the sheet mode does not
+    draw, an unknown variant, the character not written or with no look, no
+    base portrait on disk; then the rules and errors of
+    :func:`character_image`; *sticky* as :func:`character_image`'s (a job's
+    shared provider, DEC-280)."""
+    if which not in CHARACTER_IMAGES:
+        raise RefImageError(f"{which!r} is not a character image ({', '.join(CHARACTER_IMAGES)}).")
+    _check_seed(seed)
+    _check(cancel)
+    story = stories.get(story_id)
+    if not media_policy.variants_enabled(story):
+        raise RefImageError("This story's characters carry no appearance variants: set its character sheets mode "
+                            "(or generation_profile.variants \"on\") first.")
+    if which not in character_images(story):
+        raise RefImageError(f"{which!r} is not drawn in this story's sheet mode "
+                            f"({media_policy.sheet_mode(story)}: {', '.join(character_images(story))}).")
+    character = stories.read_entity(story_id, CHARACTERS, char_id)
+    name = character["name"]
+    variant = variant_record(character, variant_id)
+    if variant is None:
+        raise RefImageError(f"{name} has no appearance variant {variant_id!r}.")
+    subject = f"{name} ({variant['label']}) {which}"
+    if not character["descriptor"] or not character["signature_items"]:
+        raise RefImageError(f"{name}: write the character first -- its descriptor and signature items "
+                            "make every image.")
+    portrait_path = _existing(stories, story_id, CHARACTERS, char_id, character["refs"]["portrait"])
+    if portrait_path is None:
+        raise RefImageError(f"{name}: make the portrait first -- every variant sheet is made from it.")
+    lock = imaging.read_lock(stories, story_id, error=RefImageError)
+    prompt = variant_prompt(story, character, variant, which, env=env, lock=lock,
+                            names=_entity_names(stories, story_id))
+    prompt = _with_note(prompt, note, stories=stories, story_id=story_id)
+    if seed is None:
+        seed = _seed_of(variant["refs"].get(which))
+    if seed is None:
+        seed = variant_seed(story_id, char_id, variant_id)
+    stem = f"{which}_{variant_id}"
+    plan = _derived(story, subject=subject, prompt=prompt, size=character_size(story, which), seed=seed,
+                    references=[portrait_path], stem=stem, step=variant_step(char_id, variant_id, which),
+                    source="the portrait", role="sheet")
+
+    ref, label, est, paid = _make(stories, story, plan, entity=CHARACTERS, eid=char_id, lock=lock, env=env,
+                                  on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,
+                                  sleep_fn=sleep_fn, time_fn=time_fn, sticky=sticky)
+
+    with uploads_mod._ENTRIES_LOCK:
+        current = stories.read_entity(story_id, CHARACTERS, char_id)
+        record = variant_record(current, variant_id)
+        if record is None:
+            raise RefImageError(f"{name}'s variant {variant_id!r} was removed while its {which} was being made; "
+                                "the image is booked but not kept.")
+        record["refs"][which] = ref
+        record["approved_at"] = None
+        stories.write_entity(story_id, CHARACTERS, current, now=ref["created_at"])
+    _remove_other_extensions(stories, story_id, CHARACTERS, char_id, stem, ref["name"])
+    return _done(on_log, plan, ref, label, est, paid)
+
+
 # --------------------------------------------------------------------- places
 
 def place_prompt(stories, story, place, variant, *, env, lock) -> str:

@@ -358,7 +358,9 @@ def speech_prompt_inputs(ec, shot, script) -> dict:
     entities = getattr(ec, "entities", None) or {}
     characters = entities.get("characters") or {}
     handles = shots_mod.character_handles(characters) if characters else {}
-    speaker = characters.get(line["speaker"]) or {}
+    # Plan 23 stage D5: the speaker in the appearance variant the shot names, if any.
+    speaker = shots_mod.variant_view(characters.get(line["speaker"]) or {},
+                                     (shot.get("variants") or {}).get(line["speaker"]))
     in_frame = []
     for tag in shot.get("subject_tags") or ():
         try:
@@ -368,7 +370,7 @@ def speech_prompt_inputs(ec, shot, script) -> dict:
         if kind == "char" and entity_id != line["speaker"]:
             in_frame.append(entity_id)
     listener = handles.get(in_frame[0], "") if in_frame else ""
-    look = shots_mod.render_look(speaker, max_words=prompting.SPEECH_LOOK_MAX_WORDS) if speaker.get("look") else ""
+    look = shots_mod.speech_look(speaker, max_words=prompting.SPEECH_LOOK_MAX_WORDS) if speaker.get("look") else ""
     brief = audio_brief(ec, shot, script)
     place = (entities.get("places") or {}).get(scene.get("place_id")) or {}
     return {"speaker": handles.get(line["speaker"], "the character"), "look": look,
@@ -412,7 +414,8 @@ def action_inputs(ec, shot, script) -> dict:
     scene, line = speech_line(script, shot)
     entities = getattr(ec, "entities", None) or {}
     characters = entities.get("characters") or {}
-    anchors = shots_mod.character_anchors(characters) if characters else {}
+    # Plan 23 stage D5: a character wearing an appearance variant in this shot says its delta with its anchor.
+    anchors = shots_mod.worn_anchors(characters, shot.get("variants")) if characters else {}
     handles = shots_mod.character_handles(characters) if characters else {}
     swap = {handles[cid]: anchors[cid] for cid in handles}
     parts = _audio_parts(ec, shot, script)
@@ -434,7 +437,7 @@ def _action_clip_parts(ec, shot, script, *, tier, note, link, ambient) -> dict:
     sound, the speakers silent) or a clip whose sound is discarded."""
     entities = getattr(ec, "entities", None) or {}
     characters = entities.get("characters") or {}
-    anchors = shots_mod.character_anchors(characters) if characters else {}
+    anchors = shots_mod.worn_anchors(characters, shot.get("variants")) if characters else {}
     camera = shot["camera_motion"]
     if camera not in prompting.CAMERA_PHRASES:
         raise ValueError(f"not a Tier-1 camera_motion: {camera!r}")
