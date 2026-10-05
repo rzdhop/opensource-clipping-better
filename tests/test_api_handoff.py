@@ -134,6 +134,14 @@ def test_the_handoff_composes_each_shot_from_the_two_briefs(api):
     assert body["export"]["brief_zip"] == f"/api/stories/{story_id}/episodes/1/brief.zip?platform=flow"
     assert body["export"]["image_brief_zip"] == f"/api/stories/{story_id}/image-brief.zip?ep=1"
     assert body["export"]["brief_md"].startswith("# ")
+    # Plan 26 stage 3: the master prompt every shot prompt carries; each clip row its fit.
+    master = body["master_prompt"]
+    assert master["text"].startswith("SERIES:") and master["words"] > 0
+    assert master == clip_brief["master_prompt"] and "## Master prompt" in body["export"]["brief_md"]
+    for shot in shots:
+        brief_entry = next(item for item in clip_brief["shots"] if item["shot_id"] == shot["shot_id"])
+        assert shot["clip"]["prompt"].startswith("SERIES:") and shot["clip"]["fit"] == brief_entry["fit"]
+        assert shot["clip"].get("prompt_warning") == brief_entry.get("prompt_warning")
 
 
 def test_the_handoff_leaves_the_briefs_as_they_were(api):

@@ -123,13 +123,19 @@ def prop_words(link, *, live=None) -> int:
 UNBOUNDED_PREFIXES = ("manual/", "local/")
 
 
-def link_words(link, *, live=None):
+def link_words(link, *, live=None, template=None):
     """The words a whole prompt (the template of ``prompt_templates``, the
     core inside it) may take on *link*: ``prompt_limits.budget_words`` with
     no quality ceiling (plan 26: the ceilings above bound the hashed core,
     the link bounds the prompt). None -- no bound -- with no link, on a
-    ``manual/*`` or ``local/*`` link, or a link with no known limit."""
+    ``manual/*`` or ``local/*`` link, or a link with no known limit; but a
+    local workflow *template* whose text encoder has a window (the Wan
+    templates' umT5, ``prompt_limits.template_label``) is bounded by it."""
     label = _label(link)
+    if label and template:
+        qualified = prompt_limits.template_label(label, template)
+        if qualified != label:
+            return prompt_limits.budget_words(qualified, default=None, live=live)
     if not label or label.startswith(UNBOUNDED_PREFIXES):
         return None
     return prompt_limits.budget_words(label, default=None, live=live)

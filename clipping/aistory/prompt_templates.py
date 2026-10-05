@@ -694,7 +694,7 @@ def _scene_sections(ec, shot, script, *, image) -> tuple:
     return _finish(sections, who), speaker
 
 
-def _shot_template(ec, shot, script, core, *, limit_words, fits, image) -> dict:
+def _shot_template(ec, shot, script, core, *, limit_words, fits, image, wardrobe=None) -> dict:
     chars, places, props, variant = _shot_subjects(shot)
     scene, _number, _total = _scene_of(script, shot)
     if not places and scene.get("place_id"):
@@ -705,23 +705,27 @@ def _shot_template(ec, shot, script, core, *, limit_words, fits, image) -> dict:
                              present=chars, place_ids=places, prop_ids=props, speaker=speaker, image=image,
                              negative=shot.get("negative_prompt") or "",
                              episode=_episode(script, chars, places, props), variants=shot.get("variants"),
-                             time_variant=variant or scene.get("time_variant"))
+                             wardrobe=wardrobe, time_variant=variant or scene.get("time_variant"))
     return fit(master + scene_sections, core, limit_words=limit_words, fits=fits)
 
 
-def shot_clip_prompt(ec, shot, script, core, *, limit_words, fits=None) -> dict:
+def shot_clip_prompt(ec, shot, script, core, *, limit_words, fits=None, wardrobe=None) -> dict:
     """A shot's clip prompt: the master (the shot's characters, place and
     props present; its speaker's voice) + SCENE SUMMARY + SCENE (with the
     line's delivery and emotion) + *core* unchanged and last, fitted
     (:func:`fit`). *ec* is the ``EpisodeContext`` (``story``, ``style_lock``,
-    ``entities``, ``language``, ``ep``)."""
-    return _shot_template(ec, shot, script, core, limit_words=limit_words, fits=fits, image=False)
+    ``entities``, ``language``, ``ep``); *wardrobe* ``{char_id: wardrobe set
+    id}`` (the episode's ledger, as the core's look reads it)."""
+    return _shot_template(ec, shot, script, core, limit_words=limit_words, fits=fits, image=False,
+                          wardrobe=wardrobe)
 
 
-def shot_keyframe_prompt(ec, shot, script, core, *, limit_words, fits=None) -> dict:
+def shot_keyframe_prompt(ec, shot, script, core, *, limit_words, fits=None, wardrobe=None) -> dict:
     """A shot's keyframe prompt: the image master (no title, no voice) +
-    SCENE SUMMARY + SCENE (no line delivery) + *core*, fitted."""
-    return _shot_template(ec, shot, script, core, limit_words=limit_words, fits=fits, image=True)
+    SCENE SUMMARY + SCENE (no line delivery) + *core*, fitted; *wardrobe*
+    as :func:`shot_clip_prompt`'s."""
+    return _shot_template(ec, shot, script, core, limit_words=limit_words, fits=fits, image=True,
+                          wardrobe=wardrobe)
 
 
 # ------------------------------------------------------------------ the entity templates

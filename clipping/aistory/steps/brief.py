@@ -45,7 +45,7 @@ import zipfile
 
 from clipping.providers import generation as gen
 
-from .. import media_policy, platforms, prompting, schemas, video_plan
+from .. import media_policy, platforms, prompt_templates, prompting, schemas, video_plan
 from .. import shots as shots_mod
 from . import clips, episode_common
 
@@ -376,8 +376,14 @@ def _language(ec) -> str:
     return {"fr": "French", "en": "English"}.get(getattr(ec, "language", ""), getattr(ec, "language", ""))
 
 
-def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
-    """One shot of the brief (module docstring)."""
+def shot_entry(ec, script, shot, *, preset, assets_doc=None, wardrobe=None) -> dict:
+    """One shot of the brief (module docstring). On a v2 story (plan 26 H1)
+    the prompt is the master and the scene template before stage 4's core
+    (``clips.sent_clip_prompt`` on the manual link: nothing dropped), then
+    the platform's formatting (DEC-292); ``fit`` says its size
+    (``{limit, words, full_words, dropped}``) and ``prompt_warning`` a
+    template under ``prompt_templates.MIN_PROMPT_WORDS`` (never on a stock
+    shot). *wardrobe* as ``clips.sent_clip_prompt``'s."""
     speaks = bool(shot.get("speaks"))
     _scene_doc, line = clips.speech_line(script, shot)
     model_name, model = platforms.model_of(preset, speaks=speaks, language=ec.language)
@@ -386,6 +392,7 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
     else:
         parts = clips.clip_request_parts(ec, shot, script, tier=3, flags=clips.shot_flags(shot, assets_doc),
                                          link=gen.MANUAL_LINK)
+    sent = clips.sent_clip_prompt(ec, shot, script, parts, link=gen.MANUAL_LINK, wardrobe=wardrobe)
     refs = references(ec, script, shot)[:model["max_references"]]
     for number, ref in enumerate(refs, start=1):
         ref["number"] = number
@@ -397,7 +404,7 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
         "shot_id": shot["shot_id"], "order": shot["order"], "scene_id": shot["scene_id"], "speaks": speaks,
         "purpose": purpose(ec, script, shot),
         "platform": preset["platform"], "model": model_name, "model_label": model["label"], "mode": mode,
-        "prompt": platform_prompt(preset, model, parts["prompt"], refs),
+        "prompt": platform_prompt(preset, model, sent["text"], refs),
         "negative_prompt": parts.get("negative") or "",
         "length_s": length, "clip_s": clip_s,
         "length_note": preset["length_note"], "aspect": aspect_of(ec),
@@ -411,6 +418,11 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
     }
     if entry["state"] == "stock":
         entry["stock"] = stock_note(shot)
+    if media_policy.is_v2(getattr(ec, "story", None)):
+        entry["fit"] = {key: sent[key] for key in ("limit", "words", "full_words", "dropped")}
+        warning = prompt_templates.short_warning(sent["full_words"]) if entry["state"] != "stock" else None
+        if warning:
+            entry["prompt_warning"] = warning
     if speaks and line is not None:
         character = ((ec.entities or {}).get("characters") or {}).get(line["speaker"]) or {}
         entry.update(line=line["text"], line_id=line["line_id"], speaker=character.get("name") or line["speaker"],
@@ -433,7 +445,8 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
         {"$schema": "shot_brief_v1", "story_id", "ep", "language",
          "platform": {"platform", "name", "url", "where_to_paste", "prompt_notes", "length_note", "credits_note"},
          "shots": [<shot_entry>], "counts": {"total", "uploaded", "missing", "takes_ok", "flagged"},
-         "credits": sentence, "waiting": sentence | None}
+         "credits": sentence, "waiting": sentence | None,
+         "master_prompt": {text, words, sections}  (a v2 story only, plan 26)}
 
     ``StepFailed`` while the episode has no storyboard."""
     preset = platforms.load(platform)
@@ -454,7 +467,10 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
                                         "brief lists them.")
     if assets_doc is None:
         assets_doc = episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC)
-    shots = [shot_entry(ec, script, shot, preset=preset, assets_doc=assets_doc)
+    v2 = media_policy.is_v2(getattr(ec, "story", None))
+    # Plan 26: the ledger is read once for every shot (an empty map: each look's first set).
+    wardrobe = (clips.wardrobe_of(ec) or {}) if v2 else None
+    shots = [shot_entry(ec, script, shot, preset=preset, assets_doc=assets_doc, wardrobe=wardrobe)
              for shot in sorted(board["shots"], key=lambda item: item["order"])
              if not clips.shot_flags(shot, assets_doc).get("keep_still")]
     missing = [entry for entry in shots if entry["state"] == "missing"]
@@ -465,7 +481,7 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
     if stock:
         # Plan 23 stage B8: shots that are stock footage (free): neither missing nor uploaded.
         counts["stock"] = stock
-    return {
+    brief = {
         "$schema": SCHEMA, "story_id": ec.story_id, "ep": ec.ep, "language": ec.language,
         "title": (ec.story or {}).get("title") or "",
         "platform": {"platform": preset["platform"], "name": preset["name"], "url": preset["url"],
@@ -476,6 +492,16 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
         "credits": platforms.credits_line(preset, len(missing) or len(shots)),
         "waiting": waiting_sentence(len(missing)) if missing else None,
     }
+    if v2:
+        # Plan 26: the story's master prompt ({text, words, sections}), which every shot prompt already carries.
+        brief["master_prompt"] = master_prompt_of(ec)
+    return brief
+
+
+def master_prompt_of(ec) -> dict:
+    """``prompt_templates.master_prompt`` of *ec*'s story (plan 26): the
+    series, the art style, every character, place and prop, unfitted."""
+    return prompt_templates.master_prompt(ec.story, ec.style_lock, ec.entities, language=ec.language)
 
 
 # --------------------------------------------------------------- the markdown
@@ -502,6 +528,12 @@ def render_markdown(brief) -> str:
     head += [f"- {platform['length_note']}",
              "- Upload each clip on its shot in the episode's Shot list, or: "
              "`aistory upload-clip <story> <ep> <shot_id> <file>`.", ""]
+    master = brief.get("master_prompt")
+    if master and master.get("text"):
+        # Plan 26: the master prompt first; every shot prompt below already carries it.
+        head += ["## Master prompt", "",
+                 f"{master['words']} words. Every shot prompt below already carries it; paste it alone in a chat "
+                 "that keeps context.", "", _fence(master["text"]), ""]
     body = []
     for number, entry in enumerate(brief["shots"], start=1):
         state = entry["state"].replace("_", " ")
@@ -516,6 +548,8 @@ def render_markdown(brief) -> str:
         if entry.get("line"):
             body += [f"**Line ({brief['language']}):** {entry['speaker']} — “{entry['line']}”", "",
                      f"**Voice:** {entry['voice_line']}", ""]
+        if entry.get("prompt_warning"):
+            body += [f"**{entry['prompt_warning']}**", ""]
         body += ["**Prompt:**", "", _fence(entry["prompt"]), ""]
         if entry.get("negative_prompt"):
             body += ["**Negative prompt:**", "", _fence(entry["negative_prompt"]), ""]
@@ -878,6 +912,7 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
     modes composed into the one JSON the Handoff view reads, calling nothing::
 
         {"$schema": "handoff_v1", "story_id", "ep", "language", "title",
+         "master_prompt": {text, words, sections: [{key, label, words}]} | None (a v1 story),
          "platform": {"platform", "name", "url", "where_to_paste", "models": [{id, label, lengths,
                       max_references, speech, languages}], "model", "prompt_notes", "credits",
                       "choices": [{platform, name, supported}]},
@@ -890,7 +925,8 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
                               prompt, negative_prompt, size, min_size, references, upload_slot, zip_url},
                     "clip": {mode, mode_explicit, mode_editable, state, source, link, est_usd, gate,
                              model, model_label, how, prompt, negative_prompt, length_s, line, speaker,
-                             voice_line, checks, references, upload_slot, zip_url, take, stock}
+                             voice_line, checks, references, upload_slot, zip_url, take, stock,
+                             fit: {limit, words, full_words, dropped} | None, prompt_warning?}
                             | None for a shot kept still}],
          "entities": [the image brief's sheet / plate / prop entries, variants included],
          "export": {"brief_md", "brief_zip", "image_brief_zip"}}
@@ -986,7 +1022,11 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
                 "upload_slot": entry["upload_slot"], "take": entry["take"], "stock": entry["stock"],
                 "zip_url": (_zip_url(ec.story_id, ec.ep, shot_id, platform=preset["platform"], model=selected)
                             if entry["references"] else None),
+                # Plan 26: the brief's own fit (None on a v1 story) and its short-prompt warning.
+                "fit": entry.get("fit"),
             }
+            if entry.get("prompt_warning"):
+                clip["prompt_warning"] = entry["prompt_warning"]
             if clip_mode == video_plan.AUTO and native:
                 clip["gate"] = _refused(lambda: assets_step.shot_mode_verdict(ec, script, board, shot, env=env))
                 clip.update(link=clip["gate"]["link"] or clip_link, est_usd=clip["gate"]["est_usd"])
@@ -1019,6 +1059,8 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
     return {
         "$schema": HANDOFF_SCHEMA, "story_id": ec.story_id, "ep": ec.ep, "language": ec.language,
         "title": (ec.story or {}).get("title") or "",
+        # Plan 26: the shot brief's master prompt ({text, words, sections}; None on a v1 story).
+        "master_prompt": clip_brief.get("master_prompt"),
         "platform": {
             "platform": preset["platform"], "name": preset["name"], "url": preset["url"],
             "where_to_paste": where_to_paste(preset, frame), "model": selected,

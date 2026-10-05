@@ -1857,8 +1857,15 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
     sends for it -- its keyframe the shot's image, its length *clip_s*, its
     seed, the local template in ``extra`` -- whose cache key is the one the
     generation journal keeps it under (``out_dir`` and the name are not in
-    the key). ``ValueError`` for a prompt that cannot be built."""
+    the key). ``ValueError`` for a prompt that cannot be built.
+
+    Plan 26 H1: the request's prompt is ``clips.sent_clip_prompt``'s text --
+    on a v2 story the master and the scene template before the core, fitted
+    to *link* (and a local *template*'s window) -- and that fit is
+    ``parts["sent"]`` (``{text, words, full_words, limit, dropped}``);
+    ``parts["prompt"]`` and ``parts["hash"]`` stay the core's."""
     parts = clips.clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=note, link=link)
+    parts["sent"] = clips.sent_clip_prompt(ec, shot, script, parts, link=link, template=template)
     extra = {"name": f"shot_{shot['shot_id'][2:]}"}
     if template:
         extra["template"] = template
@@ -1873,7 +1880,7 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
         # cache keys it); a 9:16 request is the one it always was, byte for byte.
         extra["aspect"] = frame
     width, height = shot_size(ec.story)
-    request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["prompt"], negative=parts["negative"], width=width,
+    request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["sent"]["text"], negative=parts["negative"], width=width,
                              height=height, seed=seed, references=(shot_image_path(ec, shot),),
                              duration_s=int(clip_s), native_audio=parts["native_audio"], out_dir=out_dir, extra=extra)
     return parts, request
@@ -3722,8 +3729,10 @@ class _Assets(voice_lines.LineMeasurement):
         route = ec.story["generation_profile"]["route"]
         cache = self.cache(gen.VIDEO, unit="second", qty=int(clip_s))
         with tempfile.TemporaryDirectory(prefix="shot-clip-") as incoming:
-            _parts, request = clip_request(ec, shot, self.script, link=link, template=template, clip_s=clip_s,
-                                           seed=seed, note=note, flags=flags, tier=tier, out_dir=incoming)
+            sent_parts, request = clip_request(ec, shot, self.script, link=link, template=template, clip_s=clip_s,
+                                               seed=seed, note=note, flags=flags, tier=tier, out_dir=incoming)
+            if sent_parts["sent"]["dropped"]:
+                ctx.on_log(_fit_line(shot_id, link, sent_parts["sent"]))
             record["cache_key"] = gencache.request_key(gen.VIDEO, link, request)
             started = tools.time_fn()
             try:
@@ -4801,6 +4810,15 @@ def _refit_line(shot_id, kind, link, info) -> str:
              if info["note"] else f"it was built to another budget ({info['from']} words)")
     return (f"ℹ️ Shot {shot_id}'s {kind} prompt: {cause}, over {label}'s budget of {info['budget']}; resolved again "
             f"to {info['to']} words -- its context shortened, nothing of the note cut.")
+
+
+def _fit_line(shot_id, link, sent) -> str:
+    """The feed line of a clip prompt whose template was fitted to its link
+    (plan 26): "Veo accepts 630 words: 812 → 618, dropped Chloe, the props"."""
+    label = link if isinstance(link, str) else describe(link)
+    accepts = f"{label} accepts {sent['limit']} words" if sent.get("limit") else f"{label}'s limit"
+    return (f"ℹ️ Shot {shot_id}'s clip prompt: {accepts}: {sent['full_words']} → {sent['words']}, dropped "
+            f"{', '.join(sent['dropped'])}.")
 
 
 def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> dict:

@@ -73,6 +73,9 @@ _FLUX_T5 = ("no API limit published; FLUX.1's T5-XXL text encoder reads 512 toke
             "refused by the API (v1 shot prompts of ~2200 characters were always sent), so the window bounds the "
             "word budget, not the check")
 
+_UMT5 = ("no API limit (our own ComfyUI); Wan 2.2's umT5-XXL text encoder reads 512 tokens (its text_len). Text "
+         "past the window is ignored by the model, never refused, so the window bounds the word budget only")
+
 TABLE = {
     # ----------------------------------------------------------- video (fal)
     "fal/kling-2.5-turbo-std": Limit(
@@ -144,7 +147,23 @@ TABLE = {
                                 "below it", verified=False),
     "edge/*": Limit(source="edge-tts splits long text into requests itself (one voice per request)",
                     verified=False),
+    # ------------------------------------------------- local templates (plan 26)
+    # ``local/comfyui`` itself has no limit (our own hardware); a workflow template
+    # whose text encoder has a window is addressed as ``local/comfyui/<template>``
+    # (:func:`template_label`), so the prompt builders keep the shot inside it.
+    "local/comfyui/i2v_wan22_5b": Limit(window_tokens=512, source=_UMT5, verified=False),
+    "local/comfyui/i2v_wan22_14b_lightning": Limit(window_tokens=512, source=_UMT5, verified=False),
 }
+
+
+def template_label(link_or_label, template) -> str:
+    """The table label of *link_or_label* run with the local workflow
+    *template* (``local/comfyui/i2v_wan22_5b``) when the table knows that
+    template, else the link's own label: a template only bounds a budget,
+    never the check (:func:`limit_for` of ``local/comfyui`` stays None)."""
+    label = _label(link_or_label)
+    qualified = f"{label}/{template}" if template else None
+    return qualified if qualified in TABLE else label
 
 # --------------------------------------------------------------- measuring
 

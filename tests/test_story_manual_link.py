@@ -183,6 +183,17 @@ def test_the_flow_brief_pins_each_shot_s_prompt_length_references_and_checks(sto
     silent = next(item for item in brief["shots"] if not item["speaks"])
     assert "nobody speaks or sings" in silent["prompt"] and silent["line"] is None
     assert brief["waiting"] == f"Waiting for {len(board['shots'])} clips — download the brief"
+    # Plan 26 stage 3: the master and the scene template before stage 4's prompt, nothing dropped on the
+    # human's own link; the fixture's records are rich enough for the 500-word floor.
+    from clipping.aistory import prompt_templates
+
+    for item in brief["shots"]:
+        assert item["prompt"].startswith("SERIES:"), item["shot_id"]
+        assert item["fit"]["limit"] is None and item["fit"]["dropped"] == []
+        assert item["fit"]["words"] == item["fit"]["full_words"] >= prompt_templates.MIN_PROMPT_WORDS
+        assert "prompt_warning" not in item
+    master = brief["master_prompt"]
+    assert master["text"].startswith("SERIES:") and master["words"] == len(master["text"].split())
 
 
 def test_the_higgsfield_brief_names_its_references_and_keeps_veo_for_french(store):
@@ -204,6 +215,33 @@ def test_the_higgsfield_brief_names_its_references_and_keeps_veo_for_french(stor
     markdown = brief_mod.render_markdown(brief)
     assert markdown.startswith("# Shot brief — episode 1") and "```text" in markdown
     assert f"`{entry['references'][0]['file']}`" in markdown
+    # Plan 26 stage 3: the master prompt first, then the shots as before.
+    assert markdown.index("## Master prompt") < markdown.index("## 1. Shot ")
+    assert brief["master_prompt"]["text"] in markdown
+
+
+def test_a_thin_story_s_brief_warns_of_a_short_prompt(store):
+    """Plan 26 stage 3: a template under 500 words is flagged on its row
+    (never on a stock shot); the checks are the clip's, unchanged."""
+    import dataclasses
+
+    from clipping.aistory.steps import brief as brief_mod
+
+    story_id = manual_story(store)
+    _planted(store, story_id)
+    full = _brief(store, story_id, "flow")
+    ec = tas._ec(store, story_id)
+    thin = dict(ec.story, title="", logline="", tone="", genre_tags=[], world={})
+    for cid in list(ec.entities["characters"]):
+        ec.entities["characters"][cid] = {key: value for key, value in ec.entities["characters"][cid].items()
+                                          if key not in ("look", "personality", "relationships", "signature_items")}
+    lock = {key: value for key, value in ec.style_lock.items() if key in ("motion_rules", "negative_prompt")}
+    ec = dataclasses.replace(ec, story=thin, style_lock=lock)
+    brief = brief_mod.shot_brief(ec, platform="flow")
+    short = [item for item in brief["shots"] if item.get("prompt_warning")]
+    assert short and all(item["prompt_warning"].startswith("Short prompt") for item in short)
+    assert all(item["fit"]["full_words"] < 500 for item in short)
+    assert [item["checks"] for item in brief["shots"]] == [item["checks"] for item in full["shots"]]
 
 
 def test_a_bad_preset_is_refused_by_its_schema():

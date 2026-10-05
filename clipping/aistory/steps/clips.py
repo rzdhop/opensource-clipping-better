@@ -53,12 +53,13 @@ import struct
 
 from clipping.providers import adapters as adapters_mod
 from clipping.providers import budget as budget_mod
-from clipping.providers import gating, gen_timings, local_comfyui, pricing
+from clipping.providers import gating, gen_timings, local_comfyui, pricing, prompt_limits
 from clipping.providers import generation as gen
 from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
-from .. import hardware, imaging, media_policy, native_speech, prompt_budgets, prompting, schemas, stock_cutaways
+from .. import hardware, imaging, media_policy, native_speech, prompt_budgets, prompt_templates, prompting, schemas
+from .. import stock_cutaways
 from .. import video_plan
 from .. import shots as shots_mod
 from . import episode_common, sticky_link
@@ -507,6 +508,46 @@ def _fitted_clip(ec, shot, script, prompt, *, note, link, budget, tier, lines, o
                                                     tier=tier, lines=lines, note=note)
     over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, sent, budget=budget)
     return sent, over, {"from": len(prompt.split()), "to": len(sent.split()), "note": note_words, "budget": budget}
+
+
+def wardrobe_of(ec):
+    """``{char_id: wardrobe set id}`` the episode's characters wear (the
+    ledger before ``ec.ep``, ``script.ledger_of``: what the storyboard's looks
+    were resolved with), or None: a legacy story, no knowledge base, or one
+    that does not read (each look's first set then)."""
+    from . import script as script_step  # the step imports this module: a cycle at import time
+
+    try:
+        ledger = script_step.ledger_of(ec)
+    except (AttributeError, KeyError, OSError, ValueError, schemas.SchemaError):
+        return None
+    if not isinstance(ledger, dict):
+        return None
+    worn = {cid: state.get("wardrobe_set") for cid, state in ledger.items() if isinstance(state, dict)}
+    return {cid: set_id for cid, set_id in worn.items() if set_id} or None
+
+
+def sent_clip_prompt(ec, shot, script, parts, *, link, live=None, template=None, wardrobe=None) -> dict:
+    """The clip prompt sent for *shot* (plan 26 H1): on a v2 story the master
+    and the scene template (``prompt_templates.shot_clip_prompt``) before
+    *parts*' prompt -- the core, unchanged and last -- fitted to *link*'s
+    whole-prompt words (``prompt_budgets.link_words``: none on a manual
+    link; a local Wan *template*'s umT5 window) and its own check
+    (``prompt_limits.fits``); on a v1 story the core alone, as it always was.
+    ``{text, words, full_words, limit, dropped: [label]}``. *parts* (its
+    ``prompt`` and ``hash``) is never touched: the hash stays the core's, so
+    nothing made turns stale. *wardrobe* ``{char_id: set id}`` (None:
+    :func:`wardrobe_of`)."""
+    core = parts["prompt"]
+    if not media_policy.is_v2(getattr(ec, "story", None)):
+        words = len(core.split())
+        return {"text": core, "words": words, "full_words": words, "limit": None, "dropped": []}
+    label = link if isinstance(link, str) or link is None else describe(link)
+    limit = prompt_budgets.link_words(label, live=live, template=template)
+    bounded = bool(label) and prompt_limits.limit_for(label, live=live) is not None
+    fits = (lambda text: prompt_limits.fits(label, text, live=live)[0]) if bounded else None
+    return prompt_templates.shot_clip_prompt(ec, shot, script, core, limit_words=limit, fits=fits,
+                                             wardrobe=wardrobe if wardrobe is not None else wardrobe_of(ec))
 
 
 def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
