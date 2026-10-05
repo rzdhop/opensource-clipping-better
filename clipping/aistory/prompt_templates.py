@@ -188,21 +188,40 @@ class _Who:
         return self.props.get(pid) or "the object"
 
     def sweep(self, text) -> str:
-        return names_mod.without_names(text, self.names) if self.names else text
+        if not self.names:
+            return text
+        return _DOUBLE_ARTICLE.sub(r"\1", names_mod.without_names(text, self.names))
 
 
 _ARTICLE = re.compile(r"^(a|an|the)\s+", re.IGNORECASE)
-_PHRASE_MAX_WORDS = 10
+_PHRASE_MAX_WORDS = 6
+# Where a prop's noun phrase ends: a preposition, a relative, a conjunction or a participle that opens a trailing
+# clause ("coconut shell | shaped like a vintage telephone with…", "USB drive | clipped to a backpack strap").
+_PHRASE_STOPS = {"with", "without", "of", "in", "on", "at", "for", "from", "to", "by", "like", "near", "under",
+                 "over", "inside", "atop", "beside", "behind", "that", "which", "who", "whose", "where", "and",
+                 "or", "but", "as", "than"}
+_PARTICIPLE = re.compile(r"^[a-z]+(?:ed|ing)$")
+# A swept name that followed an article: "Le the coconut shell" -> "Le coconut shell"; "the the" -> "the".
+_DOUBLE_ARTICLE = re.compile(r"\b((?:le|la|les|un|une|des|du|the|a|an)\s+|l')the\s+", re.IGNORECASE)
 
 
 def _prop_phrase(handle, doc) -> str:
-    """What the template calls a prop: "the " and its descriptor's first
-    clause, at most 10 words ("the sleek USB drive clipped to a backpack
-    strap") -- ``shots.prop_handles`` cuts at the descriptor's last comma and
-    can keep a bare word ("the pulsing") -- or its handle without a
-    descriptor."""
+    """What the template calls a prop: "the " and the head noun phrase of its
+    descriptor -- the words before the first preposition, relative,
+    conjunction or trailing participle, at most 6 ("the polished half
+    coconut shell", "the sleek USB drive") -- or its handle without a
+    descriptor. ``shots.prop_handles`` cuts at the descriptor's last comma
+    and can keep a bare word ("the pulsing"); this never ends on a function
+    word."""
     clause = _ARTICLE.sub("", _ws(re.split(r"[,.;:]", str(doc.get("descriptor") or ""), maxsplit=1)[0]))
-    words = clause.split()[:_PHRASE_MAX_WORDS]
+    words = []
+    for index, word in enumerate(clause.split()):
+        bare = word.lower().strip("()'\"")
+        if bare in _PHRASE_STOPS or (index >= 2 and _PARTICIPLE.match(bare)):
+            break
+        words.append(word)
+        if len(words) == _PHRASE_MAX_WORDS:
+            break
     if not words:
         return handle
     return f"the {words[0].lower() if words[0][1:] == words[0][1:].lower() else words[0]} {' '.join(words[1:])}".strip()
