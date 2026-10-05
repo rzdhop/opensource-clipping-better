@@ -1,3 +1,12 @@
+## CURRENT STATE — plan 27 (5–10 s shots that carry an exchange) PLANNED, awaiting the human's Go (2026-10-05, local session)
+
+- **In-progress header:** phase = PLAN (approval pending). Checkpoint commit = main (this commit); live = c36e592 +
+  the plan 26 hotfixes (restarted at 0 jobs). Plan: `.claude/plans/ai-story/27-exchanges-plan.md` (5 stages; stage 3
+  riskiest; D1 the Flow/Veo 6–8 s clamp, D2 Dragon Fruit re-scripted on the next regen).
+- **Next action:** on the Go → stage 1 (lengths, Sonnet) ∥ stage 2 (the line plan + the exchange grouping, Opus) →
+  3 → 4 → 5 + deploy.
+- **Open questions:** D1, D2 (defaulted yes).
+
 ## CURRENT STATE — plan 26 (rich prompts on every link + Copy + species in a fruit world) CODE + DOCS COMPLETE and LIVE; close-out pending the human's Tier 2 (2026-10-05, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this commit), clean tree
