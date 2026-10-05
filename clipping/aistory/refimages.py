@@ -88,6 +88,7 @@ from clipping.providers.registry import ChainError
 from . import defaults, imaging, media_policy, prompt_budgets, prompt_templates, prompting, schemas, shots
 from . import names as names_mod
 from . import uploads as uploads_mod
+from .steps import sticky_link
 
 CHARACTERS, PLACES, PROPS = "characters", "places", "props"
 
@@ -184,6 +185,33 @@ class RefImageError(Exception):
         super().__init__(message)
         self.reasons = list(reasons)
         self.failures = tuple(failures)
+
+
+class StoryLinkGone(RefImageError):
+    """Plan 28 stage F5 (DEC-305 section 5): the story's image link -- the
+    one its character sheets, place plates and props are made on -- cannot
+    serve today, so the image stops and asks (DEC-204's shape for a
+    keyframe, ``sticky_link.StickyLinkGone``). ``str()`` is the sentence;
+    ``link`` the locked link, ``why`` the reason, ``next_link`` the first
+    link of the chain on another provider (None: none), and ``switch`` the
+    story edit that takes it. Nothing was generated or spent."""
+
+    def __init__(self, link, why, *, chain_name, next_link=None):
+        self.link = link
+        self.why = why
+        self.next_link = next_link
+        head = (f"The story's image link {link} cannot serve now: {why}. A story keeps its character sheets, "
+                "places and props on one link, so no other link was tried: nothing was generated or spent.")
+        if next_link is None:
+            tail = f" Bring it back and try again; no other link of {chain_name} is available."
+        else:
+            tail = (f" Bring it back and try again, or switch the story's image link to {next_link} (the story "
+                    f"edit {{\"links\": {{\"image\": \"{next_link}\"}}}}); what is already made stays as it is.")
+        super().__init__(head + tail, reasons=[why])
+
+    @property
+    def switch(self):
+        return {"links": {"image": self.next_link}} if self.next_link else None
 
 
 # DEC-117's offer, word for word (a legacy story).
@@ -579,6 +607,46 @@ def _probe_locals(readiness, chain, merged, *, route, adapters, transport, chain
 
 # ---------------------------------------------------------------------- make
 
+def _story_link_applies(story, chain) -> bool:
+    """Whether the story's one image link (plan 28 stage F5) governs an image
+    of *chain*: a v2 story whose chain holds no manual link -- the human's own
+    uploads are theirs, never locked to a provider. A legacy story keeps its
+    free chain's fall-through (RC-M1)."""
+    return media_policy.is_v2(story) and not any(gen.is_manual(link) for link in chain)
+
+
+def _story_link_gone(link, why, chain, name) -> StoryLinkGone:
+    others = [gen.describe(candidate) for candidate in chain
+              if sticky_link.provider_of(gen.describe(candidate)) != sticky_link.provider_of(link)]
+    return StoryLinkGone(link, why, chain_name=name, next_link=others[0] if others else None)
+
+
+def _keep_story_link(stories, story_id, answered, chain, *, on_log) -> None:
+    """Record the link that just served the story's first sheet, plate or
+    prop as ``story.json``'s ``links.image`` (the chain link it answered
+    for), unless one is recorded by now; every later image of the story is
+    asked of that link alone. A record that cannot be written is said and
+    the image is kept: the next one tries again."""
+    link = sticky_link.head_of(gen.describe(answered), [gen.describe(candidate) for candidate in chain])
+    now = _utc_now()
+    written = []
+
+    def mutate(doc):
+        if sticky_link.story_recorded(doc) is not None:
+            return
+        doc["links"] = dict(doc.get("links") or {}, **{sticky_link.IMAGE: sticky_link.record(link, now=now)})
+        written.append(link)
+
+    try:
+        stories.update(story_id, mutate, now=now)
+    except (schemas.SchemaError, ValueError, KeyError, OSError) as exc:
+        on_log(f"⚠️ The story's image link could not be recorded now ({exc}); the next image tries again.")
+        return
+    if written:
+        on_log(f"🔗 The story's image link is now {link}: its character sheets, places and props are made on "
+               "that link alone.")
+
+
 def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapters, transport,
           sleep_fn, time_fn, sticky=None):
     """Make one image of *plan* and store its file in the entity's refs/;
@@ -589,9 +657,22 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
     story_id = story["story_id"]
     route = story["generation_profile"]["route"]
     merged, chain, budget_obj = imaging.resolve(plan.kind, env, error=RefImageError, role=plan.role, story=story)
-    if sticky and sticky.get("provider"):
-        chain = sorted(chain, key=lambda link: link.provider != sticky["provider"])  # stable
     name = media_policy.chain_name(plan.role, plan.kind, story)
+    # Plan 28 stage F5 (DEC-305 section 5): a v2 story's sheets, plates and props are made on ONE link -- the one
+    # that served the first of them -- so a later job, or one regenerate, never lands on another provider. The
+    # chain is the whole role chain until the first image is made (then the within-job preference below).
+    full_chain = list(chain)
+    locked = _story_link_applies(story, chain)
+    entry = sticky_link.story_recorded(stories.get(story_id)) if locked else None
+    pinned_label = None
+    if entry is not None:
+        pinned = sticky_link.pin_labels([gen.describe(link) for link in chain], entry["link"])
+        if not pinned:
+            raise _story_link_gone(entry["link"], f"it is not a link of {name} any more", full_chain, name)
+        pinned_label = pinned[0]
+        chain = [link for link in chain if gen.describe(link) == pinned_label]
+    elif sticky and sticky.get("provider"):
+        chain = sorted(chain, key=lambda link: link.provider != sticky["provider"])  # stable
     if adapters is None:
         adapters_mod.load_all()
     ledger = imaging.open_ledger(stories, story_id, error=RefImageError, doing="making an image")
@@ -630,6 +711,11 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
                 transport=transport, sleep_fn=sleep_fn, time_fn=time_fn,
             )
         except imaging.NoImage as exc:
+            gone = sticky_link.gone_why(exc.failures, pinned_label) if entry is not None else None
+            if gone is not None:
+                error = _story_link_gone(entry["link"], gone, full_chain, name)
+                on_log(f"✋ {plan.subject}: {error}")
+                raise error from None
             on_log(f"✖ {plan.subject} not made: {'; '.join(exc.reasons)}")
             raise RefImageError(f"{plan.subject}: no link of {name} could make it on route "
                                 f"{route}.", reasons=exc.reasons, failures=exc.failures) from None
@@ -649,6 +735,8 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
         label = gen.describe(answered)
         if sticky is not None:
             sticky.setdefault("provider", answered.provider)
+        if locked and entry is None:
+            _keep_story_link(stories, story_id, answered, full_chain, on_log=on_log)
         try:
             produced, ext = imaging.produced_image(result)
         except imaging.NotKept as exc:

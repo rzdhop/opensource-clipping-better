@@ -183,7 +183,8 @@ WHY_COME_BACK_LINES = 3
 # The story fields an edit may set (the API's StoryPatchRequest). Everything
 # else is the rules' to write: approvals, status, the concept, the style.
 # ``episode_template_id`` (phase 3) only while no episode has a script.
-PATCH_FIELDS = ("title", "seed_text") + BIBLE_FIELDS + ("narrator", "generation_profile", "episode_template_id")
+PATCH_FIELDS = ("title", "seed_text") + BIBLE_FIELDS + ("narrator", "generation_profile", "episode_template_id",
+                                                        "links")
 
 # The keys ``params`` of the inline style step may carry.
 STYLE_PARAMS = ("template_id", "overrides", "consistency_mode")
@@ -931,6 +932,9 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
 
     check_narrator_voices(story, values)
 
+    if "links" in values:
+        values["links"] = story_links_switch(story, values["links"], now=now)
+
     clears_bible = bool(set(values) & set(BIBLE_FIELDS))
 
     def mutate(doc):
@@ -943,6 +947,55 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
             doc["approvals"]["bible"] = None
 
     return update(stories, story_id, mutate, now=now)
+
+
+def story_links_switch(story, value, *, now) -> dict:
+    """The story's ``links`` as ``PATCH`` ``{"links": {"image": "<link>"}}``
+    leaves them (plan 28 stage F5, DEC-305 section 5): the one link its
+    character sheets, place plates and props are made on, switched to *value*
+    -- ``links.image`` becomes ``{link, since: now, switched_from}``. The only
+    way a story's image link moves (a link that is gone stops the image and
+    says so: ``refimages.StoryLinkGone``); the images already made stay as
+    they are. The link is one of a quality role's links (sheet, plate, prop)
+    when the budget profile names them, else any ``provider/model`` of an
+    image provider; a draft link, a story on the legacy pipeline and a story
+    whose images are the human's own (``manual/upload``) have no image link
+    to switch. ``invalid`` otherwise, nothing written."""
+    errors = []
+    wanted = value.get("image") if isinstance(value, dict) else None
+    if not isinstance(value, dict) or set(value) != {"image"} or not isinstance(wanted, str):
+        raise _invalid_values("The story's links would not be valid.",
+                              ['links: expected {"image": "<provider>/<model>"}'])
+    if not media_policy.is_v2(story):
+        errors.append("links.image: only a story on the v2 pipeline keeps one image link for its sheets, places "
+                      "and props; a legacy story walks its image chain per image")
+    elif media_policy.images_manual(story):
+        errors.append("links.image: this story's images are your own (manual/upload): no provider to choose")
+    else:
+        allowed = set()
+        for role in ("sheet", "plate", "prop"):
+            for kind in (gen.IMAGE, gen.IMAGE_EDIT):
+                try:
+                    allowed.update(registry.describe(link) for link in media_policy.role_chain(role, kind, {}, story))
+                except (registry.ChainError, ValueError):
+                    continue
+        if wanted in media_policy.LOW_QUALITY_LINKS:
+            errors.append(f"links.image: {wanted} makes drafts, never the sheets, places and props of a v2 story")
+        elif allowed and wanted not in allowed:
+            errors.append(f"links.image: {wanted!r} is not a link of this story's budget profile "
+                          f"({', '.join(sorted(allowed))})")
+        elif not allowed:
+            try:
+                gen.parse_generation_chain(gen.IMAGE, wanted)
+            except (registry.ChainError, ValueError) as exc:
+                errors.append(f"links.image: {wanted!r} is not an image link ({exc})")
+    if errors:
+        raise _invalid_values("The story's links would not be valid.", errors)
+    current = (sticky_link.story_recorded(story) or {}).get("link")
+    links = copy.deepcopy(story.get("links") or {})
+    if current != wanted:
+        links[sticky_link.IMAGE] = sticky_link.record(wanted, now=now, switched_from=current)
+    return links
 
 
 def check_narrator_voices(story, values) -> None:

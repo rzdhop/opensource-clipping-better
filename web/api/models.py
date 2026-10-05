@@ -737,7 +737,9 @@ class StoryPatchRequest(BaseModel):
     ``clipping.aistory.defaults`` (400, not 422, which is why it is a plain
     object here). ``episode_template_id`` (phase 3) is one of the shipped
     episode templates (400), and changes only while no episode has a script
-    (409).
+    (409). ``links`` (plan 28 stage F5) is the story's one image link for its
+    sheets, places and props, ``{"image": "<link>"}`` (400 when it is not a
+    link the story can use).
     """
     title: Optional[str] = Field(None, max_length=120)
     seed_text: Optional[str] = Field(None, max_length=2000)
@@ -752,6 +754,9 @@ class StoryPatchRequest(BaseModel):
     narrator: Optional[dict] = None
     generation_profile: Optional[dict] = None
     episode_template_id: Optional[str] = None
+    # Plan 28 stage F5: ``{"image": "<provider>/<model>"}`` switches the one link the story's sheets, places and
+    # props are made on (checked by ``workflow.story_links_switch``: 400 with its errors).
+    links: Optional[dict] = None
 
 
 class SubtitleStylePatchRequest(BaseModel):

@@ -155,12 +155,13 @@ def test_every_fixed_object_of_the_bible_is_closed():
     schema = schemas.STORY_BIBLE_SCHEMA
     assert schema["additionalProperties"] is False
     for key in ("world", "audience", "generation_profile", "narrator", "approvals", "approved_by",
-                "subtitle_style"):
+                "subtitle_style", "links"):
         assert schema["properties"][key]["additionalProperties"] is False, key
     # Plan 21 stage 1, re-pinned on purpose: ``approved_by`` (the agent run's marks beside the approvals
     # it gave) is an optional field -- absent on every Studio story, whose story.json stays as it was.
     # Plan 23 stage B5, re-pinned on purpose: so is ``subtitle_style`` (the story's own subtitle look).
-    assert set(schema["required"]) == set(schema["properties"]) - {"approved_by", "subtitle_style"}
+    # Plan 28 stage F5 (DEC-305 section 5), re-pinned on purpose: so is ``links`` (the story's one image link).
+    assert set(schema["required"]) == set(schema["properties"]) - {"approved_by", "subtitle_style", "links"}
 
 
 @pytest.mark.parametrize("changes", [
@@ -245,8 +246,9 @@ def test_a_new_story_has_every_field_as_a_draft(stories):
     doc = stories.create(language="en", now=NOW)
 
     # Plan 21 stage 1, re-pinned on purpose: every field but the optional ``approved_by``, which only the
-    # agent run's approvals write. Plan 23 stage B5: nor is the optional ``subtitle_style`` on a new story.
-    assert set(doc) == set(schemas.STORY_BIBLE_SCHEMA["properties"]) - {"approved_by", "subtitle_style"}
+    # agent run's approvals write. Plan 23 stage B5: nor is the optional ``subtitle_style`` on a new story. Plan 28
+    # stage F5 (DEC-305 section 5): nor is the optional ``links`` (the first sheet, plate or prop writes it).
+    assert set(doc) == set(schemas.STORY_BIBLE_SCHEMA["properties"]) - {"approved_by", "subtitle_style", "links"}
     assert schemas.story_bible_errors(doc) == []
     assert store.STORY_ID_PATTERN.fullmatch(doc["story_id"])
     assert doc["language"] == "en"
@@ -279,9 +281,9 @@ def test_story_json_keeps_a_readable_field_order(stories, outputs):
     doc = stories.create(language="fr", now=NOW)
     text = _story_path(outputs, doc["story_id"]).read_text(encoding="utf-8")
     # Plan 21 stage 1, re-pinned on purpose: the optional ``approved_by`` is not on a new story; nor (plan 23
-    # stage B5) is the optional ``subtitle_style``.
+    # stage B5) is the optional ``subtitle_style``, nor (plan 28 stage F5) the optional ``links``.
     assert list(json.loads(text)) == [key for key in schemas.STORY_BIBLE_SCHEMA["properties"]
-                                      if key not in ("approved_by", "subtitle_style")]
+                                      if key not in ("approved_by", "subtitle_style", "links")]
     assert text.endswith("}\n")
 
 

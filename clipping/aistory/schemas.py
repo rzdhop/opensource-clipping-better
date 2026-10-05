@@ -884,6 +884,27 @@ SUBTITLE_STYLE_SCHEMA = {
 }
 
 
+# Optional (plan 28 stage F5, DEC-305 section 5): the one link the story's character sheets, place plates and
+# props are made on (``steps/sticky_link.py``, ``refimages._make``): the chain link's label as the first image made
+# answered it, since when, and the link it replaced when the user switched to it. Absent on a story that has made
+# none yet and on every story written before it; a story without the key is made exactly as before.
+STORY_LINK_PATTERN = r"^[a-z][a-z0-9_-]*/[^\s,*]+$"
+_STORY_LINK_LABEL = {"type": "string", "maxLength": 160, "pattern": STORY_LINK_PATTERN}
+STORY_LINKS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "image": {
+            "type": "object",
+            "properties": {"link": _STORY_LINK_LABEL, "since": {"type": "string", "minLength": 1},
+                           "switched_from": _STORY_LINK_LABEL},
+            "required": ["link", "since"],
+            "additionalProperties": False,
+        },
+    },
+    "additionalProperties": False,
+}
+
+
 def _id_array(pattern) -> dict:
     return {"type": "array", "items": {"type": "string", "pattern": pattern}}
 
@@ -924,6 +945,8 @@ STORY_BIBLE_SCHEMA = {
         "approved_by": _STORY_APPROVED_BY_SCHEMA,
         # Optional (plan 23 stage B5): the subtitle look; absent = today's.
         "subtitle_style": SUBTITLE_STYLE_SCHEMA,
+        # Optional (plan 28 stage F5): the story's one image link for sheets, plates and props.
+        "links": STORY_LINKS_SCHEMA,
     },
     "required": [
         "$schema", "story_id", "title", "language", "seed_text", "concept_id", "concept",

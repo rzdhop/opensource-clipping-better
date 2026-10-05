@@ -9,7 +9,8 @@ reference images by the cast (``refimages.MAX_REFERENCES``) and never more than
 fourteen by its adapter (``images.GEMINI_MAX_REFERENCES``), and honours no seed
 (``refimages`` records the seed and says so). Within one cast or places job the
 provider that answered first is tried first for the rest (the ``sticky`` dict of
-``steps.entities.Tools``).
+``steps.entities.Tools``); since plan 28 stage F5 (DEC-305 section 5) the story's recorded image link keeps
+it there for every later job too (``tests/test_story_image_link.py``).
 
 Stdlib + pytest (DEC-012); offline and hermetic (the refimages tests' fixtures).
 """
@@ -126,11 +127,13 @@ def test_sheet_falls_to_gemini_when_fal_fails(store):
     assert store.read_entity(story_id, "characters", trf.CHAR)["ref_seed"] == seed
     assert any(f"{LITE} does not honour seeds; seed {seed} is recorded, not reproducible." in line for line in log)
 
-    # The turnaround, an edit of that portrait, reuses its seed on fal's edit link, which answers.
+    # The turnaround, an edit of that portrait, reuses its seed. DEC-305 section 5 (plan 28 stage F5) re-pin: the
+    # portrait recorded the story's image link (gemini), so the edit stays on it; it was: fal's edit link
+    # answered (fal_ok.requests[0].seed == seed, one gemini request in all) -- one story, two providers.
     fal_ok = PricedImage()
     ref2, _log = trf._character_image(store, story_id, "turnaround", ENV, adapters=_adapters(fal_ok, gemini))
-    assert ref2["source"] == "fal/seedream-4.5-edit" and fal_ok.requests[0].seed == seed
-    assert len(gemini.requests) == 1
+    assert ref2["source"] == LITE and fal_ok.requests == []
+    assert len(gemini.requests) == 2 and gemini.requests[1].seed == seed
 
 
 def test_sheet_falls_to_gemini_when_a_cap_refuses_fal_but_lite_fits(store):
@@ -210,10 +213,12 @@ def test_within_one_job_the_first_answering_provider_is_tried_first(store):
     prop = refimages.prop_image(store, story_id, trf.PROP, **common)
     assert prop["source"] == LITE and len(fal.requests) == 1 and len(gemini.requests) == 2
 
-    # A job of its own (no dict shared): fal is tried first again.
+    # A job of its own (no dict shared). DEC-305 section 5 (plan 28 stage F5) re-pin: the first plate recorded the
+    # story's image link (gemini), so this job starts on it too and fal is not asked again; it was: fal tried
+    # first again (len(fal.requests) == 2) -- a later job started over and could land on another provider.
     refimages.prop_image(store, story_id, trf.PROP, env=ENV, on_log=trf.Log(), cancel=CancelToken(),
                          adapters=adapters, sleep_fn=trf._no_sleep, time_fn=lambda: 100.0)
-    assert len(fal.requests) == 2 and len(gemini.requests) == 3
+    assert len(fal.requests) == 1 and len(gemini.requests) == 3
 
 
 def test_a_job_where_fal_answers_first_keeps_fal_first(store):

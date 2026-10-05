@@ -1098,6 +1098,16 @@ def episode_image_link(ec, storyboard, *, env=None, doc=_READ) -> dict:
             info.update(link=links[0], source="derived")
         elif len(links) > 1:
             info["mixed"] = links
+        else:
+            # Plan 28 stage F5 (DEC-305 section 5): an episode with no image yet starts on the story's own image
+            # link (the one its sheets, places and props were made on), when the keyframe chain holds it -- a
+            # story never mixes providers. The first keyframe made records the episode's own link as usual.
+            # Only an episode with no image of any kind yet (an upload, a locked or a stale one, a stock frame):
+            # what is on disk is never judged against a link it was not made for.
+            story_entry = sticky_link.story_recorded(ec.story) if media_policy.is_v2(ec.story) else None
+            pinned = sticky_link.pin_labels(chain, story_entry["link"]) if story_entry else []
+            if pinned and all(shot_image_path(ec, shot) is None for shot in storyboard["shots"]):
+                info.update(link=pinned[0], source="story", since=story_entry.get("since"))
     return info
 
 
@@ -3109,6 +3119,9 @@ class _Assets(voice_lines.LineMeasurement):
         elif info["source"] == "derived":
             ctx.on_log(f"🔗 Episode {ec.ep}'s shots stay on {info['link']}, the link every image it has was made "
                        "on.")
+        elif info["source"] == "story":
+            ctx.on_log(f"🔗 Episode {ec.ep}'s shots start on the story's image link {info['link']} (its sheets, "
+                       "places and props were made on it).")
 
     def keep_link(self, label) -> None:
         """Record the link that just served an image as the episode's

@@ -100,6 +100,35 @@ def record(link, *, now, switched_from=None) -> dict:
     return entry
 
 
+def story_recorded(story):
+    """The story's ``links.image`` record (plan 28 stage F5, DEC-305 section
+    5: the one link its character sheets, place plates and props are made
+    on; ``story.json``), or None -- a story that has made none yet, or one
+    written before the record existed."""
+    return recorded(story, IMAGE)
+
+
+def provider_of(link) -> str:
+    """The provider part of a ``provider/model`` label ('' for anything else)."""
+    return link.split("/", 1)[0] if isinstance(link, str) and "/" in link else ""
+
+
+def pin_labels(labels, link) -> list:
+    """The one label of *labels* (a chain's links, in order) that a story or
+    an episode locked to *link* is asked of: the first that is *link* or its
+    like-for-like swap (:func:`family`), else -- another kind's chain names
+    the same provider's sibling model (``fal/seedream-4.5``'s text link and
+    its ``-edit`` link) -- the first of the same provider; a one-item list,
+    or ``[]`` when the chain has none (the link is gone)."""
+    labels = list(labels or ())
+    own = family(link)
+    exact = [label for label in labels if label in own]
+    if exact:
+        return exact[:1]
+    provider = provider_of(link)
+    return [label for label in labels if provider and provider_of(label) == provider][:1]
+
+
 def gone_why(failures, link):
     """Why *link* cannot serve today, read off one request's chain failures
     (``NoRunnableLink.failures``: ``(label, reason)`` pairs), or None when
