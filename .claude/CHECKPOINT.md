@@ -1,12 +1,27 @@
-## CURRENT STATE — plan 27 (5–10 s shots that carry an exchange) APPROVED; stages 1–2 merged (NOT deployed), stage 3 running (2026-10-05, local session)
+## CURRENT STATE — plan 27 (5–10 s shots carrying an exchange) CODE + DOCS COMPLETE and LIVE; close-out pending the human's regen (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `3ec6d40` (stages 1–2 merged + pushed; stage 3
-  running on feat/plan27-s3, Opus). **Live = c36e592** (plan 26 + hotfixes): main is AHEAD of the live code and must
-  NOT be deployed before stage 3 lands (stage 2's exchange plan with the old one-shot-per-line split would make a
-  scene's clips exceed its slot). Plan: `.claude/plans/ai-story/27-exchanges-plan.md`; D1/D2 defaulted yes.
-- **Next action:** merge stage 3 (gate: both envs exit 0, studio_prompts/before_d5 goldens unmodified) → stage 4 (the
-  take per line, Sonnet) → stage 5 docs + DEC-304 + A-177… → deploy at 0 jobs (restart; a rebuild only if the dashboard
-  changed) → the human regenerates one episode and sees 2–4 lines per shot.
+- **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this commit), clean tree
+  (`FETCH_HEAD` untracked). **Live:** f0dfc29 deployed (bundle index-DpbPJMw0.js), health 200, 0 jobs. CI: to read on
+  `actions/runs?branch=main` (not polled).
+- **Shipped (DEC-304, A-177…A-180; plan `.claude/plans/ai-story/27-exchanges-plan.md`):** stage 1 the 5–10 s window
+  clamped to the link (Veo/Flow 6–8, kling 5/10, seedance 5–10, ltx 6/8/10), reactions 6 s, the templates' floors and
+  slots, the trim floor, kept shots grandfathered · 2 the exchange plan (1–4 lines per shot sized to the clip, a floor
+  and a cap per line, the writer told the exchange, the trim pass lengthens) · 3 one shot per exchange + the exchange
+  clip prompt (every line in turn; one-line shots byte-identical) · 4 the take per line · 5 docs · the Handoff card
+  lists the lines. Plan 26's hotfixes (the fruit-people medium, the pacing line) and the T1v2 name→tag repair are live too.
+- **The human's Tier 2 (verdicts → A-177…A-180 + plan 26's A-169/A-171/A-174/A-176):** (a) Regenerate a Dragon
+  Fruit episode: the log shows the exchange sentences and "between lo and hi words", no name→tag retries, scenes of
+  8 s + 6 s shots with 2–3 lines each; the Handoff lists the lines per shot and Copy line copies them all; (b) paste a
+  shot into Gemini/Flow: CGI fruit people (not a mask), the exchange spoken in turn with the right voices, no dead air
+  at the end; (c) Copy works over http on the phone.
+- **Follow-ups logged (not done):** a close-up on a two-speaker exchange is not forced to a two-shot; the T1v2 ask is
+  not told about exchanges (its golden); the confrontation template's "9–16 shots" note predates exchanges; the Veo
+  price row says 4/6/8 (what it sells); plan 26's list (named_character on species-first descriptors, prop_handles,
+  platform_prompt one paragraph, _J2_SHEET_ISSUE no head, species not clearable, the series line drops before motion
+  at Veo's 630, 230-word links get the core alone).
+- **Rules in force (unchanged):** worktrees off main; DEC-234 selections in both envs; deploy only at 0 running jobs
+  after the 3.11 compile; no full local suite (DEC-278); no edits to main's source while a job runs; money only on
+  the human's go.
 - **Open questions:** none.
 
 ## CURRENT STATE — plan 26 (rich prompts on every link + Copy + species in a fruit world) CODE + DOCS COMPLETE and LIVE; close-out pending the human's Tier 2 (2026-10-05, local session)
