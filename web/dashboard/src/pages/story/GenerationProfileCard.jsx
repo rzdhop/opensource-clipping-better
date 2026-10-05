@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchStoryEstimate, fetchUniverses, patchStory, switchPipeline } from '../../api'
+import { fetchSettings, fetchStoryEstimate, fetchUniverses, patchStory, switchPipeline } from '../../api'
 import RouteChip from '../../components/RouteChip'
 import { StepError } from './fields'
 import { formatUsd } from '../../lib/format'
@@ -21,6 +21,9 @@ const SHEET_MODES = {
 }
 // Plan 23 stage D4: how the bodies are drawn (generation_profile.body_rule; absent = the style's own rules).
 const BODY_RULES = { '': 'As the style draws them', all_matter: "All skin is the character's matter" }
+
+// Plan 23 stage A9: which provider the images try first (generation_profile.image_preference; absent = fal first).
+const IMAGE_PREFERENCES = { '': 'fal first (default)', gemini_first: 'Gemini first' }
 
 /**
  * The episode the Visual tier card prices its video estimate for
@@ -124,6 +127,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   // Plan 23 stage D4: the characters' sheets and bodies (absent: three sheets, the style's own rules).
   const [sheetMode, setSheetMode] = useState(profile.sheet_mode || 'three_sheet')
   const [bodyRule, setBodyRule] = useState(profile.body_rule || '')
+  // Plan 23 stage A9: the image provider preference; Gemini first needs the paid key (GET /api/settings).
+  const [imagePreference, setImagePreference] = useState(profile.image_preference || '')
+  const [geminiKeySet, setGeminiKeySet] = useState(false)
   // Plan 23 stage D2: what the cast is made of -- the profile's universe, else the style's default
   // (shown, not edited here: it is chosen when the story is created and frozen with the style).
   const [universeCatalogue, setUniverseCatalogue] = useState(null)
@@ -145,12 +151,14 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   useEffect(() => {
     let cancelled = false
     fetchUniverses().then((data) => { if (!cancelled) setUniverseCatalogue(data) }).catch(() => {})
+    fetchSettings().then((data) => { if (!cancelled) setGeminiKeySet(Boolean(data.gemini_paid_api_key_set)) }).catch(() => {})
     return () => { cancelled = true }
   }, [])
 
   useEffect(() => { setSpeechModel(profile.speech_model || 'fast') }, [profile.speech_model])
   useEffect(() => { setSheetMode(profile.sheet_mode || 'three_sheet') }, [profile.sheet_mode])
   useEffect(() => { setBodyRule(profile.body_rule || '') }, [profile.body_rule])
+  useEffect(() => { setImagePreference(profile.image_preference || '') }, [profile.image_preference])
 
   const save = async (patch) => {
     setSaving(true)
@@ -168,6 +176,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       setSpeechModel(profile.speech_model || 'fast')
       setSheetMode(profile.sheet_mode || 'three_sheet')
       setBodyRule(profile.body_rule || '')
+      setImagePreference(profile.image_preference || '')
       setError(err.message)
       if (err.status === 409 && err.code === PIPELINE_SWITCH_HAS_SCRIPTS && err.detail.episodes) {
         setSwitchOffer({ episodes: err.detail.episodes, patch })
@@ -220,6 +229,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   // The default is no key at all (null clears it): a story that never chose keeps its documents as they were.
   const handleSheetMode = (value) => { setSheetMode(value); save({ sheet_mode: value === 'three_sheet' ? null : value }) }
   const handleBodyRule = (value) => { setBodyRule(value); save({ body_rule: value || null }) }
+  const handleImagePreference = (value) => { setImagePreference(value); save({ image_preference: value || null }) }
 
   // Every shot a clip: the quality budget profile (animate all_shots) at tier
   // >= 2 on the api route, on the v2 pipeline (the server sets its template and
@@ -330,6 +340,21 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           </select>
           <p className="form-hint">
             Sheets drawn from now on; regenerate a character's images to draw it again in the new mode.
+          </p>
+        </div>
+      )}
+      {isV2 && !imagesOwn && (
+        <div className="form-group">
+          <label className="form-label" htmlFor="story-profile-image-preference">Image provider</label>
+          <select id="story-profile-image-preference" className="form-select" value={imagePreference}
+            onChange={(e) => handleImagePreference(e.target.value)}
+            disabled={saving || (!geminiKeySet && imagePreference === '')}>
+            {Object.entries(IMAGE_PREFERENCES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+          <p className="form-hint">
+            {geminiKeySet
+              ? 'Images made from now on try this provider first; an episode already on a provider keeps it.'
+              : 'Add GEMINI_PAID_API_KEY in Settings to draw the images on Gemini first.'}
           </p>
         </div>
       )}

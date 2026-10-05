@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createStory, fetchNewStoryProfile, fetchStyles, fetchUniverses } from '../../api'
+import { createStory, fetchNewStoryProfile, fetchSettings, fetchStyles, fetchUniverses } from '../../api'
 import { Button } from '../../ui'
 import {
   EPISODE_TEMPLATES, pipelineDefaultTemplate, profileSuggestedTemplate, styleSuggestedTemplate,
@@ -47,6 +47,13 @@ const BODY_RULES = [
   { id: 'all_matter', label: "All skin is the character's matter" },
 ]
 
+// Plan 23 stage A9: which provider the images try first (generation_profile.image_preference); '' sends
+// nothing -- the budget profile's order (fal first, today's). Gemini first needs GEMINI_PAID_API_KEY.
+const IMAGE_PREFERENCES = [
+  { id: '', label: 'fal first (default)' },
+  { id: 'gemini_first', label: 'Gemini first' },
+]
+
 function CreateStoryForm() {
   const navigate = useNavigate()
   // No default: a language a user forgot to pick must never silently become
@@ -68,6 +75,9 @@ function CreateStoryForm() {
   // Plan 23 stage D4: the characters' sheets and bodies; the defaults send nothing.
   const [sheetMode, setSheetMode] = useState('three_sheet')
   const [bodyRule, setBodyRule] = useState('')
+  // Plan 23 stage A9: the image provider preference, and whether the paid Gemini key is set (GET /api/settings).
+  const [imagePreference, setImagePreference] = useState('')
+  const [geminiKeySet, setGeminiKeySet] = useState(false)
   // Plan 23 stage D2: what the cast is made of; '' sends nothing (the style's default universe).
   const [universeChoice, setUniverseChoice] = useState('')
   const [universeCatalogue, setUniverseCatalogue] = useState({ universes: [], by_style: {} })
@@ -88,6 +98,7 @@ function CreateStoryForm() {
     let cancelled = false
     fetchStyles().then((data) => { if (!cancelled) setStyles(data.styles || []) }).catch(() => {})
     fetchUniverses().then((data) => { if (!cancelled) setUniverseCatalogue(data) }).catch(() => {})
+    fetchSettings().then((data) => { if (!cancelled) setGeminiKeySet(Boolean(data.gemini_paid_api_key_set)) }).catch(() => {})
     fetchNewStoryProfile().then((data) => {
       if (cancelled) return
       setOffer(data)
@@ -186,6 +197,7 @@ function CreateStoryForm() {
           ...(manualClips && imagesOwn ? { images: 'manual' } : {}),
           ...(pipeline === 'v2' && sheetMode !== 'three_sheet' ? { sheet_mode: sheetMode } : {}),
           ...(bodyRule ? { body_rule: bodyRule } : {}),
+          ...(pipeline === 'v2' && !(manualClips && imagesOwn) && imagePreference ? { image_preference: imagePreference } : {}),
           ...(shownUniverse ? { universe: shownUniverse } : {}),
         } : null,
       }
@@ -448,6 +460,19 @@ function CreateStoryForm() {
                     <p className="form-hint">
                       One 9:16 image per character: the front on the left half, the back on the right.
                     </p>
+                  )}
+                </div>
+              )}
+              {pipeline === 'v2' && !(manualClips && imagesOwn) && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="new-story-image-preference">Image provider</label>
+                  <select id="new-story-image-preference" className="form-select" value={imagePreference}
+                    disabled={!geminiKeySet && imagePreference === ''}
+                    onChange={(e) => choose(setImagePreference)(e.target.value)}>
+                    {IMAGE_PREFERENCES.map((pref) => <option key={pref.id} value={pref.id}>{pref.label}</option>)}
+                  </select>
+                  {!geminiKeySet && (
+                    <p className="form-hint">Add GEMINI_PAID_API_KEY in Settings to draw the images on Gemini first.</p>
                   )}
                 </div>
               )}

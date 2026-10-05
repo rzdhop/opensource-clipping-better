@@ -113,6 +113,17 @@ def images_manual(story) -> bool:
     return is_v2(story) and profile.get("images") == defaults.IMAGES_MANUAL
 
 
+def image_preference(story) -> str:
+    """Which provider *story*'s image roles try first (plan 23 stage A9,
+    ``generation_profile.image_preference``): ``gemini_first`` on a v2 story
+    that chose it and whose images are not manual, else ``""`` (the budget
+    profile's order, fal first -- every story as it was)."""
+    chosen = ((story or {}).get("generation_profile") or {}).get("image_preference")
+    if is_v2(story) and not images_manual(story) and chosen in defaults.IMAGE_PREFERENCES:
+        return chosen
+    return ""
+
+
 def sheet_mode(story) -> str:
     """How *story*'s characters' reference sheets are drawn (plan 23 stage
     D4, ``generation_profile.sheet_mode``): ``three_sheet`` (absent, and
@@ -250,6 +261,9 @@ def role_chain(role, kind, merged, story) -> list:
         raise ChainError(f"no quality link is left for the {role} images (draft links, and links that cannot "
                          f"serve a {kind} request, are never used on a v2 story)")
     assert not {describe(link) for link in chain} & exclude
+    if image_preference(story) == defaults.IMAGE_GEMINI_FIRST:
+        # Plan 23 stage A9: a stable re-sort, no link added or removed (DEC-204's pins stay valid).
+        chain = sorted(chain, key=lambda link: not describe(link).startswith("gemini/"))
     return chain
 
 
@@ -639,9 +653,17 @@ def preset_estimate(merged=None, *, story=None) -> dict:
     are counted in its ``sheet_mode`` (one image and no edit a character in
     ``two_view``, one and one in ``two_view_expressions``); without one, or
     on ``three_sheet``, the text is what it always was. ``story`` also
-    carries ``sheet_usd_by_mode``: a character's sheets in each mode."""
+    carries ``sheet_usd_by_mode``: a character's sheets in each mode.
+
+    Plan 23 stage A9: a *story* that prefers Gemini (:func:`image_preference`)
+    is priced on the first link of its re-sorted chains (nano-banana-2-lite);
+    without a story, the preset is what it was."""
     profile = defaults.quality_generation_profile()
     settings = budget_mod.profile_settings(profile["budget_profile"])
+    # Plan 23 stage A9: a story's image provider preference moves the first links the estimate prices.
+    preference = image_preference(story)
+    if preference:
+        profile = dict(profile, image_preference=preference)
     story_doc = {"generation_profile": profile}
     template = templates.load_episode_template(defaults.EPISODE_TEMPLATE_ID_V2)
 

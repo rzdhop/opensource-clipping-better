@@ -29,7 +29,7 @@ def _read(path):
 
 def test_the_wizard_filters_the_select_by_the_chosen_style_and_hides_it_when_the_style_lists_none():
     src = _read(WIZARD)
-    assert "import { createStory, fetchNewStoryProfile, fetchStyles, fetchUniverses } from '../../api'" in src
+    assert "import { createStory, fetchNewStoryProfile, fetchSettings, fetchStyles, fetchUniverses } from '../../api'" in src
     assert "fetchUniverses().then((data) => { if (!cancelled) setUniverseCatalogue(data) }).catch(() => {})" in src
     assert "const styleUniverses = universeCatalogue.by_style[styleTemplateId]" in src
     assert "styleUniverses.universes" in src and ".filter(Boolean)" in src

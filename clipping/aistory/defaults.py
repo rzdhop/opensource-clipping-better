@@ -45,6 +45,14 @@ NATIVE_SPEECH_PROFILES = (NATIVE_SPEECH_PROFILE, NATIVE_SPEECH_MANUAL_PROFILE)
 IMAGES_MANUAL = "manual"
 IMAGE_MODES = (IMAGES_MANUAL,)
 
+# Plan 23 stage A9: the optional ``generation_profile.image_preference``, which
+# provider a v2 story's sheets, plates, props and keyframes try first. Absent:
+# the budget profile's order (fal first). "gemini_first" re-sorts every role's
+# chain so the ``gemini/*`` links come first, no link removed
+# (``media_policy.role_chain``); ignored on a legacy or manual-images story.
+IMAGE_GEMINI_FIRST = "gemini_first"
+IMAGE_PREFERENCES = (IMAGE_GEMINI_FIRST,)
+
 # Phase 7 (DEC-221): the optional ``generation_profile.pipeline``. Absent is
 # the legacy pipeline; "v2" gates the quality-only image links per role
 # (``media_policy``) and the phase-7 behaviour built on it. Never in the

@@ -677,6 +677,8 @@ class GenerationProfileModel(BaseModel):
     # Optional (plan 23 stage D2): what the cast is made of, an id of templates/universes.json;
     # left out, the style's default universe, else none. The store refuses one the style lacks.
     universe: Optional[str] = None
+    # Optional (plan 23 stage A9): left out, the budget profile's image order (fal first).
+    image_preference: Optional[Literal["gemini_first"]] = None
 
     @model_serializer(mode="wrap")
     def _without_unset_pipeline(self, handler):
@@ -688,7 +690,7 @@ class GenerationProfileModel(BaseModel):
             data.pop("speech_model", None)
         if isinstance(data, dict) and data.get("images") is None:
             data.pop("images", None)
-        for key in ("sheet_mode", "body_rule", "universe"):
+        for key in ("sheet_mode", "body_rule", "universe", "image_preference"):
             if isinstance(data, dict) and data.get(key) is None:
                 data.pop(key, None)
         return data

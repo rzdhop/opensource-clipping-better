@@ -318,9 +318,11 @@ _PROFILE_CHOICES = {
     "body_rule": defaults.BODY_RULES,
     # Plan 23 stage D2: what the cast is made of (a universe of templates/universes.json).
     "universe": defaults.UNIVERSES,
+    # Plan 23 stage A9: which provider the image roles try first (absent: fal first).
+    "image_preference": defaults.IMAGE_PREFERENCES,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
-_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe")
+_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe", "image_preference")
 
 _INDEX_ENTRY_SCHEMA = {
     "type": "object",
