@@ -410,7 +410,8 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     told = _k1_character(story, character)
     species_text, _world = _species_world_text(story, lock, character, told, others)
     pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
-                              universe=species_text)
+                              universe=species_text,
+                              setup=llm_call.setup_block(store, ctx.story_id, story, lock=lock, hexes=True))
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = None
     if regenerate:
@@ -481,7 +482,8 @@ def write_dossier(ctx, store, char_id, *, tools, note=None, regenerate=False, an
         raise StepFailed(f"{character['name']}: write the character first -- D1 reads its text.")
     cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
     others = [doc for doc in cast if doc["char_id"] != char_id]
-    pack = context.build_pack(language=story["language"], story=story, note=note)
+    pack = context.build_pack(language=story["language"], story=story, note=note,
+                              setup=llm_call.setup_block(store, ctx.story_id, story))
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = None
     if regenerate and character.get("dossier"):
@@ -560,7 +562,8 @@ def write_look(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     species_text, world = _species_world_text(story, lock, character, k1,
                                               [doc for doc in cast if doc["char_id"] != char_id])
     pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
-                              universe=species_text)
+                              universe=species_text,
+                              setup=llm_call.setup_block(store, ctx.story_id, story, lock=lock, hexes=True))
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = None
     if regenerate and character.get("look"):
