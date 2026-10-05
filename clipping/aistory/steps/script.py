@@ -366,6 +366,39 @@ def store_line_plans(ec, script) -> None:
         _store_plan(scene, line_plan(ec, script, scene, tail_floor=floors[scene["scene_id"]]))
 
 
+def plan_fit_refusal(ec, script=None, *, log=None):
+    """Why this episode's plan cannot fit its window (plan 28 stage A1), as
+    one plain sentence, or None when it can -- or when the story's speech is
+    not native (a TTS story's scenes are re-timed to the window). With a
+    *script* whose scenes carry their plans (an E1v3 beat sheet), the plans'
+    own clips (``timing.plan_clip_floor_s``); without one, the cheapest shape
+    the template allows on this story's links (``timing.plan_floor_preview``:
+    no call made). *log* gets each scene's arithmetic as info lines."""
+    if not media_policy.native_speech(ec.story):
+        return None
+    window_hi = float(ec.template["window_s"][1])
+    planned = [scene for scene in (script or {}).get("scenes") or () if (scene.get("line_plan") or {}).get("shots")]
+    if planned:
+        floor = timing.plan_clip_floor_s(script, ec.template)
+        scenes = len(script["scenes"])
+        rows = [(scene["scene_id"], scene["function"],
+                 sum(float(shot["clip_s"]) for shot in scene["line_plan"]["shots"])) for scene in planned]
+        end_card = floor - sum(clip for _sid, _function, clip in rows)
+    else:
+        cut = ec.episode_defaults.get("cliffhanger_style") == "cut_to_black"
+        preview = timing.plan_floor_preview(ec.template, ec.ep, _speech_lengths(ec), bool(ec.narrator),
+                                            lang=ec.language, style_lock=ec.style_lock, end_card=cut)
+        floor, scenes = preview["floor_s"], preview["scenes"]
+        rows = [(f"slot {k + 1}", slot, clip) for k, (slot, clip) in enumerate(preview["per_scene"])]
+        end_card = floor - sum(clip for _sid, _function, clip in rows)
+    sentence = timing.plan_floor_refusal(ec.ep, scenes, floor, window_hi)
+    if sentence and log is not None:
+        for sid, function, clip in rows:
+            log(f"ℹ️ {sid} ({function}): {clip:g} s of clips")
+        log(f"ℹ️ end card: {end_card:g} s; total {floor:g} s of clips against {window_hi:g} s")
+    return sentence
+
+
 def current_plan(ec, script, scene) -> dict:
     """*scene*'s line plan as it stands now (:func:`line_plan`: the voices,
     the clip lengths and the neighbours of this moment), stored on the scene
@@ -1708,14 +1741,26 @@ class _Run(LineMeasurement):
 
     def beat_sheet(self) -> None:
         ec = self.ec
+        # Plan 28 stage A1: even the cheapest shape of this template on this story's links cannot fit its
+        # window: refused before the first call is paid.
+        self.refuse_unfit_plan(None)
         self.before_call()
         self.ctx.on_log(f"🎬 Episode {ec.ep}: beat sheet (E1)")
         write_beat_sheet(self.ctx, ec, self.script, tools=self.tools, announced=self.announced)
         self.calls += 1
         self.save()
+        # ... and the beat sheet's own plans, right after it is kept: nothing else is written for them.
+        self.refuse_unfit_plan(self.script)
         body = len(body_scenes(self.script))
         self.ctx.on_log(f"🎬 Episode {ec.ep}: “{self.script['title']}” — {len(self.script['scenes'])} scenes, "
                         f"{body} body")
+
+    def refuse_unfit_plan(self, script) -> None:
+        """:func:`plan_fit_refusal` as a refusal (plan 28 stage A1): *script*
+        None asks the zero-call preview, a beat-sheeted script its own plans."""
+        sentence = plan_fit_refusal(self.ec, script, log=self.ctx.on_log)
+        if sentence:
+            raise StepFailed(sentence)
 
     def body(self) -> None:
         ec, script = self.ec, self.script
@@ -2008,6 +2053,9 @@ class _Run(LineMeasurement):
                 self.script = skeleton(ec, now=llm_call.utc_now())
             if not self.script["scenes"]:
                 self.beat_sheet()
+            elif any(scene["state"] == "stub" for scene in self.script["scenes"]):
+                # A beat sheet kept by an earlier run: its plans are checked before any scene is written.
+                self.refuse_unfit_plan(self.script)
             self.body()
             self.framing()
             self.fill()

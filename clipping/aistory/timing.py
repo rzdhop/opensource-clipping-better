@@ -970,6 +970,87 @@ def plan_budget(plan: dict, *, line_lo: int = 1) -> dict:
             "line_words": [low, largest], "caps": caps}
 
 
+# ------------------------------------------- plan 28 stage A1: the plan's floor
+
+def _end_card_s(script: dict, template: dict) -> float:
+    """The seconds the native clock adds for the end card
+    (``native_speech.native_pass``'s rule, kept here as numbers so this module
+    keeps its imports): the card less the fade into it, when the cliffhanger
+    cuts to black; nothing otherwise."""
+    if (script.get("cliffhanger") or {}).get("cut_to_black"):
+        return float(template["end_card_s"]) - float(template["transitions_s"]["fadeblack"])
+    return 0.0
+
+
+def plan_clip_floor_s(script: dict, template: dict) -> float:
+    """The least seconds *script*'s episode can last on a native-speech story
+    (plan 28 stage A1): the sum, over its scenes, of the stored
+    ``line_plan.shots[*].clip_s`` -- one bought clip each, never shorter than
+    its planned length -- plus the end card the native clock adds. A scene
+    with no stored plan (or no shots) counts nothing. Pure."""
+    total = 0.0
+    for scene in script.get("scenes") or ():
+        for shot in (scene.get("line_plan") or {}).get("shots") or ():
+            total += float(shot["clip_s"])
+    return total + _end_card_s(script, template)
+
+
+def plan_floor_refusal(ep: int, scenes: int, floor_s: float, window_hi_s: float):
+    """The one plain sentence a plan that cannot fit its window is refused
+    with (plan 28 stage A1), or None when *floor_s* fits under *window_hi_s*.
+    No internal id, no term of the pipeline: what it needs, what it is
+    allowed, what to do."""
+    if floor_s <= float(window_hi_s) + 1e-6:
+        return None
+    need = int(math.ceil(floor_s - 1e-6))
+    return (f"Episode {ep} cannot fit: its {scenes} scenes need at least {need} s of clips on this link, more "
+            f"than the {float(window_hi_s):g} s this format allows. Pick a format that fits, or let the app "
+            "choose one.")
+
+
+def plan_floor_preview(template: dict, ep: int, lengths: tuple, narrator_on: bool, *, lang: str = "fr",
+                       style_lock: dict = None, end_card: bool = False) -> dict:
+    """What the cheapest plan of episode *ep* on *template* needs in clips,
+    before any writer call (plan 28 stage A1): :func:`episode_slots` gives the
+    scenes, :func:`scene_plan` plans each on a synthetic scene -- a body
+    scene with the narrator speaking gets the narrator and one character line
+    (a narrated format's beat sheet names how many body scenes carry a
+    character line: only that many, the rest the narrator alone); with no
+    narrator, an exchange between two characters; any other slot its one
+    line. *lengths* is ``(speech lengths, silent lengths)`` of the story's
+    links, *narrator_on* whether the story's narrator is on (the template's
+    ``narrator_slots`` still say where it may speak), *end_card* whether the
+    cliffhanger cuts to black.
+
+    ``{"floor_s", "scenes", "window_s", "per_scene": [[slot, clip seconds],
+    ...]}``. Pure."""
+    speech, silent = lengths
+    slots = episode_slots(template, ep)
+    narrator_slots = template.get("narrator_slots")
+    with_character = None
+    if narrator_on and "character_lines" in template:
+        with_character = int(template["character_lines"][0])
+    body_seen = 0
+    per_scene = []
+    for k, slot in enumerate(slots):
+        function = template["slots"][slot]["functions"][0]
+        scene = {"scene_id": f"s{k:02d}", "function": function, "place_id": "place", "characters": ["c1", "c2"],
+                 "emotion": "neutral", "target_duration_s": 0.0, "lines": []}
+        speaks = bool(narrator_on) and (narrator_slots is None or slot in narrator_slots)
+        if slot == "body" and with_character is not None:
+            scene["character_line"] = body_seen < with_character
+            body_seen += 1
+        plan = scene_plan(template, scene, lang=lang, native=True, narrator=speaks,
+                          narrator_provider="edge" if speaks else None, speakers={"c1": None, "c2": None},
+                          style_lock=style_lock, speech_lengths=speech, silent_lengths=silent)
+        per_scene.append([slot, float(sum(shot["clip_s"] for shot in plan["shots"]))])
+    floor = sum(clip for _slot, clip in per_scene)
+    if end_card:
+        floor += float(template["end_card_s"]) - float(template["transitions_s"]["fadeblack"])
+    return {"floor_s": floor, "scenes": len(slots), "window_s": list(template["window_s"]),
+            "per_scene": per_scene}
+
+
 # --------------------------------------------------------------- transitions
 
 def _boundary_kind(prev_place_id: str, next_place_id: str) -> str:

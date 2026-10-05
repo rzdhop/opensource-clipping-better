@@ -1072,6 +1072,13 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
             refusal = script_refusal(script, ep)
             if refusal:
                 stops_at = {"step": "script", "reason": refusal}
+        # Plan 28 stage A1: a native-speech plan that cannot fit its window is refused before any writer call
+        # (the beat sheet's own plans once it exists, else the cheapest shape the template allows).
+        if stops_at is None and (script is None or any(scene["state"] == "stub" for scene in script["scenes"])
+                                 or not script["scenes"]):
+            refusal = script_step.plan_fit_refusal(ec, script)
+            if refusal:
+                stops_at = {"step": "script", "reason": refusal}
     script_calls = sum(breakdown.values())
     if board_approved or mode == FAST:
         t1_calls = 0
