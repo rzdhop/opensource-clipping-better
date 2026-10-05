@@ -1,3 +1,26 @@
+## CURRENT STATE — plan 23 follow-through: the human's six calls in order (2026-10-05, local session)
+
+- **In-progress header:** phase = IMPLEMENT of the follow-through list (the human's message of 2026-10-05): (1) keys +
+  zone verification [waits for the human to set `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `PIXABAY_API_KEY`,
+  `BUDGET_TIMEZONE=Europe/Paris` in Settings; free checks only] → (2) D7's writer A/B on d16026f12e77 [dry-run done:
+  Flash $0.10 / Sonnet $0.53 / Opus $1.33 one try, $1.96 total, upper $3.91 > `--max-usd 3.00`; the run waits for the go]
+  → (3) C2 the LTX-2.5 FR speech probe [tool to write, dry-run, one clip ≈ $0.54 on the go; C4/C5 only if matched ≥ 0.8
+  and the ear] → (4) five follow-ups, one stage each (A5 CLI cast gate via `workflow.generation_budget`, D7
+  `_repair_e2_reply` KeyError, B8 assets fixture + stock keys, D5 variant sheets in the image brief, A8 edit-refusal
+  hint naming the Gemini key) → (5) **DONE** CI's x86_64 golden keys (main `500a720`, pushed; CI was red on main for
+  those two keys alone) → (6) the phone walks. Checkpoint commit = main `500a720`, clean tree (`FETCH_HEAD` untracked,
+  left alone). Tier-1 baseline: CI on the pushed main (DEC-278); the golden-aspects selection 14/14 in both envs.
+- **Live state:** health 200, 346 jobs (0 running, 8 awaiting_approval), today (UTC) $0.505 of the $4 cap
+  (e7412a3efcc6's cast), zone UTC, `resets_at` 2026-10-06T00:00Z. Deployed bundle index-BfVk0EWS.js (80de8b0's code;
+  500a720 is tests-only, no deploy needed).
+- **Rules in force:** worktrees off main; DEC-234 selections in both envs per stage; a refusal-text change runs
+  `tests/test_api_budget_refusal.py` + `tests/test_stories_api_phase2.py` (DEC-297); requirements pins mirrored in
+  pyproject; deploy only at 0 running jobs after compiling the tree with the image's Python 3.11; no full local suite
+  (DEC-278); no edits to main's source while a job runs; nothing that spends without the human's go.
+- **Next action:** two Explore agents map C2 and the five follow-ups; on their reports, plan the small stages; ask the
+  human for the keys (step 1) and the A/B go (step 2).
+- **Open questions:** none blocking; the money gates are the human's.
+
 ## CURRENT STATE — plan 23 (the upgrade ideas) CODE COMPLETE and DEPLOYED; phase DOCUMENT / close-out (2026-10-05, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main `c88023c`, clean tree (`FETCH_HEAD`
