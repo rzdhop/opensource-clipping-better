@@ -12,6 +12,7 @@ import EntityGallery, { useHashAccordion } from '../EntityGallery'
 import ManualUploadSlot, { EntityImageSlots, entityImageSlot, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import VoiceReferenceSlot from './VoiceReferenceSlot'
+import PromptDrawer, { entityBrief, entryKey, useImageBrief } from './PromptDrawer'
 import { Mic } from '../../../ui/icons'
 
 // The character roles a custom entry may pick (spec 2.3): the closed list
@@ -288,7 +289,7 @@ function VariantThumb({ storyId, character, slot, refDoc }) {
   )
 }
 
-function VariantRow({ storyId, character, variant, disabled, manualImages, onChange }) {
+function VariantRow({ storyId, character, variant, disabled, manualImages, brief, onChange }) {
   const target = `character:${character.char_id}:variant:${variant.variant_id}`
   const [estimate, setEstimate] = useState(null)
   const [error, setError] = useState('')
@@ -333,16 +334,23 @@ function VariantRow({ storyId, character, variant, disabled, manualImages, onCha
         <div className="manual-upload-slots">
           <p className="form-hint">Your own images: make each sheet from the image brief (an edit of the
             portrait), then upload it here.</p>
-          {slots.map((slot) => (
-            <ManualUploadSlot
-              key={slot}
-              slot={entityImageSlot(storyId, 'characters', character.char_id, slot, variant.variant_id)}
-              label={`Upload ${variant.label} ${SLOT_LABELS[slot]}`}
-              accept="image/png,image/jpeg,image/webp"
-              disabled={disabled || working}
-              onDone={onChange}
-            />
-          ))}
+          {slots.map((slot) => {
+            // Plan 25 stage 4: the image brief's entry for this variant's sheet, when it was loaded.
+            const entry = brief && brief[entryKey(slot, variant.variant_id)]
+            return entry ? (
+              <PromptDrawer key={slot} storyId={storyId} entry={entry} disabled={disabled || working}
+                onDone={onChange} />
+            ) : (
+              <ManualUploadSlot
+                key={slot}
+                slot={entityImageSlot(storyId, 'characters', character.char_id, slot, variant.variant_id)}
+                label={`Upload ${variant.label} ${SLOT_LABELS[slot]}`}
+                accept="image/png,image/jpeg,image/webp"
+                disabled={disabled || working}
+                onDone={onChange}
+              />
+            )
+          })}
         </div>
       )}
       <div className="story-step-actions">
@@ -362,7 +370,7 @@ function VariantRow({ storyId, character, variant, disabled, manualImages, onCha
   )
 }
 
-function VariantsSection({ storyId, character, disabled, manualImages, onChange }) {
+function VariantsSection({ storyId, character, disabled, manualImages, brief, onChange }) {
   const variants = character.variants || []
   const [label, setLabel] = useState('')
   const [delta, setDelta] = useState('')
@@ -396,7 +404,7 @@ function VariantsSection({ storyId, character, disabled, manualImages, onChange 
       )}
       {variants.map((variant) => (
         <VariantRow key={variant.variant_id} storyId={storyId} character={character} variant={variant}
-          disabled={disabled} manualImages={manualImages} onChange={onChange} />
+          disabled={disabled} manualImages={manualImages} brief={brief} onChange={onChange} />
       ))}
       {variants.length < VARIANTS_MAX && (
         <form className="story-variant-add" onSubmit={add}>
@@ -713,7 +721,7 @@ function DossierSection({ storyId, character, castNames, disabled, onChange }) {
 // -------------------------------------------------------------- one character
 
 function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames,
-  withVariants, manualImages }) {
+  withVariants, manualImages, brief }) {
   const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
@@ -880,7 +888,7 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
             <details className="story-profile" open={(character.variants || []).length > 0}>
               <summary>Variants — the same character in another look ({(character.variants || []).length}/3)</summary>
               <VariantsSection storyId={storyId} character={character} disabled={cardBusy}
-                manualImages={manualImages} onChange={onChange} />
+                manualImages={manualImages} brief={brief} onChange={onChange} />
             </details>
           )}
         </>
@@ -1045,8 +1053,11 @@ function characterTile(character, info, pickVoiceIds) {
 
 // --------------------------------------------------------------------- page
 
-export default function CastStep({ data, storyId, inFlightJob, onChange }) {
+export default function CastStep({ data, storyId, inFlightJob, onChange: onChangeStep }) {
   const { story, characters, progress } = data
+  // Plan 25 stage 4: a manual-images story's prompts, read once and again after every change.
+  const { images: briefImages, reload: reloadBrief } = useImageBrief(storyId, imagesManual(story))
+  const onChange = () => { reloadBrief(); onChangeStep() }
   const consistencyMode = story.generation_profile.consistency_mode
   // The open character's editor: the URL's #char_id (one at a time).
   const [openId, toggleOpen] = useHashAccordion((characters || []).map((c) => c.char_id))
@@ -1117,7 +1128,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
               {imagesManual(story) && (
                 // Plan 22 stage 5: the story's images are the user's own -- an upload slot per sheet.
                 <EntityImageSlots storyId={storyId} kind="characters" entity={character} disabled={busy}
-                  onChange={onChange} />
+                  brief={entityBrief(briefImages, 'characters', character.char_id)} onChange={onChange} />
               )}
             <CharacterCard
               key={character.char_id}
@@ -1132,6 +1143,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
               castNames={castNames}
               withVariants={variantsEnabled(story)}
               manualImages={imagesManual(story)}
+              brief={entityBrief(briefImages, 'characters', character.char_id)}
             />
             </>
           )

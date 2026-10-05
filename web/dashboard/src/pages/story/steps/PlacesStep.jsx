@@ -10,6 +10,7 @@ import { EditableText, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
 import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
+import { entityBrief, useImageBrief } from './PromptDrawer'
 
 // The place time-variant choices a user may add (spec 2.4): the closed list
 // clipping.aistory.schemas.TIME_VARIANT_CHOICES also uses. "day" is always
@@ -911,8 +912,11 @@ function propTile(prop, ownerName) {
 
 // --------------------------------------------------------------------- page
 
-export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
+export default function PlacesStep({ data, storyId, inFlightJob, onChange: onChangeStep }) {
   const { story, places, props, places_proposal: placesProposal, characters, progress } = data
+  // Plan 25 stage 4: a manual-images story's prompts, read once and again after every change.
+  const { images: briefImages, reload: reloadBrief } = useImageBrief(storyId, imagesManual(story))
+  const onChange = () => { reloadBrief(); onChangeStep() }
   // The open place's or prop's editor: the URL's #place_id / #prop_id (one at a time).
   const [openId, toggleOpen] = useHashAccordion([
     ...(places || []).map((p) => p.place_id),
@@ -995,7 +999,7 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
                   {imagesManual(story) && (
                     // Plan 22 stage 5: the story's images are the user's own -- an upload slot per plate.
                     <EntityImageSlots storyId={storyId} kind="places" entity={place} disabled={busy}
-                      onChange={onChange} />
+                      brief={entityBrief(briefImages, 'places', place.place_id)} onChange={onChange} />
                   )}
                 <PlaceCard
                   key={place.place_id}
@@ -1031,7 +1035,7 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange }) {
                 <>
                   {imagesManual(story) && (
                     <EntityImageSlots storyId={storyId} kind="props" entity={prop} disabled={busy}
-                      onChange={onChange} />
+                      brief={entityBrief(briefImages, 'props', prop.prop_id)} onChange={onChange} />
                   )}
                 <PropCard
                   key={prop.prop_id}

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { uploadToSlot } from '../../api'
 import { Button } from '../../ui'
 import { ArrowDownToLine } from '../../ui/icons'
+import PromptDrawer, { entryKey } from './steps/PromptDrawer'
 
 // Plan 22 stage 5 (the manual link): one upload slot -- a file input that
 // sends the chosen file to an API upload slot (`upload_slot`, from the shot
@@ -65,8 +66,12 @@ export default function ManualUploadSlot({ slot, label, accept = 'video/mp4,vide
   )
 }
 
-/** The upload slots of one entity's images (a character's sheets, a place's plates, a prop's image). */
-export function EntityImageSlots({ storyId, kind, entity, disabled, onChange }) {
+/**
+ * The upload slots of one entity's images (a character's sheets, a place's plates, a prop's image).
+ * `brief` (plan 25 stage 4): the image brief's entries for this entity keyed by `entryKey(slot)`; a slot
+ * with an entry shows its prompt drawer (copy, size, reference, upload), a slot without one the bare button.
+ */
+export function EntityImageSlots({ storyId, kind, entity, disabled, onChange, brief }) {
   const id = entity.char_id || entity.place_id || entity.prop_id
   let slots
   if (kind === 'characters') {
@@ -76,10 +81,16 @@ export function EntityImageSlots({ storyId, kind, entity, disabled, onChange }) 
   } else {
     slots = ['image']
   }
+  const entries = brief ? slots.map((slot) => brief[entryKey(slot)]) : []
+  const withDrawer = entries.some(Boolean)
   return (
     <div className="manual-upload-slots">
-      <p className="form-hint">Your own images: make each one from the image brief, then upload it here.</p>
-      {slots.map((slot) => (
+      {!withDrawer && (
+        <p className="form-hint">Your own images: make each one from the image brief, then upload it here.</p>
+      )}
+      {slots.map((slot, index) => (entries[index] ? (
+        <PromptDrawer key={slot} storyId={storyId} entry={entries[index]} disabled={disabled} onDone={onChange} />
+      ) : (
         <ManualUploadSlot
           key={slot}
           slot={entityImageSlot(storyId, kind, id, slot)}
@@ -88,7 +99,7 @@ export function EntityImageSlots({ storyId, kind, entity, disabled, onChange }) 
           disabled={disabled}
           onDone={onChange}
         />
-      ))}
+      )))}
     </div>
   )
 }
