@@ -310,6 +310,8 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
     replaced = os.path.isfile(dest)
     if replaced:
         _keep_old(stories, story_id, ep, shot_id, dest, now)
+    # Plan 23 stage B8: an upload over a stock cutaway replaces its record (the stock file and its credit go).
+    was_stock = (shot["assets"].get("clip") or {}).get("route") == schemas.STOCK_ROUTE
     os.replace(received, dest)
     os.chmod(dest, 0o644)
     sha = sha256_file(dest)
@@ -324,6 +326,14 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
         host.write_board()
     except StepFailed as exc:
         raise UploadRefused(str(exc), status=409) from None
+    if was_stock:
+        from . import stock_cutaways
+
+        try:
+            os.remove(stories.episode_asset_path(story_id, ep, "clips", stock_cutaways.clip_name(shot_id)))
+        except (KeyError, OSError):
+            pass
+        stock_cutaways.write_credits(ec, host.storyboard)
     kind = sticky_link.VIDEO_SPEECH if speaks else sticky_link.VIDEO
     host.video_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO) is not None
     host.speech_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO_SPEECH) is not None

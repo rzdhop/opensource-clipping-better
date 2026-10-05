@@ -2269,6 +2269,37 @@ picture: putting it in a description is up to you. Settings →
 `GET /api/broll/status` answers which sources can serve now and how many clips
 the folder holds.
 
+## Stock cutaways (AI Story)
+
+An opt-in per story, on the profile card (**Stock cutaways**, `generation_profile.stock_cutaways: "on"`;
+clearable, and editable at any time: it only affects the next assets run). The assets step then fills the
+**establishing shots** with free stock footage instead of drawing an image and buying a clip, from the same
+sources as Clips mode's B-roll (`BROLL_SOURCES`: your local folder, Pexels, Pixabay).
+
+- **Which shots.** A wide establishing shot with no character and no prop in it that is not a speaking shot
+  (a narrator's or a voice-over line over it is fine). The story's frame picks the orientation (9:16, 16:9,
+  1:1); a clip must run at least the shot's length plus 0.3 s.
+- **What it does.** At the start of the assets step, before any keyframe, each such shot with no keyframe and no
+  clip is searched with a fixed query (the place's name, a few words of its descriptor, day or night),
+  downloaded to `assets/clips/shot_NN.stock.mp4`, and a frame at 0.5 s becomes the shot's keyframe (so the
+  cover, the brief and the thumbnails work). It costs nothing and is not judged. A shot with no match is
+  generated as usual, with a line in the feed. Manual stories (your own clips) are filled the same way.
+- **Never replaces.** A keyframe or a clip already there (made, bought or uploaded), and a locked image, are
+  never touched. A stock clip stays current only while the switch is on, the shot is still eligible and its
+  query still matches (a place renamed, another frame); otherwise the shot is made as any other. You can
+  upload your own clip over a stock one (the stock file goes).
+- **Render.** A stock shot is cut as plain video at every tier, never with the clip's own sound; a tier-1 story
+  without stock renders exactly as before.
+- **The estimate** stays at the generated price until the fill has run, with "up to N shots may be stock (free,
+  saves about $x)"; afterwards those shots are current and cost $0. Stock footage is **live-action**: only the
+  `cinematic_real` style matches it; on the others the card says so.
+- **Credits.** `assets/stock_credits.json` and `.txt` list each clip; the metadata pack carries `credits` and
+  each description ends with "Stock footage: ..." (only when there are credits), and the episode page shows
+  "Videos provided by Pexels / Pixabay" with the links Pexels asks for.
+
+Rolling back: turn the switch off and run the assets step (the stock shots are made as usual); to remove the
+feature, strip `stock_cutaways` and the stock clip records from the stories and delete the `.stock.mp4` files.
+
 ## Not yet
 
 A few things phase 5 deliberately leaves for later, and what plan 23 has
@@ -2429,6 +2460,8 @@ outputs/
                                       #   grid's own approval
       assets/
         shots/shot_<NN>.png          # (or .jpg/.jpeg/.webp) one image per shot
+        clips/shot_<NN>.stock.mp4    # a stock cutaway's clip (stock_cutaways on); its credits are
+        stock_credits.json, .txt     #   in assets/, listed in the metadata pack
         voice/
           line_<NN>.mp3 (or .wav)    # a measured line's audio ("Measure with real voices", or the assets step)
           line_<NN>.json             # its timing sidecar (source, text hash, provider/voice)

@@ -52,7 +52,7 @@ import shutil
 import subprocess
 import time
 
-from .. import context, media_policy, prompts, schemas, subtitle_style
+from .. import context, media_policy, prompts, schemas, stock_cutaways, subtitle_style
 from .. import store as store_mod
 from ..render import filtergraph, fonts, profiles
 from ..render import plan as plan_mod
@@ -181,13 +181,19 @@ def pinned_comment(teaser, ep, language) -> str:
     return f"{teaser} {call}" if teaser else call
 
 
-def platform_entry(reply, *, ep, language, teaser, now) -> dict:
+def platform_entry(reply, *, ep, language, teaser, now, credits=None) -> dict:
     """A platform's ``metadata_pack_v1`` entry from an accepted M1 *reply*:
-    what the model wrote, and what Python adds (module docstring)."""
+    what the model wrote, and what Python adds (module docstring). *credits*
+    (plan 23 stage B8: the episode's stock clips' credit records; None or
+    empty for every other episode) add a "Stock footage: ..." line after the
+    teaser."""
     description = _prose(reply["description"], language)
     teaser = " ".join(str(teaser or "").split())
     if teaser:
         description = f"{description}\n\n{teaser}"
+    stock_line = stock_cutaways.credit_text(credits)
+    if stock_line:
+        description = f"{description}\n\n{stock_line}"
     entry = {
         "title": _prose(reply["title"], language),
         "description": description,
@@ -210,6 +216,13 @@ SQUARE_NOTE = "1:1: TikTok, Shorts and Reels show a square video with bands abov
 ASPECT_NOTES = {"16:9": LANDSCAPE_NOTE, "1:1": SQUARE_NOTE}
 
 
+def stock_credits(ec) -> list:
+    """The credit records of the episode's current stock clips (``stock_cutaways.credits_of`` of
+    its storyboard), ``[]`` when it has none or no storyboard."""
+    board = episode_common.read_episode(ec, STORYBOARD_DOC)
+    return stock_cutaways.credits_of(board) if board else []
+
+
 def new_pack(ec, script, render_sha, *, now) -> dict:
     doc = {"$schema": schemas.METADATA_PACK_SCHEMA_NAME, "ep": ec.ep, "language": ec.language,
            "script_rev": script["rev"], "render_sha256": render_sha, "platforms": {},
@@ -220,6 +233,11 @@ def new_pack(ec, script, render_sha, *, now) -> dict:
         # a 9:16 pack is the one it always was.
         doc["aspect"] = frame
         doc["aspect_note"] = ASPECT_NOTES[frame]
+    credits = stock_credits(ec)
+    if credits:
+        # Plan 23 stage B8: an episode cut with stock footage records whom to credit; one without
+        # stock has the pack it always had.
+        doc["credits"] = credits
     return doc
 
 
@@ -235,7 +253,7 @@ def write_platform(ctx, ec, script, doc, platform, *, tools, announced, note=Non
     returns the document as written."""
     reply = ask_platform(ctx, ec, script, platform, tools=tools, announced=announced, note=note)
     entry = platform_entry(reply, ep=ec.ep, language=ec.language, teaser=script.get("next_episode_teaser"),
-                           now=llm_call.utc_now())
+                           now=llm_call.utc_now(), credits=doc.get("credits"))
     doc["platforms"][platform] = entry
     saved = save_pack(ec, doc)
     ctx.on_log(f"🏷 {prompts.M1_PLATFORM_RULES[platform]['name']}: {entry['title']} "

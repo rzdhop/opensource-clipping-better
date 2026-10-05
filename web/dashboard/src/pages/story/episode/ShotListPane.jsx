@@ -27,6 +27,8 @@ export const SHOT_STATES = {
   take_ok: { tone: 'success', label: 'Take ok' },
   mismatch: { tone: 'danger', label: 'Take mismatch' },
   approximate: { tone: 'neutral', label: 'Approximate' },
+  // Plan 23 stage B8: a stock cutaway -- footage from a stock source, nothing to make or upload.
+  stock: { tone: 'info', label: 'Stock footage' },
 }
 
 const PLATFORM_KEY = 'aistory.shotList.platform'
@@ -43,7 +45,8 @@ function readPlatform() {
 /** "7 of 12 clips uploaded". */
 export function progressLine(counts) {
   if (!counts) return ''
-  return `${counts.uploaded} of ${counts.total} clip${counts.total === 1 ? '' : 's'} uploaded`
+  const base = `${counts.uploaded} of ${counts.total} clip${counts.total === 1 ? '' : 's'} uploaded`
+  return counts.stock ? `${base} (${counts.stock} stock footage)` : base
 }
 
 function RefThumb({ storyId, ep, reference }) {
@@ -97,6 +100,7 @@ function ShotRow({ storyId, ep, entry, disabled, keyframes, onUploaded }) {
         <Badge tone={state.tone} dot>{state.label}</Badge>
         <span className="form-hint">Pick {entry.length_s} s (planned {entry.clip_s} s) · {entry.aspect} · {entry.model_label}</span>
       </div>
+      {entry.stock && <p className="form-hint shot-list-stock">{entry.stock}. Upload your own clip below to replace it.</p>}
       <p className="shot-list-purpose">{entry.purpose}</p>
       {entry.line && (
         <p className="shot-list-line">

@@ -605,6 +605,41 @@ function CoverImage({ episode }) {
   )
 }
 
+// Plan 23 stage B8: an episode cut with stock footage credits its sources. Pexels asks for a link
+// ("Videos provided by Pexels"); Pixabay's is the same courtesy. The pack carries one credit
+// record per clip (`pack.credits`); the descriptions already end on a "Stock footage: ..." line.
+const STOCK_SITES = {
+  pexels: { name: 'Pexels', url: 'https://www.pexels.com' },
+  pixabay: { name: 'Pixabay', url: 'https://pixabay.com' },
+}
+
+function StockCredits({ pack }) {
+  const credits = (pack && pack.credits) || []
+  const sites = [...new Set(credits.map((item) => item.provider))].filter((name) => STOCK_SITES[name])
+  if (credits.length === 0) return null
+  return (
+    <Card className="story-stock-credits">
+      <CardHeader title="Stock footage" />
+      <CardBody>
+        {sites.length > 0 && (
+          <p className="form-hint">
+            Videos provided by{' '}
+            {sites.map((name, index) => (
+              <span key={name}>
+                {index > 0 && ' / '}
+                <a href={STOCK_SITES[name].url} target="_blank" rel="noopener noreferrer">{STOCK_SITES[name].name}</a>
+              </span>
+            ))}
+          </p>
+        )}
+        <ul className="story-stock-credit-lines">
+          {credits.map((item) => <li key={item.shot_id || item.key}>{item.shot_id}: {item.credit}</li>)}
+        </ul>
+      </CardBody>
+    </Card>
+  )
+}
+
 // ------------------------------------------------------------------ ledger
 
 function LedgerTable({ episode }) {
@@ -672,6 +707,7 @@ export default function PreviewPane({ episode, storyId, ep, story, inFlightJob, 
       {metadataPlatforms ? (
         <>
           <CoverImage episode={episode} />
+          <StockCredits pack={episode.metadata.pack} />
           {metadataBlocked && <p className="form-hint story-metadata-regenerate-blocked">{metadataBlocked}</p>}
           <div className="story-metadata-cards">
             {PLATFORMS.filter((platform) => metadataPlatforms[platform]).map((platform) => (

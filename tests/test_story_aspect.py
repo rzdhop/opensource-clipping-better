@@ -49,8 +49,9 @@ def test_the_field_is_optional_create_only_and_absent_is_9_16():
         with pytest.raises(ValueError):
             store_mod._merge_generation_profile(bad)
     assert "aspect" not in store_mod._PROFILE_CLEARABLE
-    # the key comes after the others in every enumeration of the profile's keys
-    assert list(store_mod._PROFILE_CHOICES)[-1] == "aspect"
+    # the key comes after the others in every enumeration of the profile's keys (plan 23 stage B8 re-pin:
+    # stock_cutaways is added after it, as the plan says)
+    assert list(store_mod._PROFILE_CHOICES)[-2:] == ["aspect", "stock_cutaways"]
 
 
 def test_media_policy_reads_the_frame_and_its_sizes():

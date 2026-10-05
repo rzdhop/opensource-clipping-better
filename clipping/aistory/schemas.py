@@ -785,6 +785,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (plan 23 stage B7): the output frame, "16:9" or "1:1", set at creation only;
         # absent is 9:16 (defaults.ASPECTS, media_policy.aspect).
         "aspect": {"type": "string", "enum": list(defaults.ASPECTS)},
+        # Optional (plan 23 stage B8): "on" fills the eligible establishing shots with stock clips
+        # at the next assets run, never replacing a clip (defaults.STOCK_CUTAWAYS_MODES).
+        "stock_cutaways": {"type": "string", "enum": list(defaults.STOCK_CUTAWAYS_MODES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -3451,14 +3454,17 @@ SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})\.(png|jpg|jpeg|webp)$
 # shot_NN.lipsync.mp4. The only names store.EPISODE_ASSET_NAME_PATTERNS["clips"]
 # holds.
 SHOT_CLIP_DIR = "assets/clips"
-SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.lipsync|\.manual)?\.mp4$"
+SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.lipsync|\.manual|\.stock)?\.mp4$"
 SHOT_LIPSYNC_SUFFIX = ".lipsync"
 # Plan 22 stage 5: a clip the human uploaded (``manual/upload``) is kept as
 # shot_NN.manual.mp4, named only while its clip record's link is that one.
 SHOT_MANUAL_SUFFIX = ".manual"
+# Plan 23 stage B8: a stock cutaway's clip (route "stock") is kept as shot_NN.stock.mp4.
+SHOT_STOCK_SUFFIX = ".stock"
+STOCK_ROUTE = "stock"
 MANUAL_LINK = "manual/upload"
 # How an image was paid for: a free API link, a local engine, a paid link.
-IMAGE_ROUTES = ("free", "local", "paid")
+IMAGE_ROUTES = ("free", "local", "paid", "stock")
 # A full sha256, hex (a prompt hash, a cache key, a file's digest).
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 # The regenerate note's own bound (web/api/models.py, StoryRegenerateRequest).
@@ -3484,7 +3490,7 @@ _STORYBOARD_PENDING_SCHEMA = _or_null(_document({
 # current: the renderer reads it (render/plan.py). ``link`` is a chain link's
 # label (EPISODE_LINK_PATTERN's rule); ``route`` how it is paid for.
 CLIP_STATES = ("current", "stale", "failed")
-CLIP_ROUTES = ("local", "paid", "manual")
+CLIP_ROUTES = ("local", "paid", "manual", "stock")
 # DEC-258: the clip's lipsync, when its story lipsyncs (media_policy.lipsync)
 # and the shot holds a line spoken by a character in its frame. ``current``:
 # ``assets.video`` is the lip-synced take (SHOT_CLIP_DIR/shot_NN.lipsync.mp4),
@@ -3568,6 +3574,9 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     "uploaded_at": _NON_EMPTY_STRING,
     "duration_s": {"type": "number", "minimum": 0},
     "filename": {"type": "string", "maxLength": 200},
+    # Plan 23 stage B8: a stock clip's credit record (route stock, link stock/<provider>):
+    # who made it and under what licence (clipping/stock/credits.credit_record).
+    "source": {"type": "object"},
 }))
 
 # The five keys of spec 2.8 stay required; phase 4's record of the image is
@@ -3589,6 +3598,8 @@ _STORYBOARD_ASSETS_SCHEMA = _document({
     "note": _NOTE_OR_NULL,
     "generated_at": _TIMESTAMP_OR_NULL,
     "est_usd": {"type": "number", "minimum": 0},
+    # Plan 23 stage B8: where a stock keyframe came from, "stock/<provider>" (route stock).
+    "source": {"type": "string", "maxLength": 160},
     # The generation cache's key for the request (clipping/providers/gencache.py).
     "cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
     "pending": _STORYBOARD_PENDING_SCHEMA,
@@ -3780,9 +3791,10 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             plain = f"shot_{shot['shot_id'][2:]}.mp4"
             synced = f"shot_{shot['shot_id'][2:]}{SHOT_LIPSYNC_SUFFIX}.mp4"
             manual = f"shot_{shot['shot_id'][2:]}{SHOT_MANUAL_SUFFIX}.mp4"
+            stock = f"shot_{shot['shot_id'][2:]}{SHOT_STOCK_SUFFIX}.mp4"
             clip = shot["assets"].get("clip") or {}
             if (folder != SHOT_CLIP_DIR or _search(SHOT_CLIP_NAME_PATTERN, name) is None
-                    or name not in (plain, synced, manual)):
+                    or name not in (plain, synced, manual, stock)):
                 errors.append(
                     f"$.shots[{i}].assets.video: {video!r} is not {shot['shot_id']}'s clip "
                     f"({SHOT_CLIP_DIR}/shot_NN.mp4)"
@@ -3796,6 +3808,9 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             elif name == manual and clip.get("link") != MANUAL_LINK:
                 errors.append(f"$.shots[{i}].assets.video: an uploaded clip is set only with a clip on {MANUAL_LINK} "
                               f"(assets.clip.link {MANUAL_LINK!r})")
+            elif name == stock and clip.get("route") != STOCK_ROUTE:
+                errors.append(f"$.shots[{i}].assets.video: a stock clip is set only with a stock clip record "
+                              f"(assets.clip.route {STOCK_ROUTE!r})")
 
     for i, shot in enumerate(shots):
         if "variants" in shot:
@@ -4534,6 +4549,9 @@ METADATA_PACK_SCHEMA = _document({
     # (steps/metadata.ASPECT_NOTES); absent on a 9:16 one.
     "aspect": {"type": "string", "enum": ["16:9", "1:1"]},
     "aspect_note": _text(300),
+    # Plan 23 stage B8: the stock clips the episode is cut from, one credit record each
+    # (clipping/stock/credits.credit_record); absent when the episode has none.
+    "credits": {"type": "array", "items": {"type": "object"}, "maxItems": 100},
 })
 
 _EN_FIELDS = ("title_en", "hashtags_en")

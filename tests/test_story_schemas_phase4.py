@@ -44,7 +44,8 @@ def _has(errors, *keywords):
 
 def test_the_phase4_closed_lists():
     assert schemas.PLATFORMS == ("tiktok", "shorts", "reels")
-    assert schemas.IMAGE_ROUTES == ("free", "local", "paid")
+    # Plan 23 stage B8 re-pin: a frame cut from a stock clip is route "stock" (the three it had are unchanged).
+    assert schemas.IMAGE_ROUTES == ("free", "local", "paid", "stock")
     assert schemas.WORD_SOURCES == ("provider", "alignment", "even_split")
     assert schemas.SFX_STATES == ("resolved", "missing")
     assert schemas.RENDER_STAGE_STATES == ("running", "done", "failed", "cancelled", "cached")
@@ -112,7 +113,8 @@ def test_the_five_spec_keys_stay_required_and_nothing_else_is():
     assert schema["additionalProperties"] is False
     # Phase 6 stage 7 adds the shot's optional clip record; phase 8 stage B its
     # optional continuity record (a v2 shot's previous keyframe, null when none).
-    assert set(schema["properties"]) == set(PHASE4_ASSETS) | {"clip", "continuity"}
+    # Plan 23 stage B8 re-pin: a stock keyframe's optional ``source`` ("stock/<provider>").
+    assert set(schema["properties"]) == set(PHASE4_ASSETS) | {"clip", "continuity", "source"}
     continuity = schema["properties"]["continuity"]
     assert continuity["type"] == ["object", "null"] and continuity["required"] == ["shot_id", "image_sha256"]
 

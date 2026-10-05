@@ -3810,6 +3810,11 @@ def _shot_clip(ec, script, shot, doc, *, link, tier, image_sha) -> dict:
         "target": None if held is not None else target, "continue": held is not None, "blocked": blocked,
         "flags": dict(flags), "overrides": dict(video_plan.shot_overrides(doc, shot_id) or {}),
     }
+    if record.get("route") == schemas.STOCK_ROUTE:
+        # Plan 23 stage B8: a stock cutaway's credit (who made it, where, under what licence).
+        source = record.get("source") or {}
+        view["stock"] = {key: source.get(key) for key in ("provider", "author", "author_url", "page_url", "licence",
+                                                          "credit")}
     if lipsync is not None:
         view["lipsync"] = {"state": lipsync.get("state"), "link": lipsync.get("link"),
                            "lines": list(lipsync.get("lines") or []), "est_usd": lipsync.get("est_usd"),

@@ -166,6 +166,16 @@ ASPECT_SQUARE = "1:1"
 ASPECTS = (ASPECT_LANDSCAPE, ASPECT_SQUARE)
 FRAME_ASPECTS = (ASPECT_PORTRAIT,) + ASPECTS
 
+# Plan 23 stage B8: the optional ``generation_profile.stock_cutaways``, an
+# opt-in per story: an establishing wide shot with no character, prop or
+# spoken line in it may be filled with a stock clip (Pexels / Pixabay / the
+# local folder) instead of a generated image and clip. Absent is off, every
+# story as before; it only affects the next assets run and never replaces a
+# keyframe or a clip already there (``media_policy.stock_cutaways``,
+# ``clipping/aistory/stock_cutaways.py``).
+STOCK_CUTAWAYS_ON = "on"
+STOCK_CUTAWAYS_MODES = (STOCK_CUTAWAYS_ON,)
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

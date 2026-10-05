@@ -473,7 +473,8 @@ def test_a_board_with_the_new_shot_keys_round_trips(stories, story_id):
     with pytest.raises(schemas.SchemaError) as caught:
         stories.write_episode_doc(story_id, 1, STORYBOARD, _storyboard(assets={**record, "route": "api"}),
                                   now=LATEST)
-    assert caught.value.errors == ["$.shots[0].assets.route: 'api' is not one of ['free', 'local', 'paid']"]
+    # Plan 23 stage B8 re-pin: the refusal lists IMAGE_ROUTES, which now ends on "stock".
+    assert caught.value.errors == ["$.shots[0].assets.route: 'api' is not one of ['free', 'local', 'paid', 'stock']"]
 
 
 def test_a_phase3_script_and_board_written_as_phase3_did_still_read(stories, story_id):

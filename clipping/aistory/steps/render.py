@@ -105,7 +105,7 @@ import time
 
 from clipping.cancel import Cancelled
 
-from .. import media_policy, schemas, subtitle_style, wordtiming
+from .. import media_policy, schemas, stock_cutaways, subtitle_style, wordtiming
 from .. import store as store_mod
 from ..render import audio_assets, fonts, profiles
 from ..render import partial
@@ -370,7 +370,8 @@ def silent_ambience_note(shot) -> str:
 
 def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     """What each shot is cut from (module docstring, "Clips"), or None at
-    tier 1 -- the render reads no clip there::
+    tier 1 -- the render reads no clip there, but a stock cutaway's
+    (:func:`stock_shot_clips`, plan 23 stage B8)::
 
         {"videos": {shot_id: file record of its current clip},
          "keep_still": {shot_id: effective flag}, "filled": [shot ids],
@@ -395,7 +396,7 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     nothing."""
     tier = clips.tier_of(ec)
     if tier < 2:
-        return None
+        return stock_shot_clips(ec, script, board, assets_doc)
     link = (sticky_link.recorded(assets_doc, sticky_link.VIDEO) or {}).get("link")
     if media_policy.fully_animated(ec.story):
         # Every shot a clip: a shot never animated, or one whose clip is not
@@ -418,6 +419,10 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         if state == "current":
             path = clips.shot_clip_path(ec, shot)
             videos[shot_id] = runner_mod.file_record(path, shot["assets"]["video"])
+            if stock_cutaways.is_stock_clip(shot):
+                # Plan 23 stage B8: a stock cutaway is plain video at every tier -- its own sound (if
+                # any) is never the shot's, ambience or native.
+                continue
             if speech:
                 # Plan 22: a speaking clip's sound in place of its line, a silent clip's as ambience
                 # under the narrator's voice-over.
@@ -443,6 +448,32 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
         raise StepFailed(clip_refusal(ec, blocked, script=script, doc=assets_doc, link=link))
     return {"videos": videos, "keep_still": keep_still, "filled": [shot["shot_id"] for shot, _state in blocked],
             "native_audio": native, "ambience": ambience, "notes": notes}
+
+
+def stock_shot_clips(ec, script, board, assets_doc):
+    """:func:`shot_clips` at tier 1 (plan 23 stage B8): the render reads no clip there but a
+    stock cutaway's -- ``{"videos": {shot_id: file record}, "keep_still": {shot_id:
+    flag}, "filled": [], "native_audio": [], "ambience": [], "notes": []}`` for the shots whose
+    stock clip is current (``clips.clip_state``) and not kept still; None when there is none
+    (every render without stock cutaways: its inputs, plan and manifest are the ones they
+    always were). A stock clip that is not current is not an error at tier 1: the shot's
+    image is cut as always (and its keyframe, a frame of the clip, is the outdated image the
+    render refuses by itself)."""
+    videos, keep_still = {}, {}
+    for shot in board["shots"]:
+        if not stock_cutaways.is_stock_clip(shot):
+            continue
+        shot_id = shot["shot_id"]
+        flags = clips.shot_flags(shot, assets_doc)
+        keep_still[shot_id] = bool(flags["keep_still"])
+        image = assets_step.shot_image_path(ec, shot)
+        state = clips.clip_state(ec, shot, script, link=None, tier=1, flags=flags,
+                                 image_sha=assets_step._sha256_file(image) if image is not None else None)
+        if state == "current" and not keep_still[shot_id]:
+            videos[shot_id] = runner_mod.file_record(clips.shot_clip_path(ec, shot), shot["assets"]["video"])
+    if not videos:
+        return None
+    return {"videos": videos, "keep_still": keep_still, "filled": [], "native_audio": [], "ambience": [], "notes": []}
 
 
 def require_clips(ec, params=None) -> tuple:

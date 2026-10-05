@@ -34,6 +34,11 @@ const PROMPT_STYLES = {
   action: 'one continuous action (Flow / Seedance style)',
 }
 
+// Plan 23 stage B8: stock cutaways (generation_profile.stock_cutaways; absent = off). Stock footage is
+// live-action: only the photoreal style matches it, every other style gets the hint.
+const STOCK_CUTAWAYS = { '': 'Off (default)', on: 'On: stock footage fills establishing shots' }
+const STOCK_MATCHING_STYLES = ['cinematic_real']
+
 /**
  * The episode the Visual tier card prices its video estimate for
  * (browser-check finding F5): the LATEST episode with an approved
@@ -145,6 +150,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const [universeCatalogue, setUniverseCatalogue] = useState(null)
   // Plan 23 stage D6: how a clip's prompt is written (absent: studio, today's prompts).
   const [promptStyle, setPromptStyle] = useState(profile.prompt_style || 'studio')
+  // Plan 23 stage B8: fill establishing wide shots with stock footage (absent: off); patchable any time.
+  const [stockCutaways, setStockCutaways] = useState(profile.stock_cutaways || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // A pipeline switch refused over written episodes (PATCH's structured 409):
@@ -172,6 +179,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   useEffect(() => { setBodyRule(profile.body_rule || '') }, [profile.body_rule])
   useEffect(() => { setImagePreference(profile.image_preference || '') }, [profile.image_preference])
   useEffect(() => { setPromptStyle(profile.prompt_style || 'studio') }, [profile.prompt_style])
+  useEffect(() => { setStockCutaways(profile.stock_cutaways || '') }, [profile.stock_cutaways])
 
   const save = async (patch) => {
     setSaving(true)
@@ -193,6 +201,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       setBodyRule(profile.body_rule || '')
       setImagePreference(profile.image_preference || '')
       setPromptStyle(profile.prompt_style || 'studio')
+      setStockCutaways(profile.stock_cutaways || '')
       setError(err.message)
       if (err.status === 409 && err.code === PIPELINE_SWITCH_HAS_SCRIPTS && err.detail.episodes) {
         setSwitchOffer({ episodes: err.detail.episodes, patch })
@@ -247,6 +256,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const handleBodyRule = (value) => { setBodyRule(value); save({ body_rule: value || null }) }
   const handleImagePreference = (value) => { setImagePreference(value); save({ image_preference: value || null }) }
   const handlePromptStyle = (value) => { setPromptStyle(value); save({ prompt_style: value === 'studio' ? null : value }) }
+  const handleStockCutaways = (value) => { setStockCutaways(value); save({ stock_cutaways: value || null }) }
 
   // Every shot a clip: the quality budget profile (animate all_shots) at tier
   // >= 2 on the api route, on the v2 pipeline (the server sets its template and
@@ -409,6 +419,18 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           </p>
         </div>
       )}
+      <div className="form-group">
+        <label className="form-label" htmlFor="story-profile-stock-cutaways">Stock cutaways</label>
+        <select id="story-profile-stock-cutaways" className="form-select" value={stockCutaways}
+          onChange={(e) => handleStockCutaways(e.target.value)} disabled={saving}>
+          {Object.entries(STOCK_CUTAWAYS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+        <p className="form-hint">
+          {STOCK_MATCHING_STYLES.includes(story.style_template_id)
+            ? 'At the next assets run, wide establishing shots with no character are filled with free stock footage; an image or a clip already there is never replaced.'
+            : 'Stock footage is live-action: it matches only the cinematic_real style, so on this one the cutaways will look out of place.'}
+        </p>
+      </div>
       {nativeSpeech && !manualClips && (
         <div className="form-group">
           <label className="form-label" htmlFor="story-profile-speech-model">Speaking clips</label>

@@ -173,6 +173,15 @@ def variants_enabled(story) -> bool:
     return profile.get("sheet_mode") in defaults.SHEET_MODES or profile.get("variants") == defaults.VARIANTS_ON
 
 
+def stock_cutaways(story) -> bool:
+    """Whether *story* fills its eligible establishing shots with stock clips (plan 23
+    stage B8, ``generation_profile.stock_cutaways: "on"``). Absent: off, as every
+    story before; read by the assets step's fill, the clip state of a stock clip
+    and the estimate."""
+    profile = (story or {}).get("generation_profile") or {}
+    return profile.get("stock_cutaways") == defaults.STOCK_CUTAWAYS_ON
+
+
 def sheet_edits(story_or_mode) -> int:
     """How many of a character's sheets are edits of its portrait in a sheet
     mode (a story's, or the mode's name): two in ``three_sheet`` (turnaround,

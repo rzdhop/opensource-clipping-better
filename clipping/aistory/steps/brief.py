@@ -61,8 +61,9 @@ ASPECT = "9:16"
 # Where a shot stands for the human: no clip yet (or one that no longer
 # matches its line); a clip uploaded (silent, or its take not checked yet);
 # a speaking clip whose take heard its line; one whose take did not; one
-# whose take could not be checked (no STT key: the subtitles are approximate).
-STATES = ("missing", "uploaded", "take_ok", "mismatch", "approximate")
+# whose take could not be checked (no STT key: the subtitles are approximate); a
+# stock cutaway (plan 23 stage B8): footage from a stock source, nothing to make.
+STATES = ("missing", "uploaded", "take_ok", "mismatch", "approximate", "stock")
 _TAKE_STATES = {"ok": "take_ok", "mismatch": "mismatch", "no_speech": "mismatch", "stt_unavailable": "approximate"}
 PURPOSE_MAX_WORDS = 40
 
@@ -265,10 +266,24 @@ def shot_state(ec, script, shot, assets_doc=None) -> str:
         state = "current"
     if state != "current":
         return "missing"
+    if clip.get("route") == schemas.STOCK_ROUTE:
+        return "stock"
     if not shot.get("speaks"):
         return "uploaded"
     take = clip.get("native_speech") or {}
     return _TAKE_STATES.get(take.get("state"), "uploaded")
+
+
+def stock_note(shot) -> str | None:
+    """"Stock footage, no generation needed — <provider>, by <author>" for a shot whose
+    clip is a stock cutaway (plan 23 stage B8), else None."""
+    clip = (shot.get("assets") or {}).get("clip") or {}
+    if clip.get("route") != schemas.STOCK_ROUTE:
+        return None
+    source = clip.get("source") or {}
+    provider = source.get("provider") or str(clip.get("link") or "").partition("/")[2] or "a stock source"
+    return (f"Stock footage, no generation needed — {provider.capitalize()}, by "
+            f"{source.get('author') or 'an unnamed contributor'}")
 
 
 def manual_shot(story, shot, assets_doc) -> bool:
@@ -382,7 +397,11 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
         "checks": None,
         "upload_slot": upload_slot(ec.story_id, ec.ep, shot["shot_id"]),
         "state": shot_state(ec, script, shot, assets_doc),
+        # Plan 23 stage B8: a stock cutaway's note (None for any other shot).
+        "stock": None,
     }
+    if entry["state"] == "stock":
+        entry["stock"] = stock_note(shot)
     if speaks and line is not None:
         character = ((ec.entities or {}).get("characters") or {}).get(line["speaker"]) or {}
         entry.update(line=line["text"], line_id=line["line_id"], speaker=character.get("name") or line["speaker"],
@@ -421,9 +440,13 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
              for shot in sorted(board["shots"], key=lambda item: item["order"])
              if not clips.shot_flags(shot, assets_doc).get("keep_still")]
     missing = [entry for entry in shots if entry["state"] == "missing"]
-    counts = {"total": len(shots), "uploaded": len(shots) - len(missing), "missing": len(missing),
+    stock = sum(1 for entry in shots if entry["state"] == "stock")
+    counts = {"total": len(shots), "uploaded": len(shots) - len(missing) - stock, "missing": len(missing),
               "takes_ok": sum(1 for entry in shots if entry["state"] == "take_ok"),
               "flagged": sum(1 for entry in shots if entry["state"] == "mismatch")}
+    if stock:
+        # Plan 23 stage B8: shots that are stock footage (free): neither missing nor uploaded.
+        counts["stock"] = stock
     return {
         "$schema": SCHEMA, "story_id": ec.story_id, "ep": ec.ep, "language": ec.language,
         "title": (ec.story or {}).get("title") or "",
@@ -465,8 +488,10 @@ def render_markdown(brief) -> str:
     for number, entry in enumerate(brief["shots"], start=1):
         state = entry["state"].replace("_", " ")
         kind = "speaks" if entry["speaks"] else "silent"
-        body += [f"## {number}. Shot {entry['shot_id']} ({kind}) — {state}", "",
-                 f"**What it must show:** {entry['purpose']}", "",
+        body += [f"## {number}. Shot {entry['shot_id']} ({kind}) — {state}", ""]
+        if entry.get("stock"):
+            body += [f"**{entry['stock']}.** Upload your own clip to replace it.", ""]
+        body += [f"**What it must show:** {entry['purpose']}", "",
                  f"**Model:** {entry['model_label']} · **Length:** pick {entry['length_s']} s "
                  f"(planned {entry['clip_s']} s) · **Aspect:** {entry['aspect']}", "",
                  f"**Mode:** {entry['mode']}", ""]

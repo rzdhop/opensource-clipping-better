@@ -6,6 +6,8 @@ const ROUTE_LABELS = {
   local: 'local',
   free: 'free',
   paid: 'paid',
+  // Plan 23 stage B8: a stock cutaway (a frame or a clip from a stock source, free).
+  stock: 'stock',
   blocked: 'blocked',
 }
 
@@ -13,6 +15,7 @@ const ROUTE_ICONS = {
   local: Monitor,
   free: Gift,
   paid: CircleDollarSign,
+  stock: Gift,
   blocked: Ban,
 }
 

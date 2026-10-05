@@ -58,7 +58,8 @@ from clipping.providers import generation as gen
 from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
-from .. import hardware, imaging, media_policy, native_speech, prompt_budgets, prompting, schemas, video_plan
+from .. import hardware, imaging, media_policy, native_speech, prompt_budgets, prompting, schemas, stock_cutaways
+from .. import video_plan
 from .. import shots as shots_mod
 from . import episode_common, sticky_link
 from . import lipsync as lipsync_step
@@ -505,6 +506,10 @@ def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
         return "failed"
     if clip["state"] != "current" or shot_clip_path(ec, shot) is None:
         return "stale" if clip["state"] == "stale" else "none"
+    if clip.get("route") == schemas.STOCK_ROUTE:
+        # Plan 23 stage B8: a stock cutaway is no link's clip (before the link check): current only
+        # while the switch is on, the shot is still eligible and its query hash still matches.
+        return "current" if stock_cutaways.clip_is_current(ec, shot, script, clip, image_sha) else "stale"
     if link is not None and shot.get("speaks") and media_policy.native_speech(getattr(ec, "story", None)):
         # Plan 22: a speaking shot's clip is on the episode's speech link, never its silent one.
         link = class_link(ec.story, shot, _assets_doc_of(ec), link)

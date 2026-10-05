@@ -260,6 +260,10 @@ EPISODE_ASSET_NAME_PATTERNS = {
 # closed list of names (``episode_brief_path``, ``episode_take_path``).
 EPISODE_BRIEF_DIR = ("assets", "brief")
 EPISODE_BRIEF_NAMES = ("shot_brief.json", "shot_brief.md", "image_brief.json", "image_brief.md")
+# Plan 23 stage B8: the credits of an episode's stock cutaways, in assets/ next to the
+# folders above (``episode_stock_credits_path``: a closed list of two names).
+EPISODE_STOCK_CREDITS_DIR = ("assets",)
+EPISODE_STOCK_CREDITS_NAMES = ("stock_credits.json", "stock_credits.txt")
 EPISODE_TAKES_DIR = ("assets", "clips", "takes")
 EPISODE_TAKE_NAME_PATTERN = re.compile(r"^shot_(0[1-9]|[1-9][0-9]{1,2})\.manual\.[0-9]{8}T[0-9]{6}Z(-[0-9]+)?\.mp4$")
 
@@ -328,10 +332,12 @@ _PROFILE_CHOICES = {
     "variants": defaults.VARIANTS_MODES,
     # Plan 23 stage B7: the output frame (absent: 9:16), chosen at creation only -- never clearable.
     "aspect": defaults.ASPECTS,
+    # Plan 23 stage B8: the opt-in to stock cutaways (absent: off), patchable any time.
+    "stock_cutaways": defaults.STOCK_CUTAWAYS_MODES,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
 _PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe", "image_preference", "prompt_style",
-                      "variants")
+                      "variants", "stock_cutaways")
 
 _INDEX_ENTRY_SCHEMA = {
     "type": "object",
@@ -1846,6 +1852,16 @@ class StoryStore:
             if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
                 raise KeyError(f"{label}{filename}")
         return path
+
+    def episode_stock_credits_path(self, story_id, ep, name, *, create=False) -> str:
+        """The path of ``<story>/episodes/ep<NN>/assets/<name>``, one of
+        :data:`EPISODE_STOCK_CREDITS_NAMES` (plan 23 stage B8: the stock
+        cutaways' credits), with :meth:`episode_asset_path`'s rules: the name,
+        episode and story id checked first, every folder a real one, nothing
+        a symlink."""
+        if not isinstance(name, str) or name not in EPISODE_STOCK_CREDITS_NAMES:
+            raise KeyError(name)
+        return self._episode_sub_path(story_id, ep, EPISODE_STOCK_CREDITS_DIR, name, create=create)
 
     def episode_brief_path(self, story_id, ep, name, *, create=False) -> str:
         """The path of ``<story>/episodes/ep<NN>/assets/brief/<name>``, one of

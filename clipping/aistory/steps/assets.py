@@ -174,7 +174,7 @@ from clipping.providers import lipsync as lipsync_providers
 from clipping.providers.registry import ChainError, Link, describe
 
 from .. import (defaults, hardware, imaging, media_policy, native_speech, prompt_budgets, prompting, refimages,
-               schemas, timing, video_plan, voices, wordtiming)
+               schemas, stock_cutaways, timing, video_plan, voices, wordtiming)
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import shots as shots_mod
@@ -454,7 +454,10 @@ def shot_seed(shot, scene, *, story_id, ep, mode, entity_docs) -> int:
 
 
 def served_link(assets):
-    """The link a shot's image was made on (``provider/model``), or None."""
+    """The link a shot's image was made on (``provider/model``), or None -- for a frame cut from
+    a stock clip too (plan 23 stage B8: no link made it, so it is none of the episode's image link)."""
+    if assets.get("route") == schemas.STOCK_ROUTE:
+        return None
     return sticky_link.label(assets.get("provider"), assets.get("model"))
 
 
@@ -907,6 +910,9 @@ def shot_state(ec, shot, *, link=_READ) -> str:
     """:func:`image_state` of *shot* now: its hash recomputed with the note
     its image was made with; *link* the episode's recorded image link (read
     from ``assets.json`` unless given)."""
+    if shot["assets"].get("route") == schemas.STOCK_ROUTE:
+        # Plan 23 stage B8: a frame cut from a stock clip is never made again by a call.
+        return stock_cutaways.keyframe_state(ec, shot, file_ok=shot_image_path(ec, shot) is not None)
     if link is _READ:
         link = recorded_image_link(_read_assets_doc(ec))
     assets = shot["assets"]
@@ -1599,6 +1605,9 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
         units["video"] = video
     if fix is not None:
         units["keyframe_fix"] = fix
+    stock = stock_units(ec, script, storyboard, doc, images=images, video=video, env=env)
+    if stock is not None:
+        units["stock"] = stock
     units.update({
         "paid_links": paid_links, "caps": caps, "est_usd": total, "over_cap": over_cap,
         "ready": images["ready"] and voices_est["ready"] and over_cap is None,
@@ -1606,6 +1615,43 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     if video is not None and animate and (not video.get("hold") or video.get("too_long")):
         units["ready"] = bool(units["ready"] and video["ready"])
     return units
+
+
+def stock_units(ec, script, storyboard, doc, *, images, video, env):
+    """Plan 23 stage B8: what a story's stock cutaways may save, or None (the switch is off, or
+    nothing is eligible and nothing is stock): ``{"count", "shots", "stock", "saves_usd",
+    "sources", "message"}``. The estimate stays at the generated price until the fill has run
+    (it runs at the start of the assets step); ``count`` is the eligible shots with no keyframe
+    and no clip yet -- "up to N shots may be stock (free, saves ≈ $x)" -- ``saves_usd`` the
+    generated price of those shots' images and of their clips in *video*'s plan; once the fill
+    ran those shots are current and cost nothing (``stock`` counts them)."""
+    if not media_policy.stock_cutaways(ec.story):
+        return None
+    from clipping.providers import gating
+    from clipping.stock import clips as stock_clips
+
+    wanted = [shot["shot_id"] for shot in storyboard["shots"] if stock_cutaways.wants_fill(ec, shot, script, doc)]
+    held = [shot["shot_id"] for shot in storyboard["shots"] if stock_cutaways.is_stock_clip(shot)
+            and stock_cutaways.keyframe_is_stock(shot)]
+    if not wanted and not held:
+        return None
+    saves = 0.0
+    if wanted and images["count"] and images["est_usd"]:
+        saves += float(images["est_usd"]) * len([sid for sid in wanted if sid in images["shots"]]) / images["count"]
+    if wanted and video is not None:
+        saves += sum(float(row["est_usd"]) for row in video.get("plan") or () if row["shot_id"] in wanted)
+    sources = stock_clips.available_sources(gating.merged_env(env or {}))
+    saves = round(saves, 4)
+    if not wanted:
+        message = f"{len(held)} shot{'s' if len(held) != 1 else ''} filled with stock footage (free)."
+    elif not sources:
+        message = (f"Stock cutaways are on, but no stock source is configured (a Pexels or Pixabay key, or a local "
+                   f"B-roll folder): {len(wanted)} shot{'s' if len(wanted) != 1 else ''} generated as usual.")
+    else:
+        message = (f"up to {len(wanted)} shot{'s' if len(wanted) != 1 else ''} may be stock "
+                   f"(free, saves ≈ ${saves:.2f})")
+    return {"count": len(wanted), "shots": wanted, "stock": held, "saves_usd": saves, "sources": sources,
+            "message": message}
 
 
 def _video_units(ec, script, storyboard, doc, *, env, ledger, adapters, probe_local, transport, committed):
@@ -1763,6 +1809,10 @@ def keyframe_items(ec, storyboard, doc) -> list:
     link = recorded_image_link(doc)
     items, previous = [], (None, None, None)
     for shot in storyboard["shots"]:
+        if stock_cutaways.keyframe_is_stock(shot):
+            # Plan 23 stage B8: a frame of a stock clip is no generated image: not judged, no continuity either way.
+            previous = (None, None, None)
+            continue
         path = shot_image_path(ec, shot)
         sha = _sha256_file(path) if path is not None else None
         if path is not None and keyframe_problem(ec, shot, link=link) is None:
@@ -1781,9 +1831,11 @@ def keyframe_item(ec, storyboard, index, *, link=None):
         return None
     shot = storyboard["shots"][index]
     path = shot_image_path(ec, shot)
-    if path is None or keyframe_problem(ec, shot, link=link) is not None:
+    if stock_cutaways.keyframe_is_stock(shot) or path is None or keyframe_problem(ec, shot, link=link) is not None:
         return None
     previous = storyboard["shots"][index - 1] if index else None
+    if previous is not None and stock_cutaways.keyframe_is_stock(previous):
+        previous = None
     prev_path = shot_image_path(ec, previous) if previous is not None else None
     if prev_path is None:
         return shot, path, _sha256_file(path), None, None, None
@@ -2435,6 +2487,8 @@ class _Assets(voice_lines.LineMeasurement):
         # and what the keyframe auto-fix did (None: it did not run).
         self.ledger_read = _READ
         self.keyframe_fix = None
+        # Plan 23 stage B8: what the stock fill did in this run (None: the story has no stock cutaways).
+        self.stock = None
         # The Gemini tail guard's report of every line it saw in this run
         # (spoken, or cleaned in place), by line id.
         self.tails = {}
@@ -4350,6 +4404,25 @@ class _Assets(voice_lines.LineMeasurement):
 
     # ------------------------------------------------------------------- run
 
+    def stock_fill(self) -> None:
+        """Plan 23 stage B8, at the start of the run and before any keyframe: the eligible
+        establishing shots of a story with ``stock_cutaways`` on are filled with a stock
+        clip (:func:`stock_cutaways.fill`: free, a clip already there is never replaced,
+        a shot with no match is generated as usual), the storyboard and the credits
+        written when it changed. Free and local: nothing is booked."""
+        ec, ctx = self.ec, self.ctx
+        if not media_policy.stock_cutaways(ec.story):
+            return
+        before = copy.deepcopy(self.storyboard["shots"])
+        self.stock = stock_cutaways.fill(ec, self.script, self.storyboard, _read_assets_doc(ec),
+                                         env=ctx.settings_env, run=self.crop_run, on_log=ctx.on_log)
+        if self.storyboard["shots"] != before:
+            self.write_board()
+        stock_cutaways.write_credits(ec, self.storyboard)
+        if self.stock["filled"] or self.stock["missing"]:
+            ctx.on_log(f"🎞 Stock cutaways: {len(self.stock['filled'])} shot(s) filled with stock footage, "
+                       f"{len(self.stock['missing'])} generated as usual.")
+
     def run(self) -> dict:
         ec, ctx = self.ec, self.ctx
         self.script, self.storyboard = require_approved(ec)
@@ -4357,6 +4430,8 @@ class _Assets(voice_lines.LineMeasurement):
         animate = animate_param(ctx.params)
         gates = self.open_asset_gates()
         try:
+            # Before the estimate and the keyframes: a shot filled with stock is neither drawn nor bought.
+            self.stock_fill()
             units = asset_units(ec, self.script, self.storyboard, env=ctx.settings_env, align_words=align,
                                 adapters=self.tools.adapters, probe_local=True, transport=self.tools.transport,
                                 ledger=gates.ledger, animate=animate)
@@ -4493,6 +4568,11 @@ class _Assets(voice_lines.LineMeasurement):
             # Plan 22 stage 5: the step ends awaiting the human's clips.
             result["state"] = steps_pkg.AWAITING_UPLOADS
             result["uploads"] = dict(self.uploads)
+        if self.stock is not None and (self.stock["filled"] or self.stock["missing"] or self.stock["kept"]):
+            # Plan 23 stage B8: the shots filled with stock footage, kept from an earlier run, and
+            # those with no match (generated as usual).
+            result["stock"] = {"filled": list(self.stock["filled"]), "kept": list(self.stock["kept"]),
+                               "missing": [dict(item) for item in self.stock["missing"]]}
         if self.keyframe_check is not None:
             # A v2 story (phase 7 stage 6b): what J2 did, and where the keyframes' approval stands.
             result["keyframes"] = dict(self.keyframe_check, approval=keyframes_state(ec, board, doc))

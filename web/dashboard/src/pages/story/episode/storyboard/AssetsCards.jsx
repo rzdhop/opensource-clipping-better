@@ -103,6 +103,13 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
             {estimate.images.route_class && (
               <RouteChip routeClass={estimate.images.route_class} link={estimate.images.link} />
             )}
+            {/* Plan 23 stage B8: a story with stock cutaways on -- the shots that may be filled with
+                stock footage (free) before any image is made; the price above stays the generated one. */}
+            {estimate.stock && estimate.stock.message && (
+              <span className="chip" title="Stock footage fills establishing shots with no character; a clip already there is never replaced">
+                {estimate.stock.message}
+              </span>
+            )}
             {estimate.video && estimate.video.count != null && (
               <span className={`chip${estimate.video.ready ? '' : ' chip-warn'}`} title={estimate.video.message || ''}>
                 {estimate.video.count} clip{estimate.video.count === 1 ? '' : 's'}
