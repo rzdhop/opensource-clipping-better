@@ -964,15 +964,101 @@ def test_a_v3_reply_over_its_caps_is_retried_with_the_cap_named_and_the_inside_r
     assert "within its caps" in steps.script.FILL_NOTE_V3 and "top of its word budget" not in steps.script.FILL_NOTE_V3
 
 
-def test_a_v3_reply_still_over_its_caps_after_the_retry_is_never_accepted(store):
+def e2_v3_trim(call):
+    """The trim call's answer: both lines cut inside every plan (the trim
+    prompt names the scene, never its stub line, so the tag is the scene id)."""
+    sid = call["user"].split("Trim pass for scene ", 1)[1].split(":", 1)[0]
+    speakers = _speakers(call)
+    return {"lines": [{"speaker": speakers[0], "text": f"Tu mens a{sid} b{sid} depuis ton arrivée.",
+                       "emotion": "angry", "delivery": "cold"},
+                      {"speaker": speakers[-1], "text": f"Je refuse c{sid} d{sid} net.", "emotion": "tension",
+                       "delivery": "quiet"}],
+            "sfx_cues": [], "on_screen_text": None}
+
+
+def e2_v3_trim_over(call):
+    """A trim answer that is still over: both lines at 22 words."""
+    reply = e2_v3_trim(call)
+    for i, line in enumerate(reply["lines"]):
+        line["text"] = " ".join(f"t{i}{k}" for k in range(22))
+    return reply
+
+
+def _trim_calls(llm, prompt="E2v3"):
+    return [call for call in llm.of(prompt) if "Trim pass for" in call["user"]]
+
+
+def test_a_v3_scene_still_over_after_the_retry_is_trimmed_by_one_call_and_applied(store):
+    """Plan 24 stage 3 (D-4): the ladder spent on word caps alone, one trim
+    call rewrites the offending lines on the same chain; a reply inside the
+    caps is the scene's."""
     story_id = _ready_story(store, v2=True, writing="v3")
-    llm = _v3_llm([e2_v3_over, e2_v3_over])
+    llm = _v3_llm([e2_v3_over, e2_v3_over, e2_v3_trim])
+
+    _summary, log = _run(_new().script, store, story_id, llm=llm)
+
+    trims = _trim_calls(llm)
+    assert len(trims) == 1 and len(llm.of("E2v3")) == len(BODY) + 2  # a retry and a trim, on s02 only
+    user = trims[0]["user"]
+    assert user.startswith("Trim pass for scene s02: your reply was refused because a line is over its word cap.")
+    assert re.search(r"- Line 1 \(.+\): 22 words, at most \d+ \(.+\) -- rewrite it in at most \d+ words, same "
+                     r"meaning, same speaker, one or two complete sentences\.", user)
+    assert "Answer with the same JSON, whole: every line not named above byte-identical" in user
+    assert trims[0]["schema"] == llm.of("E2v3")[0]["schema"]
+    s02 = _scene(_script(store, story_id), "s02")
+    assert s02["state"] == "written" and [len(line["text"].split()) for line in s02["lines"]] == [7, 5]
+    assert any(re.fullmatch(r"✂️ Scene s02: trimmed line l08 to 7 words \(\d+ cap\)", line) for line in log)
+    assert not any("is still over its caps" in line for line in log)
+
+
+def test_a_v3_trim_reply_still_over_fails_the_scene_with_one_plain_sentence(store):
+    story_id = _ready_story(store, v2=True, writing="v3")
+    llm = _v3_llm([e2_v3_over, e2_v3_over, e2_v3_trim_over])
 
     message, log = _failed(_new().script, store, story_id, llm=llm)
 
-    assert "scene:1:s02" in message and "failed validation twice" in message and "words in total, at most" in message
-    assert not any("accepting a reply after a retry" in line for line in log)
+    assert len(_trim_calls(llm)) == 1
+    sentence = ("Scene s02 is still over its caps after the retry and the trim: line 1 (Kiwilo) has 22 words, at most "
+                "7 (about 3.3 s); line 2 (Mangella) has 22 words, at most 7 (about 3.3 s). Regenerate the scene with "
+                "shorter lines or widen its slot.")
+    assert sentence in message and "failed validation" not in message and "{" not in sentence
+    assert f"✖ Scene s02 failed: {sentence}" in log
     assert _scene(_script(store, story_id), "s02")["state"] == "stub"
+
+
+def test_a_spent_trim_budget_fails_the_scene_after_the_ladder_without_a_trim_call(store, monkeypatch):
+    monkeypatch.setattr(steps.script, "TRIM_CALLS_MAX", 0)
+    story_id = _ready_story(store, v2=True, writing="v3")
+    llm = _v3_llm([e2_v3_over, e2_v3_over])
+
+    message, _log = _failed(_new().script, store, story_id, llm=llm)
+
+    assert _trim_calls(llm) == [] and len([c for c in llm.of("E2v3") if "This scene (s02," in c["user"]]) == 2
+    assert ("Scene s02 is still over its caps after the retry, and this episode's trim calls are spent: line 1 "
+            in message)
+    assert _scene(_script(store, story_id), "s02")["state"] == "stub"
+
+
+def test_an_e3_hook_over_its_cap_gets_the_same_trim_pass(store):
+    story_id = _ready_story(store, v2=True, writing="v3")
+    hook_over = dict(HOOK_PART, lines=[dict(HOOK_PART["lines"][0], text=" ".join(f"mot{k}" for k in range(9)))])
+    hook_trim = dict(HOOK_PART, lines=[dict(HOOK_PART["lines"][0], text="Ce soir, quelqu'un part.")])
+    llm = FakeLLM(E1v3=[dict(copy.deepcopy(E1_REPLY), spine=dict(V3_SPINE))], E2v3=[], E4=[E4_PASSED],
+                  E3v3=[dict(E3_FULL, hook=hook_over), dict(E3_FULL, hook=hook_over), dict(E3_FULL, hook=hook_trim)],
+                  default={"E2v3": e2_v3_ok, "J1v3": J1_PASSED})
+
+    _summary, log = _run(_new().script, store, story_id, llm=llm)
+
+    trims = _trim_calls(llm, "E3v3")
+    assert len(trims) == 1 and len(llm.of("E3v3")) == 3
+    assert trims[0]["user"].startswith("Trim pass for the framing scenes:")
+    assert re.search(r"- The hook \(scene s\d+\): 9 words in total, at most \d+ \(a [\d.]+ s hook\) -- rewrite the "
+                     r"lines so they total at most \d+ words", trims[0]["user"])
+    script = _script(store, story_id)
+    hook = next(scene for scene in script["scenes"] if scene["function"] == "hook")
+    assert hook["lines"][0]["text"] == "Ce soir, quelqu'un part."
+    assert any(re.fullmatch(r"✂️ The hook \(scene s\d+\): trimmed to 4 words in total \(\d+ cap\)", line)
+               for line in log)
 
 
 def test_a_v3_reply_still_under_after_the_retry_is_accepted_with_a_log_line(store):

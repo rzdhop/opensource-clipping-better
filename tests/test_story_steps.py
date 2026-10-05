@@ -907,6 +907,23 @@ def test_a_reply_that_fails_validation_twice_falls_through_to_the_next_link(tmp_
     assert log[-1].startswith("✍️ B1 via groq/groq-test")
 
 
+def test_a_single_try_call_makes_one_request_and_a_rejected_reply_is_a_reply_rejected(tmp_path):
+    """Plan 24 stage 3: the trim pass asks once -- no same-link retry, no next
+    link -- and tells a refused reply from a call that could not be made."""
+    m = _new()
+    ctx, log = _bare_ctx(tmp_path, settings_env=_TWO_LINK_SETTINGS)
+    runner = _QueueRunner((INVALID_B1, LINK), (B1_REPLY, _GROQ_LINK))
+
+    with pytest.raises(m.llm_call.ReplyRejected) as caught:
+        m.llm_call.call_json(ctx, "B1", *_b1_prompt(), validator=schemas.b1_errors, runner=runner, single_try=True)
+
+    errors = schemas.b1_errors(INVALID_B1)
+    assert len(runner.calls) == 1
+    assert caught.value.reason == f"the reply failed validation: {'; '.join(errors)}"
+    assert isinstance(caught.value, steps.StepFailed)
+    assert not any("asking once more" in line or "trying the next link" in line for line in log)
+
+
 def test_a_retry_and_the_next_link_are_told_why_the_reply_was_refused(tmp_path):
     """DEC-259: the first call gets the prompt as built; the same link's
     retry and every next link get it with the refusal under it -- the first

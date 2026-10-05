@@ -381,6 +381,59 @@ def over_cap_errors(errors) -> list:
     return [error for error in errors if prompts.is_word_cap_error(error)]
 
 
+# Plan 24 stage 3 (D-4): the trim calls an episode may make after a writing-v3
+# reply stays over its caps through the retry ladder -- one call per scene (or
+# per framing call), counted on the episode context so E2 and E3 share them.
+TRIM_CALLS_MAX = 4
+
+
+def trim_calls_left(ec) -> int:
+    """How many trim calls *ec*'s run may still make."""
+    return TRIM_CALLS_MAX - getattr(ec, "trim_calls", 0)
+
+
+def _cap_clause(errors, reply, names, *, scenes=None) -> str:
+    """What the over-cap *errors* of *reply* say, in one clause for the failure
+    sentence: ``line 2 (Rida) has 15 words, at most 12 (a 6 s shot)`` for each
+    line past its cap (at most three), else the total (``the scene has 30
+    words in total, at most 23 (a 13 s scene)``; a framing part, with its
+    scene: ``the hook (scene s01) has ...``). *scenes* is ``{part: scene_id}``
+    for an E3v3 reply, None for a body scene's."""
+    parsed = [item for item in (prompts.parse_word_cap_error(error) for error in errors) if item]
+    lines = [item for item in parsed if item["index"] is not None]
+    parts = []
+    for item in (lines or parsed)[:3]:
+        said = f"{item['words']} words, at most {item['cap']} ({item['why']})"
+        if item["index"] is not None:
+            rows = (reply or {}).get("lines") or []
+            speaker = rows[item["index"]]["speaker"] if item["index"] < len(rows) else None
+            parts.append(f"line {item['index'] + 1} ({prompts.trim_speaker_label(names, speaker)}) has {said}")
+        elif item["part"]:
+            parts.append(f"the {item['part']} (scene {(scenes or {}).get(item['part'], '?')}) has "
+                         f"{item['words']} words in total, at most {item['cap']} ({item['why']})")
+        else:
+            parts.append(f"the scene has {item['words']} words in total, at most {item['cap']} ({item['why']})")
+    return "; ".join(parts)
+
+
+def over_cap_failure(sid, clause, *, trimmed, many=False) -> StepFailed:
+    """The one plain sentence a scene fails with when its lines stay over their
+    caps (plan 24 stage 3, D-4): which scene, which lines, how to move on --
+    no stack, no JSON. *trimmed*: the trim call was made (else the episode's
+    trim calls were spent)."""
+    after = "the retry and the trim" if trimmed else "the retry, and this episode's trim calls are spent"
+    fix = "shorter lines" if many else "a shorter line"
+    return StepFailed(f"Scene {sid} is still over its caps after {after}: {clause}. Regenerate the scene with {fix} "
+                      "or widen its slot.")
+
+
+def framing_over_cap_failure(clause, *, trimmed) -> StepFailed:
+    """:func:`over_cap_failure`'s sentence for the framing scenes (E3v3)."""
+    after = "the retry and the trim" if trimmed else "the retry, and this episode's trim calls are spent"
+    return StepFailed(f"The framing scenes are still over their caps after {after}: {clause}. Regenerate the "
+                      "framing scenes with shorter lines or widen their slots.")
+
+
 def narrator_in(ec, scene) -> bool:
     """Whether the narrator may speak in *scene*: the story's narrator is on
     and -- plan 22 stage 3 -- the template's ``narrator_slots``, when it has
@@ -872,6 +925,47 @@ def can_speak(ec, scene) -> bool:
     return bool(_speakers(ec, scene))
 
 
+def _trim_scene(ctx, ec, scene, *, tools, pack, prompt_id, schema, validate, attempt, plan) -> dict:
+    """The trimmed reply of body scene *scene* (plan 24 stage 3, D-4): one call
+    on the writer's own chain (:func:`llm_call.call_json`, one validated try,
+    the same *validate* -- the hard caps -- judging it) asking the last reply
+    back with only the lines its word-cap errors name rewritten. The reply
+    inside its caps is returned; one still over, or no trim call left in the
+    episode (:data:`TRIM_CALLS_MAX`), fails the scene with the one plain
+    sentence of :func:`over_cap_failure`. A call that cannot be made at all
+    (the chain, a budget) raises as any call of the step does."""
+    sid = scene["scene_id"]
+    before, over = attempt["reply"], over_cap_errors(attempt["errors"])
+    names = ec.names
+    many = sum(1 for error in over if (prompts.parse_word_cap_error(error) or {}).get("index") is not None) > 1
+    if trim_calls_left(ec) <= 0:
+        raise over_cap_failure(sid, _cap_clause(over, before, names), trimmed=False, many=many) from None
+    system, user = prompts.trim_lines_prompt(pack, scene=sid, reply=before, errors=over, names=names, plan=plan)
+    ec.trim_calls = getattr(ec, "trim_calls", 0) + 1
+    ctx.on_log(f"✂️ Scene {sid}: still over its caps after the retry; one trim call "
+               f"({ec.trim_calls} of {TRIM_CALLS_MAX} this episode).")
+    try:
+        reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
+                                   time_fn=tools.time_fn, single_try=True)
+    except llm_call.ReplyRejected:
+        again = over_cap_errors(attempt["errors"])
+        shown, source = (again, attempt["reply"]) if again else (over, before)
+        raise over_cap_failure(sid, _cap_clause(shown, source, names), trimmed=True, many=many) from None
+    rows = reply["lines"]
+    items = [prompts.parse_word_cap_error(error) for error in over]
+    for item in (item for item in items if item["index"] is not None and item["index"] < len(rows)):
+        words = len(rows[item["index"]]["text"].split())
+        try:
+            where = f"line {schemas.line_id_for(sid, item['index'])}"
+        except ValueError:
+            where = f"line {item['index'] + 1}"
+        ctx.on_log(f"✂️ Scene {sid}: trimmed {where} to {words} words ({item['cap']} cap)")
+    for item in (item for item in items if item["index"] is None and not any(i["index"] is not None for i in items)):
+        words = sum(len(row["text"].split()) for row in rows)
+        ctx.on_log(f"✂️ Scene {sid}: trimmed to {words} words in total ({item['cap']} cap)")
+    return reply
+
+
 def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bool:
     """E2 for body scene *sid* into *script* (in place; the caller writes
     it). A scene nobody can speak in is written silent without a call;
@@ -973,15 +1067,18 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
     try:
         reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
                                    time_fn=tools.time_fn)
-    except StepFailed:
+    except llm_call.ReplyRejected:
         over = over_cap_errors(attempt["errors"]) if v3 else []
-        if over:
-            # Plan 24 stage 3 (D-4) hooks its trim pass HERE: attempt["reply"]
-            # is the last reply, `over` the lines (and the total) past their
-            # caps; a trimmed reply inside its caps is applied instead of
-            # failing. Until then the scene fails, never accepted over its caps.
+        if not over:
+            raise
+        if over != attempt["errors"]:
+            # A real problem rides with the cap errors: nothing for a trim to fix alone.
             ctx.on_log(f"✖ Scene {sid}: still over its caps after every try ({over[0]}).")
-        raise
+            raise
+        # Plan 24 stage 3 (D-4): the retry ladder is spent and only word caps
+        # stand in the way -- one bounded trim call rewrites the lines they name.
+        reply = _trim_scene(ctx, ec, scene, tools=tools, pack=pack, prompt_id=prompt_id, schema=schema,
+                            validate=validate, attempt=attempt, plan=plan3)
     apply_e2(ec, scene, reply)
     return True
 
@@ -1024,6 +1121,37 @@ def _body_line(ec, script, *, first):
         return None
     line = scenes[0]["lines"][0] if first else scenes[-1]["lines"][-1]
     return {"speaker_name": speaker_name(ec, line["speaker"]), "text": line["text"]}
+
+
+def _trim_framing(ctx, ec, parts, *, tools, pack, prompt_id, schema, validate, attempt) -> dict:
+    """:func:`_trim_scene` for an E3v3 reply: the framing parts (*parts*,
+    ``{part: scene}``) whose lines stay over their plan's total are rewritten
+    by one trim call; the sentence of :func:`framing_over_cap_failure` when
+    that is still not enough or the episode has no trim call left."""
+    before, over = attempt["reply"], over_cap_errors(attempt["errors"])
+    names = ec.names
+    scenes = {key: scene["scene_id"] for key, scene in parts.items()}
+    if trim_calls_left(ec) <= 0:
+        raise framing_over_cap_failure(_cap_clause(over, before, names, scenes=scenes), trimmed=False) from None
+    system, user = prompts.trim_lines_prompt(pack, scene=scenes, reply=before, errors=over, names=names)
+    ec.trim_calls = getattr(ec, "trim_calls", 0) + 1
+    ctx.on_log(f"✂️ Framing scenes: still over their caps after the retry; one trim call "
+               f"({ec.trim_calls} of {TRIM_CALLS_MAX} this episode).")
+    try:
+        reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
+                                   time_fn=tools.time_fn, single_try=True)
+    except llm_call.ReplyRejected:
+        again = over_cap_errors(attempt["errors"]) or over
+        raise framing_over_cap_failure(_cap_clause(again, attempt["reply"], names, scenes=scenes),
+                                       trimmed=True) from None
+    for error in over:
+        item = prompts.parse_word_cap_error(error)
+        key = item["part"]
+        if key in reply and isinstance(reply[key], dict):
+            words = sum(len(line["text"].split()) for line in reply[key]["lines"])
+            ctx.on_log(f"✂️ The {key} (scene {scenes.get(key, '?')}): trimmed to {words} words in total "
+                       f"({item['cap']} cap)")
+    return reply
 
 
 def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list:
@@ -1094,6 +1222,8 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         system, user, schema = prompts.build_e3(pack, **kwargs)
     llm_call.announce_trimmed(ctx, pack, announced)
 
+    attempt = {"reply": None, "errors": []}
+
     def validate(reply):
         _repair_e3_reply(ec, reply)
         if v3:
@@ -1109,14 +1239,23 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
                                          episode_defaults=ec.episode_defaults, **v2_checks)
         if "narrator_slots" in ec.template:
             errors = list(errors) + narrator_errors(ec, reply, parts)
+        attempt["reply"], attempt["errors"] = reply, list(errors)
         if errors:
             return errors
         trial = copy.deepcopy(script)
         apply_e3(ec, trial, reply)
         return episode_common.trial_errors(ec, trial)
 
-    reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
-                               time_fn=tools.time_fn)
+    try:
+        reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
+                                   time_fn=tools.time_fn)
+    except llm_call.ReplyRejected:
+        over = over_cap_errors(attempt["errors"]) if v3 else []
+        if not over or over != attempt["errors"]:
+            raise
+        # Plan 24 stage 3 (D-4): the same bounded trim pass as a body scene's.
+        reply = _trim_framing(ctx, ec, parts, tools=tools, pack=pack, prompt_id=prompt_id, schema=schema,
+                              validate=validate, attempt=attempt)
     return apply_e3(ec, script, reply)
 
 

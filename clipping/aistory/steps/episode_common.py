@@ -135,6 +135,9 @@ class EpisodeContext:
     consistency_mode: str
     arc_entry: Optional[dict]
     next_arc_entry: Optional[dict]
+    # Plan 24 stage 3: the trim calls this run has made (script.TRIM_CALLS_MAX
+    # bounds them per episode; E2v3 scenes and the E3v3 framing share them).
+    trim_calls: int = 0
 
     @property
     def episode_defaults(self) -> dict:

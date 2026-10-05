@@ -21,6 +21,7 @@ Stdlib only (DEC-012); the one import outside this package is
 
 from __future__ import annotations
 
+import json
 import re
 
 from clipping.analysis.analyzer import ANALYTIC_TEMPERATURE, WRITING_TEMPERATURE
@@ -5741,6 +5742,88 @@ def validate_e3_v3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scen
                          "act they are about to do")
     out = errors + [error for error in extra if error not in errors]
     return _cap_errors_first(out) if plans else out
+
+
+# ------------------------------------------------------------ the trim pass
+
+# Plan 24 stage 3 (D-4): a writing-v3 reply still over its caps after the
+# retry is not failed at once -- one call rewrites ONLY the lines the
+# word-cap errors name, the rest of the reply kept as it was. The same
+# schema, the same validator and the same hard caps judge that reply.
+TRIM_ERROR_RE = re.compile(
+    r"^\$\.(?:(hook|cliffhanger|recap)\.)?lines(?:\[(\d+)\]\.text)?: (\d+) words(?: in total)?, "
+    r"at most (\d+) \(([^)]*)\)")
+TRIM_LINE_ASK = "rewrite it in at most {cap} words, same meaning, same speaker, one or two complete sentences"
+TRIM_TOTAL_ASK = ("rewrite the lines so they total at most {cap} words, same meaning, same speakers, each one or two "
+                  "complete sentences")
+TRIM_KEEP = ("Answer with the same JSON, whole: every line not named above byte-identical (speaker, text, emotion, "
+             "delivery), the same number of lines in the same order, the same sfx_cues and on_screen_text. Write the "
+             "new text in {language}.")
+
+
+def parse_word_cap_error(error):
+    """A word-cap error (:func:`is_word_cap_error`) as ``{"part", "index",
+    "words", "cap", "why"}``: *part* ``hook``/``cliffhanger``/``recap`` for
+    an E3v3 part (None for a body scene), *index* the line's 0-based place
+    (None for a total), the count, its cap and the seconds it is held to.
+    None for any other error."""
+    match = TRIM_ERROR_RE.match(str(error))
+    if match is None:
+        return None
+    part, index, words, cap, why = match.groups()
+    return {"part": part, "index": None if index is None else int(index), "words": int(words), "cap": int(cap),
+            "why": why}
+
+
+def trim_speaker_label(names, speaker) -> str:
+    """A line's speaker as a trim message names it: the character's name, or
+    ``narrator``."""
+    return "narrator" if speaker == "narrator" else names.get(speaker, speaker)
+
+
+def trim_lines_prompt(pack, *, scene, reply, errors, names, plan=None):
+    """``(system, user)`` of the trim call on a refused writing-v3 *reply*
+    (plan 24 stage 3, D-4): the reply back as JSON, then one ask per word-cap
+    error among *errors* -- "Line 2 (Rida): 15 words, at most 12 (a 6 s
+    shot) -- rewrite it in at most 12 words, same meaning, same speaker, one
+    or two complete sentences" -- and the order to answer in the same shape,
+    every other line byte-identical. *scene* is the body scene's id (an E2v3
+    reply, whose line errors say ``$.lines[i]``), or ``{part: scene_id}`` for
+    an E3v3 reply (``$.hook.lines``: the part's lines in total). *names* is
+    ``{char_id: name}``; *plan* (a scene's line plan, optional) adds the
+    scene's seconds. The schema and the call's id are the writer's own
+    (``E2v3``/``E3v3``): only the prompt differs."""
+    parsed = [item for item in (parse_word_cap_error(error) for error in errors) if item]
+    framing = isinstance(scene, dict)
+    asks = []
+    totals = []
+    for item in parsed:
+        if item["index"] is not None:
+            lines = reply.get("lines") or []
+            speaker = lines[item["index"]]["speaker"] if item["index"] < len(lines) else None
+            asks.append(f"- Line {item['index'] + 1} ({trim_speaker_label(names, speaker)}): {item['words']} words, "
+                        f"at most {item['cap']} ({item['why']}) -- " + TRIM_LINE_ASK.format(cap=item["cap"]) + ".")
+        elif item["part"]:
+            asks.append(f"- The {item['part']} (scene {scene.get(item['part'], '?')}): {item['words']} words in "
+                        f"total, at most {item['cap']} ({item['why']}) -- " + TRIM_TOTAL_ASK.format(cap=item["cap"])
+                        + ".")
+        else:
+            totals.append(item)
+    for item in totals:
+        tail = ("together they must stay within it" if asks else
+                f"shorten the longest lines so that they total at most {item['cap']} words, same meaning, same "
+                "speakers, each one or two complete sentences")
+        asks.append(f"- The scene's lines total {item['words']} words, at most {item['cap']} ({item['why']}) -- "
+                    f"{tail}.")
+    if framing:
+        head = ("Trim pass for the framing scenes: your reply was refused because a part is over its word cap.")
+    else:
+        head = f"Trim pass for scene {scene}: your reply was refused because a line is over its word cap."
+        if plan is not None:
+            head += f" The scene lasts at most {plan_seconds(plan['slot_s'][1])} s."
+    user = (head + "\n\nYour reply:\n" + json.dumps(reply, ensure_ascii=False) + "\n\nRewrite only this:\n"
+            + "\n".join(asks) + "\n\n" + TRIM_KEEP.format(language=pack.language_name))
+    return _system(pack), user
 
 
 # ------------------------------------------------------------------ J1v3

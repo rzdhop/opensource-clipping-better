@@ -61,6 +61,7 @@ from . import StepFailed
 __all__ = [
     "PAID_SKIP_REASON",
     "STORY_CALL_BUDGET_SECONDS",
+    "ReplyRejected",
     "StepFailed",
     "announce_trimmed",
     "call_json",
@@ -297,6 +298,13 @@ def _provider_reason(exc) -> str:
 
 # --------------------------------------------------------------- the call
 
+class ReplyRejected(StepFailed):
+    """:func:`call_json` got answers but the validator refused the last one
+    (plan 24 stage 3): the one failure a caller may repair -- the script
+    step's trim pass -- as opposed to a chain that could not answer, a budget
+    refusal or a configuration error, which are plain :class:`StepFailed`."""
+
+
 def call_json(
     ctx,
     prompt_id,
@@ -308,6 +316,7 @@ def call_json(
     runner=None,
     time_fn=time.monotonic,
     max_tokens=None,
+    single_try=False,
 ) -> dict:
     """One accepted JSON reply for *prompt_id* (``"C1"``, ``"B1"``, ...).
 
@@ -320,6 +329,10 @@ def call_json(
     measured variant of the prompt hands in that variant's cap instead
     (E1's payoff variant, ``prompts.E1_PAYOFF_MAX_TOKENS``). Either way the
     same cap is sent on the second try.
+
+    *single_try* (plan 24 stage 3, the trim pass): the first reply the
+    validator refuses ends the call -- no same-link retry, no further link --
+    so one call is one request on the chain's first answering link.
 
     Raises ``StepFailed`` (the chain failed to answer at all, or every link's
     reply was rejected by *validator* -- the first to answer retried once,
@@ -456,6 +469,9 @@ def call_json(
         if label not in tried_labels:
             tried_labels.append(label)
 
+        if single_try:
+            break
+
         if retry_available:
             # The first link to answer gets one retry, same link, same cap
             # -- a reply is never "fixed" by asking for less.
@@ -479,14 +495,16 @@ def call_json(
     more = len(errors) - _ERRORS_IN_FAILURE
     if more > 0:
         shown += f"; and {more} more"
-    if len(tried_labels) <= 1:
+    if single_try:
+        reason = f"the reply failed validation: {shown}"
+    elif len(tried_labels) <= 1:
         # Legacy wording: a chain of one usable link, tried twice.
         reason = f"the reply failed validation twice: {shown}"
     else:
         tried = ", ".join(tried_labels)
         reason = (f"every link's reply failed validation ({len(tried_labels)} tried: {tried}); "
                   f"the last reply ({tried_labels[-1]}): {shown}")
-    raise StepFailed(f"{prompt_id}: {reason}", reason=reason)
+    raise ReplyRejected(f"{prompt_id}: {reason}", reason=reason)
 
 
 REFUSED_PROMPT_HEAD = "Your previous reply was refused"
