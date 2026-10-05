@@ -544,7 +544,8 @@ def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, vide
     and language (the end card's title), the resolved *inputs* and the
     step's params (``fill_failed_with_motion`` passed only when on) and, for
     a story with a ``subtitle_style``, its resolved look (``look``; absent
-    otherwise, so the plan is what it always was)."""
+    otherwise, so the plan is what it always was), and for a 16:9 or 1:1
+    story its frame (``aspect``, plan 23 stage B7; absent at 9:16)."""
     args = {
         "script": script, "storyboard": board, "assets": assets_doc, "style_lock": ec.style_lock,
         "template": ec.template, "ep": ec.ep, "inputs": inputs,
@@ -556,6 +557,11 @@ def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, vide
     look = subtitle_style.look_for(ec.style_lock, ec.story)
     if look is not None:
         args["look"] = look
+    frame = media_policy.aspect(ec.story)
+    if frame != profiles.PORTRAIT.name:
+        # Plan 23 stage B7: a 16:9 or 1:1 story renders in its frame (B6's geometry); a 9:16
+        # story's arguments are the ones they always were.
+        args["aspect"] = frame
     return args
 
 
@@ -569,7 +575,7 @@ def _default_detector():
     return detect_video_encoder
 
 
-def detect_encoder(ctx, *, detect=None):
+def detect_encoder(ctx, *, detect=None, aspect=None):
     """``{"name", "args"}`` of the encoder ``encoder="auto"`` found for the
     final pass (``detect_video_encoder``, or the *detect* stand-in of a
     test). A probe that cannot run leaves libx264 in place, said, never a
@@ -577,8 +583,10 @@ def detect_encoder(ctx, *, detect=None):
     ctx.on_log("🔎 encoder auto: probing the hardware encoders for the final pass (shots stay on libx264)")
     try:
         detector = detect if detect is not None else _default_detector()
-        # The frame's short side: a 1080x1920 frame has the pixels of 1080p.
-        found = detector(None, target_h=min(profiles.WIDTH, profiles.HEIGHT))
+        # The frame's short side: a 1080x1920 frame has the pixels of 1080p (as do 1920x1080 and
+        # 1080x1080: plan 23 stage B7 asks the story's own frame).
+        geometry = profiles.GEOMETRIES.get(aspect or profiles.PORTRAIT.name, profiles.PORTRAIT)
+        found = detector(None, target_h=min(geometry.width, geometry.height))
     except Exception as exc:  # noqa: BLE001 - the probe is optional; libx264 always works
         ctx.on_log(f"⚠️ encoder auto: the hardware probe could not run ({type(exc).__name__}: {exc}); "
                    "the final pass stays on libx264.")
@@ -962,7 +970,8 @@ def render_episode(ctx, ec, params, *, step=STEP, profile="final", run_process=s
     except runner_mod.PreflightError as exc:
         raise StepFailed(f"Episode {ep} cannot be rendered: ffmpeg pre-flight: {exc}. Install ffmpeg with libass "
                          "(it needs zoompan, xfade, sidechaincompress, loudnorm and ass), then render again.") from None
-    video_encoder = detect_encoder(ctx, detect=detect) if params["encoder"] == AUTO_ENCODER else None
+    video_encoder = (detect_encoder(ctx, detect=detect, aspect=media_policy.aspect(ec.story))
+                     if params["encoder"] == AUTO_ENCODER else None)
     inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir,
                            fill_failed_with_motion=fill, shot_clips_now=resolved)
     try:

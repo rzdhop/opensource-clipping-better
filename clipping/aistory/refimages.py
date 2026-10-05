@@ -92,7 +92,8 @@ from . import uploads as uploads_mod
 CHARACTERS, PLACES, PROPS = "characters", "places", "props"
 
 # Output sizes (width, height). The sheets are wide; everything a shot is
-# composed on (portrait, plates) is vertical 9:16.
+# composed on (portrait, plates) is vertical 9:16 -- a 16:9 or 1:1 story's
+# plates are asked at its frame (:func:`plate_size`, plan 23 stage B7).
 PORTRAIT_SIZE = (720, 1280)
 TURNAROUND_SIZE = (1280, 720)
 EXPRESSIONS_SIZE = (1200, 800)
@@ -855,8 +856,25 @@ def place_prompt(stories, story, place, variant, *, env, lock) -> str:
         edit = variant != MASTER_PLATE and story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
         link = _first_link(story, "plate", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
         return prompting.plate_prompt_v2(lock, place_text=place_text, variant=variant,
-                                         budget=prompt_budgets.plate_words(link))
-    return prompting.variant_prompt(lock, place_descriptor=place["descriptor"], variant=variant)
+                                         budget=prompt_budgets.plate_words(link),
+                                         **_frame_kwargs(story))
+    return prompting.variant_prompt(lock, place_descriptor=place["descriptor"], variant=variant,
+                                    **_frame_kwargs(story))
+
+
+def _frame_kwargs(story) -> dict:
+    """``{"aspect": ...}`` for a plate prompt of a 16:9 or 1:1 *story* (plan 23
+    stage B7), else nothing: a 9:16 story's prompt is built as it always was."""
+    frame = media_policy.aspect(story)
+    return {} if frame == defaults.ASPECT_PORTRAIT else {"aspect": frame}
+
+
+def plate_size(story) -> tuple:
+    """The size a place's plate (and its time variants) is asked at:
+    :data:`PLATE_SIZE` on a 9:16 story, its frame's on a 16:9 or 1:1 one
+    (plan 23 stage B7, ``media_policy.image_size``). The sheets and the props
+    keep their sizes in every frame."""
+    return media_policy.image_size(story, PLATE_SIZE)
 
 
 def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, note=None, seed=None,
@@ -896,7 +914,7 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
         seed = override if override is not None else _seed_of(plate)
         if seed is None:
             seed = image_seed(story_id, PLACES, place_id)
-        plan = _Plan(subject, gen.IMAGE, prompt, PLATE_SIZE, seed, (), BASE, stem, step,
+        plan = _Plan(subject, gen.IMAGE, prompt, plate_size(story), seed, (), BASE, stem, step,
                      f"{media_policy.chain_name('plate', gen.IMAGE, story)}, text to image", role="plate")
     else:
         plate_path = _existing(stories, story_id, PLACES, place_id, plate)
@@ -906,8 +924,9 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
         seed = override if override is not None else _seed_of(plate)
         if seed is None:
             seed = image_seed(story_id, PLACES, place_id)
-        plan = _derived(story, subject=subject, prompt=prompt, size=VARIANT_SIZE, seed=seed,
-                        references=[plate_path], stem=stem, step=step, source="the master plate", role="plate")
+        plan = _derived(story, subject=subject, prompt=prompt, size=media_policy.image_size(story, VARIANT_SIZE),
+                        seed=seed, references=[plate_path], stem=stem, step=step, source="the master plate",
+                        role="plate")
 
     ref, label, est, paid = _make(stories, story, plan, entity=PLACES, eid=place_id, lock=lock, env=env,
                                   on_log=on_log, cancel=cancel, adapters=adapters, transport=transport,

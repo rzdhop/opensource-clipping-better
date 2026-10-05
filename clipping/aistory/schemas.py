@@ -782,6 +782,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (plan 23 stage D5): "on" lets a v2 story's characters carry
         # appearance variants without a sheet_mode (media_policy.variants_enabled).
         "variants": {"type": "string", "enum": list(defaults.VARIANTS_MODES)},
+        # Optional (plan 23 stage B7): the output frame, "16:9" or "1:1", set at creation only;
+        # absent is 9:16 (defaults.ASPECTS, media_policy.aspect).
+        "aspect": {"type": "string", "enum": list(defaults.ASPECTS)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,
@@ -4526,6 +4529,11 @@ METADATA_PACK_SCHEMA = _document({
     "platforms": {"type": "object"},
     "created_at": _NON_EMPTY_STRING,
     "updated_at": _NON_EMPTY_STRING,
+}, optional={
+    # Plan 23 stage B7: a 16:9 or 1:1 episode's frame, and what that means for where it goes
+    # (steps/metadata.ASPECT_NOTES); absent on a 9:16 one.
+    "aspect": {"type": "string", "enum": ["16:9", "1:1"]},
+    "aspect_note": _text(300),
 })
 
 _EN_FIELDS = ("title_en", "hashtags_en")

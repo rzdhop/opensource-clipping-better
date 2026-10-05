@@ -61,6 +61,33 @@ const PROMPT_STYLES = [
   { id: 'action', label: 'one continuous action (Flow / Seedance style)' },
 ]
 
+// Plan 23 stage B7: the story's frame (generation_profile.aspect), chosen once, here; 9:16 sends nothing.
+// The reasons a frame is disabled come from the server (offer.aspect_reasons, media_policy.aspect_reasons);
+// what stays 9:16 in v1 is said under the select.
+const FRAMES = [
+  { id: '9:16', label: 'Vertical 9:16 (default)' },
+  { id: '16:9', label: 'Landscape 16:9' },
+  { id: '1:1', label: 'Square 1:1' },
+]
+const FRAME_HINT = ('The character sheets and the style preview stay 9:16 (references, not output). Landscape: a '
+  + 'regular YouTube video, not Shorts. Square: Tier 1, or clips on Seedance or Kling (Veo, LTX, Flow and a local '
+  + 'ComfyUI make no 1:1). The frame cannot change after the story is made.')
+
+/** Why the frame `frame` cannot be picked with this profile, or '' (media_policy.aspect_refusal's rules). */
+export function frameRefusal(frame, { pipeline, tier, route, budgetProfile, reasons }) {
+  if (frame === '9:16') return ''
+  const said = reasons || {}
+  if (pipeline !== 'v2') return said.pipeline || 'a 16:9 or 1:1 frame is for a story on the v2 pipeline'
+  if (tier < 2) return ''
+  if (route === 'local') return said.local || 'local ComfyUI clips are 9:16 only (v1)'
+  if (budgetProfile === 'free') return said.free || 'the free profile animates on a local ComfyUI only (9:16)'
+  if (frame === '1:1' && budgetProfile === 'native_speech') return said.veo_square || 'Veo makes 9:16 and 16:9 only'
+  if (frame === '1:1' && budgetProfile === 'native_speech_manual') {
+    return said.manual_square || 'Google Flow makes 9:16 and 16:9 only'
+  }
+  return ''
+}
+
 function CreateStoryForm() {
   const navigate = useNavigate()
   // No default: a language a user forgot to pick must never silently become
@@ -89,6 +116,7 @@ function CreateStoryForm() {
   const [universeChoice, setUniverseChoice] = useState('')
   const [universeCatalogue, setUniverseCatalogue] = useState({ universes: [], by_style: {} })
   const [promptStyle, setPromptStyle] = useState('studio')
+  const [frame, setFrame] = useState('9:16')
   // The episode format the user picked; '' until they pick one, so the
   // select follows the style's suggestion, else the pipeline's default.
   const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
@@ -148,6 +176,12 @@ function CreateStoryForm() {
   // server's price table; phase 7 stage 7): shown whether or not it is the
   // default yet, so a missing key is weighed against a price.
   const estimate = offer && offer.estimate
+  // Plan 23 stage B7: a frame the profile cannot make is disabled with its reason; a pick that became
+  // impossible falls back to 9:16 (what is sent is what the select shows).
+  const frameReason = (id) => frameRefusal(id, {
+    pipeline, tier, route, budgetProfile, reasons: offer && offer.aspect_reasons,
+  })
+  const shownFrame = frameReason(frame) ? '9:16' : frame
   // Plan 20 stage 1: a style suggests an episode format
   // (episode_defaults.episode_template_id -- Fruit Drama the narrated drama)
   // when it fits the pipeline; the story keeps whichever is sent. Plan 22
@@ -208,6 +242,7 @@ function CreateStoryForm() {
           ...(pipeline === 'v2' && !(manualClips && imagesOwn) && imagePreference ? { image_preference: imagePreference } : {}),
           ...(shownUniverse ? { universe: shownUniverse } : {}),
           ...(pipeline === 'v2' && promptStyle !== 'studio' ? { prompt_style: promptStyle } : {}),
+          ...(shownFrame !== '9:16' ? { aspect: shownFrame } : {}),
         } : null,
       }
       const story = await createStory(createFields)
@@ -513,6 +548,21 @@ function CreateStoryForm() {
                   )}
                 </div>
               )}
+              <div className="form-group">
+                <label className="form-label" htmlFor="new-story-frame">Frame</label>
+                <select id="new-story-frame" className="form-select" value={shownFrame}
+                  onChange={(e) => choose(setFrame)(e.target.value)}>
+                  {FRAMES.map((option) => {
+                    const reason = frameReason(option.id)
+                    return (
+                      <option key={option.id} value={option.id} disabled={Boolean(reason)} title={reason}>
+                        {option.label}{reason ? ` — unavailable: ${reason}` : ''}
+                      </option>
+                    )
+                  })}
+                </select>
+                <p className="form-hint">{FRAME_HINT}</p>
+              </div>
               {nativeSpeech && !manualClips && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-speech-model">Speaking clips</label>

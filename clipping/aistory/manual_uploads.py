@@ -13,10 +13,12 @@ which hand the received file to :func:`accept_clip`:
    storyboard approved (409 otherwise), the shot on the storyboard (404),
    its clip the human's (a native-speech story, the shot's class link
    ``manual/upload``), then the file itself (:func:`probe_clip`, ffprobe):
-   a video stream; at least :data:`MIN_CLIP_S`; 9:16 within
+   a video stream; at least :data:`MIN_CLIP_S`; the story's frame (9:16, or
+   the 16:9 / 1:1 it was made with, plan 23 stage B7) within
    :data:`ASPECT_TOLERANCE` (2 %) -- the render would crop any other shape
-   to 9:16 (scale to cover, centre crop), which on a 16:9 or 1:1 clip cuts
-   the characters out of frame, so the clip is refused rather than cropped;
+   to that frame (scale to cover, centre crop), which on a clip of another
+   shape cuts the characters out of frame, so the clip is refused rather
+   than cropped;
    a sound track when the shot speaks (its sound is the line);
 2. **stored** as ``assets/clips/shot_NN.manual.mp4`` by an atomic rename
    from the received file (same folder); a clip already there moves to
@@ -58,6 +60,8 @@ MAX_CLIP_BYTES = 500 * 1024 * 1024
 MIN_CLIP_S = 2.0
 ASPECT = 9 / 16
 ASPECT_TOLERANCE = 0.02
+# Plan 23 stage B7: a story's frame as a width/height ratio (9:16 is ASPECT).
+FRAME_RATIOS = {"9:16": ASPECT, "16:9": 16 / 9, "1:1": 1.0}
 FILENAME_MAX = 200
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
@@ -148,8 +152,10 @@ def probe_clip(path, *, run=None) -> dict:
             "mp4": bool({"mp4", "mov"} & set(container.split(",")))}
 
 
-def clip_refusal(info, *, speaks) -> str | None:
-    """Why the probed clip *info* cannot be a shot's clip, or None."""
+def clip_refusal(info, *, speaks, aspect="9:16") -> str | None:
+    """Why the probed clip *info* cannot be a shot's clip, or None. *aspect*
+    is the story's frame (``media_policy.aspect``: 9:16 unless it was made
+    16:9 or 1:1); the clip must be it within :data:`ASPECT_TOLERANCE`."""
     if not info["video"]:
         return "The file has no video stream: send the clip itself (an MP4), not its sound or a still."
     if not info.get("mp4", True):
@@ -161,9 +167,10 @@ def clip_refusal(info, *, speaks) -> str | None:
     if not width or not height:
         return "The clip's size cannot be read: send it again as an MP4."
     ratio = width / height
-    if abs(ratio - ASPECT) / ASPECT > ASPECT_TOLERANCE:
-        return (f"The clip is {width}x{height} ({_ratio_name(width, height)}), not 9:16: the render would crop it to "
-                "9:16 and cut the characters out of frame. Pick 9:16 on the platform and make it again.")
+    want = FRAME_RATIOS[aspect]
+    if abs(ratio - want) / want > ASPECT_TOLERANCE:
+        return (f"The clip is {width}x{height} ({_ratio_name(width, height)}), not {aspect}: the render would crop it "
+                f"to {aspect} and cut the characters out of frame. Pick {aspect} on the platform and make it again.")
     if speaks and not info["audio"]:
         return ("The clip has no sound track, and this shot speaks: its sound is the line. Download the take with "
                 "its audio (Veo 3.1 always makes sound).")
@@ -278,7 +285,7 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
         raise UploadRefused(refusal)
     speaks = bool(shot.get("speaks"))
     info = probe_clip(received, run=run)
-    refusal = clip_refusal(info, speaks=speaks)
+    refusal = clip_refusal(info, speaks=speaks, aspect=media_policy.aspect(ec.story))
     if refusal:
         raise UploadRefused(refusal)
 
@@ -355,11 +362,13 @@ def _image_size(path) -> tuple:
         return image.size
 
 
-def _clean_image(received, folder, *, role, exact_916=False) -> tuple:
+def _clean_image(received, folder, *, role, exact_916=False, aspect="9:16") -> tuple:
     """*received* decoded, re-encoded as a clean PNG in *folder* (the
     uploads module's own decoder: PNG, JPEG, WebP or GIF, no metadata) and
-    checked against the least size *role* takes; a keyframe is 9:16 within
-    :data:`ASPECT_TOLERANCE`, cropped to the exact even 9:16 the render
+    checked against the least size *role* takes at the story's frame
+    *aspect*; a keyframe (*exact_916*) is that frame -- 9:16 unless the story
+    was made 16:9 or 1:1 (plan 23 stage B7) -- within
+    :data:`ASPECT_TOLERANCE`, cropped to the exact even frame the render
     expects. ``(path, (width, height))``; :class:`UploadRefused` otherwise."""
     import tempfile
 
@@ -375,16 +384,17 @@ def _clean_image(received, folder, *, role, exact_916=False) -> tuple:
         except uploads_mod.UploadError as exc:
             raise UploadRefused(str(exc), status=exc.http_status) from None
         width, height = _image_size(cleaned)
-        least = brief_mod.IMAGE_MIN_SIZES[role]
+        least = brief_mod.image_min_size(role, aspect)
         if width < least[0] or height < least[1]:
             what = role.replace("_", " ")
             raise UploadRefused(f"The image is {width}x{height}: a {what} is at least {least[0]}x{least[1]} "
-                                f"(the app makes it at {'x'.join(map(str, brief_mod.IMAGE_SIZES[role]))}).")
+                                f"(the app makes it at {'x'.join(map(str, brief_mod.image_size(role, aspect)))}).")
         if exact_916:
-            if abs(width / height - ASPECT) / ASPECT > ASPECT_TOLERANCE:
-                raise UploadRefused(f"The keyframe is {width}x{height} ({_ratio_name(width, height)}), not 9:16: "
-                                    "make it 9:16 (the render would crop the characters out of frame).")
-            crop = policy.keyframe_crop((width, height))
+            want = FRAME_RATIOS[aspect]
+            if abs(width / height - want) / want > ASPECT_TOLERANCE:
+                raise UploadRefused(f"The keyframe is {width}x{height} ({_ratio_name(width, height)}), not {aspect}: "
+                                    f"make it {aspect} (the render would crop the characters out of frame).")
+            crop = policy.keyframe_crop((width, height), aspect)
             if crop is not None:
                 from PIL import Image
 
@@ -453,7 +463,7 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guar
     except (KeyError, TypeError):
         raise UploadRefused("The entity's refs/ folder is not a real folder (a symlink is never followed).",
                             status=409) from None
-    cleaned, size = _clean_image(received, folder, role=role)
+    cleaned, size = _clean_image(received, folder, role=role, aspect=media_policy.aspect(story))
     try:
         if guard is not None:
             guard()
@@ -493,8 +503,9 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guar
 def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_log=None, now=None,
                     guard=None) -> dict:
     """The user's own keyframe of a shot, on a story whose images are manual:
-    decoded clean, 9:16 within 2 % (cropped to the exact even 9:16), at
-    least 360x640, stored as ``assets/shots/shot_NN.png`` and recorded as a
+    decoded clean, 9:16 within 2 % (cropped to the exact even 9:16) -- the
+    story's own 16:9 or 1:1 frame when it was made with one -- at least
+    360x640 (its frame's least size otherwise), stored as ``assets/shots/shot_NN.png`` and recorded as a
     made keyframe is -- ``provider: manual``, ``model: upload``, ``route: free``, $0, the
     prompt hash it would be asked with now -- so it reads current; the
     episode's image link recorded as ``manual/upload``. Returns ``{"shot_id",
@@ -518,7 +529,8 @@ def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_lo
     except KeyError:
         raise UploadRefused(f"assets/shots/{name} is not a real file (a symlink is never followed).",
                             status=409) from None
-    cleaned, size = _clean_image(received, os.path.dirname(dest), role="keyframe", exact_916=True)
+    cleaned, size = _clean_image(received, os.path.dirname(dest), role="keyframe", exact_916=True,
+                                 aspect=media_policy.aspect(ec.story))
     if guard is not None:
         try:
             guard()

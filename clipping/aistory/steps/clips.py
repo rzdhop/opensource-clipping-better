@@ -562,12 +562,15 @@ def local_video_status(env, *, transport=None) -> dict:
             "note": f"{name} can run on ComfyUI at {client.base_url} ({card}, profile {profile})"}
 
 
-def hosted_rows(chain, merged, adapters, *, resolution=None) -> list:
+def hosted_rows(chain, merged, adapters, *, resolution=None, aspect=None) -> list:
     """One row per hosted link of VIDEO_CHAIN, calling nothing:
     ``{"link", "status": "keyed" | "skipped", "reason", "price_per_second"}``
     -- keyed: it has an adapter, a table of sellable lengths, its key and a
     price per second (every hosted clip is paid), at *resolution* when the
-    table prices that size apart (``pricing.price_key``, phase 7 stage 4)."""
+    table prices that size apart (``pricing.price_key``, phase 7 stage 4).
+    Plan 23 stage B7: at the story's frame *aspect* (None or 9:16: every
+    link, as always) a link that cannot make it is skipped with the reason
+    (``video.aspect_refusal``)."""
     rows = []
     for link in chain:
         if link.provider == "local":
@@ -580,6 +583,8 @@ def hosted_rows(chain, merged, adapters, *, resolution=None) -> list:
             row["reason"] = video_providers.REFUSED_LINKS[label]
         elif label not in video_providers.CLIP_LENGTHS:
             row["reason"] = "no table of the clip lengths it sells"
+        elif video_providers.aspect_refusal(label, aspect):
+            row["reason"] = video_providers.aspect_refusal(label, aspect)
         elif gen.missing_keys(link, merged):
             row["reason"] = imaging.missing_keys_reason(gen.missing_keys(link, merged))
         else:
@@ -718,12 +723,15 @@ def planned_link(ec, env, *, assets_doc=None, adapters=None):
     resolution = media_policy.video_resolution(ec.story)
     policy = settings.get("video_link_policy") or CHEAPEST
     want = int(profile.get("tier") or 1) == 3 and media_policy.ambience(ec.story)
-    row = pick_hosted(hosted_rows(chain, merged, adapters, resolution=resolution), policy, want_sound=want)
+    frame = media_policy.aspect(ec.story)
+    row = pick_hosted(hosted_rows(chain, merged, adapters, resolution=resolution, aspect=frame), policy,
+                      want_sound=want)
     if row is None:
         assumed = dict(merged)
         for link in chain:
             assumed.update((name, _ASSUMED_KEY) for name in gen.missing_keys(link, merged))
-        row = pick_hosted(hosted_rows(chain, assumed, adapters, resolution=resolution), policy, want_sound=want)
+        row = pick_hosted(hosted_rows(chain, assumed, adapters, resolution=resolution, aspect=frame), policy,
+                          want_sound=want)
     return row["link"] if row is not None else None
 
 
@@ -926,7 +934,8 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
 
     # --- the link: the episode's own, else the route and the profile's policy
     resolution = media_policy.video_resolution(ec.story)
-    rows = hosted_rows(chain, merged, adapters, resolution=resolution)
+    frame = media_policy.aspect(ec.story)
+    rows = hosted_rows(chain, merged, adapters, resolution=resolution, aspect=frame)
     local_listed = any(link.provider == "local" for link in chain)
     local_adapter = gen.adapter_for(gen.VIDEO, "local", adapters) is not None
     local_info = {}
@@ -938,6 +947,10 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
                                   note=f"{LOCAL_LINK} is not a link of {gen.ENV_NAMES[gen.VIDEO]}")
             elif not local_adapter:
                 local_info.update(ok=False, template=None, profile=None, note="no adapter yet for local video")
+            elif video_providers.aspect_refusal(LOCAL_LINK, frame):
+                # Plan 23 stage B7: a local workflow renders 9:16 only (v1); it is never probed for another frame.
+                local_info.update(ok=False, template=None, profile=None,
+                                  note=video_providers.aspect_refusal(LOCAL_LINK, frame))
             elif not probe_local:
                 local_info.update(ok=False, template=None, profile=None, note=LOCAL_NOT_ASKED)
             else:
@@ -1232,15 +1245,19 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
 
 # ================================================== plan 22 (native speech)
 
-def link_row(label, merged, adapters, *, resolution=None) -> dict:
+def link_row(label, merged, adapters, *, resolution=None, aspect=None) -> dict:
     """``hosted_rows``' row of one link *label*, resolved by name (plan 22: a
     native-speech profile's speech or silent link, which need not be a link
     of VIDEO_CHAIN): keyed when it parses, has an adapter, is not refused,
-    has its keys and a price per second -- a link that costs nothing (one
-    the human fills, stage 5) is keyed at $0 whatever its unit."""
+    makes the story's frame *aspect* (plan 23 stage B7; None or 9:16: every
+    link), has its keys and a price per second -- a link that costs nothing
+    (one the human fills, stage 5) is keyed at $0 whatever its unit."""
     row = {"link": label, "status": "skipped", "reason": None, "price_per_second": None, "paid": False}
     if not label:
         row["reason"] = "the budget profile names no link"
+        return row
+    if video_providers.aspect_refusal(label, aspect):
+        row["reason"] = video_providers.aspect_refusal(label, aspect)
         return row
     if gen.is_manual(label) and label == gen.MANUAL_LINK:
         # Plan 22 stage 5: the human's own upload is keyed always -- no key, no adapter call, $0.
@@ -1306,7 +1323,8 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
     resolution = media_policy.video_resolution(ec.story)
     speech_label = class_link(ec.story, {"speaks": True}, assets_doc, None)
     silent_label = class_link(ec.story, {"speaks": False}, assets_doc, None)
-    rows = {label: link_row(label, merged, adapters, resolution=resolution)
+    frame = media_policy.aspect(ec.story)
+    rows = {label: link_row(label, merged, adapters, resolution=resolution, aspect=frame)
             for label in dict.fromkeys((speech_label, silent_label))}
     speech_row, silent_row = rows[speech_label], rows[silent_label]
     cap = float((caps.get("episode") or {}).get("cap_usd", budget_obj.per_episode_cap_usd))

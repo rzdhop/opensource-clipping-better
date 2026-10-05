@@ -125,6 +125,21 @@ def palette_line(style_lock: dict) -> str:
 
 # --------------------------------------------------------------- builders
 
+# Plan 23 stage B7: how a prompt names its frame. 9:16 is the very phrase
+# every prompt said before (RC-M1: byte for byte); the character sheets keep
+# their own "Vertical 9:16" -- a sheet is a reference, never the output.
+_FRAME_PHRASES = {"9:16": "Vertical 9:16", "16:9": "Landscape 16:9", "1:1": "Square 1:1"}
+
+
+def _frame_phrase(aspect="9:16") -> str:
+    """``"Vertical 9:16"`` (``None`` too), ``"Landscape 16:9"`` or
+    ``"Square 1:1"``; ``ValueError`` for any other frame."""
+    phrase = _FRAME_PHRASES.get(aspect or "9:16")
+    if phrase is None:
+        raise ValueError(f"unknown frame {aspect!r}, expected one of {list(_FRAME_PHRASES)}")
+    return phrase
+
+
 def shot_prompt(
     style_lock: dict,
     *,
@@ -133,9 +148,11 @@ def shot_prompt(
     place_block: str,
     time_variant: str,
     framing: str,
+    aspect: str = "9:16",
 ) -> str:
     """The common shot-prompt skeleton (spec 5): subject -> action -> setting
-    -> style -> camera -> lighting -> quality, in that fixed order.
+    -> style -> camera -> lighting -> quality, in that fixed order; the
+    frame is *aspect*'s (:func:`_frame_phrase`, 9:16 unless said).
     """
     _check_framing(framing)
     framing_phrase = FRAMING_PHRASES[framing]
@@ -155,7 +172,7 @@ def shot_prompt(
         f"{subjects}. {act}. Setting: {place}, {time_v}. "
         f"Style: {rendering}. Palette: {palette}. {character_design_rules} "
         f"Camera: {framing_phrase}, {lens}. Lighting: {lighting}. "
-        "Vertical 9:16 composition, subject kept in the central safe area "
+        f"{_frame_phrase(aspect)} composition, subject kept in the central safe area "
         "(leave the bottom 22% free of faces for subtitles). "
         f"{quality_tail}"
     )
@@ -203,7 +220,7 @@ def expressions_prompt(style_lock: dict, *, descriptor: str, signature_items) ->
     return _collapse_ws(text)
 
 
-def master_plate_prompt(style_lock: dict, *, place_descriptor: str, time_variant: str) -> str:
+def master_plate_prompt(style_lock: dict, *, place_descriptor: str, time_variant: str, aspect: str = "9:16") -> str:
     environment_rules = style_lock["environment_rules"].strip()
     if environment_rules and environment_rules[-1] not in ".!?":
         environment_rules += "."
@@ -212,13 +229,13 @@ def master_plate_prompt(style_lock: dict, *, place_descriptor: str, time_variant
         "no people, no characters. "
         f"{environment_rules} {style_lock['rendering']}. "
         f"Palette: {palette_line(style_lock)}. Camera: wide, eye level, 24mm equivalent. "
-        f"Lighting: {style_lock['lighting']}. Vertical 9:16, horizon in the upper third, "
+        f"Lighting: {style_lock['lighting']}. {_frame_phrase(aspect)}, horizon in the upper third, "
         f"foreground detail in the lower third. {style_lock['quality_tail']}"
     )
     return _collapse_ws(text)
 
 
-def variant_prompt(style_lock: dict, *, place_descriptor: str, variant: str) -> str:
+def variant_prompt(style_lock: dict, *, place_descriptor: str, variant: str, aspect: str = "9:16") -> str:
     """The master-plate prompt (spec 5) of one time variant of a place: the
     variant name is its time and weather (``night``, ``golden_hour`` ->
     "golden hour"). ``variant_prompt(..., variant="day")`` is the master plate
@@ -228,7 +245,7 @@ def variant_prompt(style_lock: dict, *, place_descriptor: str, variant: str) -> 
     if not isinstance(variant, str) or re.fullmatch(schemas.TIME_VARIANT_PATTERN, variant) is None:
         raise ValueError(f"not a time variant name: {variant!r}")
     return master_plate_prompt(style_lock, place_descriptor=place_descriptor,
-                               time_variant=variant.replace("_", " "))
+                               time_variant=variant.replace("_", " "), aspect=aspect)
 
 
 def prop_image_prompt(style_lock: dict, *, descriptor: str) -> str:
@@ -546,18 +563,21 @@ def variant_prompt_v2(style_lock: dict, *, which: str, delta_text: str, look_tex
                      tail=tail, constraints=constraints, rules=rules, budget=budget, cues=cues)
 
 
-def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=PLATE_V2_MAX_WORDS) -> str:
+def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=PLATE_V2_MAX_WORDS,
+                    aspect: str = "9:16") -> str:
     """A v2 place's plate for one time variant: the place in words
     (``shots.render_place``: descriptor, layout map, the variant's light,
     the props that live there), no people, a wide camera, the style's
     rendering and palette -- at most *budget* words (``PLATE_V2_MAX_WORDS``,
     or the link's own, stage F2). The style's ``environment_rules``, as one
-    sentence, when the budget has room for it whole after the rendering."""
+    sentence, when the budget has room for it whole after the rendering.
+    The frame is *aspect*'s (plan 23 stage B7; 9:16 unless said)."""
     if not isinstance(variant, str) or re.fullmatch(schemas.TIME_VARIANT_PATTERN, variant) is None:
         raise ValueError(f"not a time variant name: {variant!r}")
     head = f"Establishing wide shot of an empty set, {variant.replace('_', ' ')}, no people, no characters:"
     after = (f"Camera: wide, eye level, 24mm equivalent, deep focus. "
-             f"Palette: {_strip_trailing_period(palette_line(style_lock))}. Vertical 9:16. {_CONSTRAINTS_NO_PEOPLE}")
+             f"Palette: {_strip_trailing_period(palette_line(style_lock))}. {_frame_phrase(aspect)}. "
+             f"{_CONSTRAINTS_NO_PEOPLE}")
     room = budget - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
     place = _fit(place_text, room)
     before = f"{head} {place}." if place else f"{head[:-1]}."

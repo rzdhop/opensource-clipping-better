@@ -488,7 +488,7 @@ form, or the Visual tier card, if you'd rather not.
    before uploading. A platform select switches every prompt between Flow's
    and Higgsfield's own phrasing; **"Download brief (zip)"** saves the
    `.md`, the `.json` and every reference image in one file.
-5. On **Google Flow**: set the project to **9:16**, use **Frames to Video**
+5. On **Google Flow**: set the project to **9:16** (16:9 on a landscape story), use **Frames to Video**
    with the shot's keyframe as the first frame when one exists (else
    **Ingredients to Video** with the character and place sheets), paste the
    prompt, and generate on **Veo 3.1 Fast** (20 Flow credits a clip on AI
@@ -500,7 +500,7 @@ form, or the Visual tier card, if you'd rather not.
    refused, with the reason, rather than silently cropped or accepted: not
    an **MP4 or MOV** ("the clip is not an MP4 (or MOV): download the take
    from the platform as MP4 and send that"), shorter than **2 s**, not
-   **9:16 within 2 %** (the render would crop any other shape, cutting the
+   **9:16 within 2 %** — the story's own frame on a 16:9 story — (the render would crop any other shape, cutting the
    characters out of frame — refused instead of cropped), or a speaking
    shot's clip with **no sound track**.
 7. Once stored, the clip is **taken** for free: its audio is transcribed and
@@ -704,6 +704,28 @@ approving a variant marks the storyboards that have the character as
 outdated; their prompts refresh, and a shot without a variant is byte for
 byte what it was. The image brief for manual uploads does not list variant
 sheets yet.
+
+**Frame (16:9 and 1:1).** The generation profile's **Frame** select picks
+the story's output frame: Vertical 9:16 (the default, every story made
+before), Landscape 16:9 or Square 1:1 (`generation_profile.aspect`). It is
+chosen when the story is made and never changes after — its plates,
+keyframes and clips are made at it — so `PATCH` and the pipeline switch
+answer 409 "the frame is chosen when the story is made"; an existing story
+is never converted. The plates and keyframes are asked at the frame, each
+clip says it to its link (seedance and LTX `aspect_ratio`, Veo
+`aspectRatio`; Kling follows its keyframe), and the render, the cover and
+the subtitles follow it. A frame a profile cannot make is disabled in the
+form with the reason, and refused on creation: 16:9 and 1:1 need the v2
+pipeline; a local ComfyUI renders 9:16 clips only (v1), so neither the
+`local` route nor the `free` profile at tier 2+ takes another frame; Veo,
+LTX and Google Flow make 9:16 and 16:9 but no 1:1, so a 1:1 story is a
+Tier 1 story or one whose clips are on Seedance (or Kling) — no 1:1 with
+native speech or your own Flow clips. The clip estimate skips a link that
+cannot make the story's frame, with the reason. Stays 9:16 in v1: the
+character sheets (references, not output), the style preview, local
+ComfyUI clips, the tier-2 render golden, and Clips mode. A 16:9 episode's
+metadata pack records its frame with a note — upload it as a regular
+YouTube video, not Shorts (a YouTube landscape entry is not written yet).
 
 **Episode formats.** Five templates ship, each a story-level choice
 (`episode_template_id`, sent on creation or patched while no episode has a

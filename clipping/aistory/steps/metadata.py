@@ -26,7 +26,8 @@ no call); a pack of another render or script revision is written again,
 every platform.
 
 **The cover** (:func:`make_cover`, DEC-159: text by libass from ASS built
-in Python, no PIL): the hook scene's first shot image, filled to 1080x1920,
+in Python, no PIL): the hook scene's first shot image, filled to 1080x1920
+(the story's own frame -- 1920x1080, 1080x1080 -- on a 16:9 or 1:1 story),
 with ``hook.on_screen_text`` -- else the first platform's M1 ``hook_text``
 -- burned by ``subtitles.cover_ass`` in the style's typography and the font
 the render resolves; one frame by ffmpeg (``filtergraph.cover_argv``) to the
@@ -51,9 +52,9 @@ import shutil
 import subprocess
 import time
 
-from .. import context, prompts, schemas, subtitle_style
+from .. import context, media_policy, prompts, schemas, subtitle_style
 from .. import store as store_mod
-from ..render import filtergraph, fonts
+from ..render import filtergraph, fonts, profiles
 from ..render import plan as plan_mod
 from ..render import runner as runner_mod
 from ..render import subtitles as subtitles_mod
@@ -202,10 +203,24 @@ def platform_entry(reply, *, ep, language, teaser, now) -> dict:
     return entry
 
 
+# Plan 23 stage B7: what a landscape episode's pack says about where it goes.
+LANDSCAPE_NOTE = ("16:9: upload as a regular YouTube video, not Shorts (Shorts, TikTok and Reels are vertical); "
+                  "a YouTube landscape entry is not written yet.")
+SQUARE_NOTE = "1:1: TikTok, Shorts and Reels show a square video with bands above and below."
+ASPECT_NOTES = {"16:9": LANDSCAPE_NOTE, "1:1": SQUARE_NOTE}
+
+
 def new_pack(ec, script, render_sha, *, now) -> dict:
-    return {"$schema": schemas.METADATA_PACK_SCHEMA_NAME, "ep": ec.ep, "language": ec.language,
-            "script_rev": script["rev"], "render_sha256": render_sha, "platforms": {},
-            "created_at": now, "updated_at": now}
+    doc = {"$schema": schemas.METADATA_PACK_SCHEMA_NAME, "ep": ec.ep, "language": ec.language,
+           "script_rev": script["rev"], "render_sha256": render_sha, "platforms": {},
+           "created_at": now, "updated_at": now}
+    frame = media_policy.aspect(ec.story)
+    if frame != profiles.PORTRAIT.name:
+        # Plan 23 stage B7: a 16:9 or 1:1 episode's pack records its frame and where it goes;
+        # a 9:16 pack is the one it always was.
+        doc["aspect"] = frame
+        doc["aspect_note"] = ASPECT_NOTES[frame]
+    return doc
 
 
 def save_pack(ec, doc) -> dict:
@@ -308,12 +323,14 @@ def make_cover(ctx, ec, script, text, *, run_process=subprocess.run, custom_font
         runner_mod._stage_font({"font": font}, render_dir)
     except (OSError, runner_mod.RunnerError) as exc:
         raise StepFailed(f"Episode {ep}'s cover could not be made: the font could not be staged ({exc}).") from None
-    _write_text(os.path.join(render_dir, COVER_ASS_REL), subtitles_mod.cover_ass(text, typography))
+    # Plan 23 stage B7: the cover is the story's frame (B6's geometry; 9:16 as always by default).
+    geometry = profiles.GEOMETRIES[media_policy.aspect(ec.story)]
+    _write_text(os.path.join(render_dir, COVER_ASS_REL), subtitles_mod.cover_ass(text, typography, geometry=geometry))
     part = os.path.join(render_dir, COVER_PART_REL)
     if os.path.isfile(part) and not os.path.islink(part):
         os.remove(part)
 
-    argv = filtergraph.cover_argv(image_rel, COVER_ASS_REL, plan_mod.FONTS_DIR, COVER_PART_REL)
+    argv = filtergraph.cover_argv(image_rel, COVER_ASS_REL, plan_mod.FONTS_DIR, COVER_PART_REL, geometry=geometry)
     ctx.cancel.check()
     try:
         done = run_process(argv, cwd=render_dir, stdin=subprocess.DEVNULL, capture_output=True, text=True,

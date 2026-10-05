@@ -662,6 +662,10 @@ class ComfyUIVideoAdapter:
             raise ValueError(f"local/comfyui {name}: keyframe {request.references[0]} not found")
         if not request.out_dir:
             raise ValueError(f"local/comfyui {name}: GenRequest.out_dir is required: where the clip is written")
+        aspect = (request.extra or {}).get("aspect")
+        if aspect not in (None, "9:16"):
+            # Plan 23 stage B7: the shipped workflows render a 9:16 frame only (v1).
+            raise ValueError(f"local/comfyui {name} renders 9:16 clips only (v1), not {aspect}")
         template = load_template(name)
         rule = template["frame_rule"]
         duration = request.duration_s

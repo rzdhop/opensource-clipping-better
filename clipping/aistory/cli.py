@@ -756,7 +756,7 @@ def build_parser() -> argparse.ArgumentParser:
         "upload-clip", parents=[common], help="upload your own clip for one shot (the manual link)",
         description=(
             "Take FILE as shot SHOT_ID's clip of episode EP, with the API's own checks (a video stream, at "
-            "least 2 s, 9:16, a sound track when the shot speaks): stored as assets/clips/shot_NN.manual.mp4 "
+            "least 2 s, the story's frame -- 9:16 unless made 16:9 --, a sound track when the shot speaks): stored as assets/clips/shot_NN.manual.mp4 "
             "(an earlier one kept in assets/clips/takes/), then taken -- its speech heard against the line on "
             "the STT chain. The file itself is copied, never moved."
         ),

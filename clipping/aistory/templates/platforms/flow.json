@@ -23,7 +23,7 @@
       "reference_syntax": null
     }
   },
-  "aspect": "9:16",
+  "aspects": ["9:16", "16:9"],
   "length_note": "Flow makes 8 s clips only: pick 8 s. The app keeps the clip's real length and cuts a speaking shot 0.3 s after its last word.",
   "modes": {
     "keyframe": "Frames to Video: image 1 (the keyframe) as the first frame.",
@@ -39,7 +39,7 @@
     "The spoken line stays in quotes, in the story's language: do not translate it.",
     "Audio is always on in Veo 3.1: the prompt says which voice speaks and that nothing else does."
   ],
-  "where_to_paste": "Flow → New project → Frames to Video (with the keyframe) or Ingredients to Video (with the sheets) → set 9:16 → paste the prompt → Generate. Download the take you like as MP4.",
+  "where_to_paste": "Flow → New project → Frames to Video (with the keyframe) or Ingredients to Video (with the sheets) → set {aspect} → paste the prompt → Generate. Download the take you like as MP4.",
   "credits": {
     "unit": "Flow credits",
     "per_clip": {"fast_ai_pro": 20, "fast_ultra": 10, "quality": 100},

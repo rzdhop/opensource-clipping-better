@@ -154,6 +154,18 @@ PROMPT_STUDIO = "studio"
 PROMPT_ACTION = "action"
 PROMPT_STYLES = (PROMPT_STUDIO, PROMPT_ACTION)
 
+# Plan 23 stage B7: the optional ``generation_profile.aspect``, the story's
+# output frame, chosen when the story is made and never changed after (its
+# plates, keyframes and clips are made at it). Absent is the vertical 9:16
+# every story had before (byte for byte); "16:9" and "1:1" are the two that
+# may be stored (``media_policy.aspect``). The character sheets, the style
+# preview, local ComfyUI clips and Clips mode stay 9:16 in v1.
+ASPECT_PORTRAIT = "9:16"
+ASPECT_LANDSCAPE = "16:9"
+ASPECT_SQUARE = "1:1"
+ASPECTS = (ASPECT_LANDSCAPE, ASPECT_SQUARE)
+FRAME_ASPECTS = (ASPECT_PORTRAIT,) + ASPECTS
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

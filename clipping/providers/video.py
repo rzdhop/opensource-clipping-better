@@ -85,6 +85,33 @@ AUDIO = {
     # the clip's real length is the shot's.
     "manual/upload": "optional",
 }
+# Plan 23 stage B7: the frames each link makes (``GenRequest.extra["aspect"]``,
+# absent = 9:16). Veo makes 9:16 and 16:9 (ai.google.dev; Higgsfield's Veo 3.1
+# guide likewise), LTX-2.3/2.5 fast sell ``aspect_ratio`` 9:16 or 16:9 (fal's
+# schemas), seedance 1 pro fast also sells 1:1 (A-100's enum), kling has no
+# aspect field -- its clip follows the keyframe, so it makes whatever frame the
+# keyframe is. The human's own upload follows the default platform (Google
+# Flow: 9:16 and 16:9). A local ComfyUI workflow renders 9:16 only in v1.
+PORTRAIT = "9:16"
+ASPECTS = {
+    "fal/seedance-1-pro-fast": ("9:16", "16:9", "1:1"),
+    "fal/ltx-2.3-fast": ("9:16", "16:9"),
+    "fal/ltx-2.5-fast": ("9:16", "16:9"),
+    "fal/kling-2.5-turbo-std": ("9:16", "16:9", "1:1"),
+    "gemini/veo-3.1-lite": ("9:16", "16:9"),
+    "gemini/veo-3.1-fast": ("9:16", "16:9"),
+    "gemini/veo-3.1": ("9:16", "16:9"),
+    "manual/upload": ("9:16", "16:9"),
+}
+LOCAL_ASPECTS = ("9:16",)
+# Why a link cannot make a frame, by the kind of link.
+_ASPECT_REASONS = {
+    "gemini": "Veo makes 9:16 and 16:9 clips only",
+    "ltx": "LTX makes 9:16 and 16:9 clips only",
+    "manual": "Google Flow (the shot brief's platform) makes 9:16 and 16:9 clips only",
+    "local": "a local ComfyUI workflow renders 9:16 clips only (v1)",
+}
+
 # Only seedance takes a seed; kling and LTX (2.3, 2.5) have no field, Veo is "not deterministic".
 SEED_HONOURED = frozenset({"fal/seedance-1-pro-fast"})
 
@@ -157,7 +184,45 @@ def clip_seconds(link, request) -> int:
                          f"not {request.duration_s!r}")
     if not request.out_dir:
         raise ValueError(f"{label}: GenRequest.out_dir is required: where the clip is written")
+    refusal = aspect_refusal(label, _aspect(request))
+    if refusal:
+        raise ValueError(refusal)
     return seconds
+
+
+def _label(link) -> str:
+    return link if isinstance(link, str) else describe(link)
+
+
+def supports_aspect(link, aspect) -> bool:
+    """Whether a clip of *link* (a ``Link`` or its label) can be made at the
+    frame *aspect* (``"9:16"``, ``"16:9"``, ``"1:1"``; None is 9:16). Every
+    link makes 9:16; a link this module has no table for makes 9:16 only."""
+    if aspect in (None, PORTRAIT):
+        return True
+    label = _label(link)
+    if label.startswith("local/"):
+        return aspect in LOCAL_ASPECTS
+    return aspect in ASPECTS.get(label, (PORTRAIT,))
+
+
+def aspect_refusal(link, aspect) -> str | None:
+    """Why *link* cannot make *aspect* clips, in one sentence, or None when
+    it can (:func:`supports_aspect`)."""
+    if supports_aspect(link, aspect):
+        return None
+    label = _label(link)
+    provider, _, model = label.partition("/")
+    kind = "ltx" if model.startswith("ltx") else provider
+    reason = _ASPECT_REASONS.get(kind, f"{label} makes 9:16 clips only")
+    return f"{label} cannot make {aspect} clips: {reason}"
+
+
+def _aspect(request):
+    """The frame *request* asks (``GenRequest.extra["aspect"]``, plan 23
+    stage B7), or None: 9:16, the frame every clip was bought at before."""
+    aspect = (request.extra or {}).get("aspect")
+    return None if aspect in (None, PORTRAIT) else aspect
 
 
 def _resolution(request):
@@ -209,10 +274,11 @@ class FalVideoAdapter(images.FalAdapter):
             resolution = _resolution(request) or "720p"
             if resolution not in ("720p", "1080p"):
                 raise ValueError(f"{describe(link)}: clips of 720p or 1080p, not {resolution!r}")
-            return {**base, "duration": str(seconds), "resolution": resolution, "aspect_ratio": "9:16", "seed": seed}
+            return {**base, "duration": str(seconds), "resolution": resolution,
+                    "aspect_ratio": _aspect(request) or PORTRAIT, "seed": seed}
         if link.model == "ltx-2.3-fast":
             # 1080p is its smallest size; audio only when the clip is to keep it.
-            return {**base, "duration": seconds, "aspect_ratio": "9:16", "resolution": "1080p",
+            return {**base, "duration": seconds, "aspect_ratio": _aspect(request) or PORTRAIT, "resolution": "1080p",
                     "generate_audio": bool(request.native_audio)}
         if link.model == "ltx-2.5-fast":
             # 720p unless the request asks 1080p (1440p+ is not sold or priced). The server's
@@ -221,10 +287,11 @@ class FalVideoAdapter(images.FalAdapter):
             resolution = _resolution(request) or "720p"
             if resolution not in LTX25_RESOLUTIONS:
                 raise ValueError(f"{describe(link)}: clips of {' or '.join(LTX25_RESOLUTIONS)}, not {resolution!r}")
-            return {**base, "duration": LTX25_DURATION_TYPE(seconds), "aspect_ratio": "9:16",
+            return {**base, "duration": LTX25_DURATION_TYPE(seconds), "aspect_ratio": _aspect(request) or PORTRAIT,
                     "resolution": resolution, "generate_audio": bool(request.native_audio)}
         if link.model == "kling-2.5-turbo-std":
-            # No aspect or size field: the output follows the 9:16 keyframe (A-102); cfg_scale keeps its default.
+            # No aspect or size field: the output follows the keyframe's frame (A-102; a 16:9 or 1:1
+            # story's keyframe is made at its frame, plan 23 stage B7); cfg_scale keeps its default.
             inputs = {**base, "duration": str(seconds)}
             if request.negative:
                 inputs["negative_prompt"] = request.negative
@@ -280,10 +347,12 @@ class GeminiVeoAdapter:
         mime, data = read_b64(request.references[0])
         if link is not None and link.model in VEO_SPEECH_MODELS:
             return self._speech_body(link, request, seconds, mime, data)
-        # No negativePrompt (undocumented for 3.1 lite, A-103) and no seed (not deterministic).
+        # No negativePrompt (undocumented for 3.1 lite, A-103) and no seed (not deterministic);
+        # a 9:16 request's body is the one it always was (RC-N1), a 16:9 one says so (B7).
         return {
             "instances": [{"prompt": request.prompt, "image": veo_image(mime, data)}],
-            "parameters": {"aspectRatio": "9:16", "resolution": "720p", "durationSeconds": VEO_DURATION_TYPE(seconds)},
+            "parameters": {"aspectRatio": _aspect(request) or PORTRAIT, "resolution": "720p",
+                           "durationSeconds": VEO_DURATION_TYPE(seconds)},
         }
 
     def _speech_body(self, link, request, seconds, mime, data) -> dict:
@@ -295,7 +364,8 @@ class GeminiVeoAdapter:
             raise ValueError(f"{describe(link)}: clips of {' or '.join(VEO_RESOLUTIONS)}, not {resolution!r}")
         return {
             "instances": [{"prompt": request.prompt, "image": veo_image(mime, data)}],
-            "parameters": {"aspectRatio": "9:16", "resolution": resolution, "durationSeconds": VEO_DURATION_TYPE(seconds),
+            "parameters": {"aspectRatio": _aspect(request) or PORTRAIT, "resolution": resolution,
+                           "durationSeconds": VEO_DURATION_TYPE(seconds),
                            "personGeneration": VEO_PERSON_GENERATION, "negativePrompt": VEO_NEGATIVE_PROMPT},
         }
 

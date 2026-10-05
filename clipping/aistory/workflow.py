@@ -843,6 +843,36 @@ def approve_style(stories, story_id, *, now, by=USER_APPROVED) -> dict:
 
 # ------------------------------------------------------------------ patch
 
+# Plan 23 stage B7: the frame is set once, when the story is made.
+ASPECT_FROZEN = ("the frame is chosen when the story is made: its plates, keyframes and clips depend on it "
+                 "(make a new story for another frame)")
+
+
+def check_aspect_unchanged(story, partial) -> None:
+    """``conflict`` (:data:`ASPECT_FROZEN`) when the profile patch *partial*
+    changes *story*'s frame (``generation_profile.aspect``: absent, null and
+    ``"9:16"`` all mean 9:16), or moves a 16:9 / 1:1 story off the v2
+    pipeline it was made on; resending the frame it has changes nothing."""
+    if not isinstance(partial, dict):
+        return
+    current = media_policy.aspect(story)
+    if "aspect" in partial:
+        sent = partial["aspect"]
+        sent = defaults.ASPECT_PORTRAIT if sent is None else sent
+        if sent != current:
+            raise WorkflowError(CONFLICT, f"The story's frame is {current}: {ASPECT_FROZEN}.")
+    if current != defaults.ASPECT_PORTRAIT and "pipeline" in partial and partial["pipeline"] != defaults.PIPELINE_V2:
+        raise WorkflowError(CONFLICT, f"A {current} story stays on the v2 pipeline: {ASPECT_FROZEN}.")
+
+
+def _without_null_aspect(partial):
+    """*partial* without an ``aspect: null`` (a 9:16 story saying it is 9:16,
+    :func:`check_aspect_unchanged` passed): nothing to merge."""
+    if isinstance(partial, dict) and "aspect" in partial and partial["aspect"] is None:
+        return {key: value for key, value in partial.items() if key != "aspect"}
+    return partial
+
+
 def patch_story(stories, story_id, fields, *, now) -> dict:
     """Edit the story fields in *fields*, and only those; returns the story.
 
@@ -878,12 +908,18 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
         partial = values["generation_profile"]
         if partial is None:
             raise WorkflowError(INVALID, "generation_profile must be an object, not null.")
+        check_aspect_unchanged(story, partial)
+        partial = _without_null_aspect(partial)
         try:
             # The store's own check, on the current profile with the sent keys over it.
             values["generation_profile"] = story_store._merge_generation_profile(
                 {**story["generation_profile"], **partial})
             # Plan 23 stage D2: a universe the story's style accepts.
             story_store.check_universe(values["generation_profile"], story.get("style_template_id"))
+            # Plan 23 stage B7: a profile that can still make the story's frame (9:16: always).
+            refusal = media_policy.aspect_refusal(values["generation_profile"])
+            if refusal:
+                raise ValueError(f"this story's frame is {media_policy.aspect(story)}: {refusal}")
         except ValueError as exc:
             raise WorkflowError(INVALID, str(exc)) from None
         _follow_pipeline_switch(stories, story, values)
@@ -1064,6 +1100,8 @@ def switch_pipeline(stories, story_id, profile_patch, *, regenerate_episodes, no
     story = load(stories, story_id)
     if not isinstance(profile_patch, dict):
         raise WorkflowError(INVALID, "generation_profile must be an object.")
+    check_aspect_unchanged(story, profile_patch)
+    profile_patch = _without_null_aspect(profile_patch)
     try:
         profile = story_store._merge_generation_profile({**story["generation_profile"], **profile_patch})
     except ValueError as exc:

@@ -6,7 +6,9 @@ named by the request's key, with the request's outputs beside it:
 * the **key** is the sha256 of the request's canonical JSON -- kind, link,
   prompt, negative, the sha256 of each reference file's *bytes*, seed, size,
   text, voice, rate, pitch, template and take; a video request adds its
-  clip's length (``clip_s``), frame rate and native audio, and its keyframe
+  clip's length (``clip_s``), frame rate and native audio (its size and its
+  frame -- ``extra["resolution"]``, ``extra["aspect"]`` -- only when not the
+  720p / 9:16 every clip was bought at before), and its keyframe
   is its one reference; a lipsync request (DEC-258) is keyed by its clip
   (its one reference), the sha256 of its dialogue track
   (``extra["audio"]``) and the clip's length. Where the answer is written (``out_dir``,
@@ -183,6 +185,11 @@ def key_payload(kind, link, request):
         resolution = extra.get("resolution")
         if resolution and resolution != "720p":
             payload["resolution"] = resolution
+        # Its frame (plan 23 stage B7) likewise only when it is not the 9:16
+        # every clip was bought at before.
+        aspect = extra.get("aspect")
+        if aspect and aspect != "9:16":
+            payload["aspect"] = aspect
     if kind == LIPSYNC:
         # A new kind (DEC-258): no older key to keep. The clip is the one
         # reference; the dialogue track is keyed by its bytes, never its path.

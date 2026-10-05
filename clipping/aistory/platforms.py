@@ -2,8 +2,8 @@
 makes their own clips -- Google Flow (Veo 3.1) and Higgsfield / Freepik.
 
 Each preset is a data file, ``templates/platforms/<name>.json``
-(``platform_preset_v1``), so a platform's drift in prompt syntax, lengths or
-credits is one edit, never code. :func:`load` reads and validates one
+(``platform_preset_v1``), so a platform's drift in prompt syntax, lengths,
+frames (``aspects``, plan 23 stage B7) or credits is one edit, never code. :func:`load` reads and validates one
 (:func:`preset_errors`: a small closed schema); :func:`model_of` picks the
 model a shot is made on (the preset's ``default_model``; a speaking shot in a
 language the model does not speak moves to the first model that does);
@@ -23,10 +23,15 @@ SCHEMA = "platform_preset_v1"
 PLATFORMS = ("flow", "higgsfield")
 DEFAULT_PLATFORM = "flow"
 PLATFORMS_DIR = os.path.join(os.path.dirname(__file__), "templates", "platforms")
+# Plan 23 stage B7: the frames a preset may list in ``aspects`` (a story is
+# briefed on a platform only when its frame is one of them).
+FRAMES = ("9:16", "16:9", "1:1")
 
-_REQUIRED = ("$schema", "platform", "name", "checked_at", "url", "default_model", "models", "aspect", "length_note",
+_REQUIRED = ("$schema", "platform", "name", "checked_at", "url", "default_model", "models", "aspects", "length_note",
              "modes", "prompt_order", "dialogue_syntax", "ambient_syntax", "sfx_syntax", "closing", "prompt_notes",
              "where_to_paste", "credits")
+# The key ``aspects`` replaced (plan 23 stage B7): refused with that said, the rest still checked.
+_LEGACY_ASPECT = "aspect"
 _MODEL_KEYS = ("label", "max_references", "lengths", "speech", "languages", "reference_syntax")
 _CREDIT_KEYS = ("unit", "per_clip", "default", "labels", "note")
 
@@ -40,17 +45,22 @@ def preset_errors(doc) -> list:
     if not isinstance(doc, dict):
         return ["a preset is a JSON object"]
     errors = [f"missing {key!r}" for key in _REQUIRED if key not in doc]
-    unknown = sorted(set(doc) - set(_REQUIRED))
+    unknown = sorted(set(doc) - set(_REQUIRED) - {_LEGACY_ASPECT})
     if unknown:
         errors.append(f"unknown key(s) {', '.join(unknown)}")
     if errors:
         return errors
+    if _LEGACY_ASPECT in doc:
+        # Plan 23 stage B7: the one frame a preset used to name is now the list it makes.
+        errors.append("'aspect' is replaced by 'aspects', the list of frames the platform makes")
     if doc["$schema"] != SCHEMA:
         errors.append(f"$schema must be {SCHEMA!r}")
     if doc["platform"] not in PLATFORMS:
         errors.append(f"platform must be one of {', '.join(PLATFORMS)}")
-    if doc["aspect"] != "9:16":
-        errors.append("aspect must be 9:16 (every story is vertical)")
+    aspects = doc["aspects"]
+    if (not isinstance(aspects, list) or not aspects or "9:16" not in aspects
+            or not all(aspect in FRAMES for aspect in aspects) or len(set(aspects)) != len(aspects)):
+        errors.append(f"aspects must list the frames the platform makes, 9:16 among them (of {', '.join(FRAMES)})")
     models = doc["models"]
     if not isinstance(models, dict) or not models:
         errors.append("models must be a non-empty object")

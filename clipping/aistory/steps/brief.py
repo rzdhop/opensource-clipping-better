@@ -325,9 +325,21 @@ def waiting_sentence(count, *, what="clip", keyframes=0) -> str:
 
 # ------------------------------------------------------------------ the brief
 
+def aspect_of(ec) -> str:
+    """The frame *ec*'s story is made at (plan 23 stage B7): :data:`ASPECT`
+    (9:16) unless it was made 16:9 or 1:1 (``media_policy.aspect``)."""
+    return media_policy.aspect(getattr(ec, "story", None)) if getattr(ec, "story", None) else ASPECT
+
+
+def where_to_paste(preset, aspect=ASPECT) -> str:
+    """The preset's ``where_to_paste`` with the story's frame in place of
+    ``{aspect}`` (9:16: the sentence as it always read)."""
+    return preset["where_to_paste"].replace("{aspect}", aspect)
+
+
 def _checks(ec, shot, line, clip_s, length, preset) -> list:
     look = "the look kept: the faces, outfits and colours of the reference sheets"
-    size = f"9:16, at least {max(2, int(clip_s))} s (pick {length} s on {preset['name']})"
+    size = f"{aspect_of(ec)}, at least {max(2, int(clip_s))} s (pick {length} s on {preset['name']})"
     if shot.get("speaks") and line is not None:
         return ["the lips move on the words, in sync, for the whole line",
                 f"the line is spoken as written, in {_language(ec)}, by the one speaker -- nobody else talks",
@@ -364,7 +376,7 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
         "prompt": platform_prompt(preset, model, parts["prompt"], refs),
         "negative_prompt": parts.get("negative") or "",
         "length_s": length, "clip_s": clip_s,
-        "length_note": preset["length_note"], "aspect": ASPECT,
+        "length_note": preset["length_note"], "aspect": aspect_of(ec),
         "references": refs,
         "line": None, "speaker": None, "voice_line": None,
         "checks": None,
@@ -393,6 +405,11 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
 
     ``StepFailed`` while the episode has no storyboard."""
     preset = platforms.load(platform)
+    frame = aspect_of(ec)
+    if frame not in preset["aspects"]:
+        # Plan 23 stage B7: a platform that cannot make the story's frame is never briefed.
+        raise episode_common.StepFailed(f"{preset['name']} makes {', '.join(preset['aspects'])} clips, not this "
+                                        f"story's {frame}: pick another platform for the brief.")
     script = script if script is not None else episode_common.read_episode(ec, episode_common.SCRIPT_DOC)
     board = storyboard if storyboard is not None else episode_common.read_episode(ec, episode_common.STORYBOARD_DOC)
     if not script or not board or not board.get("shots"):
@@ -411,7 +428,7 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
         "$schema": SCHEMA, "story_id": ec.story_id, "ep": ec.ep, "language": ec.language,
         "title": (ec.story or {}).get("title") or "",
         "platform": {"platform": preset["platform"], "name": preset["name"], "url": preset["url"],
-                     "where_to_paste": preset["where_to_paste"], "prompt_notes": list(preset["prompt_notes"]),
+                     "where_to_paste": where_to_paste(preset, frame), "prompt_notes": list(preset["prompt_notes"]),
                      "length_note": preset["length_note"], "credits_note": preset["credits"]["note"],
                      "checked_at": preset["checked_at"]},
         "shots": shots, "counts": counts,
@@ -543,6 +560,22 @@ IMAGE_MIN_SIZES = {"portrait": (360, 640), "turnaround": (640, 360), "expression
 IMAGE_SIZES = {"portrait": (720, 1280), "turnaround": (1280, 720), "expressions": (1200, 800),
                "plate": (720, 1280), "prop": (1024, 1024), "keyframe": (1080, 1920),
                "sheet_two_view": (1080, 1920)}
+# Plan 23 stage B7: a 16:9 or 1:1 story's plates and keyframes are its frame
+# (the sheets and the props are the same in every frame, v1).
+FRAME_IMAGE_SIZES = {"16:9": {"plate": (1280, 720), "keyframe": (1920, 1080)},
+                     "1:1": {"plate": (1024, 1024), "keyframe": (1080, 1080)}}
+FRAME_IMAGE_MIN_SIZES = {"16:9": {"plate": (640, 360), "keyframe": (640, 360)},
+                         "1:1": {"plate": (512, 512), "keyframe": (360, 360)}}
+
+
+def image_size(role, aspect="9:16") -> tuple:
+    """The size the app makes an image of *role* at, in the story's frame *aspect*."""
+    return (FRAME_IMAGE_SIZES.get(aspect) or {}).get(role) or IMAGE_SIZES[role]
+
+
+def image_min_size(role, aspect="9:16") -> tuple:
+    """The least an uploaded image of *role* may measure, in the frame *aspect*."""
+    return (FRAME_IMAGE_MIN_SIZES.get(aspect) or {}).get(role) or IMAGE_MIN_SIZES[role]
 
 
 def entity_image_slot(story_id, kind, eid, slot) -> str:
@@ -639,9 +672,10 @@ def image_brief(stories, story, *, env=None, ec=None) -> dict:
         if board and board.get("shots"):
             doc = episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC)
             entries += _keyframe_entries(ec, board, doc)
+    frame = media_policy.aspect(story)
     for number, entry in enumerate(entries, start=1):
-        entry["size"] = list(IMAGE_SIZES[entry["role"]])
-        entry["min_size"] = list(IMAGE_MIN_SIZES[entry["role"]])
+        entry["size"] = list(image_size(entry["role"], frame))
+        entry["min_size"] = list(image_min_size(entry["role"], frame))
         entry.setdefault("negative_prompt", "")
         refs = entry.setdefault("references", [])
         for index, ref in enumerate(refs, start=1):

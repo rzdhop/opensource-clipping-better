@@ -31,7 +31,7 @@
       "reference_syntax": "@Element{n} is {label}"
     }
   },
-  "aspect": "9:16",
+  "aspects": ["9:16", "16:9"],
   "length_note": "Pick the length shown (the smallest the model sells that holds the line). The app keeps the clip's real length and cuts a speaking shot 0.3 s after its last word.",
   "modes": {
     "keyframe": "Image to video: image 1 (the keyframe) as the start frame; the others as references.",
@@ -47,7 +47,7 @@
     "Attach the reference images in the order listed: the prompt names them by their number.",
     "The spoken line stays in quotes, in the story's language: do not translate it."
   ],
-  "where_to_paste": "Higgsfield → Video → pick the model shown → upload the reference images in order → 9:16 → paste the prompt → Generate. Download the take you like as MP4.",
+  "where_to_paste": "Higgsfield → Video → pick the model shown → upload the reference images in order → {aspect} → paste the prompt → Generate. Download the take you like as MP4.",
   "credits": {
     "unit": "Higgsfield credits",
     "per_clip": {},

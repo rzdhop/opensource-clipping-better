@@ -326,6 +326,8 @@ _PROFILE_CHOICES = {
     "prompt_style": defaults.PROMPT_STYLES,
     # Plan 23 stage D5: the explicit opt-in to appearance variants (absent: sheet_mode decides).
     "variants": defaults.VARIANTS_MODES,
+    # Plan 23 stage B7: the output frame (absent: 9:16), chosen at creation only -- never clearable.
+    "aspect": defaults.ASPECTS,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
 _PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe", "image_preference", "prompt_style",
@@ -844,6 +846,10 @@ class StoryStore:
         profile = _merge_generation_profile(generation_profile)
         # Plan 23 stage D2: the universe is one the style accepts.
         check_universe(profile, style_template_id)
+        # Plan 23 stage B7: a frame the profile's links can make (a v2 story; no 1:1 on Veo or Flow).
+        refusal = media_policy.aspect_refusal(profile)
+        if refusal:
+            raise ValueError(refusal)
         # Plan 22 stage 2 (DEC-274): every story created from now on writes
         # on the brief-faithful v3 prompts (the concepts/bible steps still
         # gate on a non-empty seed_text too) -- unless the caller named a

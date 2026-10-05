@@ -33,6 +33,7 @@ from clipping.providers import video as video_providers
 from clipping.providers.registry import ChainError, describe
 
 from . import defaults, templates, video_plan
+from .render import profiles as render_profiles
 
 ROLES = budget_mod.PROFILE_ROLES  # ("sheet", "plate", "prop", "keyframe")
 
@@ -321,6 +322,102 @@ def video_resolution(story) -> str:
     return chosen if chosen in defaults.VIDEO_RESOLUTIONS else defaults.VIDEO_RESOLUTION_DEFAULT
 
 
+# ---------------------------------------------------------------- the frame (plan 23 stage B7)
+
+def aspect(story) -> str:
+    """*story*'s output frame (plan 23 stage B7, ``generation_profile.aspect``):
+    ``"16:9"`` or ``"1:1"`` when the story was made with one, else ``"9:16"``
+    -- every story made before, byte for byte. Chosen when the story is made
+    (``store.create``), never changed after (``workflow.patch_story``)."""
+    chosen = ((story or {}).get("generation_profile") or {}).get("aspect")
+    return chosen if chosen in defaults.ASPECTS else defaults.ASPECT_PORTRAIT
+
+
+def portrait(story) -> bool:
+    """Whether *story* is on the 9:16 frame (:func:`aspect`)."""
+    return aspect(story) == defaults.ASPECT_PORTRAIT
+
+
+def frame_size(story) -> tuple:
+    """``(width, height)`` of *story*'s rendered frame: 1080x1920, 1920x1080
+    or 1080x1080 (``render.profiles.GEOMETRIES``)."""
+    geometry = render_profiles.GEOMETRIES[aspect(story)]
+    return (geometry.width, geometry.height)
+
+
+# The size a plate or a keyframe is asked at, by frame: the 9:16 one is
+# ``refimages.PLATE_SIZE`` as it always was; the others hold as many pixels.
+IMAGE_FRAME_SIZES = {defaults.ASPECT_PORTRAIT: (720, 1280), defaults.ASPECT_LANDSCAPE: (1280, 720),
+                     defaults.ASPECT_SQUARE: (1024, 1024)}
+
+
+def image_size(story, portrait_size=None) -> tuple:
+    """``(width, height)`` a plate or a keyframe of *story* is asked at: at a
+    9:16 story *portrait_size* (the caller's own 9:16 size, else
+    ``IMAGE_FRAME_SIZES["9:16"]``), so every request is the one it was; else
+    its frame's (:data:`IMAGE_FRAME_SIZES`). The character sheets and the
+    props never ask this: they stay as they are in every frame (v1)."""
+    frame = aspect(story)
+    if frame == defaults.ASPECT_PORTRAIT:
+        return tuple(portrait_size or IMAGE_FRAME_SIZES[frame])
+    return IMAGE_FRAME_SIZES[frame]
+
+
+# Words of a frame refusal that hold for any profile (the wizard says them too).
+ASPECT_NEEDS_V2 = "a 16:9 or 1:1 frame is for a story on the v2 pipeline"
+ASPECT_LOCAL_ONLY = "local ComfyUI clips are 9:16 only (v1): pick the API route or Tier 1"
+ASPECT_FREE_LOCAL = ("the free profile animates on a local ComfyUI only, whose clips are 9:16 only (v1): pick "
+                     "Tier 1 or a paid profile")
+
+
+def aspect_refusal(profile, chosen=None) -> str | None:
+    """Why a story with the generation profile *profile* cannot be made at
+    the frame *chosen* (None: the profile's own ``aspect``), in one
+    sentence, or None when it can. 9:16 always can. Otherwise the story is a
+    v2 one, and the clips it must buy can be made at that frame: at tier 1
+    nothing is bought; on the local route, or the ``free`` profile (clips on
+    a local ComfyUI only), never (local video is 9:16 only in v1); on a
+    native-speech profile its speech and silent links each
+    (``video.aspect_refusal``: Veo and the human's Flow make 9:16 and 16:9).
+    Any other profile's links come from VIDEO_CHAIN: the clip estimate picks
+    one that makes the frame, or says why none can (``clips.hosted_rows``)."""
+    profile = profile or {}
+    chosen = chosen if chosen is not None else profile.get("aspect")
+    if chosen in (None, defaults.ASPECT_PORTRAIT):
+        return None
+    if chosen not in defaults.ASPECTS:
+        return f"generation_profile.aspect must be one of {list(defaults.ASPECTS)}, not {chosen!r}"
+    story = {"generation_profile": dict(profile, aspect=chosen)}
+    if not is_v2(story):
+        return ASPECT_NEEDS_V2 + " (pipeline v2)"
+    if int(profile.get("tier") or 1) < 2:
+        return None
+    settings = _profile_of(story)
+    if profile.get("route") == "local":
+        return f"{chosen}: {ASPECT_LOCAL_ONLY}"
+    if settings.get("animate") == "none":
+        return f"{chosen}: {ASPECT_FREE_LOCAL}"
+    if native_speech(story):
+        for label in dict.fromkeys((speech_link(story), silent_link(story))):
+            if label:
+                refusal = video_providers.aspect_refusal(label, chosen)
+                if refusal:
+                    return refusal
+    return None
+
+
+def aspect_options(profile=None) -> list:
+    """The frames the new-story form offers, each ``{"id", "label", "ok",
+    "reason"}`` for the profile *profile* (:func:`aspect_refusal`)."""
+    labels = {defaults.ASPECT_PORTRAIT: "Vertical 9:16", defaults.ASPECT_LANDSCAPE: "Landscape 16:9",
+              defaults.ASPECT_SQUARE: "Square 1:1"}
+    rows = []
+    for frame in defaults.FRAME_ASPECTS:
+        reason = aspect_refusal(profile or {}, frame)
+        rows.append({"id": frame, "label": labels[frame], "ok": reason is None, "reason": reason})
+    return rows
+
+
 def fully_animated(story) -> bool:
     """Whether every shot of *story* must be a video clip (the human, 2026-10-02:
     "only fully animated episodes, no diaporama"): a v2 story at tier >= 2
@@ -532,7 +629,8 @@ def new_story_offer(settings_env) -> dict:
     """What the new-story form starts from (``GET /api/stories/new-profile``)::
 
         {"profile", "quality": bool, "missing_keys": [name, ...], "sound_missing_keys": [name, ...],
-         "allow_paid": bool, "estimate": <preset_estimate>}
+         "allow_paid": bool, "estimate": <preset_estimate>, "native_speech", "native_speech_manual",
+         "aspect_reasons": {rule: sentence}}
 
     ``sound_missing_keys`` (stage E): the keys the preset's clips still need
     for their own sound (GEMINI_PAID_API_KEY for Veo) -- the preset runs
@@ -568,7 +666,20 @@ def new_story_offer(settings_env) -> dict:
         # Plan 22 stage 5: what the manual profile costs (keyframes and text; the clips are yours).
         "native_speech_manual": native_speech_estimate(
             merged, story={"generation_profile": native_speech_manual_profile()}),
+        # Plan 23 stage B7: why a frame cannot be picked, by rule (the form disables it with the sentence).
+        "aspect_reasons": aspect_reasons(),
     }
+
+
+def aspect_reasons() -> dict:
+    """The sentences the new-story form disables a frame with, by rule
+    (:func:`aspect_refusal` says the same): ``pipeline`` (not v2), ``local``
+    (the local route), ``free`` (the free profile animates locally only),
+    ``veo_square`` (1:1 on a Veo native-speech profile), ``manual_square``
+    (1:1 with the human's own clips)."""
+    return {"pipeline": ASPECT_NEEDS_V2, "local": ASPECT_LOCAL_ONLY, "free": ASPECT_FREE_LOCAL,
+            "veo_square": video_providers.aspect_refusal("gemini/veo-3.1-fast", defaults.ASPECT_SQUARE),
+            "manual_square": video_providers.aspect_refusal(gen.MANUAL_LINK, defaults.ASPECT_SQUARE)}
 
 
 # ------------------------------------------------------ the preset's price
@@ -955,20 +1066,24 @@ def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
 
 # The source crop of a v2 keyframe (A6): an exact 9:16 whose multiple of 9x16
 # is even, so the render's scale lands on 1080x1920 with square pixels and no
-# near-9:16 still ever reaches the final concat (DEC-217's follow-up).
+# near-9:16 still ever reaches the final concat (DEC-217's follow-up). Plan 23
+# stage B7: a 16:9 or 1:1 story's keyframe is cropped to its own frame's units.
 _UNIT_W, _UNIT_H = 9, 16
+_UNITS = {defaults.ASPECT_PORTRAIT: (_UNIT_W, _UNIT_H), defaults.ASPECT_LANDSCAPE: (16, 9),
+          defaults.ASPECT_SQUARE: (1, 1)}
 
 
-def keyframe_crop(size):
+def keyframe_crop(size, aspect=defaults.ASPECT_PORTRAIT):
     """``(width, height)`` of the centre crop that makes a keyframe of *size*
-    an exact, even 9:16, or None when it is one already or *size* is unknown
-    (or too small to hold one)."""
+    an exact, even frame of *aspect* (9:16 unless said: 16:9, 1:1), or None
+    when it is one already or *size* is unknown (or too small to hold one)."""
     if not size:
         return None
     width, height = size
-    k = min(width // _UNIT_W, height // _UNIT_H)
+    unit_w, unit_h = _UNITS[aspect]
+    k = min(width // unit_w, height // unit_h)
     k -= k % 2
     if not k:
         return None
-    crop = (_UNIT_W * k, _UNIT_H * k)
+    crop = (unit_w * k, unit_h * k)
     return None if crop == (width, height) else crop

@@ -227,7 +227,8 @@ FREE_VRAM_GB = 12
 # The pause before a free link that pushed back is asked again
 # (:data:`pacing.RATE_LIMIT_PAUSE_S`, re-imported above under this name).
 
-# A shot's image is vertical 9:16, the size of the plates it is composed on.
+# A shot's image is vertical 9:16, the size of the plates it is composed on
+# (a 16:9 or 1:1 story's is its frame's: :func:`shot_size`, plan 23 stage B7).
 SHOT_SIZE = refimages.PLATE_SIZE
 SHOTS_DIR = schemas.SHOT_IMAGE_DIR
 PROMPT_ONLY, REFERENCES = refimages.PROMPT_ONLY, refimages.REFERENCES
@@ -561,7 +562,8 @@ def _sha256_file(path):
 def v2_keyframe_source(story, produced, *, out_dir, run=None) -> str:
     """The file a shot's image is stored from (phase 7, A6): *produced* as it
     came for a legacy story; for a v2 story, centre-cropped to an exact, even
-    9:16 (``media_policy.keyframe_crop`` on ``imagesize.image_size``) by one
+    9:16 -- its own frame on a 16:9 or 1:1 story (plan 23 stage B7) --
+    (``media_policy.keyframe_crop`` on ``imagesize.image_size``) by one
     single-frame ffmpeg pass into *out_dir*, in the same format, when it is
     not one already -- so the near-9:16 concat edge of DEC-217 never arises.
     An unreadable size keeps the file (the render frames it as before).
@@ -569,18 +571,19 @@ def v2_keyframe_source(story, produced, *, out_dir, run=None) -> str:
     *run* is ``subprocess.run`` (None) or a test's stand-in."""
     if not media_policy.is_v2(story):
         return produced
-    crop = media_policy.keyframe_crop(imagesize.image_size(produced))
+    frame = media_policy.aspect(story)
+    crop = media_policy.keyframe_crop(imagesize.image_size(produced), frame)
     if crop is None:
         return produced
     run = run or subprocess.run
     ext = os.path.splitext(produced)[1] or ".png"
-    out = os.path.join(out_dir, f"keyframe-9x16{ext}")
+    out = os.path.join(out_dir, f"keyframe-{frame.replace(':', 'x')}{ext}")
     argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", produced,
             "-vf", f"crop={crop[0]}:{crop[1]}", "-frames:v", "1", out]
     try:
         result = run(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     except OSError as exc:
-        raise ShotFailed(f"ffmpeg is needed to crop the image to 9:16 and cannot run ({exc}); install ffmpeg "
+        raise ShotFailed(f"ffmpeg is needed to crop the image to {frame} and cannot run ({exc}); install ffmpeg "
                          "and run the step again (the call is booked and cached)") from None
     if result.returncode != 0 or not os.path.isfile(out):
         detail = (getattr(result, "stderr", "") or "").strip()[-200:]
@@ -807,6 +810,14 @@ def _fitted(ec, shot, note, link, *, budget, continuity=None) -> tuple:
     return fitted, over, info
 
 
+def shot_size(story) -> tuple:
+    """``(width, height)`` *story*'s shot images (and the clips made from
+    them) are asked at: :data:`SHOT_SIZE` on a 9:16 story, every request and
+    prompt hash as it always was; its frame's on a 16:9 or 1:1 one (plan 23
+    stage B7, ``media_policy.image_size``)."""
+    return media_policy.image_size(story, SHOT_SIZE)
+
+
 def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> dict:
     """What *shot*'s image request is made of in the story's mode now:
     ``{kind, prompt, negative, consistency, size, references, missing,
@@ -841,6 +852,7 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
     one, ``refit`` says from and to how many words (else None), and the
     ``hash`` stays the stored prompt's, so nothing made before reads stale."""
     mode = ec.consistency_mode
+    size = shot_size(ec.story)
     prompt = effective_prompt(shot, ec.entities, note)
     negative = shot["negative_prompt"]
     layered = link is not None and bool(shot.get("prompt_layout"))
@@ -850,19 +862,19 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
     sent_prompt, over, refit = _fitted(ec, shot, note, link, budget=budget) if layered else (prompt, None, None)
     if mode == PROMPT_ONLY:
         kind, paths, missing, ref_shas = gen.IMAGE, [], [], []
-        return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+        return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": size,
                 "references": paths, "missing": missing,
-                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over, "refit": refit}
+                "hash": prompt_hash(prompt, negative, mode, size, ref_shas), "over": over, "refit": refit}
     kind = gen.IMAGE_EDIT
     paths, missing = reference_paths(ec, shot, link=link)
     ref_shas = [_sha256_file(path) or f"unreadable:{path}" for path in paths] + [f"missing:{rel}"
                                                                                  for rel in missing]
     slot = continuity_slot(shot, link)
     if slot is None:
-        return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+        return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": size,
                 "references": paths, "missing": missing,
-                "hash": prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas), "over": over, "refit": refit}
-    digest = prompt_hash(prompt, negative, mode, SHOT_SIZE, ref_shas + [_CONTINUITY_HASH_TOKEN])
+                "hash": prompt_hash(prompt, negative, mode, size, ref_shas), "over": over, "refit": refit}
+    digest = prompt_hash(prompt, negative, mode, size, ref_shas + [_CONTINUITY_HASH_TOKEN])
     sent = list(paths)
     if continuity is not None:
         sent.insert(min(slot, len(sent)), continuity)
@@ -871,7 +883,7 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
         # Asked alone (no previous keyframe to send): fitted the same way, without the slot.
         sent_prompt, over, refit = _fitted(ec, alone_shot, note, link, budget=budget, continuity=False)
         sent, missing = reference_paths(ec, alone_shot, link=link)
-    return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": SHOT_SIZE,
+    return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": size,
             "references": sent, "missing": missing, "hash": digest, "over": over, "refit": refit}
 
 
@@ -1120,9 +1132,10 @@ def image_quote(ec, qty, *, env, story_spent, adapters=None, probe_local=False, 
     story = ec.story
     if ec.consistency_mode != PROMPT_ONLY:
         return refimages.edit_readiness(story, env=env, qty=qty, story_spent=story_spent, adapters=adapters,
-                                        size=SHOT_SIZE, probe_local=probe_local, transport=transport,
+                                        size=shot_size(story), probe_local=probe_local, transport=transport,
                                         role=KEYFRAME_ROLE)
-    request = gen.GenRequest(kind=gen.IMAGE, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
+    width, height = shot_size(story)
+    request = gen.GenRequest(kind=gen.IMAGE, width=width, height=height)
     return imaging.estimate(gen.IMAGE, env, route=story["generation_profile"]["route"], request=request, qty=qty,
                             story_spent=story_spent, adapters=adapters, step=STEP, what="the shot images",
                             when="the assets step runs", role=KEYFRAME_ROLE, story=story)
@@ -1135,7 +1148,8 @@ def _chain_rows(ec, qty, *, env, story_spent, adapters) -> dict:
     """``imaging.estimate`` of *qty* shot images on the episode's chain: a
     row per link through the runner's gates, calling nothing."""
     kind = image_kind(ec)
-    request = gen.GenRequest(kind=kind, width=SHOT_SIZE[0], height=SHOT_SIZE[1])
+    width, height = shot_size(ec.story)
+    request = gen.GenRequest(kind=kind, width=width, height=height)
     return imaging.estimate(kind, env, route=ec.story["generation_profile"]["route"], request=request, qty=qty,
                             story_spent=story_spent, adapters=adapters, step=STEP, what=_WHAT, when=_WHEN,
                             role=KEYFRAME_ROLE, story=ec.story)
@@ -1665,8 +1679,14 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
         # The story's 1080p switch (phase 7 stage 4): seedance reads it, the cache
         # keys it; a 720p request is the one it always was (DEC-207).
         extra["resolution"] = resolution
-    request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["prompt"], negative=parts["negative"], width=SHOT_SIZE[0],
-                             height=SHOT_SIZE[1], seed=seed, references=(shot_image_path(ec, shot),),
+    frame = media_policy.aspect(ec.story)
+    if frame != defaults.ASPECT_PORTRAIT:
+        # Plan 23 stage B7: a 16:9 or 1:1 story's clip says its frame (the adapters send it, the
+        # cache keys it); a 9:16 request is the one it always was, byte for byte.
+        extra["aspect"] = frame
+    width, height = shot_size(ec.story)
+    request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["prompt"], negative=parts["negative"], width=width,
+                             height=height, seed=seed, references=(shot_image_path(ec, shot),),
                              duration_s=int(clip_s), native_audio=parts["native_audio"], out_dir=out_dir, extra=extra)
     return parts, request
 
@@ -2050,7 +2070,8 @@ def video_offer(ec, storyboard, link, *, why, env, adapters=None, todo=(), paid=
         chain = []
     own = sticky_link.family(link)
     rows = [row for row in clips.hosted_rows(chain, merged, adapters,
-                                             resolution=media_policy.video_resolution(ec.story))
+                                             resolution=media_policy.video_resolution(ec.story),
+                                             aspect=media_policy.aspect(ec.story))
             if row["link"] not in own]
     try:
         allow = gating.budget_of(merged).allow_paid
@@ -2686,7 +2707,7 @@ class _Assets(voice_lines.LineMeasurement):
         cache = self.cache(kind, unit="image", qty=1)
         with tempfile.TemporaryDirectory(prefix="shot-image-") as incoming:
             request = gen.GenRequest(kind=kind, prompt=parts["prompt"], negative=parts["negative"],
-                                     width=SHOT_SIZE[0], height=SHOT_SIZE[1], seed=seed,
+                                     width=shot_size(ec.story)[0], height=shot_size(ec.story)[1], seed=seed,
                                      references=tuple(parts["references"]), out_dir=incoming,
                                      extra={"name": f"shot_{shot_id[2:]}"})
             try:
@@ -4579,7 +4600,7 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
         elif ec.consistency_mode == REFERENCES:
             readiness = refimages.edit_readiness(ec.story, env=ctx.settings_env, qty=1,
                                                  story_spent=gates.spent(), adapters=tools.adapters,
-                                                 size=SHOT_SIZE, probe_local=True, transport=tools.transport,
+                                                 size=shot_size(ec.story), probe_local=True, transport=tools.transport,
                                                  role=KEYFRAME_ROLE)
             if not readiness["ready"]:
                 reasons = [f"{row['link']}: {row['reason']}" for row in readiness["links"]] or [readiness["message"]]

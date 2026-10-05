@@ -24,6 +24,10 @@ const BODY_RULES = { '': 'As the style draws them', all_matter: "All skin is the
 // Plan 23 stage A9: which provider the images try first (generation_profile.image_preference; absent = fal first).
 const IMAGE_PREFERENCES = { '': 'fal first (default)', gemini_first: 'Gemini first' }
 
+// Plan 23 stage B7: the story's frame (generation_profile.aspect; absent = 9:16), chosen when the story was
+// made: shown here, never edited (PATCH answers 409).
+const FRAMES = { '9:16': 'Vertical 9:16', '16:9': 'Landscape 16:9', '1:1': 'Square 1:1' }
+
 // Plan 23 stage D6: how a clip's prompt is written (generation_profile.prompt_style; absent = studio).
 const PROMPT_STYLES = {
   studio: 'studio (default)',
@@ -388,6 +392,11 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           )}
         </div>
       )}
+      <div className="form-group">
+        <span className="form-label">Frame</span>
+        <p className="story-profile-frame">{FRAMES[profile.aspect || '9:16']}</p>
+        <p className="form-hint">Chosen when the story was made: its plates, keyframes and clips are made at it.</p>
+      </div>
       {isV2 && (
         <div className="form-group">
           <label className="form-label" htmlFor="story-profile-prompt-style">Clip prompts</label>
