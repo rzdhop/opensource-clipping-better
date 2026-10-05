@@ -331,9 +331,9 @@ def test_once_every_clip_is_uploaded_the_step_no_longer_waits(store, tmp_path):
     assert "state" not in result and host.uploads is None
 
 
-def test_an_8_s_upload_on_a_4_s_plan_is_judged_on_its_real_length(store, tmp_path):
+def test_an_8_s_upload_on_a_6_s_plan_is_judged_on_its_real_length(store, tmp_path):
     """The length rule (stage 4) holds for an upload: the line spoken past
-    the planned 4 s but inside the 8 s clip is ``ok``, the shot cut 0.3 s
+    the planned 6 s but inside the 8 s clip is ``ok``, the shot cut 0.3 s
     after the last word."""
     import shutil
 
@@ -342,18 +342,18 @@ def test_an_8_s_upload_on_a_4_s_plan_is_judged_on_its_real_length(store, tmp_pat
 
     tnt._require_ffmpeg()
     story_id = manual_story(store)
-    shot = next(item for item in tas._board(store, story_id)["shots"] if item.get("speaks") and item["clip_s"] == 4)
+    shot = next(item for item in tas._board(store, story_id)["shots"] if item.get("speaks") and item["clip_s"] == 6)
     script = tas.eps._script(store, story_id)
     text = next(line["text"] for scene in script["scenes"] for line in scene["lines"]
                 if line["line_id"] == shot["lines"][0])
-    heard = tnt.words(text, start=5.0 - 0.3 * len(tnt.words(text)) + 0.02)
+    heard = tnt.words(text, start=6.5 - 0.3 * len(tnt.words(text)) + 0.02)
     received = f"{manual_uploads.clips_folder(store, story_id, 1)}/.upload.part"
     shutil.copyfile(tnt.make_clip(tmp_path / "long.mp4", 8), received)
     out = manual_uploads.accept_clip(store, story_id, 1, shot["shot_id"], received, filename="long.mp4",
                                      env=tas._settings(), transcribe=tnt.Transcriber(heard))
-    assert out["take"]["state"] == "ok" and out["take"]["end_s"] == pytest.approx(5.0)
+    assert out["take"]["state"] == "ok" and out["take"]["end_s"] == pytest.approx(6.5)
     assert out["take"]["clip_real_s"] == pytest.approx(8.0, abs=0.05)
-    assert out["duration_s"] == pytest.approx(5.3, abs=1 / 30)
+    assert out["duration_s"] == pytest.approx(6.8, abs=1 / 30)
 
 
 def test_a_story_whose_images_are_yours_awaits_its_keyframes_and_asks_nothing(store):

@@ -706,19 +706,28 @@ def sold_lengths(story, link):
     """The lengths *story*'s plan may buy on the hosted *link* when that is
     fewer than the link sells, else None (the link's own table, as always):
     a lipsyncing story (``media_policy.lipsync``, DEC-258) buys no clip longer
-    than Kling LipSync takes (``media_policy.LIPSYNC_MAX_CLIP_S``)."""
+    than Kling LipSync takes (``media_policy.LIPSYNC_MAX_CLIP_S``); a
+    native-speech story (plan 27) buys none outside the 5-10 s shot window
+    (``native_speech.window_lengths``). The two clamps compose."""
     lengths = video_providers.CLIP_LENGTHS.get(link or "")
-    if not lengths or not media_policy.lipsync(story):
+    if not lengths:
         return None
-    capped = tuple(length for length in lengths if length <= media_policy.LIPSYNC_MAX_CLIP_S)
+    capped = tuple(lengths)
+    if media_policy.lipsync(story):
+        capped = tuple(length for length in capped if length <= media_policy.LIPSYNC_MAX_CLIP_S)
+    if media_policy.native_speech(story):
+        capped = native_speech.window_lengths(capped)
     return capped if capped and capped != tuple(lengths) else None
 
 
 def link_lengths(link):
     """The lengths a native-speech clip on *link* is planned at: the link's
-    own table (``video.CLIP_LENGTHS``), else ``native_speech.SPEECH_LENGTHS``
-    (a link with no table yet: resolved by name, plan 22)."""
-    return tuple(video_providers.CLIP_LENGTHS.get(link or "") or native_speech.SPEECH_LENGTHS)
+    own table (``video.CLIP_LENGTHS``) inside the 5-10 s shot window (plan 27,
+    ``native_speech.window_lengths``: Veo 6/8, kling 5/10, seedance 5-10, ltx
+    6/8/10), else ``native_speech.SPEECH_LENGTHS`` (a link with no table yet:
+    resolved by name, plan 22)."""
+    table = video_providers.CLIP_LENGTHS.get(link or "")
+    return native_speech.window_lengths(table) if table else tuple(native_speech.SPEECH_LENGTHS)
 
 
 def speech_lengths(story) -> tuple:

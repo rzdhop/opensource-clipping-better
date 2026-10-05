@@ -2350,14 +2350,18 @@ def _time_shots(shots, transitions, script, *, template, language, style_lock, s
 
 def _speech_fields(shot, plan, kept) -> None:
     """A native board's shot (plan 22): ``speaks`` and ``clip_s`` from its
-    plan, its length its clip's -- or, a kept shot whose clip is current,
-    the length its take gave it (``native_speech.shot_seconds``)."""
+    plan, its length its clip's -- or, a kept shot whose clip is current
+    (plan 27), the ``clip_s`` it was made at and the length its take gave it
+    (``native_speech.shot_seconds``): nothing made turns stale when the
+    window of lengths moves; only a shot without a clip takes the plan's."""
     clip_s = int(plan["clip_s"])
     shot["speaks"] = bool(plan.get("speaks"))
     shot["clip_s"] = clip_s
     shot["duration_s"] = float(clip_s)
     clip = ((kept or {}).get("assets") or {}).get("clip") or {}
-    if kept is not None and clip.get("state") == "current" and int(kept.get("clip_s") or 0) == clip_s:
+    if kept is not None and clip.get("state") == "current":
+        if int(kept.get("clip_s") or 0) > 0:
+            shot["clip_s"] = int(kept["clip_s"])
         shot["duration_s"] = float(kept["duration_s"])
 
 

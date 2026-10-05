@@ -197,8 +197,12 @@ def test_the_narrated_template_carries_the_narration_and_the_others_do_not():
     # Fewer, longer body passages than the v2 template it comes from.
     assert narrated["default_body_count"] < v2["default_body_count"]
     assert narrated["slots"]["body"]["duration_s"][0] > v2["slots"]["body"]["duration_s"][0]
-    for key in ("shots_per_scene", "max_shot_s", "min_shot_s", "pauses_s", "transitions_s"):
+    for key in ("shots_per_scene", "pauses_s", "transitions_s"):
         assert narrated[key] == v2[key], key
+    # Plan 27: the narrated template's shots are the 5-10 s window (serial_60s_v2 keeps its own).
+    assert (narrated["min_shot_s"], narrated["max_shot_s"]) == (5, 10)
+    assert [narrated["slots"][slot]["duration_s"] for slot in ("recap", "hook", "body", "cliffhanger")] == [
+        [5.0, 6.0], [5.0, 8.0], [10.0, 16.0], [6.0, 10.0]]
     # RC-M1: the narration fields exist on the narrated template only.
     for template_id in ("serial_60s_v1", "serial_60s_v2", "serial_90s_v1", "serial_90s_v2"):
         tpl = templates.load_episode_template(template_id)

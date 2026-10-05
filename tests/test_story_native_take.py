@@ -157,8 +157,9 @@ def test_a_take_that_speaks_its_line_becomes_the_lines_audio_and_the_shot_is_cut
     ``ok`` (every word heard), the line's audio is the clip's sound from its
     first word to its last with its aligned sidecar (words from 0.0), the
     line measured as any voiced line; the clip runs more than a second past
-    its last word, so the shot is cut 0.3 s after it; the line starts on the
-    episode timeline where its shot starts plus 0.5 s."""
+    its last word, so the shot is cut 0.3 s after it -- but never under the
+    5 s floor of the shot window (plan 27); the line starts on the episode
+    timeline where its shot starts plus 0.5 s."""
     from clipping.aistory import timing, wordtiming
     from clipping.aistory.steps import assets, voice_lines
 
@@ -180,7 +181,7 @@ def test_a_take_that_speaks_its_line_becomes_the_lines_audio_and_the_shot_is_cut
     end = heard[-1]["end"]
     assert (record["state"], record["matched"], record["start_s"], record["end_s"]) == ("ok", 1.0, 0.5, end)
     assert record["aligned_by"] == "groq/whisper-large-v3-turbo" and record["clip_real_s"] == pytest.approx(6.0, abs=0.05)
-    assert stored["duration_s"] == pytest.approx(round(end + 0.3, 3), abs=1 / 30)
+    assert end + 0.3 < 5.0 and stored["duration_s"] == pytest.approx(5.0, abs=1 / 30)
     script = eps._script(store, story_id)
     measured = next(item for scene in script["scenes"] for item in scene["lines"] if item["line_id"] == line["line_id"])
     assert voice_lines.is_measured(tas._ec(store, story_id), measured)
@@ -201,7 +202,9 @@ def test_a_clip_that_runs_at_most_a_second_past_its_last_word_keeps_its_length(s
     story_id = nsp.planned_story(store)
     probe_host, _log = _host(store, story_id)
     text = _line(probe_host, _shot(probe_host, 6))["text"]
-    host, _log = _host(store, story_id, transcribe=Transcriber(words(text, start=2.4, each=0.35)))
+    # The speech ends at 5.2 s of the 6 s clip (0.8 s before its end): no trim.
+    host, _log = _host(store, story_id, transcribe=Transcriber(words(text, start=5.2 - 0.35 * len(words(text)) + 0.02,
+                                                                     each=0.35)))
     shot = _shot(host, 6)
     _put_clip(store, story_id, host, shot, make_clip(tmp_path / "late.mp4", 6))
     host.native_take_shot(shot)
@@ -211,26 +214,58 @@ def test_a_clip_that_runs_at_most_a_second_past_its_last_word_keeps_its_length(s
 
 
 def test_a_clip_longer_than_planned_is_judged_against_its_real_length(store, tmp_path):
-    """An 8 s clip (an upload) for a line planned at 4 s, its speech ending at
-    5.0 s -- past the planned length, inside the clip: ``ok``; the shot is
+    """An 8 s clip (an upload) for a line planned at 6 s, its speech ending at
+    6.5 s -- past the planned length, inside the clip: ``ok``; the shot is
     cut 0.3 s after the last word."""
     _require_ffmpeg()
     story_id = nsp.planned_story(store)
     probe_host, _log = _host(store, story_id)
-    shot = _shot(probe_host, 4)
+    shot = _shot(probe_host, 6)
     text = _line(probe_host, shot)["text"]
     count = len(words(text))
-    heard = words(text, start=5.0 - 0.3 * count + 0.02)
-    assert heard[-1]["end"] == pytest.approx(5.0)
+    heard = words(text, start=6.5 - 0.3 * count + 0.02)
+    assert heard[-1]["end"] == pytest.approx(6.5)
     host, _log = _host(store, story_id, transcribe=Transcriber(heard))
-    shot = _shot(host, 4)
+    shot = _shot(host, 6)
     _put_clip(store, story_id, host, shot, make_clip(tmp_path / "upload.mp4", 8))
     host.native_take_shot(shot)
     stored = next(item for item in tas._board(store, story_id)["shots"] if item["shot_id"] == shot["shot_id"])
     record = stored["assets"]["clip"]["native_speech"]
-    assert (record["state"], record["end_s"]) == ("ok", pytest.approx(5.0))
+    assert (record["state"], record["end_s"]) == ("ok", pytest.approx(6.5))
     assert record["clip_real_s"] == pytest.approx(8.0, abs=0.05)
-    assert stored["duration_s"] == pytest.approx(5.3, abs=1 / 30)
+    assert stored["duration_s"] == pytest.approx(6.8, abs=1 / 30)
+
+
+def _cut_at(store, tmp_path, speech_end_s):
+    """The length a 6 s plan's 8 s upload, its speech ending at *speech_end_s*, leaves its shot."""
+    story_id = nsp.planned_story(store)
+    probe_host, _log = _host(store, story_id)
+    text = _line(probe_host, _shot(probe_host, 6))["text"]
+    count = len(words(text))
+    heard = words(text, start=speech_end_s - 0.3 * count + 0.02)
+    host, _log = _host(store, story_id, transcribe=Transcriber(heard))
+    shot = _shot(host, 6)
+    _put_clip(store, story_id, host, shot, make_clip(tmp_path / f"cut{speech_end_s}.mp4", 8))
+    host.native_take_shot(shot)
+    return next(item for item in tas._board(store, story_id)["shots"] if item["shot_id"] == shot["shot_id"])
+
+
+def test_the_take_trim_floors_at_5_s_and_a_longer_cut_stays(store, tmp_path):
+    """Plan 27 stage 1: a take that would trim to 5.3 s stays 5.3; one that would trim to 4.1 s
+    floors at 5.0 s (the template's ``min_shot_s`` is 5, the window's floor)."""
+    _require_ffmpeg()
+    assert _cut_at(store, tmp_path, 5.0)["duration_s"] == pytest.approx(5.3, abs=1 / 30)
+    assert _cut_at(store, tmp_path, 3.8)["duration_s"] == pytest.approx(5.0, abs=1 / 30)
+
+
+def test_shot_seconds_never_cuts_under_its_floor_nor_past_the_clip():
+    from clipping.aistory import native_speech
+
+    assert native_speech.shot_seconds(8.0, speaks=True, end_s=5.0, floor_s=5) == pytest.approx(5.3, abs=1 / 30)
+    assert native_speech.shot_seconds(8.0, speaks=True, end_s=3.8, floor_s=5) == 5.0
+    assert native_speech.shot_seconds(8.0, speaks=True, end_s=3.8) == pytest.approx(4.1, abs=1 / 30)  # no floor given
+    assert native_speech.shot_seconds(4.5, speaks=True, end_s=1.0, floor_s=5) == 4.5  # never past the clip
+    assert native_speech.shot_seconds(6.0, speaks=False, floor_s=5) == 6.0
 
 
 # =================================================================== flagged

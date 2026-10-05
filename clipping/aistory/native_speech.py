@@ -45,11 +45,13 @@ TIMING_MODE = "native_speech"
 # seconds of a clip that are not speech (a breath before, a beat after).
 SPEECH_WPS = 2.4
 SPEECH_OVERHEAD_S = 0.7
+# Plan 27: a shot is 5 to 10 s, clamped to what its link sells (:func:`window_lengths`).
+SHOT_WINDOW_S = (5, 10)
 # The lengths a speaking clip is planned at when its link has no table
-# (Veo's own: 4, 6, 8 s).
-SPEECH_LENGTHS = (4, 6, 8)
+# (Veo's own 4, 6, 8 s, less the 4 s the window drops).
+SPEECH_LENGTHS = (6, 8)
 # A silent reaction shot's length.
-REACTION_S = 4
+REACTION_S = 6
 # Where the planned speech starts in its clip (half the overhead), and where
 # a narrator's voice-over starts in its silent shot.
 PLANNED_LEAD_S = round(SPEECH_OVERHEAD_S / 2, 3)
@@ -74,6 +76,19 @@ TAKES_TO_RETAKE = (TAKE_MISMATCH, TAKE_NO_SPEECH)
 FPS = 30
 
 
+def window_lengths(lengths, window=SHOT_WINDOW_S) -> tuple:
+    """*lengths* inside the shot window (plan 27: 5 to 10 s). A link none of
+    whose lengths is inside it keeps its nearest ones (the lengths at the
+    least distance from the window), so a link is never left selling nothing."""
+    ordered = tuple(sorted(int(length) for length in lengths))
+    low, high = window
+    inside = tuple(length for length in ordered if low <= length <= high)
+    if inside or not ordered:
+        return inside
+    gap = min(low - length if length < low else length - high for length in ordered)
+    return tuple(length for length in ordered if (low - length if length < low else length - high) == gap)
+
+
 def words_of(text) -> int:
     """The line's words, as the subtitles count them."""
     return len(wordtiming.tokens(text))
@@ -81,7 +96,7 @@ def words_of(text) -> int:
 
 def capacity(length_s) -> int:
     """How many words a clip of *length_s* seconds speaks:
-    ``floor((L - 0.7) x 2.4)`` -- 4 s: 7, 6 s: 12, 8 s: 17."""
+    ``floor((L - 0.7) x 2.4)`` -- 5 s: 10, 6 s: 12, 8 s: 17, 10 s: 22."""
     return max(0, math.floor((float(length_s) - SPEECH_OVERHEAD_S) * SPEECH_WPS + 1e-9))
 
 
@@ -195,14 +210,18 @@ def _frames_down(seconds) -> float:
     return math.floor(float(seconds) * FPS + 1e-6) / FPS
 
 
-def shot_seconds(clip_real_s, *, speaks, end_s=None) -> float:
+def shot_seconds(clip_real_s, *, speaks, end_s=None, floor_s=None) -> float:
     """A shot's length from its clip's real length (whole frames, never past
     the clip): a speaking clip running more than :data:`TRIM_AFTER_S` past
-    its last word (*end_s*) is cut :data:`TRIM_PAD_S` after it; any other
-    clip keeps its length."""
+    its last word (*end_s*) is cut :data:`TRIM_PAD_S` after it, but never
+    below *floor_s* (the template's ``min_shot_s``, at least the window's
+    5 s; plan 27) nor past the clip; any other clip keeps its length."""
     real = _frames_down(clip_real_s)
     if speaks and end_s is not None and real - float(end_s) > TRIM_AFTER_S:
-        return round(_frames_down(float(end_s) + TRIM_PAD_S), 3)
+        cut = _frames_down(float(end_s) + TRIM_PAD_S)
+        if floor_s is not None:
+            cut = max(cut, _frames_down(floor_s))
+        return round(min(cut, real), 3)
     return round(real, 3)
 
 

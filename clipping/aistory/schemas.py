@@ -3782,7 +3782,8 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
     (stable keys, in any order: walk follow-up F5) and order sequencing
     (``order`` is the shot's position), scene references and contiguity, line references, transition
     references, a non-cut transition sitting only on a scene boundary (spec
-    6.3: ``cut`` inside a scene), the per-shot minimum length once timed, the
+    6.3: ``cut`` inside a scene), the per-shot minimum length once timed (a shot with a current clip is
+    exempt: it keeps the length it was made at, plan 27), the
     motion type matching the shot's own camera motion, and a shot's image
     being its own file (``SHOT_IMAGE_DIR``/``shot_NN.<ext>``), and its clip
     (phase 6 stage 7) its own ``SHOT_CLIP_DIR``/``shot_NN.mp4``, named only
@@ -3821,7 +3822,10 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
                 f"camera_motion {shot['camera_motion']!r}"
             )
         duration = shot["duration_s"]
-        if duration != 0 and duration < min_shot_s:
+        # Plan 27: a shot made under an older, lower floor keeps the length its clip gave it
+        # (a current clip's shot is grandfathered; the floor binds the shots still to be made).
+        made = ((shot["assets"].get("clip") or {}).get("state") == "current")
+        if duration != 0 and duration < min_shot_s and not made:
             errors.append(f"$.shots[{i}].duration_s: {duration} < the minimum shot length {min_shot_s}")
         image = shot["assets"]["image"]
         if image is not None:

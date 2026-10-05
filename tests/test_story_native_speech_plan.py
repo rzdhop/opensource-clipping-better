@@ -132,13 +132,32 @@ def test_a_link_that_does_not_exist_yet_is_accepted_by_name(tmp_path):
 
 # ================================================================ the lengths
 
-@pytest.mark.parametrize("words,clip_s", [(1, 4), (7, 4), (8, 6), (12, 6), (13, 8), (17, 8), (18, None)])
+@pytest.mark.parametrize("words,clip_s", [(1, 6), (7, 6), (8, 6), (12, 6), (13, 8), (17, 8), (18, None)])
 def test_a_speaking_clip_is_the_smallest_sold_length_that_can_speak_its_line(words, clip_s):
+    """Plan 27 stage 1: the default lengths are 6 and 8 s (the 4 s clip is out of the 5-10 s window)."""
     from clipping.aistory import native_speech
 
-    assert [native_speech.capacity(length) for length in (4, 6, 8)] == [7, 12, 17]
+    assert native_speech.SPEECH_LENGTHS == (6, 8)
+    assert [native_speech.capacity(length) for length in (5, 6, 8, 10)] == [10, 12, 17, 22]
     assert native_speech.SPEECH_WPS == 2.4
     assert native_speech.speech_clip_s(" ".join(["mot"] * words)) == clip_s
+
+
+@pytest.mark.parametrize("words,clip_s", [(1, 5), (10, 5), (11, 10), (22, 10), (23, None)])
+def test_a_10s_sold_length_holds_22_words_and_a_5s_one_10(words, clip_s):
+    """Seedance and kling sell 5 and 10 s: 5 s holds 10 words, 10 s holds 22."""
+    from clipping.aistory import native_speech
+
+    assert native_speech.speech_clip_s(" ".join(["mot"] * words), (5, 10)) == clip_s
+
+
+def test_a_reaction_shot_is_6s_and_a_silent_clip_is_never_under_the_window():
+    from clipping.aistory import native_speech
+
+    assert native_speech.REACTION_S == 6 and native_speech.SHOT_WINDOW_S == (5, 10)
+    assert native_speech.silent_clip_s(native_speech.REACTION_S, (6, 8)) == 6
+    assert native_speech.silent_clip_s(native_speech.REACTION_S, (5, 10)) == 10
+    assert native_speech.narrator_clip_s(1.0, (6, 8)) == 6
 
 
 def _scene(lines, *, characters=("char_a", "char_b")):
@@ -167,7 +186,7 @@ def test_each_character_line_is_one_speaking_shot_and_a_narrator_line_a_silent_o
     plans = [_beat([1, 2]), _beat([], framing="close_up"), _beat([3], framing="wide_establishing")]
     planned = shots.speech_shot_plan(scene, plans, language="fr")
     assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [
-        ([1], True, 6), ([2], True, 8), ([], False, 4), ([3], False, 4)]
+        ([1], True, 6), ([2], True, 8), ([], False, 6), ([3], False, 6)]
     assert planned[0]["subjects"][:2] == ["@char_a", "@char_b"]
     assert planned[1]["subjects"][:2] == ["@char_b", "@char_a"]
     assert planned[3]["framing"] == "wide_establishing"  # a silent shot keeps its framing
@@ -184,20 +203,20 @@ def _with_plan(scene, entries):
 
 
 def test_the_shots_are_the_scenes_line_plan_when_it_has_one():
-    """Plan 24 stage 4, fail-first. A character line of 7 words would be a 4 s
-    clip and a one-word narration a 4 s one; the stored plan says 6 s and 6 s,
-    so the two shots are exactly 6 s then 6 s, in line order."""
+    """Plan 24 stage 4, fail-first. A character line of 7 words would be a 6 s
+    clip and a one-word narration a 6 s one (plan 27: no 4 s clip); the stored
+    plan says 8 s and 8 s, so the two shots are exactly 8 s then 8 s, in line order."""
     from clipping.aistory import shots
 
     lines = [("char_a", "Tu caches la clé depuis lundi."), ("narrator", "Personne ne bouge.")]
     plans = [_beat([1]), _beat([2], framing="wide_establishing")]
     today = shots.speech_shot_plan(_scene(lines), plans, language="fr")
-    assert [plan["clip_s"] for plan in today] == [4, 4]
+    assert [plan["clip_s"] for plan in today] == [6, 6]
 
     notes = []
-    scene = _with_plan(_scene(lines), [("character", "char_a", 6), ("narrator", "narrator", 6)])
+    scene = _with_plan(_scene(lines), [("character", "char_a", 8), ("narrator", "narrator", 8)])
     planned = shots.speech_shot_plan(scene, plans, language="fr", notes=notes)
-    assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [([1], True, 6), ([2], False, 6)]
+    assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [([1], True, 8), ([2], False, 8)]
     assert notes == []
     assert shots.speech_shot_plan(scene, planned, language="fr") == planned
 
@@ -205,12 +224,12 @@ def test_the_shots_are_the_scenes_line_plan_when_it_has_one():
 def test_a_written_line_that_outgrew_its_planned_clip_keeps_the_smallest_clip_that_holds_it_and_is_named():
     from clipping.aistory import shots
 
-    long_line = "Rends-la moi tout de suite parce que je dois partir ce soir."
-    scene = _with_plan(_scene([("char_a", long_line)]), [("character", "char_a", 4)])
+    long_line = "Rends-la moi tout de suite parce que je dois partir ce soir avant la nuit."
+    scene = _with_plan(_scene([("char_a", long_line)]), [("character", "char_a", 6)])
     notes = []
     planned = shots.speech_shot_plan(scene, [_beat([1])], language="fr", notes=notes)
-    assert [plan["clip_s"] for plan in planned] == [6]
-    assert len(notes) == 1 and "s02 line 1" in notes[0] and "planned 4 s" in notes[0]
+    assert [plan["clip_s"] for plan in planned] == [8]
+    assert len(notes) == 1 and "s02 line 1" in notes[0] and "planned 6 s" in notes[0]
 
 
 def test_a_scene_with_no_plan_is_planned_as_it_always_was_and_says_nothing():
@@ -224,7 +243,7 @@ def test_a_scene_with_no_plan_is_planned_as_it_always_was_and_says_nothing():
     plans = [_beat([1, 2]), _beat([], framing="close_up"), _beat([3], framing="wide_establishing")]
     notes = []
     bare = shots.speech_shot_plan(_scene(lines), plans, language="fr", notes=notes)
-    assert [plan["clip_s"] for plan in bare] == [6, 8, 4, 4] and notes == []
+    assert [plan["clip_s"] for plan in bare] == [6, 8, 6, 6] and notes == []
     empty = _scene(lines)
     empty["line_plan"] = {"lines": []}
     assert shots.speech_shot_plan(empty, plans, language="fr", notes=notes) == bare and notes == []
@@ -238,7 +257,7 @@ def test_a_plan_whose_line_count_differs_from_the_written_lines_is_ignored_and_l
     scene = _with_plan(_scene(lines), [("character", "char_a", 8)])
     notes = []
     planned = shots.speech_shot_plan(scene, plans, language="fr", notes=notes)
-    assert [plan["clip_s"] for plan in planned] == [4, 4]
+    assert [plan["clip_s"] for plan in planned] == [6, 6]
     assert len(notes) == 1 and "ignored" in notes[0]
 
 

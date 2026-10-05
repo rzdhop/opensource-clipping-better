@@ -44,11 +44,11 @@ def test_the_template_validates_with_the_plans_values():
     assert schemas.episode_template_errors(tpl) == []
     assert defaults.EPISODE_TEMPLATE_ID_CONFRONTATION in defaults.EPISODE_TEMPLATE_IDS
     assert (tpl["window_s"], tpl["target_s"], tpl["tighten_above_s"]) == ([44, 58], 50, 55)
-    assert (tpl["scenes"], tpl["shots"], tpl["min_shot_s"], tpl["max_shot_s"]) == ([4, 6], [9, 16], 2.0, 8)
+    assert (tpl["scenes"], tpl["shots"], tpl["min_shot_s"], tpl["max_shot_s"]) == ([4, 6], [9, 16], 5, 10)
     slots = tpl["slots"]
-    assert slots["hook"]["duration_s"] == [4.0, 8.0] and slots["cliffhanger"]["duration_s"] == [6.0, 10.0]
+    assert slots["hook"]["duration_s"] == [5.0, 8.0] and slots["cliffhanger"]["duration_s"] == [6.0, 10.0]
     assert slots["body"]["count"] == [2, 3] and slots["body"]["duration_s"] == [10.0, 16.0]
-    assert slots["recap"]["duration_s"] == [3.0, 4.0] and tpl["recap_from_episode"] == 2
+    assert slots["recap"]["duration_s"] == [5.0, 6.0] and tpl["recap_from_episode"] == 2
     assert tpl["default_body_count"] == 3 and tpl["tail_peak_functions"] == ["peak", "cliffhanger"]
     assert {key: tpl[key] for key in NEW_KEYS} == {
         "single_place": True, "scene_transition": "cut", "narrator_slots": ["recap"], "line_words": [5, 17],

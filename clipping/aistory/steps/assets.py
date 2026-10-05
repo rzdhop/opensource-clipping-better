@@ -3994,6 +3994,11 @@ class _Assets(voice_lines.LineMeasurement):
             if video is not None and row is not None:
                 self.retake_shot(shot, video=video, row=row, image_link=image_link)
 
+    def _native_floor_s(self) -> float:
+        """The shortest a native shot is cut to (plan 27): the template's
+        ``min_shot_s``, at least the shot window's 5 s."""
+        return max(float(self.ec.template["min_shot_s"]), float(native_speech.SHOT_WINDOW_S[0]))
+
     def _native_length(self, shot, path) -> None:
         """A silent clip's shot lasts its clip's real length."""
         try:
@@ -4002,7 +4007,7 @@ class _Assets(voice_lines.LineMeasurement):
             self.ctx.on_log(f"⚠️ Shot {shot['shot_id']}: its clip's length could not be read ({exc}); its planned "
                             "length is kept.")
             return
-        seconds = max(float(self.ec.template["min_shot_s"]), native_speech.shot_seconds(real, speaks=False))
+        seconds = max(self._native_floor_s(), native_speech.shot_seconds(real, speaks=False))
         seconds = round(min(seconds, real), 3)
         if abs(float(shot["duration_s"]) - seconds) > 1e-6:
             shot["duration_s"] = seconds
@@ -4060,8 +4065,8 @@ class _Assets(voice_lines.LineMeasurement):
         record = take_mod.record(take, clip_sha256=sha, clip_real_s=real, line_id=line_id, now=now, reason=reason)
         shot["assets"]["clip"] = dict(clip, native_speech=record)
         end = take["end_s"] if take["state"] in (native_speech.TAKE_OK, native_speech.TAKE_MISMATCH) else None
-        seconds = native_speech.shot_seconds(real, speaks=True, end_s=end)
-        seconds = round(min(real, max(float(ec.template["min_shot_s"]), seconds)), 3)
+        seconds = native_speech.shot_seconds(real, speaks=True, end_s=end, floor_s=self._native_floor_s())
+        seconds = round(min(real, max(self._native_floor_s(), seconds)), 3)
         shot["duration_s"] = seconds
         self.write_board()
         self.save()
