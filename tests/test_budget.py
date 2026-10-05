@@ -134,9 +134,13 @@ def test_the_shipped_profiles_match_the_spec():
 def test_only_the_quality_profile_redraws_flagged_keyframes_and_its_key_is_checked(tmp_path):
     """Phase 8 stage B (the human's choice: up to 2 redraws a flagged shot,
     at most $0.40 an episode): ``keyframe_fix`` is the quality profile's
-    alone; a profile without it never redraws. Present, it is checked."""
+    alone; a profile without it never redraws. Present, it is checked.
+    Plan 28 F1, re-pinned on purpose: the shipped profiles size the
+    episode's budget by a rule (``cap_rule``: its shots x the redraws x one
+    keyframe's price) instead of $0.40; a fixed ``cap_usd`` is still read."""
     profiles = load_profiles()
-    assert profiles["profiles"]["quality"]["keyframe_fix"] == {"max_redraws_per_shot": 2, "cap_usd": 0.40}
+    assert profiles["profiles"]["quality"]["keyframe_fix"] == {"max_redraws_per_shot": 2,
+                                                               "cap_rule": "shots_x_redraws_x_price"}
     assert "keyframe_fix" not in profiles["profiles"]["free"]
     assert "keyframe_fix" not in profiles["profiles"]["one_dollar"]
 
@@ -150,6 +154,8 @@ def test_only_the_quality_profile_redraws_flagged_keyframes_and_its_key_is_check
         ({"max_redraws_per_shot": True, "cap_usd": 0.4}, "max_redraws_per_shot must be a whole number"),
         ({"max_redraws_per_shot": 2, "cap_usd": -0.1}, "cap_usd must be an amount in USD (0 or more)"),
         ({"max_redraws_per_shot": 2, "cap_usd": "0.40"}, "cap_usd must be an amount"),
+        ({"max_redraws_per_shot": 2, "cap_rule": "per_shot"}, "cap_rule must be one of shots_x_redraws_x_price"),
+        ({"max_redraws_per_shot": 2, "cap_usd": 0.4, "cap_rule": "shots_x_redraws_x_price"}, "must hold exactly"),
     ):
         broken = load_profiles()
         broken["profiles"]["one_dollar"]["keyframe_fix"] = fix

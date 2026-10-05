@@ -649,7 +649,9 @@ def test_the_estimate_prices_one_lipsync_per_clip_with_an_on_screen_line_and_the
     assert verdict["est_usd"] == pytest.approx(units["est_usd"] + video["est_usd"])
 
     # An episode cap the clips fit and the lipsync does not: refused whole, before anything is made.
-    cap = units["est_usd"] + clips_usd + lip["est_usd"] / 2
+    # Plan 28 F1, re-pinned on purpose: the auto-fix's ceiling takes only what the caps leave after the
+    # clips, so the cap is set from the rest of the plan (images and voices).
+    cap = units["est_usd"] - units["keyframe_fix"]["est_usd"] + clips_usd + lip["est_usd"] / 2
     message = tft.stopped(store, story_id, seams.fakes, settings=dict(QUALITY, PER_EPISODE_CAP_USD=f"{cap:.4f}"))
     assert "would go over a cap" in message and f"{lip['count']} lip-syncs on {LIPSYNC_LINK}" in message
     assert seams.image.requests == [] and seams.video.requests == [] and seams.lip.requests == []

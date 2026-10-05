@@ -320,8 +320,9 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
  * no clip is bought before (RC-Q3; `workflow.approve_keyframes`,
  * `episode.assets.keyframes`: approval none | current | stale), for a story
  * that stopped at the keyframes ("Stop at the keyframes for my review"). A
- * refusal shows the server's sentence and offers "Approve anyway", which goes
- * over a failed or missing check, never over a missing keyframe. Each shot's
+ * refusal shows the server's sentence -- plan 28 F1: the check is a hard
+ * gate, nothing goes over it -- and the two ways out: regenerate the shot
+ * (the Review tab) or upload your own keyframe (the Handoff). Each shot's
  * check (J2) is read, large, on the Review tab (stage C: `episode.review`,
  * ReviewPane.jsx) -- this card only counts the flagged ones. Null on a legacy
  * episode (no `keyframes` in the payload).
@@ -341,12 +342,12 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
   const flagged = review ? review.flagged.length : 0
   const reason = busy ? 'A step is running.' : null
 
-  const handleApprove = async (anyway) => {
+  const handleApprove = async () => {
     setApproving(true)
     setError('')
     setErrors(null)
     try {
-      await approveStoryDoc(storyId, keyframes.target, anyway ? { approve_anyway: true } : undefined)
+      await approveStoryDoc(storyId, keyframes.target)
       onChange()
     } catch (err) {
       setError(err.message)
@@ -374,18 +375,12 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => handleApprove(false)}
+          onClick={handleApprove}
           disabled={approved || Boolean(reason) || approving}
           title={reason || undefined}
         >
           {approving ? 'Approving…' : approved ? 'Keyframes approved' : 'Approve keyframes'}
         </button>
-        {error && !approved && (
-          <button type="button" className="btn btn-secondary" onClick={() => handleApprove(true)}
-            disabled={Boolean(reason) || approving}>
-            Approve anyway
-          </button>
-        )}
         <Badge tone={approved ? 'accent' : approval === 'stale' ? 'warning' : 'neutral'}>
           keyframes: {approval}{approved && keyframes.anyway ? ' (anyway)' : ''}
         </Badge>
@@ -398,6 +393,12 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
         </p>
       )}
       <StepError message={error} errors={errors} className="story-step-error" />
+      {error && !approved && (
+        <p className="form-hint">
+          Regenerate each shot that does not match on the Review tab, or upload your own keyframe on the Handoff
+          (the shot set to “My own”); then approve again.
+        </p>
+      )}
       </CardBody>
     </Card>
   )

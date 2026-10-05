@@ -92,6 +92,11 @@ def _run(store, story_id, *, image=None, vision=None, settings=SETTINGS, clock=N
     return tas._run(store, story_id, adapters=_adapters(image, vision), settings=settings, clock=clock, ctx=ctx)
 
 
+def _ceiling(store, story_id):
+    """Plan 28 F1: the episode's fix budget -- its shots x 2 redraws x one keyframe on fal ($0.04)."""
+    return round(len(tas._shots(store, story_id)) * 2 * PRICE, 4)
+
+
 def _seeds(monkeypatch, start=4242):
     from clipping.aistory.steps import entities
 
@@ -143,7 +148,9 @@ def test_a_flagged_keyframe_is_redrawn_with_a_fresh_seed_and_its_verdict_s_note_
     assert first["issue"] == f"missing {MISSING}" and first["image_sha256"] != second["image_sha256"]
     assert (second["passed"], second["issue"], second["note"]) == (True, None, note)
     assert second["image_sha256"] == doc["keyframe_verdicts"]["sh05"]["image_sha256"]
-    assert doc["keyframe_fix_budget"] == {"max_redraws_per_shot": 2, "cap_usd": 0.4, "spent_usd": PRICE}
+    # Plan 28 F1, re-pinned on purpose: the budget is the episode's shots x 2 redraws x $0.04.
+    assert doc["keyframe_fix_budget"] == {"max_redraws_per_shot": 2, "cap_usd": _ceiling(store, story_id),
+                                          "spent_usd": PRICE}
     assert summary["keyframes"]["fix"]["fixed"] == ["sh05"] and summary["keyframes"]["fix"]["redraws"] == 1
     assert summary["keyframes"]["fix"]["message"] == "1 keyframe redrawn and fixed, $0.04"
     assert "🛠 Keyframe auto-fix: 1 keyframe redrawn and fixed, $0.04" in log
@@ -176,33 +183,34 @@ def test_a_shot_still_flagged_after_its_redraws_is_given_up_and_never_redrawn_ag
     assert summary["keyframes"]["fix"]["message"] == "1 still flagged after 2 redraws, $0.00"
 
 
-def test_the_fix_stops_at_the_episode_s_fix_budget_and_keeps_it_across_runs(store, tmp_path, monkeypatch):
+def test_the_fix_budget_is_sized_to_the_episode_and_kept_across_runs(store, tmp_path, monkeypatch):
+    """Plan 28 F1 (DEC-305 §5), re-pinned on purpose: the episode's budget is
+    its shots x 2 redraws x one keyframe on its link ($0.04) -- it was $0.40
+    whatever the shot count, so 5 shots got their redraws and the rest none.
+    Every shot now uses its two; one still flagged after them is said with
+    the keyframe approval's own sentence, never left silent."""
     story_id = _quality(store, tmp_path)
     _seeds(monkeypatch)
     every = {shot["shot_id"]: None for shot in tas._shots(store, story_id)}
     image = kc.SeededImage(price=PRICE)
 
-    summary, _log = _run(store, story_id, image=image, vision=Judge(every))
+    summary, log = _run(store, story_id, image=image, vision=Judge(every))
 
     total = len(every)
+    ceiling = round(total * 2 * PRICE, 4)
     fix = summary["keyframes"]["fix"]
-    # $0.40 at $0.04 a redraw: ten redraws, the first five shots' two each, then the budget stops it.
-    assert len(image.requests) == total + 10 and fix["redraws"] == 10 and fix["spent_usd"] == 0.4
-    assert fix["gave_up"] == ["sh01", "sh02", "sh03", "sh04", "sh05"] and len(fix["flagged"]) == total - 5
-    assert fix["stopped"] == "the episode's keyframe fix budget is spent ($0.40 of $0.40; a redraw is est $0.040)"
-    assert fix["message"] == (f"5 still flagged after 2 redraws, {total - 5} still flagged, $0.40 (stopped: the "
-                              "episode's keyframe fix budget is spent ($0.40 of $0.40; a redraw is est $0.040))")
+    assert len(image.requests) == total * 3 and fix["redraws"] == 2 * total and fix["spent_usd"] == ceiling
+    assert fix["gave_up"] == list(every) and fix["flagged"] == [] and fix["stopped"] is None
     doc = tas._assets_doc(store, story_id)
-    assert doc["keyframe_fix_budget"]["spent_usd"] == 0.4
-    # The shot it stopped at is on record, flagged, not redrawn; the ones after it are not reached.
-    assert doc["keyframe_fixes"]["sh06"]["redraws"] == 0 and doc["keyframe_fixes"]["sh06"]["gave_up"] is False
-    assert sorted(doc["keyframe_fixes"]) == ["sh01", "sh02", "sh03", "sh04", "sh05", "sh06"]
-
+    assert doc["keyframe_fix_budget"] == {"max_redraws_per_shot": 2, "cap_usd": ceiling, "spent_usd": ceiling}
+    refusal = summary["keyframes"]["refusal"]
+    assert refusal.startswith(f"Shot sh01 does not match: missing {MISSING}. Shot sh02 does not match: ")
+    assert refusal.endswith("Regenerate them, or upload your own.")
+    assert f"⛔ Episode 1's keyframes cannot be approved yet. {refusal}" in log
     # Per episode, not per run: the next run redraws nothing more.
     image = kc.SeededImage(price=PRICE)
     summary, _log = _run(store, story_id, image=image, vision=Judge(every))
-    assert image.requests == [] and summary["keyframes"]["fix"]["stopped"].startswith(
-        "the episode's keyframe fix budget is spent")
+    assert image.requests == [] and summary["keyframes"]["fix"]["gave_up"] == list(every)
 
 
 def test_the_fix_stops_where_a_cap_would_refuse_the_redraw(store, tmp_path, monkeypatch):
@@ -369,7 +377,13 @@ def test_approved_keyframes_are_never_redrawn_on_their_own(store, tmp_path, monk
     with monkeypatch.context() as patch:
         patch.setattr(media_policy, "keyframe_fix", lambda story: None)
         _run(store, story_id, vision=Judge({"sh05": None}))
-    workflow.approve_keyframes(store, story_id, 1, approve_anyway=True, now=kg.LATER)
+    # Plan 28 F1, re-pinned on purpose: no approval goes over a flagged keyframe any more -- approved
+    # once it passed, then flagged by a later check, it is still never redrawn on its own.
+    kg._pass_verdict(store, story_id, "sh05")
+    workflow.approve_keyframes(store, story_id, 1, now=kg.LATER)
+    doc = tas._assets_doc(store, story_id)
+    doc["keyframe_verdicts"]["sh05"]["missing"] = [MISSING]
+    store.write_episode_doc(story_id, 1, "assets.json", doc, now=kg.LATER)
     image = kc.SeededImage(price=PRICE)
 
     summary, _log = _run(store, story_id, image=image, vision=Judge({"sh05": None}))
@@ -387,18 +401,26 @@ def test_the_estimate_counts_the_fix_ceiling_in_the_paid_plan_and_its_caps(store
     shots_total = len(tas._shots(store, story_id))
     units = tce._units(store, story_id, SETTINGS, adapters=_adapters())
 
+    # Plan 28 F1, re-pinned on purpose: the ceiling is the episode's shots x 2 redraws x $0.04, not $0.40.
+    ceiling = round(shots_total * 2 * PRICE, 4)
     assert units["keyframe_fix"] == {
-        "max_redraws_per_shot": 2, "cap_usd": 0.4, "spent_usd": 0.0, "est_usd": 0.4, "route_class": "paid",
+        "max_redraws_per_shot": 2, "cap_usd": ceiling, "spent_usd": 0.0, "est_usd": ceiling, "route_class": "paid",
         "link": "fal/seedream-4.5-edit",
-        "message": "up to $0.40 to redraw flagged keyframes (at most 2 redraws a shot, $0.40 an episode)"}
-    assert units["est_usd"] == round(shots_total * PRICE + 0.4, 4) and units["over_cap"] is None
+        "message": f"up to ${ceiling:.2f} to redraw flagged keyframes (at most 2 redraws a shot, ${ceiling:.2f} an "
+                   "episode)"}
+    assert units["est_usd"] == round(shots_total * PRICE + ceiling, 4) and units["over_cap"] is None
 
-    # The ceiling counts against the caps: a cap the images alone fit refuses the whole plan.
-    tight = dict(SETTINGS, PER_EPISODE_CAP_USD="1.30")
+    # Plan 28 F1, re-pinned on purpose: the ceiling takes what the caps leave once the rest is counted --
+    # a cap the images fit cuts it, never refuses the whole plan for redraws it may not need.
+    images = round(shots_total * PRICE, 4)
+    tight = dict(SETTINGS, PER_EPISODE_CAP_USD=f"{images + 0.30:.2f}")
     units = tce._units(store, story_id, tight, adapters=_adapters())
-    assert units["over_cap"] == ("refused: est $1.360 on episode 1's paid images and voices, with up to $0.40 to "
-                                 "redraw flagged keyframes would bring this episode to $1.36 of its $1.30 cap")
-    assert assets.plan_refusal(tas._ec(store, story_id), units).startswith("Episode 1's assets would go over a cap")
+    assert units["keyframe_fix"]["est_usd"] == pytest.approx(round(float(f"{images + 0.30:.2f}") - images, 4))
+    assert units["over_cap"] is None and "cut to what the caps leave" in units["keyframe_fix"]["message"]
+    # A cap the images just fit leaves nothing for redraws: a flagged keyframe then stops the run, said.
+    units = tce._units(store, story_id, dict(SETTINGS, PER_EPISODE_CAP_USD=f"{images:.2f}"), adapters=_adapters())
+    assert units["keyframe_fix"]["est_usd"] == 0.0 and units["over_cap"] is None
+    assert assets.plan_refusal(tas._ec(store, story_id), units) is None
 
     # Once the keyframes are made and approved, no redraw is to come: nothing is reserved.
     _run(store, story_id)
@@ -410,7 +432,10 @@ def test_the_estimate_counts_the_fix_ceiling_in_the_paid_plan_and_its_caps(store
     assert units["keyframe_fix"]["message"] == "The keyframes are approved: none is redrawn on its own."
 
 
-def test_the_clips_are_planned_after_the_fix_ceiling(store, tmp_path, monkeypatch):
+def test_the_clips_are_planned_before_the_fix_ceiling_which_takes_what_the_caps_leave(store, tmp_path, monkeypatch):
+    """Plan 28 F1, re-pinned on purpose: the ceiling sized to the episode
+    would leave the clips short under the caps -- they are planned first
+    now, and the ceiling takes what is left."""
     from clipping.aistory.steps import assets
 
     story_id = _quality(store, tmp_path)
@@ -427,8 +452,10 @@ def test_the_clips_are_planned_after_the_fix_ceiling(store, tmp_path, monkeypatc
     units = tce._units(store, story_id, settings, adapters=_adapters())
 
     images = len(tas._shots(store, story_id)) * PRICE
-    assert seen == [pytest.approx(images + 0.4)]
-    assert units["keyframe_fix"]["est_usd"] == 0.4
+    assert seen == [pytest.approx(images)]
+    left = 4.0 - images - units["video"]["est_usd"]
+    assert units["keyframe_fix"]["est_usd"] == pytest.approx(round(min(images * 2, left), 4))
+    assert units["over_cap"] is None
 
 
 def test_the_fast_track_prices_the_fix_ceiling(store, tmp_path):
@@ -437,10 +464,12 @@ def test_the_fast_track_prices_the_fix_ceiling(store, tmp_path):
     story_id = _quality(store, tmp_path)
     estimate = fast_track.estimate(tas._ec(store, story_id), env=SETTINGS, adapters=_adapters())
 
-    assert estimate["keyframe_fix"]["est_usd"] == 0.4
-    assert "up to $0.40 to redraw flagged keyframes" in estimate["paid"]["parts"]
+    # Plan 28 F1, re-pinned on purpose: the ceiling is the episode's shots x 2 redraws x $0.04.
     images = len(tas._shots(store, story_id)) * PRICE
-    assert estimate["est_usd"] == pytest.approx(images + 0.4)
+    ceiling = round(images * 2, 4)
+    assert estimate["keyframe_fix"]["est_usd"] == ceiling
+    assert f"up to ${ceiling:.2f} to redraw flagged keyframes" in estimate["paid"]["parts"]
+    assert estimate["est_usd"] == pytest.approx(images + ceiling)
     # The pure verdict counts it as a paid part, in the total.
     units = {"images": {"count": 0}, "voices": {"voices": [], "paid_usd": 0.0}, "caps": {"allow_paid": True},
              "over_cap": None, "ready": True,
@@ -471,7 +500,7 @@ def test_a_shot_regenerate_checks_that_shot_and_the_one_after_it_and_never_auto_
     doc = tas._assets_doc(store, story_id)
     shot = _shot(store, story_id, "sh05")
     verdict = doc["keyframe_verdicts"]["sh05"]
-    assert verdict["missing"] == [MISSING] and verdict["prompt_version"] == 2
+    assert verdict["missing"] == [MISSING] and verdict["prompt_version"] == 3  # plan 28 F2, re-pinned
     from clipping.aistory.steps import assets
 
     assert verdict["image_sha256"] == assets._sha256_file(assets.shot_image_path(tas._ec(store, story_id), shot))
@@ -505,7 +534,7 @@ def test_the_episode_page_shows_each_shot_s_verdict_and_fix_and_the_fix_budget(s
 
     page = workflow.episode_outputs(store, store.get(story_id), 1)["assets"]
     by_id = {shot["shot_id"]: shot for shot in page["shots"]}
-    assert page["keyframes"]["fix_budget"] == {"max_redraws_per_shot": 2, "cap_usd": 0.4,
+    assert page["keyframes"]["fix_budget"] == {"max_redraws_per_shot": 2, "cap_usd": _ceiling(store, story_id),
                                                "spent_usd": round(3 * PRICE, 4)}
     fixed = by_id["sh05"]
     assert fixed["keyframe_verdict"]["passed"] is True and fixed["keyframe_verdict"]["current"] is True

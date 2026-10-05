@@ -4175,6 +4175,8 @@ _EPISODE_ASSETS_HANDOFF_SCHEMA = _document(
 # keyframe (``image_sha256``) and the previous shot's (``previous_sha256``,
 # null for the first shot) are the images it saw.
 KEYFRAME_MISSING_MAX = 3
+# Plan 28 F2: each character that does not match its sheet, in J2's words.
+KEYFRAME_SHEET_ISSUES_MAX = 2
 _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA = _document({
     "image_sha256": _SHA256,
     "previous_sha256": _or_null(_SHA256),
@@ -4191,6 +4193,11 @@ _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA = _document({
     # Plan 19 stage 3 (F3): the framing the keyframe has when it is not the
     # one asked; absent when J2 named none, and on every older verdict.
     "framing_issue": {"type": "string", "minLength": 1, "maxLength": 200},
+    # Plan 28 F2: each on-screen character that does not match its sheet
+    # and written look ("Gaston's head is a pear, the sheet shows a
+    # pineapple"); absent when J2 named none, and on every older verdict.
+    "sheet_issues": {"type": "array", "items": _text(300), "minItems": 1,
+                     "maxItems": KEYFRAME_SHEET_ISSUES_MAX},
 })
 
 # Phase 8 stage B: what the assets step's keyframe auto-fix did -- per shot

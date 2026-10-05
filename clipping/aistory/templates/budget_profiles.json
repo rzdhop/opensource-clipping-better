@@ -33,7 +33,7 @@
       "video_link_policy": "first_with_audio",
       "video_resolution": "720p",
       "tier3_native_audio": "ambience",
-      "keyframe_fix": {"max_redraws_per_shot": 2, "cap_usd": 0.40},
+      "keyframe_fix": {"max_redraws_per_shot": 2, "cap_rule": "shots_x_redraws_x_price"},
       "lipsync": "kling"
     },
     "native_speech": {
@@ -54,7 +54,7 @@
       "silent_link": "gemini/veo-3.1-lite",
       "video_resolution": "720p",
       "tier3_native_audio": "speech",
-      "keyframe_fix": {"max_redraws_per_shot": 2, "cap_usd": 0.40},
+      "keyframe_fix": {"max_redraws_per_shot": 2, "cap_rule": "shots_x_redraws_x_price"},
       "speech_retake": {"max_per_shot": 1, "cap_usd": 1.0},
       "lipsync": "none"
     },
@@ -76,7 +76,7 @@
       "silent_link": "manual/upload",
       "video_resolution": "720p",
       "tier3_native_audio": "speech",
-      "keyframe_fix": {"max_redraws_per_shot": 2, "cap_usd": 0.40},
+      "keyframe_fix": {"max_redraws_per_shot": 2, "cap_rule": "shots_x_redraws_x_price"},
       "speech_retake": {"max_per_shot": 0, "cap_usd": 0},
       "lipsync": "none"
     }

@@ -297,7 +297,7 @@ def test_max_tokens():
         "J1": 970,
         # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2), its English worst case,
         # under the plan's 160 (same file).
-        "J2": 110,
+        "J2": 190,  # plan 28 F2, re-pinned on purpose: the framing and sheet issues counted
         # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes, a new id (the S1
         # row is unchanged), measured on its French worst case (tests/test_story_season_archetypes.py).
         "S1v2": 1150,

@@ -78,12 +78,18 @@ def test_a_premium_episode_over_the_per_episode_cap_is_refused_before_anything_i
 def test_the_agent_estimate_prices_episode_one_from_the_profile_not_its_cap(store):
     """``_agent_episode_usd`` before the story is ready: the native-speech
     figure with the keyframe auto-fix's ceiling, never the profile's
-    ``cap_usd`` ($10)."""
+    ``cap_usd`` ($10). Plan 28 F1, re-pinned on purpose: the ceiling is the
+    episode's 12 shots x 2 redraws x one keyframe ($0.04 on fal's editor:
+    $0.96), no more a flat $0.40."""
     from clipping.aistory import media_policy, workflow
 
     story = store.get(nsp.native_story(store))
     usd = workflow._agent_episode_usd(story, KEYS)
-    expected = media_policy.native_speech_estimate(KEYS, story=story)["episode_usd"] + 0.40
+    estimate = media_policy.native_speech_estimate(KEYS, story=story)
+    assert estimate["episode"]["keyframe_usd"] == 0.04
+    shots = estimate["episode"]["speech_shots"] + estimate["episode"]["silent_shots"]
+    assert shots == 12
+    expected = estimate["episode_usd"] + 12 * 2 * 0.04
     assert usd == pytest.approx(expected) and usd != 10.0
 
 

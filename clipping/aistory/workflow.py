@@ -4723,18 +4723,10 @@ def keyframe_findings(ec, board, doc) -> dict:
     """What stands between episode *ec.ep*'s keyframes and their approval,
     shot by shot (the keyframe approval's own reading, shared with the fast
     track's one click, stage C): ``{"failed": [(shot_id, what J2 found)],
-    "unjudged": [shot_id, ...]}`` -- a current verdict (J2) that failed, and
-    a shot with no current verdict (none, or one of other images:
-    ``judge.verdict_current``). Hashes every image."""
-    verdicts = (doc or {}).get(judge_step.KEYFRAME_VERDICTS) or {}
-    unjudged, failed = [], []
-    for shot, _path, sha, _prev_id, _prev_path, prev_sha in assets_step.keyframe_items(ec, board, doc):
-        entry = verdicts.get(shot["shot_id"])
-        if not judge_step.verdict_current(entry, sha, prev_sha):
-            unjudged.append(shot["shot_id"])
-        elif not judge_step.verdict_passed(entry):
-            failed.append((shot["shot_id"], judge_step.verdict_text(entry)))
-    return {"failed": failed, "unjudged": unjudged}
+    "unjudged": [shot_id, ...], "refusal": sentence | None}`` --
+    ``assets.keyframe_findings`` (plan 28 F1: the refusal's plain sentences,
+    ``judge.keyframe_refusal``). Hashes every image."""
+    return assets_step.keyframe_findings(ec, board, doc)
 
 
 def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now, by=USER_APPROVED) -> dict:
@@ -4742,25 +4734,31 @@ def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now, by=US
     ``POST /approve/keyframes:<ep>``, CLI ``approve ID keyframes:<ep>``);
     returns ``assets.json`` as written. *by* (``schemas.APPROVED_BY``, stage
     C) is who approves: the human, or the fast track's one click on their
-    behalf -- the record then carries ``by`` and ``flagged``, the shots it
-    went over, so the review screen can show them.
+    behalf -- the record carries ``by``.
 
     A v2 story's alone (``conflict`` for a legacy one: its assets approval
     is the one it has). ``conflict`` before the script is approved and the
     storyboard approved and current (``assets.require_approved``); without
     an ``assets.json``; while a shot has no current keyframe (its image on
     disk and current, or locked: ``assets.keyframe_problem``), naming each
-    and its regenerate target; and -- unless *approve_anyway* -- while a
-    shot's keyframe check (J2) failed or has no current verdict (none, or
-    one of other images: ``judge.verdict_current``), naming each with what
-    J2 found. Then ``assets.json`` gains ``keyframes_approved {at, anyway,
-    fingerprint}`` -- ``anyway`` true when it went over a failed or missing
-    verdict, the fingerprint of the keyframes as they are now
-    (``assets.keyframes_fingerprint``): once a keyframe changes, the
-    approval is stale (:func:`keyframes_approval_state`), derived, never
-    cleared (DEC-155). Until it is current no clip is bought (RC-Q3,
-    ``assets.clip_hold``). Nothing else moves: not the assets approval, not
-    the storyboard, not the story (RC-E2)."""
+    and its regenerate target; and -- plan 28 F1 (DEC-305 §5), a hard gate
+    -- while a shot's keyframe check (J2) failed or has no current verdict
+    (none, or one of other images or of an older J2:
+    ``judge.verdict_current``), in plain sentences naming each shot and
+    what the judge saw (``judge.keyframe_refusal``: "Shot sh04 does not
+    match: Gaston's head is a pear, the sheet shows a pineapple. Regenerate
+    it, or upload your own."). *approve_anyway* is still accepted (the API
+    and the CLI pass it) and goes over nothing: the way past a refusal is a
+    new keyframe -- regenerated, or the human's own upload -- that passes
+    the check. Then ``assets.json`` gains ``keyframes_approved {at, anyway,
+    fingerprint, by, flagged}`` -- ``anyway`` false and ``flagged`` empty
+    (both kept for the approvals recorded before), the fingerprint of the
+    keyframes as they are now (``assets.keyframes_fingerprint``): once a
+    keyframe changes, the approval is stale
+    (:func:`keyframes_approval_state`), derived, never cleared (DEC-155).
+    Until it is current no clip is bought (RC-Q3, ``assets.clip_hold``).
+    Nothing else moves: not the assets approval, not the storyboard, not the
+    story (RC-E2)."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
     if not media_policy.is_v2(story):
@@ -4786,25 +4784,12 @@ def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now, by=US
                                        f"{_and(targets)}) or lock {'it' if len(missing) == 1 else 'them'}, then "
                                        "approve the keyframes."))
     findings = keyframe_findings(ec, board, doc)
-    unjudged = findings["unjudged"]
-    failed = [f"{shot_id} ({text})" for shot_id, text in findings["failed"]]
-    if (unjudged or failed) and not approve_anyway:
-        found = []
-        if failed:
-            found.append(f"the keyframe check (J2) found issues in shot{_plural_s(failed)} {'; '.join(failed)}")
-        if unjudged:
-            found.append(f"shot{_plural_s(unjudged)} {_and(unjudged)} {'has' if len(unjudged) == 1 else 'have'} "
-                         "no current keyframe check (J2): run the assets step again (it checks them, free)")
-        raise WorkflowError(CONFLICT, (f"Episode {ep}'s keyframes are not approved: {'; and '.join(found)}. "
-                                       "Make the shots again (regenerate them, with a note) and check again, or "
-                                       "approve anyway."))
-    # The shots it goes over, in storyboard order (the failed and the unjudged are disjoint).
-    flagged = [shot["shot_id"] for shot in board["shots"]
-               if shot["shot_id"] in unjudged or any(shot_id == shot["shot_id"] for shot_id, _text in
-                                                      findings["failed"])]
-    doc[judge_step.KEYFRAMES_APPROVED] = {"at": now, "anyway": bool(unjudged or failed),
+    if findings["refusal"]:
+        # Plan 28 F1: a hard gate -- approve_anyway goes over nothing.
+        raise WorkflowError(CONFLICT, f"Episode {ep}'s keyframes are not approved. {findings['refusal']}")
+    doc[judge_step.KEYFRAMES_APPROVED] = {"at": now, "anyway": False,
                                           "fingerprint": assets_step.keyframes_fingerprint(ec, board),
-                                          "by": by, "flagged": flagged}
+                                          "by": by, "flagged": []}
     try:
         return stories.write_episode_doc(story_id, ep, ASSETS_DOC, doc, now=now)
     except schemas.SchemaError as exc:
@@ -6673,7 +6658,9 @@ def _agent_episode_usd(story, env) -> float:
     """What episode 1 may spend before the story is ready to price it
     exactly: nothing on the free budget profile; the Quality preset's own
     figure (``media_policy.preset_estimate``, with the keyframe auto-fix's
-    ceiling) on the quality one; the profile's ``cap_usd`` otherwise."""
+    ceiling -- plan 28 F1: its shots x redraws x one keyframe,
+    ``media_policy.keyframe_fix_cap``) on the quality one; the profile's
+    ``cap_usd`` otherwise."""
     profile = (story.get("generation_profile") or {}).get("budget_profile")
     if profile == defaults.DEFAULT_BUDGET_PROFILE:
         return 0.0
@@ -6681,22 +6668,27 @@ def _agent_episode_usd(story, env) -> float:
         cap = float(budget_mod.profile_settings(profile).get("cap_usd") or 0.0)
     except (OSError, ValueError, KeyError, TypeError):
         cap = 0.0
+    fix = media_policy.keyframe_fix(story)
     if profile in defaults.NATIVE_SPEECH_PROFILES:
         # Plan 22: a native-speech story's own figure (its speech model, links and retake budget).
         try:
-            usd = float(media_policy.native_speech_estimate(gating.merged_env(env), story=story)["episode_usd"])
+            estimate = media_policy.native_speech_estimate(gating.merged_env(env), story=story)
+            usd = float(estimate["episode_usd"])
+            shots = int(estimate["episode"]["speech_shots"]) + int(estimate["episode"]["silent_shots"])
+            unit = float(estimate["episode"]["keyframe_usd"])
         except Exception:  # noqa: BLE001 - a predicted figure falls back to the profile's own
-            usd = cap
-        fix = media_policy.keyframe_fix(story)
-        return round(usd + (float(fix["cap_usd"]) if fix else 0.0), 4)
+            usd, shots, unit = cap, 0, 0.0
+        # Plan 28 F1: the auto-fix's ceiling sized to the episode (its shots x redraws x one keyframe).
+        return round(usd + (media_policy.keyframe_fix_cap(fix, shots=shots, unit_usd=unit) if fix else 0.0), 4)
     if profile != "quality":
         return round(cap, 4)
     try:
-        usd = float(media_policy.preset_estimate(gating.merged_env(env))["episode_usd"])
+        estimate = media_policy.preset_estimate(gating.merged_env(env))
+        usd = float(estimate["episode_usd"])
+        shots, unit = int(estimate["episode"]["shots"]), float(estimate["episode"]["keyframe_usd"])
     except Exception:  # noqa: BLE001 - a predicted figure falls back to the profile's own
-        usd = cap
-    fix = media_policy.keyframe_fix(story)
-    return round(usd + (float(fix["cap_usd"]) if fix else 0.0), 4)
+        usd, shots, unit = cap, 0, 0.0
+    return round(usd + (media_policy.keyframe_fix_cap(fix, shots=shots, unit_usd=unit) if fix else 0.0), 4)
 
 
 def _agent_episode_calls(story) -> int:

@@ -160,8 +160,8 @@ numbers).
 Phase 7 stage 6b: ``approve <story_id> keyframes:N`` approves a v2 story's
 episode N keyframes (``workflow.approve_keyframes``, the API's own rule:
 every shot with a current keyframe, every keyframe check (J2) passed --
-``--anyway`` goes over a failed or missing one, and the approval records
-it); no clip of a v2 episode is bought before it is current. It is the one
+a hard gate since plan 28 F1: ``--anyway`` is still accepted and goes over
+nothing); no clip of a v2 episode is bought before it is current. It is the one
 document approved by a command of its own: a person approves keyframes
 after looking at them, so no step's ``--auto-approve`` ever does. Any other
 document is refused, pointing at ``--auto-approve``.
@@ -713,15 +713,17 @@ def build_parser() -> argparse.ArgumentParser:
         "approve", parents=[common], help="approve a v2 episode's keyframes (keyframes:N)",
         description=(
             "Approve episode N's keyframes on a v2 story (keyframes:N), by the API's own rule: every shot "
-            "with a current keyframe and every keyframe check (J2) passed; --anyway goes over a failed or "
-            "missing check, and the approval records it. No clip of a v2 episode is bought before its "
-            "keyframes are approved. The other documents are approved with 'step ... --auto-approve'."
+            "with a current keyframe and every keyframe check (J2) passed (a failed or missing check is "
+            "refused: regenerate the shot or upload your own keyframe). No clip of a v2 episode is bought "
+            "before its keyframes are approved. The other documents are approved with 'step ... "
+            "--auto-approve'."
         ),
     )
     approve_cmd.add_argument("story_id", help="the story's id (see 'list')")
     approve_cmd.add_argument("doc", metavar="keyframes:N", help="the document to approve: keyframes:N")
     approve_cmd.add_argument("--anyway", action="store_true",
-                             help="approve over keyframe checks (J2) that failed or have not run")
+                             help="accepted, goes over nothing: a failed or missing keyframe check (J2) is "
+                                  "refused (plan 28)")
 
     # ---- voice-tails (phase 7 follow-up: the Gemini tail guard, read only)
     tails_cmd = commands.add_parser(

@@ -165,7 +165,9 @@ C1_CALLS = 10
 # J1 version 2 (DEC-248): each issue's severity, 842.4 -> 970.
 # J2 (stage 6b): its largest reply (English: 3 missing items of 6 words, a
 # 25-word continuity issue, 6-character words) needs 91 (chars/4), + 15 %,
-# rounded up to ten: 110, under the plan's 160.
+# rounded up to ten: 110, under the plan's 160. Plan 28 F2: plus the 8-word
+# framing issue (plan 19 stage 3 never counted it) and 2 sheet issues of 14
+# words: 165, + 15 %, rounded up to ten: 190.
 # S1v2 (plan 20 stage 2, a v2 story's S1, DEC-138's method): its largest
 # French reply -- 12 entries at 25 words, each naming the longest archetype
 # id, and the primary and secondary chosen -- needs 997.1 tokens (chars/4 x
@@ -182,7 +184,7 @@ MAX_TOKENS = {
     "D4": 430, "D5": 3330, "D6": 540,
     "E1v2": 1750, "E2v2": 600, "E3v2": 720,
     "L1": 690,
-    "J1": 970, "J2": 110,
+    "J1": 970, "J2": 190,
     "S1v2": 1150,
     # Plan 22 stage 2 (DEC-274): C1v2 answers the same C1 schema (= C1's own
     # cap); C1J is a short verdict (kept/missing); B1v3 answers the same
@@ -414,6 +416,9 @@ SCHEMA_NAMES.update({"E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dia
 # J2 (stage 6b) is a vision call with no pack, as U1: no entry; its text at
 # its worst case fits the default pack budget (tests/test_story_keyframe_gate.py)
 # -- version 2 (phase 8 stage B: looks, sheets, the scene) too, at 1,145.
+# Version 3 (plan 28 F2: the sheet check's head and outfit lines, the set's
+# plate and the props named as images) is 1,303: past the pack budget, under
+# J2's own (``J2_TEXT_BUDGET``, below).
 #
 # S1v2 (plan 20 stage 2): S1 plus the plot-archetype pick-list (the seven
 # premises in French, each with its pairs), on a French worst case -- the
@@ -3673,8 +3678,11 @@ def validate_j1(reply, *, scene_ids) -> list:
 # ``assets.json``'s ``keyframe_verdicts``, each stamped with the version that
 # judged it; a verdict of another version is asked again --
 # ``steps/judge.verdict_current``). 1: stage 6b (a verdict without a stamp);
-# 2: phase 8 stage B (the sheets, the looks, the scene).
-J2_PROMPT_VERSION = 2
+# 2: phase 8 stage B (the sheets, the looks, the scene); 3: plan 28 F2 (the
+# sheet check asks the head, species, skin and material and the outfit, each
+# character's mismatch its own ``sheet_issues`` item; the set's plate and the
+# props in frame are shown too).
+J2_PROMPT_VERSION = 3
 
 J2_MISSING_MAX = 3
 J2_MISSING_MAX_WORDS = 6
@@ -3689,9 +3697,28 @@ J2_CONTINUITY_MAX_WORDS = 25
 # judged keyframe -- and redraw what the new ask flags -- for nothing wrong.
 J2_FRAMING_MAX_WORDS = 8
 # The most identity sheets one J2 call sends beside the two keyframes (a
-# frame's staging holds at most 4 characters): six images a call, which
-# every link of VISION_CHAIN takes.
+# frame's staging holds at most 4 characters).
 J2_MAX_SHEETS = 4
+# Plan 28 F2: the most images one J2 call sends -- the two keyframes, the
+# sheets, then the set's plate (its time variant when it has one: the plate
+# the keyframe was drawn with) and the props in frame while there is room.
+# Raised from 6 to 8: the first links of VISION_CHAIN take far more (Gemini
+# flash-lite reads up to 3,600 images a request, OpenRouter's Qwen VL a
+# list of image parts; no adapter caps them), and 8 images at 258 tokens
+# each stay well inside the local Ollama link's context too.
+J2_MAX_IMAGES = 8
+# Plan 28 F2: each on-screen character that does not match its sheet or its
+# written look is one ``sheet_issues`` item naming them first ("Gaston's head
+# is a pear, the sheet shows a pineapple"): the keyframe approval's refusal
+# says it as it is.
+J2_SHEET_ISSUES_MAX = 2
+J2_SHEET_ISSUE_MAX_WORDS = 14
+# Plan 28 F2: J2's text at its worst case (5 characters with looks at their
+# caps, 4 sheets, the plate, a prop, a scene change) is 1,303 tokens, past
+# the default pack budget (1,200) it fitted until version 2. J2 takes no
+# pack: the budget is its own, the images apart (258 tokens each, at most
+# J2_MAX_IMAGES) -- about 3,400 tokens a call at worst.
+J2_TEXT_BUDGET = 1400
 
 _J2_SYSTEM = (
     "You check one keyframe of a vertical-video episode against what its shot must show. You only look and "
@@ -3712,44 +3739,49 @@ _J2_CONTINUITY_ASK = (
     f"or size, the set, the light), at most {J2_CONTINUITY_MAX_WORDS} words; null when nothing did"
 )
 _J2_NO_PREVIOUS_ASK = "- continuity_issue: null (this is the episode's first shot)"
-_J2_SHEET_ISSUE = "how a character in image 1 differs from its sheet (face, hair, build, proportions)"
 _J2_SAME_SCENE_ISSUE = ("what changed from image 2 to image 1 that should not have (a character's face, outfit or "
                         "size, the set, the light)")
 _J2_SCENE_CHANGE_ISSUE = ("what changed from image 2 to image 1 in who a character is ({what}) -- never the set or "
                           "the light, which change with the scene")
-_J2_SHEETS_NOTE = ("A character sheet shows who the character is: face, hair, build and proportions; the outfit "
-                   "each wears in this shot is the one written below.")
+_J2_SHEETS_NOTE = ("A character sheet shows who the character is: head and species, skin or material, face, hair, "
+                   "build and proportions; the outfit each wears in this shot is the one written below.")
+# Plan 28 F2: the sheet check, asked apart from the continuity with image 2
+# -- the head and what it is made of first, then the outfit written below.
+_J2_SHEET_ASK = (
+    "- sheet_issues: one item per character in image 1 who does not match its sheet and its line above, naming "
+    f"them first, at most {J2_SHEET_ISSUES_MAX} items of at most {J2_SHEET_ISSUE_MAX_WORDS} words; [] when all "
+    "match. Check:\n"
+    "  - the head, species, skin and material (\"Gaston's head is a pear, the sheet shows a pineapple\")\n"
+    "  - the outfit: the one written above, never the sheet's\n"
+)
 # Plan 23 stage D4: said only when the sheets are two-view ones (``sheet_mode`` two_view).
 _J2_TWO_VIEW_NOTE = ("Each sheet shows its one character twice, front and back: the character should appear once in "
                      "image 1.")
 
 
-def _j2_continuity_ask(*, has_previous, same_scene, sheets, outfit) -> str:
-    """J2's ``continuity_issue`` line: against each character's sheet when
-    *sheets* are sent; against image 2 when there is one -- all of it in the
-    same scene, only who the characters are across a scene change (*same_scene*
-    False: face, build, hair, and the outfit only when *outfit*: each
-    character wears the same set in both shots). With neither, null (the
-    episode's first shot). No sheet and an unknown scene: stage 6b's line."""
-    if not sheets and same_scene is None:
-        return _J2_CONTINUITY_ASK if has_previous else _J2_NO_PREVIOUS_ASK
-    if not sheets and not has_previous:
+def _j2_continuity_ask(*, has_previous, same_scene, outfit) -> str:
+    """J2's ``continuity_issue`` line: against image 2 when there is one --
+    all of it in the same scene, only who the characters are across a scene
+    change (*same_scene* False: face, build, hair, and the outfit only when
+    *outfit*: each character wears the same set in both shots); an unknown
+    scene: stage 6b's line. Without image 2, null (the episode's first
+    shot). Plan 28 F2: the sheets are asked apart (:data:`_J2_SHEET_ASK`)."""
+    if not has_previous:
         return _J2_NO_PREVIOUS_ASK
-    parts = [_J2_SHEET_ISSUE] if sheets else []
-    if has_previous:
-        if same_scene is False:
-            parts.append(_J2_SCENE_CHANGE_ISSUE.format(what="face, build, hair, outfit" if outfit
-                                                       else "face, build, hair"))
-        else:
-            parts.append(_J2_SAME_SCENE_ISSUE)
-    return (f"- continuity_issue: {'; or '.join(parts)}, at most {J2_CONTINUITY_MAX_WORDS} words; null when "
-            "nothing is wrong")
+    if same_scene is None:
+        return _J2_CONTINUITY_ASK
+    if same_scene is False:
+        part = _J2_SCENE_CHANGE_ISSUE.format(what="face, build, hair, outfit" if outfit else "face, build, hair")
+    else:
+        part = _J2_SAME_SCENE_ISSUE
+    return f"- continuity_issue: {part}, at most {J2_CONTINUITY_MAX_WORDS} words; null when nothing is wrong"
 
 
 def j2_schema() -> dict:
     """The J2 output schema: ``{shows_beat, missing, framing_issue?,
-    continuity_issue}`` -- ``framing_issue`` (plan 19 stage 3) asked, never
-    required: a reply without it reads as no framing issue."""
+    continuity_issue, sheet_issues?}`` -- ``framing_issue`` (plan 19 stage
+    3) and ``sheet_issues`` (plan 28 F2) asked, never required: a reply
+    without them reads as none."""
     return _llm_obj({
         "shows_beat": {"type": "boolean"},
         "missing": {"type": "array", "description": f"at most {J2_MISSING_MAX} items",
@@ -3757,22 +3789,29 @@ def j2_schema() -> dict:
         "framing_issue": {"type": ["string", "null"]},
         "continuity_issue": {"type": ["string", "null"],
                              "description": f"at most {J2_CONTINUITY_MAX_WORDS} words, or null"},
+        "sheet_issues": {"type": "array", "items": {"type": "string"}},
     }, required=("shows_beat", "missing", "continuity_issue"))
 
 
-def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True, two_view=False):
+def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True, two_view=False,
+             plate=False, props=()):
     """The keyframe judge of shot *shot_id* (section above): *brief* is what
     the shot must show (``steps/judge.keyframe_brief``); *previous_shot_id*
-    the shot whose keyframe is image 2, None for the first shot (then, with
-    no sheet, ``continuity_issue`` is asked null). Takes no pack: there is
-    no story text to draw on for one image check, as :func:`build_u1`.
+    the shot whose keyframe is image 2, None for the first shot (then
+    ``continuity_issue`` is asked null). Takes no pack: there is no story
+    text to draw on for one image check, as :func:`build_u1`.
 
     Phase 8 stage B: *same_scene* says whether image 2 is in this shot's
     scene (None: not said, stage 6b's text); *sheets* are the names of the
     characters whose identity sheet follows the keyframes, in image order;
     *outfit*: across a scene change, whether the outfits are compared too
     (:func:`_j2_continuity_ask`); *two_view* (plan 23 stage D4): the sheets
-    show their character front and back (:data:`_J2_TWO_VIEW_NOTE`)."""
+    show their character front and back (:data:`_J2_TWO_VIEW_NOTE`).
+
+    Plan 28 F2: with *sheets*, ``sheet_issues`` is asked (the head, species,
+    skin and material, then the outfit: :data:`_J2_SHEET_ASK`); *plate*
+    (the set's plate follows the sheets) and *props* (the names of the
+    objects whose images follow it, in image order) are said as images."""
     has_previous = previous_shot_id is not None
     user = f"Image 1 is the keyframe of shot {shot_id}."
     if has_previous:
@@ -3782,28 +3821,36 @@ def build_j2(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(
         elif same_scene is False:
             user += ", the last shot of the previous scene (another place or moment)"
         user += "."
-    first = 3 if has_previous else 2
-    for number, name in enumerate(sheets, start=first):
+    number = 3 if has_previous else 2
+    for name in sheets:
         user += f" Image {number} is {name}'s character sheet."
+        number += 1
+    if plate:
+        user += f" Image {number} is the set."
+        number += 1
+    for name in props:
+        user += f" Image {number} is {name}."
+        number += 1
     if sheets:
         user += f" {_J2_SHEETS_NOTE}"
         if two_view:
             user += f" {_J2_TWO_VIEW_NOTE}"
     user += f"\n\nWhat shot {shot_id} must show:\n{brief}\n\n"
-    user += _J2_ASK + _j2_continuity_ask(has_previous=has_previous, same_scene=same_scene, sheets=sheets,
-                                         outfit=outfit)
+    user += _J2_ASK + (_J2_SHEET_ASK if sheets else "") + _j2_continuity_ask(
+        has_previous=has_previous, same_scene=same_scene, outfit=outfit)
     return _J2_SYSTEM, user, j2_schema()
 
 
 def j2_prompt_text(*, shot_id, brief, previous_shot_id=None, same_scene=None, sheets=(), outfit=True,
-                   two_view=False) -> str:
+                   two_view=False, plate=False, props=()) -> str:
     """J2 as the one text a vision adapter sends beside the images: the
     system text, the ask and the reply's schema joined
     (``uploads.vision_prompt``'s shape)."""
     import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
 
     system, user, schema = build_j2(shot_id=shot_id, brief=brief, previous_shot_id=previous_shot_id,
-                                    same_scene=same_scene, sheets=sheets, outfit=outfit, two_view=two_view)
+                                    same_scene=same_scene, sheets=sheets, outfit=outfit, two_view=two_view,
+                                    plate=plate, props=props)
     shape = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
     return f"{system}\n\n{user}\n\nThe reply's JSON schema: {shape}"
 
@@ -3812,8 +3859,9 @@ def validate_j2(reply, *, has_previous=True) -> list:
     """Post-validation for a J2 reply: at most :data:`J2_MISSING_MAX`
     missing items within their word cap, a framing issue (when given)
     within :data:`J2_FRAMING_MAX_WORDS`, a continuity issue within its cap
-    -- and null when there is nothing to compare image 1 with (*has_previous*
-    false: the first shot, with no character sheet sent)."""
+    -- and null when there is no image 2 to compare image 1 with
+    (*has_previous* false: the first shot) -- and (plan 28 F2) at most
+    :data:`J2_SHEET_ISSUES_MAX` sheet issues within their word cap."""
     errors = schemas.validate(reply, j2_schema())
     if errors:
         return errors
@@ -3833,6 +3881,11 @@ def validate_j2(reply, *, has_previous=True) -> list:
             errors.append("$.continuity_issue: must be null for the episode's first shot")
         else:
             _text_errors(errors, "$.continuity_issue", issue, max_words=J2_CONTINUITY_MAX_WORDS)
+    sheet_issues = reply.get("sheet_issues") or []
+    if len(sheet_issues) > J2_SHEET_ISSUES_MAX:
+        errors.append(f"$.sheet_issues: {len(sheet_issues)} item(s), expected at most {J2_SHEET_ISSUES_MAX}")
+    for i, item in enumerate(sheet_issues):
+        _text_errors(errors, f"$.sheet_issues[{i}]", item, max_words=J2_SHEET_ISSUE_MAX_WORDS)
     return errors
 
 

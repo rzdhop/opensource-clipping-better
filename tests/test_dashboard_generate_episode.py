@@ -137,7 +137,11 @@ def test_the_review_approves_what_is_pending_in_order_and_regenerates_in_place()
     keyframes = approve.index("approveStoryDoc(storyId, review.approvals.keyframes.target")
     assets = approve.index("approveStoryDoc(storyId, `assets:${ep}`)")
     assert keyframes < assets
-    assert "approve_anyway: true" in approve and "Approve anyway" in approve
+    # Plan 28 F1, re-pinned on purpose: the keyframe check is a hard gate -- no "anyway"; a refusal offers
+    # Regenerate (the flagged shot's tile, opened large) and Upload your own (the Handoff).
+    assert "approve_anyway" not in approve and "Approve anyway" not in approve
+    assert "review.flagged.map" in approve and "onOpenShot(shotId)" in approve and "Regenerate {shotId}" in approve
+    assert "handoffPath(storyId, ep)" in approve and "Upload your own" in approve
     assert "Approve keyframes and assets" in approve and "Everything is approved" in approve
     assert "story-step-error" in src
     # The regenerate controls are the existing ones, on the existing targets.
@@ -153,7 +157,9 @@ def test_the_storyboard_pane_s_keyframe_card_points_to_the_review():
     body = _component(src, "ApproveKeyframes")
     assert "assets.doc.keyframe_verdicts" not in body
     assert "Review" in body and "episode.review" in body
-    assert "Approve keyframes" in body and "Approve anyway" in body
+    # Plan 28 F1, re-pinned on purpose: no "Approve anyway" -- regenerate or upload your own instead.
+    assert "Approve keyframes" in body and "Approve anyway" not in body and "approve_anyway" not in body
+    assert "upload your own keyframe on the Handoff" in body
 
 
 def test_the_review_grid_fits_three_tiles_at_375px():

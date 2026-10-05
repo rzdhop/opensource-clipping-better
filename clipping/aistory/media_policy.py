@@ -667,12 +667,14 @@ def stt_missing_keys(merged) -> list:
 
 
 def keyframe_fix(story):
-    """``{"max_redraws_per_shot", "cap_usd"}`` -- how a v2 story's assets
-    step redraws the keyframes the keyframe check (J2) flagged (phase 8
-    stage B: its budget profile's ``keyframe_fix``, the quality preset's
-    "up to 2 redraws a shot, at most $0.40 an episode") -- or None: a
-    legacy story, a profile without the key (free, one_dollar: never on its
-    own), or one that cannot be read."""
+    """``{"max_redraws_per_shot", "cap_usd", "cap_rule"}`` -- how a v2
+    story's assets step redraws the keyframes the keyframe check (J2)
+    flagged (phase 8 stage B: its budget profile's ``keyframe_fix``) -- or
+    None: a legacy story, a profile without the key (free, one_dollar:
+    never on its own), or one that cannot be read. ``cap_usd`` is a fixed
+    episode budget, None under a ``cap_rule`` (plan 28 F1, the shipped
+    profiles: "up to 2 redraws a shot, the episode's budget sized to its
+    shots" -- :func:`keyframe_fix_cap`)."""
     if not is_v2(story):
         return None
     profile = story.get("generation_profile") or {}
@@ -683,7 +685,22 @@ def keyframe_fix(story):
     fix = settings.get("keyframe_fix")
     if not isinstance(fix, dict):
         return None
-    return {"max_redraws_per_shot": int(fix["max_redraws_per_shot"]), "cap_usd": float(fix["cap_usd"])}
+    rule = fix.get("cap_rule")
+    return {"max_redraws_per_shot": int(fix["max_redraws_per_shot"]),
+            "cap_usd": None if rule else float(fix["cap_usd"]), "cap_rule": rule}
+
+
+def keyframe_fix_cap(settings, *, shots, unit_usd) -> float:
+    """The episode's keyframe-fix budget in USD (plan 28 F1, DEC-305 §5):
+    under ``cap_rule`` ``shots_x_redraws_x_price``, *shots* (the episode's)
+    x ``max_redraws_per_shot`` x *unit_usd* (one keyframe on the episode's
+    image link, 0 on a free one) -- 14 shots at 2 redraws on
+    fal/seedream-4.5-edit ($0.04) are $1.12; else the fixed ``cap_usd``.
+    The run's other caps (the episode's, the day's, the story's) still
+    stop it first."""
+    if settings.get("cap_rule") == budget_mod.KEYFRAME_FIX_CAP_RULE:
+        return round(int(shots) * int(settings["max_redraws_per_shot"]) * float(unit_usd or 0.0), 4)
+    return float(settings.get("cap_usd") or 0.0)
 
 
 def quality_keys_present(merged) -> bool:

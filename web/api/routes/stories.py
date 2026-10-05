@@ -1934,8 +1934,9 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     plan; 409 while a step job of the episode is queued or running; then
     ``workflow.approve_keyframes`` (409 for a legacy story, until the script
     and the storyboard are approved and current, naming every shot with no
-    current keyframe, and -- unless ``approve_anyway`` -- every shot whose
-    keyframe check (J2) failed or has not run on it); ``assets.json`` gains
+    current keyframe, and every shot whose keyframe check (J2) failed or has
+    not run on it -- a hard gate since plan 28 F1: ``approve_anyway`` goes
+    over nothing there); ``assets.json`` gains
     ``keyframes_approved {at, anyway, fingerprint}``, and until it is current
     no clip of the episode is bought. No job awaits it.
 

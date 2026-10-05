@@ -13,6 +13,7 @@
 // three tiles a row, the large view a full-width card.
 
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   approveStoryDoc, regenerateStory, fetchStoryEstimate, fetchShotImageUrl, fetchEpisodeClipUrl,
 } from '../../../api'
@@ -21,6 +22,7 @@ import { RegenerateControl, StepError } from '../fields'
 import { formatUsd } from '../../../lib/format'
 import { Badge, Card, CardBody, CardHeader } from '../../../ui'
 import { AlertTriangle, Circle, CircleCheck } from '../../../ui/icons'
+import { handoffPath } from './HandoffPage'
 
 /**
  * A blob URL for one media file (the shot image route, the clip route:
@@ -400,11 +402,14 @@ function ApprovalsChecklist({ review }) {
 /**
  * The one primary action: approves what `review.pending` lists, in its
  * order -- the keyframes (`keyframes:<ep>`), then the assets (`assets:<ep>`)
- * -- with the existing routes. A keyframe refusal (a failed or missing check)
- * shows the server's sentence and offers "Approve anyway", which goes over
- * it and then approves the assets too. Disabled once nothing is pending.
+ * -- with the existing routes. Plan 28 F1: the keyframe check (J2) is a hard
+ * gate, the server goes over nothing -- a keyframe refusal shows the
+ * server's sentence (each shot and what the judge saw) and offers the two
+ * ways out instead: regenerate the shot (its tile, opened large) or upload
+ * your own keyframe (the Handoff, the shot set to "My own"). Disabled once
+ * nothing is pending.
  */
-function ApproveAll({ storyId, ep, review, busy, onChange }) {
+function ApproveAll({ storyId, ep, review, busy, onChange, onOpenShot }) {
   const [approving, setApproving] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
@@ -417,7 +422,7 @@ function ApproveAll({ storyId, ep, review, busy, onChange }) {
     : 'Everything is approved'
   const reason = busy ? 'A step is running.' : null
 
-  const approve = async (anyway) => {
+  const approve = async () => {
     setApproving(true)
     setError('')
     setErrors(null)
@@ -425,7 +430,7 @@ function ApproveAll({ storyId, ep, review, busy, onChange }) {
     try {
       if (pending.includes('keyframes')) {
         try {
-          await approveStoryDoc(storyId, review.approvals.keyframes.target, anyway ? { approve_anyway: true } : undefined)
+          await approveStoryDoc(storyId, review.approvals.keyframes.target)
         } catch (err) {
           setRefusedKeyframes(true)
           throw err
@@ -447,21 +452,28 @@ function ApproveAll({ storyId, ep, review, busy, onChange }) {
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => approve(false)}
+          onClick={approve}
           disabled={pending.length === 0 || Boolean(reason) || approving}
           title={reason || undefined}
         >
           {approving ? 'Approving…' : label}
         </button>
-        {refusedKeyframes && error && (
-          <button type="button" className="btn btn-secondary" onClick={() => approve(true)}
-            disabled={Boolean(reason) || approving}>
-            Approve anyway
-          </button>
-        )}
         {reason && <span className="form-hint">{reason}</span>}
       </div>
       <StepError message={error} errors={errors} className="story-step-error" />
+      {refusedKeyframes && error && (
+        <div className="story-step-actions">
+          {review.flagged.map((shotId) => (
+            <button key={shotId} type="button" className="btn btn-secondary btn-sm"
+              onClick={() => onOpenShot(shotId)} disabled={Boolean(reason)}>
+              Regenerate {shotId}
+            </button>
+          ))}
+          <Link to={handoffPath(storyId, ep)} className="btn btn-ghost btn-sm">
+            Upload your own (Handoff)
+          </Link>
+        </div>
+      )}
     </>
   )
 }
@@ -533,7 +545,8 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
                 </ul>
               </div>
             )}
-            <ApproveAll storyId={storyId} ep={ep} review={review} busy={busy} onChange={onChange} />
+            <ApproveAll storyId={storyId} ep={ep} review={review} busy={busy} onChange={onChange}
+              onOpenShot={setOpen} />
             {review.status === 'render_needed' && <p className="form-hint">Then render it on the Preview tab.</p>}
           </div>
         </CardBody>

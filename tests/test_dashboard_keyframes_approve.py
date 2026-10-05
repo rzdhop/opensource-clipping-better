@@ -1,15 +1,17 @@
 """The storyboard pane's keyframe approval (phase 7 stage 6b, DEC-230) and,
 since stage C, the review grid it points to: each shot's keyframe check (J2)
 is read there, per shot, from the page's ``review`` block
-(``workflow.episode_review``); the card keeps "Approve keyframes" / "Approve
-anyway", before which no v2 clip is bought (RC-Q3), for a story that stopped
-at the keyframes.
+(``workflow.episode_review``); the card keeps "Approve keyframes", before
+which no v2 clip is bought (RC-Q3), for a story that stopped at the
+keyframes -- since plan 28 F1 with no "Approve anyway" (a hard gate): a
+refusal points to Regenerate (the Review tab) and Upload your own (the
+Handoff).
 
 A text contract over ``StoryboardPane.jsx`` and ``ReviewPane.jsx`` (CI has
 no node, like the other dashboard tests): the names they read from the
 episode payload are the backend's own (``workflow.episode_view``'s
-``keyframes`` block, the review's per-shot ``verdict``), and they post
-``approve_anyway`` to the target the payload gives. Stdlib + pytest (DEC-012).
+``keyframes`` block, the review's per-shot ``verdict``), and they post to
+the target the payload gives. Stdlib + pytest (DEC-012).
 """
 
 from __future__ import annotations
@@ -43,8 +45,11 @@ def test_the_pane_approves_with_the_payloads_target_and_the_review_shows_each_ch
     for key in ("approval", "approved_at", "anyway", "target"):
         assert f'"{key}"' in block, key
         assert f"keyframes.{key}" in body, key
-    assert re.search(r"approveStoryDoc\(storyId, keyframes\.target, anyway \? \{ approve_anyway: true \}", body)
-    assert "Approve anyway" in body and "Approve keyframes" in body
+    # Plan 28 F1 (DEC-305 §5), re-pinned on purpose: the keyframe check (J2) is a hard gate -- the card
+    # approves with no "anyway" and, refused, points to the two ways out.
+    assert "approveStoryDoc(storyId, keyframes.target)" in body
+    assert "approve_anyway" not in body and "Approve anyway" not in body and "Approve keyframes" in body
+    assert "Regenerate each shot that does not match on the Review tab, or upload your own keyframe" in body
     # Stage C: each shot's check is the review grid's (its verdict per shot), not a text row here.
     assert "assets.doc.keyframe_verdicts" not in body
     review = REVIEW.read_text(encoding="utf-8")

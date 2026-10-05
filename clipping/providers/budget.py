@@ -208,8 +208,15 @@ LIPSYNC_MODES = ("none", "kling")
 # Phase 8 stage B: ``keyframe_fix`` -- a v2 story's keyframes flagged by the
 # keyframe check (J2) are redrawn by the assets step, at most
 # ``max_redraws_per_shot`` times a shot and ``cap_usd`` an episode. A profile
-# without it never redraws on its own.
+# without it never redraws on its own. Plan 28 F1 (DEC-305 §5, the keyframe
+# check a hard gate): ``cap_rule`` instead of ``cap_usd`` sizes the episode's
+# budget at run time -- ``shots_x_redraws_x_price``: the episode's shots x
+# ``max_redraws_per_shot`` x one keyframe on the episode's image link
+# (``media_policy.keyframe_fix_cap``), so every shot can use its redraws
+# whatever the shot count. One of the two, never both.
 KEYFRAME_FIX_KEYS = ("max_redraws_per_shot", "cap_usd")
+KEYFRAME_FIX_CAP_RULE = "shots_x_redraws_x_price"
+KEYFRAME_FIX_CAP_RULES = (KEYFRAME_FIX_CAP_RULE,)
 KEYFRAME_FIX_MAX_REDRAWS = 5
 
 
@@ -293,14 +300,19 @@ def _speech_errors(name, profile) -> list:
 def _keyframe_fix_errors(name, fix) -> list:
     """What is wrong with profile *name*'s optional ``keyframe_fix``:
     exactly ``max_redraws_per_shot`` (a whole number, 0 to
-    :data:`KEYFRAME_FIX_MAX_REDRAWS`) and ``cap_usd`` (an amount >= 0)."""
+    :data:`KEYFRAME_FIX_MAX_REDRAWS`) and ``cap_usd`` (an amount >= 0) --
+    or, plan 28 F1, ``cap_rule`` (one of :data:`KEYFRAME_FIX_CAP_RULES`)
+    in place of ``cap_usd``."""
     where = f"profile {name!r}: keyframe_fix"
     if not isinstance(fix, dict):
         return [f"{where} must be an object {{max_redraws_per_shot, cap_usd}}"]
     errors = []
-    if sorted(fix) != sorted(KEYFRAME_FIX_KEYS):
+    ruled = ("max_redraws_per_shot", "cap_rule")
+    if sorted(fix) not in (sorted(KEYFRAME_FIX_KEYS), sorted(ruled)):
         errors.append(f"{where} must hold exactly {', '.join(KEYFRAME_FIX_KEYS)} (it holds "
                       f"{', '.join(sorted(map(str, fix))) or 'nothing'})")
+    if "cap_rule" in fix and fix["cap_rule"] not in KEYFRAME_FIX_CAP_RULES:
+        errors.append(f"{where}.cap_rule must be one of {', '.join(KEYFRAME_FIX_CAP_RULES)}, not {fix['cap_rule']!r}")
     redraws = fix.get("max_redraws_per_shot")
     if "max_redraws_per_shot" in fix and (isinstance(redraws, bool) or not isinstance(redraws, int)
                                           or not 0 <= redraws <= KEYFRAME_FIX_MAX_REDRAWS):

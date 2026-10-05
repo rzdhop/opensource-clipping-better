@@ -61,12 +61,22 @@ who the characters are, never the set or the light. Each verdict carries
 the version that judged it; one of an older version stays readable and is
 asked again.
 
+Plan 28 F2 (J2 version 3, DEC-305 §5): the sheet check is asked apart --
+``sheet_issues``, one item per character that does not match its sheet and
+its written look, the head, species, skin and material first, then the
+outfit written for the shot -- and J2 also sees the set's plate and the
+props in frame (:meth:`KeyframeContext.refs_of`, within
+``prompts.J2_MAX_IMAGES``). A sheet issue fails the verdict
+(:func:`verdict_passed`) and is said first (:func:`verdict_text`).
+
 **The keyframe approval** (``workflow.approve_keyframes``):
 ``assets.json``'s ``keyframes_approved {at, anyway, fingerprint}``, the
 fingerprint of the keyframe images (:func:`keyframes_fingerprint`): once
 it differs, the approval is stale (:func:`keyframes_state`) -- derived,
 never cleared (DEC-155's rule). No clip of a v2 episode is bought before it
-is current (``assets.clip_hold``, RC-Q3).
+is current (``assets.clip_hold``, RC-Q3). Plan 28 F1: a hard gate -- a
+failed or missing verdict is refused in plain sentences
+(:func:`keyframe_refusal`), with no "anyway".
 
 A legacy story is never judged: nothing here runs for it, its script never
 has ``first_watch`` and its ``assets.json`` neither key.
@@ -472,7 +482,8 @@ STORY_VISION_CALL_SECONDS = 120
 # presentation, build, face, hair and skin) and what it wears in this shot
 # (its wardrobe set's items), each with its own cap -- the J2 text of version
 # 2 at its worst case (5 such characters, 4 sheets, a scene change) is 1,145
-# tokens, under the default pack budget's 1,200.
+# tokens, under the default pack budget's 1,200 (version 3, plan 28 F2: 1,303,
+# under ``prompts.J2_TEXT_BUDGET``).
 _BRIEF_ACTION_CHARS = 320
 _BRIEF_LOOK_CHARS = 100
 _BRIEF_IDENTITY_CHARS = 120
@@ -497,13 +508,19 @@ class KeyframeContext:
     the storyboard. *variant_sheets* (plan 23 stage D5): ``{(char_id,
     variant_id): path}`` of the appearance variants' sheets the shots name
     (a shot's ``variants``): such a character is judged against its
-    variant's sheet, labelled with the variant."""
+    variant's sheet, labelled with the variant. *plates* (plan 28 F2):
+    ``{shot_id: path}`` of the set's plate each shot's keyframe was drawn
+    with (the scene's time variant when it has one); *props*: ``{shot_id:
+    [(name, path)]}`` of the images of the props in frame -- shown after the
+    sheets while the call has room (``prompts.J2_MAX_IMAGES``)."""
 
-    def __init__(self, *, sheets=None, ledger=None, scenes=None, variant_sheets=None):
+    def __init__(self, *, sheets=None, ledger=None, scenes=None, variant_sheets=None, plates=None, props=None):
         self.sheets = dict(sheets or {})
         self.ledger = ledger
         self.scenes = dict(scenes or {})
         self.variant_sheets = dict(variant_sheets or {})
+        self.plates = dict(plates or {})
+        self.props = {shot_id: list(found) for shot_id, found in (props or {}).items()}
 
     def characters(self, ec, shot) -> list:
         """``[(char_id, doc)]`` of *shot*'s character tags, each once, in
@@ -529,6 +546,15 @@ class KeyframeContext:
             elif self.sheets.get(cid):
                 found.append((doc.get("name") or cid, self.sheets[cid]))
         return found[:prompts.J2_MAX_SHEETS]
+
+    def refs_of(self, shot, room) -> tuple:
+        """``(plate path | None, [(name, path)])``: the set's plate and the
+        props' images shown with *shot*, within *room* images (the plate
+        first, then the props in frame, in subject order)."""
+        plate = self.plates.get(shot["shot_id"]) if room > 0 else None
+        left = room - (1 if plate else 0)
+        props = self.props.get(shot["shot_id"]) or []
+        return plate, props[:max(0, left)]
 
     def same_scene(self, shot_id, previous_shot_id):
         """Whether the two shots are in one scene; None when it is not known."""
@@ -647,15 +673,18 @@ def verdict_current(entry, image_sha, previous_sha) -> bool:
 def verdict_passed(entry) -> bool:
     """A verdict passes when the keyframe shows the beat, misses nothing, has
     the framing asked (``framing_issue``, plan 19 stage 3: absent on an older
-    verdict, which reads as none) and keeps continuity with the shot before
-    it."""
+    verdict, which reads as none), matches each character's sheet and look
+    (``sheet_issues``, plan 28 F2: absent reads as none) and keeps
+    continuity with the shot before it."""
     return (bool(entry["shows_beat"]) and not entry["missing"] and not entry.get("framing_issue")
-            and not entry["continuity_issue"])
+            and not entry.get("sheet_issues") and not entry["continuity_issue"])
 
 
 def verdict_text(entry) -> str:
-    """One verdict's findings, for a refusal or the feed."""
-    found = []
+    """One verdict's findings, for a refusal or the feed: each character
+    that does not match its sheet first (plan 28 F2, J2's own words), then
+    the rest."""
+    found = [issue.rstrip(".") for issue in entry.get("sheet_issues") or ()]
     if not entry["shows_beat"]:
         found.append("does not show the beat")
     if entry["missing"]:
@@ -665,6 +694,25 @@ def verdict_text(entry) -> str:
     if entry["continuity_issue"]:
         found.append(f"continuity: {entry['continuity_issue']}")
     return ", ".join(found) or "passed"
+
+
+def keyframe_refusal(failed, unjudged) -> str:
+    """Plan 28 F2 (DEC-305 §5): why keyframes cannot be approved, in plain
+    sentences -- each failed shot (*failed*: ``[(shot_id, verdict)]``) with
+    what the judge saw ("Shot sh04 does not match: Gaston's head is a pear,
+    the sheet shows a pineapple. Regenerate it, or upload your own."), then
+    the shots with no current check (*unjudged*). The keyframe approval's
+    refusal and the fast track's stop say it alike; nothing goes over it."""
+    sentences = [f"Shot {shot_id} does not match: {verdict_text(entry)}." for shot_id, entry in failed]
+    if failed:
+        sentences.append("Regenerate it, or upload your own." if len(failed) == 1
+                         else "Regenerate them, or upload your own.")
+    if unjudged:
+        many = len(unjudged) > 1
+        names = ", ".join(unjudged[:-1]) + f" and {unjudged[-1]}" if many else unjudged[0]
+        sentences.append(f"Shot{'s' if many else ''} {names} {'have' if many else 'has'} no keyframe check yet: run "
+                         "the assets step again (it checks them, free).")
+    return " ".join(sentences)
 
 
 def keyframes_fingerprint(shas) -> str:
@@ -716,6 +764,9 @@ def _reply_of(result, *, has_previous):
     if value.get("framing_issue"):
         # Plan 19 stage 3: kept only when J2 names one (a verdict without it reads as none).
         found["framing_issue"] = " ".join(value["framing_issue"].split())
+    if value.get("sheet_issues"):
+        # Plan 28 F2: each character that does not match its sheet, kept only when J2 names one.
+        found["sheet_issues"] = [" ".join(item.split()) for item in value["sheet_issues"]]
     return found, []
 
 
@@ -724,22 +775,30 @@ def j2_request(ec, shot, path, prev_id, prev_path, context=None):
     *path*, the previous one (*prev_path*, None for the first shot), and
     with a *context* (:class:`KeyframeContext`, phase 8 stage B) each
     on-screen character's identity sheet after them, the brief with the
-    episode's wardrobe sets, and whether image 2 is in the same scene.
-    *has_previous* is whether the reply may name a continuity issue."""
+    episode's wardrobe sets, and whether image 2 is in the same scene --
+    and (plan 28 F2) the set's plate and the props in frame after the
+    sheets, within ``prompts.J2_MAX_IMAGES``. *has_previous* is whether the
+    reply may name a continuity issue (an image 2; the sheets are asked
+    apart, in ``sheet_issues``)."""
     has_previous = prev_path is not None
     sheets = context.sheets_of(ec, shot) if context is not None else []
     same_scene = context.same_scene(shot["shot_id"], prev_id) if context is not None and has_previous else None
     brief = keyframe_brief(ec, shot, ledger=context.ledger if context is not None else None)
     images = ((path, prev_path) if has_previous else (path,)) + tuple(sheet for _name, sheet in sheets)
+    # Plan 28 F2: the set's plate and the props in frame, while the call has room.
+    plate, props = (context.refs_of(shot, prompts.J2_MAX_IMAGES - len(images)) if context is not None
+                    else (None, []))
+    images += ((plate,) if plate else ()) + tuple(image for _name, image in props)
     # One continuity ledger an episode: a character wears one wardrobe set in
     # every shot of it, so across a scene change its outfit is compared too.
     text = prompts.j2_prompt_text(shot_id=shot["shot_id"], brief=brief,
                                   previous_shot_id=prev_id if has_previous else None, same_scene=same_scene,
                                   sheets=[name for name, _sheet in sheets], outfit=True,
-                                  two_view=media_policy.two_view(getattr(ec, "story", None)))
+                                  two_view=media_policy.two_view(getattr(ec, "story", None)),
+                                  plate=bool(plate), props=[name for name, _image in props])
     request = gen.GenRequest(kind=gen.VISION, prompt=text, images=images,
                              extra={"max_tokens": prompts.MAX_TOKENS[J2], "temperature": prompts.TEMPERATURE[J2]})
-    return request, has_previous or bool(sheets)
+    return request, has_previous
 
 
 def check_keyframes(ctx, ec, items, verdicts, *, env, ledger, step, before_call, on_verdict=None, adapters=None,

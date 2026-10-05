@@ -1700,7 +1700,7 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     A story whose budget profile redraws flagged keyframes (phase 8 stage B,
     ``media_policy.keyframe_fix``) also has ``"keyframe_fix"``
     (:func:`keyframe_fix_units`, after ``video``): its ceiling ("up to
-    $0.40 to redraw flagged keyframes") is in ``est_usd`` and ``over_cap``
+    $1.12 to redraw flagged keyframes" on 14 shots) is in ``est_usd`` and ``over_cap``
     like the rest of the paid part, and committed before the clips are
     planned, so they never take the money it may spend.
     """
@@ -1742,18 +1742,20 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     images_paid = images["est_usd"] if images["route_class"] == "paid" else 0.0
     voices_paid = sum(row["est_usd"] for row in voices_est["voices"] if row["paid"])
     # Phase 8 stage B: the keyframe auto-fix's ceiling is part of the paid plan
-    # and its caps, committed before any clip (None: a story with no auto-fix,
-    # its estimate byte for byte what it was).
+    # and its caps (None: a story with no auto-fix, its estimate byte for byte
+    # what it was). Plan 28 F1: its ceiling sized to the episode
+    # (:func:`keyframe_fix_units`) takes what the caps leave once the clips are
+    # planned (:func:`fit_fix_units`) -- the clips are planned first, so a
+    # whole episode never goes over a cap for redraws it may not need.
     fix, fix_paid = None, 0.0
     if media_policy.keyframe_fix(ec.story) is not None:
         fix = keyframe_fix_units(ec, storyboard, doc, env=env, story_spent=story_spent, adapters=adapters,
                                  transport=transport, link_info=episode_image_link(ec, storyboard, env=env, doc=doc))
-        fix_paid = fix["est_usd"]
     video, video_paid = None, 0.0
     if clips.tier_of(ec) >= 2:
         video = _video_units(ec, script, storyboard, doc, env=env, ledger=ledger, adapters=adapters,
                              probe_local=probe_local, transport=transport,
-                             committed=images_paid + voices_paid + fix_paid)
+                             committed=images_paid + voices_paid)
         video["animate"] = bool(animate)
         if not animate:
             video["message"] = f"Animate off: no clip is made in this run. {video['message']}".strip()
@@ -1783,6 +1785,12 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
                                    "reason": video["refused"] or lip["reason"] or "paid, allowed", "est_usd": lip_usd})
             if video["ready"]:
                 video_paid = video["est_usd"]
+    if fix is not None:
+        # Plan 28 F1: the clips to buy (held for the keyframes' approval or not) keep their money.
+        clips_usd = (float(video["est_usd"] or 0.0) if video is not None and video["route_class"] == "paid"
+                     and video.get("ready") and clips.to_buy(video) else 0.0)
+        fix = fit_fix_units(ec, fix, images_paid + voices_paid + clips_usd, env=env, ledger=ledger)
+        fix_paid = fix["est_usd"]
     total = round(images_paid + voices_paid + fix_paid + video_paid, 4)
     caps, over_cap = spending_caps(ec, total, env=env, ledger=ledger, video=video if video_paid else None,
                                    fix_usd=fix_paid)
@@ -2042,7 +2050,8 @@ def keyframe_item(ec, storyboard, index, *, link=None):
 # --------------------------------------- the keyframe auto-fix (phase 8 stage B)
 #
 # On a v2 story whose budget profile has ``keyframe_fix`` (the quality
-# preset: up to 2 redraws a flagged shot, at most $0.40 an episode), the run
+# presets: up to 2 redraws a flagged shot; plan 28 F1: the episode's budget
+# its shots x 2 x one keyframe's price, ``media_policy.keyframe_fix_cap``), the run
 # redraws each keyframe J2 flagged after its check (``_Assets.fix_keyframes``)
 # -- with a fresh seed and a note made of the verdict -- and checks it again,
 # with the shot after it, until it passes or the shot has used its redraws.
@@ -2118,6 +2127,9 @@ def correction_note(entity_docs, verdict, shot=None) -> str:
     order is never lost to the cap. Only the auto-fix of a v2 (layered) shot
     calls this (J2 judges no legacy keyframe): no v1 prompt changes."""
     parts = []
+    for issue in verdict.get("sheet_issues") or ():
+        # Plan 28 F2: a character that does not match its sheet, as J2 said it.
+        parts.append(f"match the character sheet: {issue.rstrip('.')}")
     if not verdict["shows_beat"]:
         parts.append("show this shot's action clearly")
     if verdict["missing"]:
@@ -2180,15 +2192,19 @@ def keyframe_fix_units(ec, storyboard, doc, *, env, story_spent, adapters=None, 
     redrawn its most at one image's price (:func:`image_quote`), the lower
     -- counted in the paid plan and its caps like the rest of it, so the
     clips planned after it never take the money it may spend. Nothing while
-    the keyframes are approved and current (the run never redraws them)."""
+    the keyframes are approved and current (the run never redraws them).
+    Plan 28 F1: under the profile's ``cap_rule`` the episode's budget
+    (``cap_usd`` here) is its shots x ``max_redraws_per_shot`` x that one
+    image's price (``media_policy.keyframe_fix_cap``): every shot may use
+    its redraws, the ceiling is the whole of it."""
     settings = media_policy.keyframe_fix(ec.story)
     if settings is None:
         return None
-    most, cap = settings["max_redraws_per_shot"], settings["cap_usd"]
+    most = settings["max_redraws_per_shot"]
     spent = float(((doc or {}).get(KEYFRAME_FIX_BUDGET) or {}).get("spent_usd") or 0.0)
-    base = {"max_redraws_per_shot": most, "cap_usd": cap, "spent_usd": round(spent, 4), "est_usd": 0.0,
-            "route_class": None, "link": None}
     count = len(storyboard["shots"]) if storyboard is not None else int(shots or 0)
+    base = {"max_redraws_per_shot": most, "cap_usd": media_policy.keyframe_fix_cap(settings, shots=count, unit_usd=0.0),
+            "spent_usd": round(spent, 4), "est_usd": 0.0, "route_class": None, "link": None}
     if storyboard is not None and doc is not None and keyframes_state(ec, storyboard, doc) == "current":
         return dict(base, message="The keyframes are approved: none is redrawn on its own.")
     if not most or not count:
@@ -2197,17 +2213,42 @@ def keyframe_fix_units(ec, storyboard, doc, *, env, story_spent, adapters=None, 
                         storyboard=storyboard if link_info else None, link_info=link_info)
     paid = quote["route_class"] == "paid"
     each = float(quote["est_usd"] or 0.0) if paid else 0.0
+    cap = media_policy.keyframe_fix_cap(settings, shots=count, unit_usd=each)
+    base["cap_usd"] = cap
     est = round(min(max(0.0, cap - spent), each * most * count), 4) if paid else 0.0
     message = (f"up to ${est:.2f} to redraw flagged keyframes (at most {most} redraws a shot, ${cap:.2f} an "
                "episode)" if paid else f"flagged keyframes are redrawn free (at most {most} redraws a shot)")
     return dict(base, est_usd=est, route_class=quote["route_class"], link=quote["link"], message=message)
 
 
+def fit_fix_units(ec, fix, planned_usd, *, env, ledger=None) -> dict:
+    """*fix* (:func:`keyframe_fix_units`) with its ceiling cut to what the
+    caps leave (the episode's, the day's, the story's: the lowest) once
+    *planned_usd* -- the plan's paid images, voices and clips -- is
+    counted (plan 28 F1, DEC-305 §5: the redraw budget is sized to the
+    episode inside its cap, never pushing the whole plan over it). A free
+    link, paid off or caps that cannot be read: *fix* as it is."""
+    if fix["route_class"] != "paid" or not fix["est_usd"]:
+        return fix
+    caps, _over = spending_caps(ec, 0.0, env=env, ledger=ledger)
+    lefts = [caps[name]["left_usd"] for name in ("episode", "day", "story") if name in caps]
+    if not caps.get("allow_paid") or not lefts:
+        return fix
+    room = round(max(0.0, min(lefts) - float(planned_usd)), 4)
+    if room >= fix["est_usd"]:
+        return fix
+    message = (f"up to ${room:.2f} to redraw flagged keyframes (at most {fix['max_redraws_per_shot']} redraws a "
+               f"shot; ${fix['cap_usd']:.2f} for the episode, cut to what the caps leave after the rest of it)")
+    return dict(fix, est_usd=room, message=message)
+
+
 def keyframe_context(ec, storyboard, *, ledger=None):
     """What J2 is shown beside the keyframes (``judge.KeyframeContext``,
     phase 8 stage B): each character's identity sheet on disk (its
     portrait: the full-body sheet on a v2 story), the episode's continuity
-    *ledger* (its wardrobe sets) and the scene of every shot."""
+    *ledger* (its wardrobe sets) and the scene of every shot -- and (plan 28
+    F2) each shot's set plate and prop images, the ones its keyframe was
+    drawn with (its ``reference_images``), when they are on disk."""
     def on_disk(cid, ref):
         if not ref or not ref.get("name"):
             return None
@@ -2230,9 +2271,51 @@ def keyframe_context(ec, storyboard, *, ledger=None):
             path = on_disk(cid, ((variant or {}).get("refs") or {}).get("portrait"))
             if path:
                 variant_sheets[(cid, variant_id)] = path
+    # Plan 28 F2: the set's plate and the props' images each keyframe was drawn with (its references:
+    # the scene's time variant when the place has one), as they are on disk now.
+    plates, props = {}, {}
+    for shot in storyboard["shots"]:
+        for rel in shot.get("reference_images") or ():
+            parts = rel.split("/")
+            if len(parts) != 4 or parts[0] not in ("places", "props") or parts[2] != "refs":
+                continue
+            try:
+                path = ec.store.media_path(ec.story_id, parts[0], parts[1], parts[3])
+            except KeyError:
+                continue
+            if not path or not os.path.isfile(path) or os.path.islink(path):
+                continue
+            if parts[0] == "places":
+                plates.setdefault(shot["shot_id"], path)
+            else:
+                name = (ec.entities["props"].get(parts[1]) or {}).get("name") or parts[1]
+                props.setdefault(shot["shot_id"], []).append((name, path))
     return judge.KeyframeContext(sheets=sheets, ledger=ledger,
                                  scenes={shot["shot_id"]: shot["scene_id"] for shot in storyboard["shots"]},
-                                 variant_sheets=variant_sheets)
+                                 variant_sheets=variant_sheets, plates=plates, props=props)
+
+
+def keyframe_findings(ec, storyboard, doc) -> dict:
+    """What stands between episode *ec.ep*'s keyframes and their approval,
+    shot by shot (``workflow.keyframe_findings``' reading, here so the
+    assets step says it too): ``{"failed": [(shot_id, what J2 found)],
+    "unjudged": [shot_id, ...], "refusal": sentence | None}`` -- a current
+    verdict (J2) that failed, a shot with no current verdict (none, or one
+    of other images or of an older J2: ``judge.verdict_current``), and (plan
+    28 F1) the plain sentences that refuse them
+    (``judge.keyframe_refusal``), None when every shot passed. Hashes every
+    image."""
+    verdicts = (doc or {}).get(judge.KEYFRAME_VERDICTS) or {}
+    unjudged, failed, entries = [], [], []
+    for shot, _path, sha, _prev_id, _prev_path, prev_sha in keyframe_items(ec, storyboard, doc):
+        entry = verdicts.get(shot["shot_id"])
+        if not judge.verdict_current(entry, sha, prev_sha):
+            unjudged.append(shot["shot_id"])
+        elif not judge.verdict_passed(entry):
+            failed.append((shot["shot_id"], judge.verdict_text(entry)))
+            entries.append((shot["shot_id"], entry))
+    refusal = judge.keyframe_refusal(entries, unjudged) if entries or unjudged else None
+    return {"failed": failed, "unjudged": unjudged, "refusal": refusal}
 
 
 def keyframes_fingerprint(ec, storyboard) -> str:
@@ -2684,6 +2767,7 @@ class _Assets(voice_lines.LineMeasurement):
         # and what the keyframe auto-fix did (None: it did not run).
         self.ledger_read = _READ
         self.keyframe_fix = None
+        self.fix_reserve = None
         # Plan 23 stage B8: what the stock fill did in this run (None: the story has no stock cutaways).
         self.stock = None
         # The Gemini tail guard's report of every line it saw in this run
@@ -4500,6 +4584,25 @@ class _Assets(voice_lines.LineMeasurement):
         return {"link": self.link, "source": "record" if self.link_kept else "derived",
                 "since": info.get("since"), "switched_from": info.get("switched_from")}
 
+    def fix_cap(self, settings) -> float:
+        """The episode's keyframe-fix budget for this run
+        (``media_policy.keyframe_fix_cap``, plan 28 F1): its shots x the
+        redraws a shot x one redraw's estimate on the episode's image link
+        (0 on a free link, or one that cannot quote now: the gates refuse
+        it first) -- at most what the run's estimate reserved for it
+        (:func:`fit_fix_units`: what the caps leave once the clips are
+        counted)."""
+        quote = image_quote(self.ec, 1, env=self.ctx.settings_env, story_spent=self.gates.spent(),
+                            adapters=self.tools.adapters, transport=self.tools.transport, storyboard=self.storyboard,
+                            link_info=self.fix_link_info())
+        each = float(quote["est_usd"] or 0.0) if quote["route_class"] == "paid" else 0.0
+        cap = media_policy.keyframe_fix_cap(settings, shots=len(self.storyboard["shots"]), unit_usd=each)
+        reserve = self.fix_reserve
+        if reserve and reserve.get("route_class") == "paid":
+            # What the run's estimate reserved, inside the caps once the clips are counted.
+            cap = min(cap, round(float(reserve["spent_usd"]) + float(reserve["est_usd"]), 4))
+        return cap
+
     def fix_gate(self, settings, spent):
         """Why the auto-fix asks for no other redraw now, or None (the
         cancel token raises): the step budget cannot fit a redraw and its two
@@ -4538,9 +4641,12 @@ class _Assets(voice_lines.LineMeasurement):
         after it (whose previous keyframe changed), until it passes or used
         its ``max_redraws_per_shot``. A locked shot, or one made with a note
         of the user's (a regenerate), is left as it is. Stops -- the step
-        goes on -- once the episode's fix budget (``cap_usd``), a cap or the
+        goes on -- once the episode's fix budget (``cap_usd``; plan 28 F1: its
+        shots x redraws x one redraw's price, :meth:`fix_cap`), a cap or the
         paid gates refuse, the step budget cannot fit a redraw, or J2 cannot
-        check (:meth:`fix_gate`); a cancel stops the step. ``keyframe_fixes``
+        check (:meth:`fix_gate`); a cancel stops the step. A shot still
+        flagged then is said in the feed with the keyframe approval's own
+        sentence (:meth:`finish`), never left silent. ``keyframe_fixes``
         and ``keyframe_fix_budget`` are written after each redraw. Returns
         ``assets.json`` as it stands after."""
         ec, ctx, board = self.ec, self.ctx, self.storyboard
@@ -4551,6 +4657,8 @@ class _Assets(voice_lines.LineMeasurement):
             return doc
         if self.link_info is None:
             self.resolve_link(announce=False)
+        # Plan 28 F1: the episode's budget, sized now to its shots and one redraw's price on its link.
+        settings = dict(settings, cap_usd=self.fix_cap(settings))
         held = {"doc": doc, "fixes": copy.deepcopy(doc.get(KEYFRAME_FIXES) or {}),
                 "spent": float((doc.get(KEYFRAME_FIX_BUDGET) or {}).get("spent_usd") or 0.0)}
         summary = {"fixed": [], "gave_up": [], "flagged": [], "redraws": 0, "spent_usd": 0.0, "stopped": None,
@@ -4708,6 +4816,8 @@ class _Assets(voice_lines.LineMeasurement):
                                 adapters=self.tools.adapters, probe_local=True, transport=self.tools.transport,
                                 ledger=gates.ledger, animate=animate)
             self.check_plan(units)
+            # Plan 28 F1: the auto-fix spends at most the ceiling this estimate reserved (fit_fix_units).
+            self.fix_reserve = units.get("keyframe_fix")
             video = units.get("video")
             if video is not None:
                 # Tier >= 2 (a tier-1 plan has no video part: nothing below runs).
@@ -4848,6 +4958,12 @@ class _Assets(voice_lines.LineMeasurement):
         if self.keyframe_check is not None:
             # A v2 story (phase 7 stage 6b): what J2 did, and where the keyframes' approval stands.
             result["keyframes"] = dict(self.keyframe_check, approval=keyframes_state(ec, board, doc))
+            if result["keyframes"]["approval"] != "current":
+                # Plan 28 F1: what the hard gate will refuse, said now -- never a silent stop.
+                refusal = keyframe_findings(ec, board, doc)["refusal"]
+                if refusal:
+                    result["keyframes"]["refusal"] = refusal
+                    ctx.on_log(f"⛔ Episode {ec.ep}'s keyframes cannot be approved yet. {refusal}")
             if self.keyframe_fix is not None:
                 # Phase 8 stage B: what the keyframe auto-fix did, with its one-line message.
                 result["keyframes"]["fix"] = dict(self.keyframe_fix)

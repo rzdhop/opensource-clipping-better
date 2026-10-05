@@ -4,8 +4,9 @@ directly the whole thing at once, ready to read and approve").
 
 - On a v2 story at tier >= 2 the fast track no longer stops at the keyframes:
   once they are made, checked (J2) and auto-fixed, it records the keyframe
-  approval itself (``keyframes_approved.by == "fast_track"``, ``anyway`` and
-  ``flagged`` naming the shots still flagged), buys the clips, approves the
+  approval itself (``keyframes_approved.by == "fast_track"``; plan 28 F1:
+  only when every check passed -- a shot still flagged stops it, never
+  approved "anyway"), buys the clips, approves the
   assets (``approved.by``), renders and writes the metadata. The job ends
   completed, "ready for review". ``stop_at_keyframes`` keeps today's stop.
 - The paid check before anything is bought counts the whole episode -- the
@@ -167,20 +168,29 @@ def test_the_one_click_approves_the_keyframes_buys_the_clips_approves_the_assets
     assert any(f"under a {int(expected // 60)}-minute budget" in line for line in log), log[:3]
 
 
-def test_flagged_keyframes_are_approved_anyway_by_the_one_click_naming_them(store, tmp_path, built):
+def test_flagged_keyframes_stop_the_one_click_naming_them(store, tmp_path, built):
+    """Plan 28 F1 (DEC-305 §5), re-pinned on purpose: a keyframe still
+    flagged after the auto-fix stops the one click with the keyframe
+    approval's own sentences -- it was approved "anyway" -- and no clip is
+    bought; once it passes, Continue approves and finishes the episode."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
     video = tvp.FakeVideo()
     fakes = _fakes(tmp_path, video=video, vision=kg.FakeVision(kg._failing("sh02")))
 
-    summary, log = tft.run(store, story_id, fakes, settings=kg.SETTINGS)
+    message = tft.stopped(store, story_id, fakes, settings=kg.SETTINGS)
 
+    assert message == ("Fast track stopped at the assets (step 4 of 6): Episode 1's keyframes are not approved. Shot "
+                       "sh02 does not match: does not show the beat, missing the coconut phone. Regenerate it, or "
+                       "upload your own. Then Continue the fast track: it picks up here and repeats nothing already "
+                       "done.")
+    assert video.requests == []
+    assert "keyframes_approved" not in kg._doc(store, story_id)
+
+    kg._pass_verdict(store, story_id, "sh02")
+    summary, _log = tft.run(store, story_id, _fakes(tmp_path, video=video), settings=kg.SETTINGS)
     approved = kg._doc(store, story_id)["keyframes_approved"]
-    assert approved["by"] == "fast_track" and approved["anyway"] is True and approved["flagged"] == ["sh02"]
-    assert summary["keyframes"] == {"auto_approved": True, "anyway": True, "flagged": ["sh02"], "unchecked": []}
-    approval = next(line for line in log if line.startswith("✅ Fast track: episode 1's keyframes auto-approved"))
-    assert "anyway" in approval and "sh02" in approval and "missing the coconut phone" in approval
+    assert approved["by"] == "fast_track" and approved["anyway"] is False and approved["flagged"] == []
     assert video.requests and summary["steps"]["render"]["state"] == "completed"
-    assert "still flagged: sh02" in log[-1]
 
 
 def test_stop_at_keyframes_keeps_todays_stop_and_the_human_s_approval(store, tmp_path, built):
@@ -211,8 +221,9 @@ def test_the_paid_check_counts_the_held_clips_against_every_cap_before_anything_
     units = tce._units(store, story_id, QUALITY_SETTINGS, adapters=fakes.adapters)
     plan = units["video"]
     assert plan["count"] == len(tas._shots(store, story_id)) and plan["est_usd"] > 0 and plan["hold"]
-    # The keyframes and the auto-fix's ceiling fit the day; with the clips, the plan does not.
-    cap = units["est_usd"] + plan["est_usd"] / 2
+    # The keyframes fit the day; with the clips, the plan does not. Plan 28 F1, re-pinned on purpose: the
+    # auto-fix's ceiling takes only what the caps leave after the clips (nothing here), never refused for.
+    cap = units["est_usd"] - units["keyframe_fix"]["est_usd"] + plan["est_usd"] / 2
     settings = dict(QUALITY_SETTINGS, DAILY_CAP_USD=f"{cap:.3f}")
 
     message = tft.stopped(store, story_id, fakes, settings=settings)
@@ -220,7 +231,7 @@ def test_the_paid_check_counts_the_held_clips_against_every_cap_before_anything_
     assert message.startswith("Fast track stopped at the paid check (step 3 of 6): Episode 1's assets would go over "
                               "a cap -- ")
     assert f"{plan['count']} clips ({plan['seconds']} s) on {plan['link']} (est ${plan['est_usd']:.3f})" in message
-    assert "up to $0.40 to redraw flagged keyframes" in message
+    assert "to redraw flagged keyframes" not in message
     assert "daily cap" in message and "Nothing was generated or spent" in message
     assert image.requests == [] and vision.requests == [] and video.requests == []
     assert tas._assets_doc(store, story_id) is None
@@ -294,8 +305,13 @@ def test_the_review_block_reads_the_finished_episode_and_what_is_still_pending(s
     wf = _wf()
     story_id = kg._v2_keyframes(store, tmp_path, built)
     video = tvp.FakeVideo()
-    tft.run(store, story_id, _fakes(tmp_path, video=video, vision=kg.FakeVision(kg._failing("sh02"))),
-            settings=kg.SETTINGS)
+    tft.run(store, story_id, _fakes(tmp_path, video=video), settings=kg.SETTINGS)
+    # Plan 28 F1, re-pinned on purpose: the one click no longer approves over a flagged keyframe; the
+    # review still reads an approval recorded "anyway" before it (sh02 flagged, its verdict a failure).
+    doc = kg._doc(store, story_id)
+    doc["keyframe_verdicts"]["sh02"].update(shows_beat=False, missing=["the coconut phone"])
+    doc["keyframes_approved"].update(anyway=True, flagged=["sh02"])
+    store.write_episode_doc(story_id, 1, "assets.json", doc, now=kg.LATER)
 
     review = wf.episode_review(_page(store, story_id))
 

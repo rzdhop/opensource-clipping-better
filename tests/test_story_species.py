@@ -236,7 +236,10 @@ def test_the_judge_brief_with_a_head_keeps_the_worst_case_inside_the_pack_budget
                                scenes={"sh10": "s04", "sh09": "s03"})
     request, _ = judge.j2_request(ec, shot, "/k/sh10.png", "sh09", "/k/sh09.png", kc)
     assert "Head: four word species name (" in request.prompt
-    assert context.estimate_tokens(request.prompt, "") <= context.PACK_TOKEN_BUDGET
+    # Plan 28 F2, re-pinned on purpose: J2 version 3 has its own text budget (the sheet check's lines).
+    from clipping.aistory import prompts
+
+    assert context.estimate_tokens(request.prompt, "") <= prompts.J2_TEXT_BUDGET
 
 
 @pytest.mark.parametrize("species", ["pear", "Dragon Fruit"])

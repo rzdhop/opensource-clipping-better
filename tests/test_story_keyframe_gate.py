@@ -127,6 +127,14 @@ def _doc(store, story_id):
     return store.read_episode_doc(story_id, 1, "assets.json")
 
 
+def _pass_verdict(store, story_id, shot_id):
+    """Shot *shot_id*'s stored verdict made a pass (as a redraw that passed
+    would leave it): the hard gate's way through in a test (plan 28 F1)."""
+    doc = _doc(store, story_id)
+    doc["keyframe_verdicts"][shot_id].update(shows_beat=True, missing=[], continuity_issue=None)
+    store.write_episode_doc(story_id, 1, "assets.json", doc, now=LATER)
+
+
 def _approve_keyframes(store, story_id, **kwargs):
     return _wf().approve_keyframes(store, story_id, 1, now=kwargs.pop("now", LATER), **kwargs)
 
@@ -208,7 +216,9 @@ def test_a_changed_keyframe_makes_the_approval_stale_and_holds_the_clips_again(s
     assert summary["keyframes"]["approval"] == "stale"
 
 
-def test_a_failed_or_missing_verdict_refuses_the_approval_unless_anyway(store, tmp_path, built):
+def test_a_failed_or_missing_verdict_refuses_the_approval(store, tmp_path, built):
+    """Plan 28 F1, re-pinned on purpose: a hard gate -- the refusal names
+    each shot in plain sentences and ``approve_anyway`` goes over nothing."""
     wf = _wf()
     story_id = _v2_keyframes(store, tmp_path, built)
     shots = [shot["shot_id"] for shot in tas._board(store, story_id)["shots"]]
@@ -220,22 +230,20 @@ def test_a_failed_or_missing_verdict_refuses_the_approval_unless_anyway(store, t
     assert summary["keyframes"]["unavailable"].startswith("no vision link could judge the keyframes")
     assert any(line.startswith("👁 Keyframe check (J2) stopped: no vision link") for line in log)
     with pytest.raises(wf.WorkflowError) as caught:
-        _approve_keyframes(store, story_id)
+        _approve_keyframes(store, story_id, approve_anyway=True)
     assert caught.value.code == wf.CONFLICT
-    assert str(caught.value).startswith(f"Episode 1's keyframes are not approved: shots {shots[0]}, ")
-    assert "have no current keyframe check (J2): run the assets step again (it checks them, free)" in str(caught.value)
+    assert str(caught.value).startswith(f"Episode 1's keyframes are not approved. Shots {shots[0]}, ")
+    assert "have no keyframe check yet: run the assets step again (it checks them, free)." in str(caught.value)
 
-    # J2 finds sh03 short of its prop: refused naming it and what it found; anyway approves, recorded.
+    # J2 finds sh03 short of its prop: refused naming it and what it found, anyway or not.
     _run(store, story_id, vision=FakeVision(_failing("sh03")), params={"animate": False})
-    with pytest.raises(wf.WorkflowError) as caught:
-        _approve_keyframes(store, story_id)
-    assert str(caught.value) == (
-        "Episode 1's keyframes are not approved: the keyframe check (J2) found issues in shot sh03 (does not show "
-        "the beat, missing the coconut phone). Make the shots again (regenerate them, with a note) and check again, "
-        "or approve anyway.")
-    approved = _approve_keyframes(store, story_id, approve_anyway=True)["keyframes_approved"]
-    assert approved["anyway"] is True
-    # The verdicts and the assets' own approval never move with it.
+    for anyway in (False, True):
+        with pytest.raises(wf.WorkflowError) as caught:
+            _approve_keyframes(store, story_id, approve_anyway=anyway)
+        assert str(caught.value) == (
+            "Episode 1's keyframes are not approved. Shot sh03 does not match: does not show the beat, missing the "
+            "coconut phone. Regenerate it, or upload your own.")
+    assert "keyframes_approved" not in _doc(store, story_id)
     assert _doc(store, story_id)["keyframe_verdicts"]["sh03"]["missing"] == ["the coconut phone"]
 
 
@@ -315,7 +323,8 @@ def test_j2_sends_the_keyframe_the_previous_one_and_what_the_shot_must_show(stor
     first, second = vision.requests[:2]
     paths = [assets.shot_image_path(ec, shot) for shot in board["shots"][:2]]
     assert first.images == (paths[0],) and second.images == (paths[1], paths[0])
-    assert first.extra == second.extra == {"max_tokens": 110, "temperature": prompts.ANALYTIC_TEMPERATURE}
+    # Plan 28 F2, re-pinned on purpose: the reply's cap counts the framing and the sheet issues (110 -> 190).
+    assert first.extra == second.extra == {"max_tokens": 190, "temperature": prompts.ANALYTIC_TEMPERATURE}
     assert "Image 2" not in first.prompt and "- continuity_issue: null (this is the episode's first shot)" \
         in first.prompt
     # Phase 8 stage B (J2 version 2), re-pinned on purpose: J2 is told whether image 2 is in the same scene.
@@ -365,8 +374,9 @@ def test_a_stop_mid_check_keeps_every_verdict_judged_so_far(store, tmp_path, bui
 
 
 # Plan 19 stage 3, re-measured on purpose: the ask gains the framing_issue line and the schema its
-# property (831 -> 879; still well inside the pack budget).
-MEASURED_J2_TEXT = 879
+# property (831 -> 879; still well inside the pack budget). Plan 28 F2, re-measured on purpose: the
+# schema gains sheet_issues (879 -> 894).
+MEASURED_J2_TEXT = 894
 
 
 def test_the_j2_text_at_its_worst_case_fits_the_default_pack_budget():
@@ -402,8 +412,10 @@ def test_the_j2_text_at_its_worst_case_fits_the_default_pack_budget():
 
 
 # Plan 19 stage 3, re-measured on purpose: the framing_issue line and property (1145 -> 1194, inside 1200 --
-# the ask was written short to stay inside it).
-MEASURED_J2_V2_TEXT = 1194
+# the ask was written short to stay inside it). Plan 28 F2, re-measured on purpose: the sheet check's
+# head and outfit lines, sheet_issues in the schema, the set's plate and a prop named as images 7 and 8
+# (1194 -> 1303): past the pack budget, inside J2's own (prompts.J2_TEXT_BUDGET, 1400).
+MEASURED_J2_V2_TEXT = 1303
 
 
 def test_the_j2_v2_text_at_its_worst_case_fits_the_default_pack_budget():
@@ -413,7 +425,8 @@ def test_the_j2_v2_text_at_its_worst_case_fits_the_default_pack_budget():
     of 9 characters: 120 shown) and a 20-word wardrobe set (90 shown) --,
     the 4 identity sheets J2 sends at most (``prompts.J2_MAX_SHEETS``) named
     by 60-character names, and the longest continuity ask (a scene change
-    after a previous keyframe)."""
+    after a previous keyframe). Plan 28 F2: the set's plate and the props
+    in frame (60-character names) fill the call to ``prompts.J2_MAX_IMAGES``."""
     from clipping.aistory import context, prompts
     from clipping.aistory.steps import judge
 
@@ -436,13 +449,15 @@ def test_the_j2_v2_text_at_its_worst_case_fits_the_default_pack_budget():
             "staging": [{"subject": f"@char_c{i}", "position": "left", "facing": "f" * 120, "expression": "e" * 120}
                         for i in range(4)]}
     kc = judge.KeyframeContext(sheets={cid: f"/sheets/{cid}.png" for cid in chars},
-                               scenes={"sh10": "s04", "sh09": "s03"})
+                               scenes={"sh10": "s04", "sh09": "s03"}, plates={"sh10": "/plates/night.png"},
+                               props={"sh10": [(name(i), f"/props/p{i}.png") for i in range(2)]})
     request, has_previous = judge.j2_request(ec, shot, "/k/sh10.png", "sh09", "/k/sh09.png", kc)
-    assert has_previous and len(request.images) == 2 + prompts.J2_MAX_SHEETS
+    assert has_previous and len(request.images) == prompts.J2_MAX_IMAGES == 2 + prompts.J2_MAX_SHEETS + 2
+    assert request.images[-2:] == ("/plates/night.png", "/props/p0.png")
     assert "never the set or the light, which change with the scene" in request.prompt
     tokens = context.estimate_tokens(request.prompt, "")
     assert tokens == MEASURED_J2_V2_TEXT
-    assert tokens <= context.PACK_TOKEN_BUDGET
+    assert tokens <= prompts.J2_TEXT_BUDGET
 
 
 def test_j2_asks_a_framing_issue_of_its_own_and_its_brief_is_unchanged():
@@ -468,7 +483,7 @@ def test_j2_asks_a_framing_issue_of_its_own_and_its_brief_is_unchanged():
     assert user.index("- missing:") < user.index("- framing_issue:") < user.index("- continuity_issue:")
     assert schema["properties"]["framing_issue"] == {"type": ["string", "null"]}
     assert schema["required"] == ["shows_beat", "missing", "continuity_issue"]
-    assert prompts.J2_PROMPT_VERSION == 2
+    assert prompts.J2_PROMPT_VERSION == 3  # plan 28 F2, re-pinned on purpose: the sheet check's own field
 
     base = {"shows_beat": True, "missing": [], "continuity_issue": None}
     assert prompts.validate_j2(base) == []  # a reply without the field still validates
@@ -484,22 +499,28 @@ def test_j2_asks_a_framing_issue_of_its_own_and_its_brief_is_unchanged():
 
 # ============================================================ the API and the CLI
 
-def test_the_approve_route_takes_keyframes_and_approve_anyway_without_auth(api, tmp_path, built):
+def test_the_approve_route_takes_keyframes_without_auth_and_anyway_goes_over_nothing(api, tmp_path, built):
+    """Plan 28 F1, re-pinned on purpose: ``approve_anyway`` is still taken
+    on ``keyframes:<ep>`` and goes over nothing (a hard gate)."""
     story_id = _v2_keyframes(api.store, tmp_path, built)
     tas._run(api.store, story_id, adapters=_adapters(vision=FakeVision(_failing("sh02"))), settings=SETTINGS,
              params={"animate": False})
     path = f"/api/stories/{story_id}/approve/keyframes:1"
 
-    refused = api.client.post(path)
-    assert refused.status_code == 409, refused.text
-    assert "shot sh02 (does not show the beat, missing the coconut phone)" in refused.json()["detail"]
+    for body in (None, {"approve_anyway": True}):
+        refused = api.client.post(path, json=body) if body else api.client.post(path)
+        assert refused.status_code == 409, refused.text
+        assert ("Shot sh02 does not match: does not show the beat, missing the coconut phone. Regenerate it, or "
+                "upload your own.") in refused.json()["detail"]
     assert api.client.post(f"/api/stories/{story_id}/approve/keyframes:99").status_code == 400
+    assert "keyframes_approved" not in api.store.read_episode_doc(story_id, 1, "assets.json")
 
-    approved = api.client.post(path, json={"approve_anyway": True})
+    # Every keyframe passing, the route approves.
+    _pass_verdict(api.store, story_id, "sh02")
+    approved = api.client.post(path)
     assert approved.status_code == 200, approved.text
     keyframes = approved.json()["assets"]["keyframes"]
-    assert keyframes["approval"] == "current" and keyframes["anyway"] is True
-    assert api.store.read_episode_doc(story_id, 1, "assets.json")["keyframes_approved"]["anyway"] is True
+    assert keyframes["approval"] == "current" and keyframes["anyway"] is False
     # approve_anyway is still refused for any document but script:<ep> and keyframes:<ep>.
     other = api.client.post(f"/api/stories/{story_id}/approve/storyboard:1", json={"approve_anyway": True})
     assert other.status_code == 400 and "keyframes:<ep>" in other.json()["detail"]
@@ -510,9 +531,13 @@ def test_the_cli_approves_keyframes_and_refuses_any_other_document(cli, tmp_path
     _run(cli.store, story_id, vision=FakeVision(_failing("sh02")), params={"animate": False})
 
     assert cli.run("approve", story_id, "keyframes:1") == 1
-    assert "shot sh02 (does not show the beat" in cli.capsys.readouterr().err
-    assert cli.run("approve", story_id, "keyframes:1", "--anyway") == 0
+    assert "Shot sh02 does not match: does not show the beat" in cli.capsys.readouterr().err
+    # Plan 28 F1, re-pinned on purpose: --anyway goes over nothing.
+    assert cli.run("approve", story_id, "keyframes:1", "--anyway") == 1
+    assert "Regenerate it, or upload your own." in cli.capsys.readouterr().err
+    _pass_verdict(cli.store, story_id, "sh02")
+    assert cli.run("approve", story_id, "keyframes:1") == 0
     out = cli.capsys.readouterr().out
-    assert out.startswith("✅ Episode 1's keyframes approved anyway (fingerprint ")
+    assert out.startswith("✅ Episode 1's keyframes approved (fingerprint ")
     assert cli.run("approve", story_id, "script:1") == 2
     assert "'script:1' is not keyframes:N" in cli.capsys.readouterr().err

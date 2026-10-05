@@ -1092,7 +1092,9 @@ def test_the_largest_french_l1_reply_fits_its_cap():
 # issues (3195 -> 3463), and each issue's severity in the reply (795.6 -> 842.4).
 MEASURED_J1 = 3463
 MEASURED_J1_REPLY = 842.4
-MEASURED_J2_REPLY = 91
+# Plan 28 F2, re-measured on purpose: the framing issue (8 words, never counted since plan 19) and 2 sheet
+# issues of 14 words (91 -> 165).
+MEASURED_J2_REPLY = 165
 _J1_PROPS = 10
 _J1_PROPS_PER_SCENE = 4
 
@@ -1148,16 +1150,18 @@ def _english(words):
     return " ".join(["abcdef"] * words)
 
 
-def test_the_largest_j2_reply_fits_its_cap_under_the_plans_160():
+def test_the_largest_j2_reply_fits_its_cap_under_200():
     import json
 
     reply = {"shows_beat": False, "missing": [_english(prompts.J2_MISSING_MAX_WORDS)] * prompts.J2_MISSING_MAX,
-             "continuity_issue": _english(prompts.J2_CONTINUITY_MAX_WORDS)}
+             "continuity_issue": _english(prompts.J2_CONTINUITY_MAX_WORDS),
+             "framing_issue": _english(prompts.J2_FRAMING_MAX_WORDS),
+             "sheet_issues": [_english(prompts.J2_SHEET_ISSUE_MAX_WORDS)] * prompts.J2_SHEET_ISSUES_MAX}
     assert prompts.validate_j2(reply) == []
     needed = context.estimate_tokens("", json.dumps(reply, ensure_ascii=False))
     assert needed == pytest.approx(MEASURED_J2_REPLY, abs=0.05)
     cap = prompts.MAX_TOKENS["J2"]
     assert cap == -(-round(needed * 1.15, 1) // 10) * 10
-    assert cap <= 160
+    assert cap <= 200  # plan 28 F2, re-pinned on purpose: the plan's 160 held no sheet issue
     assert prompts.TEMPERATURE["J2"] is prompts.ANALYTIC_TEMPERATURE
     assert "J2" not in prompts.INPUT_BUDGET

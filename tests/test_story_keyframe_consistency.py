@@ -272,12 +272,16 @@ def test_j2_sees_each_on_screen_character_s_sheet_and_this_shot_s_outfit(store, 
         request = requests[shot["shot_id"]]
         cast = list(dict.fromkeys(tag[1:] for tag in shot["subject_tags"] if tag.startswith("@")))[:4]
         first = 2 if index else 1
-        assert request.images[first:] == tuple(store.media_path(story_id, "characters", cid, "portrait.jpg")
-                                               for cid in cast)
+        # Plan 28 F2, re-pinned on purpose: the sheets come first after the keyframes, then the set's
+        # plate and the props in frame (the references the keyframe was drawn with).
+        sheets = tuple(store.media_path(story_id, "characters", cid, "portrait.jpg") for cid in cast)
+        assert request.images[first:first + len(cast)] == sheets
+        assert all("/places/" in path or "/props/" in path for path in request.images[first + len(cast):])
         for number, cid in enumerate(cast, start=first + 1):
             assert f"Image {number} is {eps.NAMES[cid]}'s character sheet." in request.prompt
         if cast:
-            assert "A character sheet shows who the character is: face, hair, build and proportions" \
+            assert ("A character sheet shows who the character is: head and species, skin or material, face, hair, "
+                    "build and proportions") \
                 in request.prompt
         if KIWILO in cast:
             # His look and the set he wears in this episode -- not his descriptor, not his sheet's suit.
@@ -287,7 +291,7 @@ def test_j2_sees_each_on_screen_character_s_sheet_and_this_shot_s_outfit(store, 
             assert "- Mangella: adult, elegant slim body with a mango head" in request.prompt
             assert "wearing a tailored emerald green pantsuit" in request.prompt
     verdicts = tas._assets_doc(store, story_id)["keyframe_verdicts"]
-    assert {entry["prompt_version"] for entry in verdicts.values()} == {2}
+    assert {entry["prompt_version"] for entry in verdicts.values()} == {3}  # plan 28 F2, re-pinned on purpose
 
 
 def test_j2_across_a_scene_change_compares_only_who_the_characters_are(store, tmp_path):
@@ -317,7 +321,7 @@ def test_a_verdict_of_the_older_j2_stays_readable_and_is_asked_again(store, tmp_
     _run(store, story_id)
     doc = tas._assets_doc(store, story_id)
     first = doc["keyframe_verdicts"]["sh01"]
-    assert first["prompt_version"] == 2 and judge.verdict_current(first, first["image_sha256"], None)
+    assert first["prompt_version"] == 3 and judge.verdict_current(first, first["image_sha256"], None)
 
     # Stage 6b's verdict, as written before the stamp existed: still a valid document.
     del doc["keyframe_verdicts"]["sh01"]["prompt_version"]
@@ -328,4 +332,4 @@ def test_a_verdict_of_the_older_j2_stays_readable_and_is_asked_again(store, tmp_
     vision = kg.FakeVision()
     _run(store, story_id, vision=vision)
     assert vision.shots() == ["sh01"]
-    assert tas._assets_doc(store, story_id)["keyframe_verdicts"]["sh01"]["prompt_version"] == 2
+    assert tas._assets_doc(store, story_id)["keyframe_verdicts"]["sh01"]["prompt_version"] == 3
