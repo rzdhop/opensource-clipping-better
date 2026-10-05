@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { downloadShotBriefZip, fetchStoryEstimate, runStoryStep } from '../../api'
+import { fetchStoryEstimate, runStoryStep } from '../../api'
 import { formatUsd } from '../../lib/format'
-import { Button, Card, CardBody, CardHeader, useConfirm, useToast } from '../../ui'
-import { ArrowDownToLine, Bot } from '../../ui/icons'
+import { Button, Card, CardBody, CardHeader, useConfirm } from '../../ui'
+import { Bot } from '../../ui/icons'
 import { agentPartOf, IN_FLIGHT } from './storySteps'
 
 const AGENT_STEP = 'story-fast-track'
@@ -33,13 +33,12 @@ function latestAgentJob(jobs) {
  * with) and the button reads "Continue the agent run" -- the same job, run
  * again, repeats nothing already done. Episode 1 rendered: a link to its
  * Review tab, no button. Plan 22 stage 5: a run paused for the user's own
- * clips (status `awaiting_uploads`) says what it waits for, links the
- * episode's Shot list and the brief's zip; the upload that leaves nothing
- * missing starts it again by itself.
+ * clips (status `awaiting_uploads`) says what it waits for and -- plan 25
+ * stage 3 -- opens the episode's Handoff (prompts, uploads, the brief's
+ * export); the upload that leaves nothing missing starts it again by itself.
  */
 export default function AgentRunCard({ storyId, data, onChange }) {
   const confirm = useConfirm()
-  const toast = useToast()
   const [estimate, setEstimate] = useState(null)
   const [estimateError, setEstimateError] = useState('')
   const [running, setRunning] = useState(false)
@@ -85,20 +84,19 @@ export default function AgentRunCard({ storyId, data, onChange }) {
 
   if (paused) {
     const uploads = job.uploads || {}
-    const download = () => downloadShotBriefZip(storyId, EPISODE).catch((err) => toast.error(err.message))
     return (
       <Card className="story-agent-run-card">
         <CardHeader icon={Bot} title="Agent run" subtitle={`Paused at episode ${EPISODE}: ${uploads.message || 'waiting for your clips'}.`} />
         <CardBody>
           <p className="form-hint">
-            Make each clip on your own subscription from the shot brief, then upload it on its shot: the run goes on
+            Make each clip on your own subscription from the Handoff's prompts, then upload it on its shot: the run goes on
             by itself once every clip is there, repeating nothing already done.
           </p>
           <div className="story-step-actions">
-            <Button variant="primary" icon={ArrowDownToLine} onClick={download}>Download the brief (zip)</Button>
-            <Link to={`/story/${storyId}/episodes/${EPISODE}#shots`} className="story-ready-open-episode">
-              {`Open episode ${EPISODE}'s shot list →`}
-            </Link>
+            {/* Plan 25 stage 3: the Handoff holds the prompts, the uploads and the brief's export. */}
+            <Button as={Link} variant="primary" to={`/story/${storyId}/episodes/${EPISODE}/handoff`}>
+              Open the Handoff →
+            </Button>
           </div>
         </CardBody>
       </Card>

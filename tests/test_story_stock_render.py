@@ -313,8 +313,9 @@ STORY = SRC / "pages" / "story"
 
 
 def test_the_dashboard_names_the_stock_state_the_card_s_select_and_the_credit_links():
-    pane = (STORY / "episode" / "ShotListPane.jsx").read_text(encoding="utf-8")
-    assert "stock: { tone: 'info', label: 'Stock footage' }" in pane and "entry.stock" in pane
+    # 2026-10-05 (plan 25 stage 3, DEC-301): the Shot list pane is retired; the Handoff card keeps the state.
+    pane = (STORY / "episode" / "HandoffCard.jsx").read_text(encoding="utf-8")
+    assert "stock: { tone: 'info', label: 'Stock footage' }" in pane and "block.stock" in pane
     card = (STORY / "GenerationProfileCard.jsx").read_text(encoding="utf-8")
     assert "save({ stock_cutaways: value || null })" in card and "STOCK_MATCHING_STYLES = ['cinematic_real']" in card
     assert "Stock footage is live-action" in card

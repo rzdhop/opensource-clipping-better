@@ -1254,3 +1254,77 @@ export function uploadToSlot(slot, file, onProgress) {
     xhr.send(formData)
   })
 }
+
+// ------------------------------------------------- the handoff (plan 25 stage 3)
+
+/**
+ * The episode's handoff document (`GET .../episodes/{ep}/handoff`, plan 25
+ * stage 2): per shot its clip and keyframe blocks (mode, state, prompt,
+ * references, upload slot, the gate of an auto row), the entities, the
+ * counts, what is missing and the export links. Without `platform` the
+ * server reads the platform and model `patchHandoff` remembered.
+ */
+export async function fetchHandoff(storyId, ep, { platform = null, model = null } = {}) {
+  const params = new URLSearchParams()
+  if (platform) params.set('platform', platform)
+  if (model) params.set('model', model)
+  const query = params.toString()
+  const res = await request(`/stories/${storyId}/episodes/${ep}/handoff${query ? `?${query}` : ''}`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the handoff')
+  return res.json()
+}
+
+/** Remember where the episode's clips are made (`{platform, model?}`); 409 while a step runs. */
+export async function patchHandoff(storyId, ep, body) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/handoff`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to save the platform')
+  return res.json()
+}
+
+/**
+ * Switch one shot's clip or keyframe between `auto` and `manual` (`{clip?,
+ * image?}`); answers `{modes, link, states, stale, verdict}` -- 409 while a
+ * step runs, 400 for a mode the story cannot take.
+ */
+export async function patchShotMode(storyId, ep, shotId, body) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/shots/${shotId}/mode`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to change the mode')
+  return res.json()
+}
+
+/** The path `request()` takes for a URL the API itself wrote (`/api/...`). */
+function apiPath(url) {
+  return url.startsWith(API_BASE) ? url.slice(API_BASE.length) : url
+}
+
+/**
+ * An object URL for a file the API names by URL (a reference image's `url`):
+ * fetched with the auth header (DEC-113). The caller revokes it.
+ */
+export async function fetchApiObjectUrl(url) {
+  const res = await request(apiPath(url))
+  if (!res.ok) throw await apiError(res, 'Failed to load the file')
+  return URL.createObjectURL(await res.blob())
+}
+
+/** Save a file the API names by URL (a zip) under `filename`, fetched with the auth header. */
+export async function downloadApiFile(url, filename) {
+  const res = await request(apiPath(url))
+  if (!res.ok) throw await apiError(res, 'Failed to download the file')
+  const objectUrl = URL.createObjectURL(await res.blob())
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+}

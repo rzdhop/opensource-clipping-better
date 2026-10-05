@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { fetchEpisode, fetchStory, runStoryStep, fetchStoryEstimate } from '../../api'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
+import { fetchEpisode, fetchHandoff, fetchStory, runStoryStep, fetchStoryEstimate } from '../../api'
 import { LiveActivity, useJobFeed } from '../../components/ActivityFeed'
 import Tabs from '../../components/Tabs'
 import { StepError } from './fields'
@@ -10,7 +10,7 @@ import ScriptPane from './episode/ScriptPane'
 import StoryboardPane from './episode/storyboard/StoryboardPane'
 import PreviewPane from './episode/PreviewPane'
 import ReviewPane from './episode/ReviewPane'
-import ShotListPane from './episode/ShotListPane'
+import { handoffLinks, handoffPath } from './episode/HandoffPage'
 import EpisodeStepper, { episodeSteps, stepOfJob } from './episode/EpisodeStepper'
 import { imagesManual } from './ManualUploadSlot'
 
@@ -23,6 +23,8 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
+// 'shots' is the Handoff (plan 25 stage 3, DEC-301 retired the Shot list): the
+// tab and a #shots link open its own route, /story/:id/episodes/:ep/handoff.
 const TAB_IDS = ['script', 'storyboard', 'preview', 'review', 'shots']
 
 // Plan 22 stage 5: the budget profile whose clips are the user's own uploads.
@@ -342,6 +344,11 @@ export default function EpisodeStudio() {
   // A section a stepper click (or a #keyframes / #clips hash) asked to
   // scroll to, once the tab holding it has rendered.
   const [pendingAnchor, setPendingAnchor] = useState(anchorFromHash)
+  const navigate = useNavigate()
+  // A #shots link (the Shot list's old deep link) opens the Handoff instead.
+  const [shotsLink] = useState(() => typeof window !== 'undefined' && window.location.hash === '#shots')
+  // The handoff document, read for the stepper's "Handoff →" links (what is the human's).
+  const [handoffDoc, setHandoffDoc] = useState(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -363,6 +370,10 @@ export default function EpisodeStudio() {
   }, [storyId, ep, refresh])
 
   const onTabChange = (id) => {
+    if (id === 'shots') {
+      navigate(handoffPath(storyId, ep))
+      return
+    }
     setTab(id)
     if (typeof window !== 'undefined') window.location.hash = id
   }
@@ -383,6 +394,17 @@ export default function EpisodeStudio() {
   useEffect(() => {
     if (inFlightJobId) setStoppedJob(null)
   }, [inFlightJobId])
+
+  // Read again when the episode gains a storyboard and whenever a job ends.
+  const hasStoryboard = Boolean(episode && episode.storyboard)
+  useEffect(() => {
+    if (!hasStoryboard || inFlightJobId || shotsLink) return undefined
+    let cancelled = false
+    fetchHandoff(storyId, ep)
+      .then((body) => { if (!cancelled) setHandoffDoc(body) })
+      .catch(() => { if (!cancelled) setHandoffDoc(null) })
+    return () => { cancelled = true }
+  }, [storyId, ep, hasStoryboard, inFlightJobId, shotsLink])
 
   const { job: liveJob, events, streamState } = useJobFeed(inFlightJobId, {
     onJob: (job) => {
@@ -420,6 +442,7 @@ export default function EpisodeStudio() {
     return () => window.cancelAnimationFrame(frame)
   }, [pendingAnchor, episode, tab, wide])
 
+  if (shotsLink) return <Navigate to={handoffPath(storyId, ep)} replace />
   if (loading) {
     return <div className="fade-in"><div className="empty-state"><span className="spinner"></span></div></div>
   }
@@ -432,8 +455,13 @@ export default function EpisodeStudio() {
   const manual = clipsManual(story.story, episode)
   const pausedJob = pausedJobOf(episode)
   const tabs = tabsFor(episode)
-  // Plan 22 stage 5: your own clips, shot by shot -- last, so the three panes keep their places.
-  if (manual && episode.storyboard) tabs.push({ id: 'shots', label: 'Shot list' })
+  // Plan 25 stage 3: the Handoff (prompts, modes and uploads, shot by shot) -- last, so the three
+  // panes keep their places; the tab opens its own page.
+  if (episode.storyboard) tabs.push({ id: 'shots', label: 'Handoff →' })
+  // The stepper's Keyframes / Clips nodes link to it when something there is the human's; until the
+  // document is read, the story's own profile says so.
+  const handoffNodes = handoffDoc ? handoffLinks(handoffDoc)
+    : { keyframes: imagesManual(story.story), clips: manual }
   const activeTab = tabs.some((entry) => entry.id === tab) ? tab : 'script'
   const fastTrackJob = inFlightJob && inFlightJob.step === 'fast-track' ? inFlightJob : null
   const steps = episodeSteps(episode, hasReview(episode))
@@ -489,16 +517,6 @@ export default function EpisodeStudio() {
         onChange={refresh}
       />
     ),
-    shots: (
-      <ShotListPane
-        storyId={storyId}
-        ep={epNumber}
-        inFlightJob={inFlightJob}
-        pausedJob={pausedJob}
-        keyframes={imagesManual(story.story)}
-        onChange={refresh}
-      />
-    ),
     preview: (
       <PreviewPane
         episode={episode}
@@ -523,7 +541,8 @@ export default function EpisodeStudio() {
           events={events} paused={pausedJob} onChange={refresh} />
       </div>
 
-      <EpisodeStepper steps={steps} runningKey={stepOfJob(inFlightJob, steps)} onSelect={selectStep} />
+      <EpisodeStepper steps={steps} runningKey={stepOfJob(inFlightJob, steps)} onSelect={selectStep}
+        handoffTo={episode.storyboard ? handoffPath(storyId, ep) : null} handoffLinks={handoffNodes} />
 
       {inFlightJob && liveJob ? (
         liveJob.status === 'queued'
@@ -557,11 +576,11 @@ export default function EpisodeStudio() {
               {panes.storyboard}
             </section>
           </div>
-          {manual && episode.storyboard && (
-            <section className="episode-studio-pane episode-studio-pane-wide" id="episode-pane-shots">
-              <h3 className="card-title episode-studio-pane-heading">Shot list</h3>
-              {panes.shots}
-            </section>
+          {episode.storyboard && (
+            <p className="episode-studio-handoff" id="episode-pane-shots">
+              <Link to={handoffPath(storyId, ep)}>Handoff →</Link>
+              <span className="form-hint"> prompts, modes and uploads, shot by shot</span>
+            </p>
           )}
           <section className="episode-studio-pane episode-studio-pane-wide" id="episode-pane-preview">
             <h3 className="card-title episode-studio-pane-heading">{tabs[2].label}</h3>

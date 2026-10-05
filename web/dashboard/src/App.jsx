@@ -9,6 +9,7 @@ import StoriesList from './pages/story/StoriesList'
 import NewStoryWizard from './pages/story/NewStoryWizard'
 import StoryWorkspace from './pages/story/StoryWorkspace'
 import EpisodeStudio from './pages/story/EpisodeStudio'
+import HandoffPage from './pages/story/episode/HandoffPage'
 import ModeSwitch, { modeFromPath, readMode, rememberMode } from './components/ModeSwitch'
 import { checkToken, clearToken, getToken } from './api'
 import { BookOpen, Clapperboard, LayoutDashboard, Lock, MenuIcon, Plus, Settings as SettingsIcon, X } from './ui/icons'
@@ -205,6 +206,8 @@ function App() {
           {/* The story workspace: /story/:storyId opens the step to do next (DEC-255). */}
           <Route path="/story/:storyId/:step?" element={<StoryWorkspace />} />
           <Route path="/story/:storyId/episodes/:ep" element={<EpisodeStudio />} />
+          {/* Plan 25 stage 3 (DEC-301): the episode's handoff -- prompts, modes and uploads, shot by shot. */}
+          <Route path="/story/:storyId/episodes/:ep/handoff" element={<HandoffPage />} />
           <Route path="/story/*" element={<Navigate to="/story" replace />} />
           {/* The paths the product shipped with keep working through a redirect. */}
           <Route path="/new" element={<Navigate to="/clips/new" replace />} />

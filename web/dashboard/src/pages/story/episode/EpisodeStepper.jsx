@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { Spinner } from '../../../ui'
 import { AlertTriangle, Check } from '../../../ui/icons'
 
@@ -163,8 +164,11 @@ const STATUS_TEXT = { done: 'Done', active: 'Next', pending: 'To do' }
  * the step's number, or a warning mark when its approval went stale, its
  * one-line state, and a spinner on the step a job is running. It scrolls
  * sideways in its own box on a narrow screen, the active step kept in view.
+ * Plan 25 stage 3: `handoffLinks` (`{keyframes, clips}`) marks the nodes
+ * where something is the human's to make; each gets a "Handoff →" link to
+ * `handoffTo`, the episode's Handoff page.
  */
-export default function EpisodeStepper({ steps, runningKey, onSelect }) {
+export default function EpisodeStepper({ steps, runningKey, onSelect, handoffTo = null, handoffLinks = null }) {
   const listRef = useRef(null)
   const activeKey = (steps.find((step) => step.status === 'active') || {}).key
 
@@ -209,6 +213,12 @@ export default function EpisodeStepper({ steps, runningKey, onSelect }) {
                 </span>
                 {running && <Spinner size={13} className="episode-stepper-spinner" label="A job runs on this step" />}
               </button>
+              {handoffTo && handoffLinks && handoffLinks[step.key] && (
+                <Link to={handoffTo} className="episode-stepper-handoff"
+                  aria-label={`Handoff: the ${step.label.toLowerCase()} that are yours to make`}>
+                  Handoff →
+                </Link>
+              )}
             </li>
           )
         })}

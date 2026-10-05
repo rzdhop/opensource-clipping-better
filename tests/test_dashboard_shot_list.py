@@ -1,11 +1,11 @@
 """The manual link in the dashboard (plan 22, stage 5): text contracts over the
 JSX (CI has no node) and the payload contract of the fields the pages read.
 
-The episode studio's "Shot list" pane reads the shot brief (``GET
-.../episodes/{ep}/brief?platform=``): every field it reads off a brief or a
-shot entry is one the server writes; its platform choices are the presets;
-its state badges are the brief's states; each row uploads to the entry's
-own ``upload_slot``. The Generate button reads "Waiting for N clips" while a
+The episode studio's "Shot list" pane read the shot brief (``GET
+.../episodes/{ep}/brief?platform=``); 2026-10-05 (plan 25 stage 3, DEC-301)
+the Handoff view replaced it: its clip states are still the brief's states and
+each card uploads to the entry's own ``upload_slot`` (the Handoff's own
+contracts: test_dashboard_handoff.py). The Generate button reads "Waiting for N clips" while a
 job of the episode is paused ``awaiting_uploads``; the Agent run card shows
 the pause and the brief; the wizard and the profile card offer the manual
 profile and its images switch; the cast, places and props tiles carry an
@@ -17,13 +17,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import test_story_assets_step as tas
-import test_story_native_speech_plan as nsp
 from test_story_assets_step import hermetic, store  # noqa: F401 - the step's fixtures (hermetic is autouse)
 
 SRC = Path(__file__).resolve().parent.parent / "web" / "dashboard" / "src"
 STORY = SRC / "pages" / "story"
-PANE = STORY / "episode" / "ShotListPane.jsx"
+# 2026-10-05 (plan 25 stage 3, DEC-301): the Shot list pane is retired; its pins moved to the Handoff card.
+PANE = STORY / "episode" / "HandoffCard.jsx"
 SLOT = STORY / "ManualUploadSlot.jsx"
 STUDIO = STORY / "EpisodeStudio.jsx"
 AGENT = STORY / "AgentRunCard.jsx"
@@ -36,34 +35,23 @@ def _read(path):
     return path.read_text(encoding="utf-8")
 
 
-def test_the_shot_list_reads_only_what_the_brief_writes(store):
-    """Fail-first: the pane did not exist. Every ``entry.<field>`` and
-    ``brief.<field>`` the pane reads is a key the server's brief carries."""
-    from clipping.aistory.steps import brief as brief_mod
-
-    story_id = nsp.planned_story(store, profile="native_speech_manual")
-    brief = brief_mod.shot_brief(tas._ec(store, story_id), platform="flow")
-    src = _read(PANE)
-    entry_keys = set().union(*(set(entry) for entry in brief["shots"]))
-    read = set(re.findall(r"\bentry\.([a-z_]+)", src))
-    assert read and read <= entry_keys, read - entry_keys
-    top = set(re.findall(r"\bbrief\.([a-z_]+)", src))
-    assert top <= set(brief) | {"zip_url", "files"}, top - set(brief)
-    take_keys = set(re.findall(r"\bentry\.take\.([a-z_]+)", src))
-    assert take_keys <= {"state", "matched", "heard", "start_s", "end_s", "reason"}
+# 2026-10-05 (plan 25 stage 3, DEC-301): test_the_shot_list_reads_only_what_the_brief_writes pinned the
+# retired pane's ``entry.``/``brief.`` reads; the Handoff's reads are pinned against the handoff document
+# instead (test_dashboard_handoff.test_the_page_reads_only_what_the_handoff_writes).
 
 
 def test_the_shot_list_s_choices_are_the_presets_and_the_states():
-    from clipping.aistory import platforms
+    # 2026-10-05 (plan 25 stage 3, DEC-301): re-pinned on the Handoff card. The platform choices now come
+    # from the handoff document (``platform.choices``, the presets), so no list is hard-coded in the page;
+    # the clip states, the upload slot and the copy are the card's; the brief's zip is the Export menu's.
     from clipping.aistory.steps import brief as brief_mod
 
     src = _read(PANE)
-    assert set(re.findall(r"\{ id: '([a-z]+)', label:", src)) == set(platforms.PLATFORMS)
-    states = re.search(r"export const SHOT_STATES = \{(.*?)\n\}", src, re.DOTALL).group(1)
+    states = re.search(r"export const CLIP_STATES = \{(.*?)\n\}", src, re.DOTALL).group(1)
     assert set(re.findall(r"^\s*([a-z_]+):", states, re.MULTILINE)) == set(brief_mod.STATES)
-    assert "slot={entry.upload_slot}" in src and "navigator.clipboard.writeText(entry.prompt)" in src
-    assert "downloadShotBriefZip(storyId, ep, platform)" in src and "Download brief (zip)" in src
-    assert "clip${counts.total === 1 ? '' : 's'} uploaded" in src  # "7 of 12 clips uploaded"
+    assert "slot={block.upload_slot}" in src and "navigator.clipboard.writeText(text)" in src
+    page = _read(STORY / "episode" / "HandoffPage.jsx")
+    assert "platformInfo.choices" in page and "doc.export.brief_zip" in page
     api = _read(API)
     for name in ("fetchShotBrief", "downloadShotBriefZip", "uploadToSlot", "fetchImageBrief"):
         assert f"export async function {name}(" in api or f"export function {name}(" in api, name
@@ -72,7 +60,8 @@ def test_the_shot_list_s_choices_are_the_presets_and_the_states():
 
 def test_the_studio_routes_the_pane_and_waits_while_clips_are_missing():
     src = _read(STUDIO)
-    assert "'shots'" in src and "<ShotListPane" in src and "id=\"episode-pane-shots\"" in src
+    # 2026-10-05 (plan 25 stage 3, DEC-301): the 'shots' tab opens the Handoff route, not the retired pane.
+    assert "'shots'" in src and "navigate(handoffPath(storyId, ep))" in src and "id=\"episode-pane-shots\"" in src
     assert "job.status === 'awaiting_uploads'" in src
     assert "waiting ? waitingLabel(waiting) : 'Generate episode'" in src
     assert "return `Waiting for ${parts.join(' and ')}`" in src
@@ -82,7 +71,8 @@ def test_the_studio_routes_the_pane_and_waits_while_clips_are_missing():
 def test_the_agent_run_card_shows_the_pause_and_the_brief():
     src = _read(AGENT)
     assert "job.status === 'awaiting_uploads'" in src and "uploads.message" in src
-    assert "downloadShotBriefZip(storyId, EPISODE)" in src and "#shots" in src
+    # 2026-10-05 (plan 25 stage 3, DEC-301): the card opens the Handoff, which holds the brief's export.
+    assert "`/story/${storyId}/episodes/${EPISODE}/handoff`" in src and "Open the Handoff →" in src
 
 
 def test_the_wizard_and_the_card_offer_your_own_clips_and_images():
