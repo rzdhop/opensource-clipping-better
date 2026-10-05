@@ -34,6 +34,7 @@ from types import SimpleNamespace
 import pytest
 
 from clipping.aistory import defaults, prompts, schemas, steps, stylelock, templates, timing
+from clipping.aistory.steps import script as script_step  # imported by name: ``steps.script`` depends on import order
 from clipping.aistory.store import StoryStore
 from clipping.cancel import CancelToken, Cancelled
 from clipping.providers.errors import ProviderError
@@ -961,7 +962,7 @@ def test_a_v3_reply_over_its_caps_is_retried_with_the_cap_named_and_the_inside_r
     # E3v3 is told each framing part's seconds and hard cap.
     assert re.search(r"The hook lasts at most [\d.]+ s: at most \d+ words\.", llm.of("E3v3")[0]["user"])
     # The fill pass asks a v3 scene for words within its caps.
-    assert "within its caps" in steps.script.FILL_NOTE_V3 and "top of its word budget" not in steps.script.FILL_NOTE_V3
+    assert "within its caps" in script_step.FILL_NOTE_V3 and "top of its word budget" not in script_step.FILL_NOTE_V3
 
 
 def e2_v3_trim(call):
@@ -1027,7 +1028,7 @@ def test_a_v3_trim_reply_still_over_fails_the_scene_with_one_plain_sentence(stor
 
 
 def test_a_spent_trim_budget_fails_the_scene_after_the_ladder_without_a_trim_call(store, monkeypatch):
-    monkeypatch.setattr(steps.script, "TRIM_CALLS_MAX", 0)
+    monkeypatch.setattr(script_step, "TRIM_CALLS_MAX", 0)
     story_id = _ready_story(store, v2=True, writing="v3")
     llm = _v3_llm([e2_v3_over, e2_v3_over])
 

@@ -21,7 +21,6 @@ Stdlib only (DEC-012); the one import outside this package is
 
 from __future__ import annotations
 
-import json
 import re
 
 from clipping.analysis.analyzer import ANALYTIC_TEMPERATURE, WRITING_TEMPERATURE
@@ -5793,6 +5792,7 @@ def trim_lines_prompt(pack, *, scene, reply, errors, names, plan=None):
     ``{char_id: name}``; *plan* (a scene's line plan, optional) adds the
     scene's seconds. The schema and the call's id are the writer's own
     (``E2v3``/``E3v3``): only the prompt differs."""
+    import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
     parsed = [item for item in (parse_word_cap_error(error) for error in errors) if item]
     framing = isinstance(scene, dict)
     asks = []
