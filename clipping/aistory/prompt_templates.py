@@ -13,10 +13,11 @@ drawing. The text is built from labelled paragraphs, one per
 1. ``SERIES`` -- title, logline, tone, genre, the world (setting, time
    period), the universe, the dialogue language; ``SERIES LORE`` its rules,
    motifs, themes and premise.
-2. ``ART STYLE`` -- the style lock verbatim: rendering, character design
-   rules, environment rules, palette line and forbidden colours;
-   ``PALETTE COLOURS`` the hexes; ``CAMERA AND LIGHT`` the camera, lighting,
-   quality tail, motion rules and voice direction.
+2. ``ART STYLE`` -- the style lock's rendering sentence, palette line and
+   forbidden colours; ``STYLE RULES`` its character design rules,
+   environment rules, quality tail, motion rules and voice direction;
+   ``PALETTE COLOURS`` the hexes; ``CAMERA AND LIGHT`` the camera and
+   lighting.
 3. ``CHARACTER`` -- one paragraph per character (species or head, a human
    says "a human"; build, silhouette, face, hair, skin, height, the wardrobe
    in use, signature items, bearing, colours; the speaker's voice
@@ -38,10 +39,13 @@ creature cast becoming its handle and a cast called by its name
 
 **Fit.** :func:`fit` drops sections in :data:`DROP_ORDER` (the last of a
 rank first) until the text is within the link's words (and ``fits(text)``,
-the link's own check) -- the style's rendering and rules, the series line,
-the characters, place and props in the shot, the scene staging and the core
-are never dropped, but for the last rung: the core alone, so the template
-never adds a refusal that does not exist today.
+the link's own check) -- the style's rendering and palette line, the series
+line, the characters, place and props in the shot, the scene staging and the
+core are never dropped, but for the last rung: the core alone, so the
+template never adds a refusal that does not exist today. The style's rules
+(``style_rules``, plan 26 stage 4c) are the last section to go, so a small
+cap (Seedream's 3000 characters, 461 words) still gets the rendering, the
+palette and the looks of who is in the shot before the core.
 
 Nothing here is hashed: the template is composed where a request is sent and
 where the brief is built (plan 26 H1), so a record edit changes the next
@@ -63,14 +67,15 @@ MIN_PROMPT_WORDS = 500
 Section = namedtuple("Section", "key label text rank")
 
 # The ladder, first dropped first: plan 26's nine rungs, then -- before the core alone -- the camera and light
-# of the style, the series line, the props in the shot, the place's layout and the characters' secondary
-# details, so a link that cannot take the shot's whole context still gets its style, who is in it (what they
-# are made of, face, hair, skin, outfit), the place and its light, and the staging. Past the last rung only the
-# never-dropped sections are left (the style's rendering and rules, those looks, the place, the scene); when
-# they do not fit either, the core alone.
+# of the style, the series line, the props in the shot, the place's layout, the characters' secondary details
+# and, last, the style's rules (character design, environment, quality tail, motion, voice: ~1000 characters
+# that left a 3000-character cap with only the core, stage 4c), so a link that cannot take the shot's whole
+# context still gets its style, who is in it (what they are made of, face, hair, skin, outfit), the place and
+# its light, and the staging. Past the last rung only the never-dropped sections are left (the style's
+# rendering and palette line, those looks, the place, the scene); when they do not fit either, the core alone.
 DROP_ORDER = ("avoid", "characters_absent", "places_absent", "props_absent", "series_lore", "style_palette_hexes",
               "personality", "relationships", "scene_summary", "style_detail", "series", "props", "place_detail",
-              "character_detail")
+              "character_detail", "style_rules")
 
 SHORT_WARNING = ("Short prompt: {words} words — the template expects at least {floor}; the cast and place records "
                  "are thin.")
@@ -356,16 +361,21 @@ def _place_parts(place, who, *, variant=None) -> tuple:
     return [part for part in parts if part], [part for part in detail if part]
 
 
-def _prop_text(prop, who, *, present=False) -> str:
+def _prop_text(prop, who, *, present=False, for_reference=False) -> str:
+    """A prop's paragraph. *for_reference*: the paragraph of the prop's own reference image -- no size phrase
+    and no owner (nothing in frame to judge a scale against, so a size invited a hand holding the object, and
+    an owner a character; plan 26 stage 4c, A1). "Shown alone" is the v2 core's own sentence, not repeated."""
     look = prop.get("look") or {}
-    size = _bare(look.get("scale_phrase"))
-    if look.get("scale_cm"):
-        size = f"{size}, about {look['scale_cm']} cm" if size else f"about {look['scale_cm']} cm"
     parts = [_sentence(prop.get("descriptor") or prop.get("one_line")), _labelled("Material", look.get("material")),
-             _labelled("Colour", look.get("colour")), _labelled("Size", size)]
-    owner = prop.get("owner_char_id")
-    if owner and owner in who.entities["characters"]:
-        parts.append(_sentence(f"It belongs to {who.char(owner)}"))
+             _labelled("Colour", look.get("colour"))]
+    if not for_reference:
+        size = _bare(look.get("scale_phrase"))
+        if look.get("scale_cm"):
+            size = f"{size}, about {look['scale_cm']} cm" if size else f"about {look['scale_cm']} cm"
+        parts.append(_labelled("Size", size))
+        owner = prop.get("owner_char_id")
+        if owner and owner in who.entities["characters"]:
+            parts.append(_sentence(f"It belongs to {who.char(owner)}"))
     return _paragraph("PROP (in this shot)" if present else "PROP", parts)
 
 
@@ -398,20 +408,23 @@ def _series_sections(story, style_lock, *, language, image, droppable=False):
 
 
 def _style_sections(style_lock, *, image):
+    """``style`` (the rendering sentence, the palette line, the forbidden colours: never dropped), ``style_rules``
+    (character design and environment rules, the quality tail, the motion and voice direction: the last rung of
+    the ladder), the palette hexes and the camera and light, in that order."""
     palette = style_lock.get("palette") or {}
     forbidden = _join(palette.get("forbidden"), " or ")
-    style = [_sentence(style_lock.get("rendering")),
-             _labelled("Character design rules", style_lock.get("character_design_rules")),
-             _labelled("Environment rules", style_lock.get("environment_rules")),
-             _labelled("Palette", palette.get("palette_line")),
+    style = [_sentence(style_lock.get("rendering")), _labelled("Palette", palette.get("palette_line")),
              _sentence(f"Never use {forbidden}") if forbidden else ""]
-    hexes = [_labelled("Primary", _join(palette.get("primary"))), _labelled("Accents", _join(palette.get("accents")))]
-    detail = [_labelled("Camera", style_lock.get("camera")), _labelled("Lighting", style_lock.get("lighting")),
-              _labelled("Finish", style_lock.get("quality_tail"))]
+    rules = [_labelled("Character design rules", style_lock.get("character_design_rules")),
+             _labelled("Environment rules", style_lock.get("environment_rules")),
+             _labelled("Finish", style_lock.get("quality_tail"))]
     if not image:
-        detail.append(_labelled("Motion", (style_lock.get("motion_rules") or {}).get("tier2_prompt_suffix_v2")))
-        detail.append(_labelled("Voice direction", (style_lock.get("audio") or {}).get("voice_direction")))
+        rules.append(_labelled("Motion", (style_lock.get("motion_rules") or {}).get("tier2_prompt_suffix_v2")))
+        rules.append(_labelled("Voice direction", (style_lock.get("audio") or {}).get("voice_direction")))
+    hexes = [_labelled("Primary", _join(palette.get("primary"))), _labelled("Accents", _join(palette.get("accents")))]
+    detail = [_labelled("Camera", style_lock.get("camera")), _labelled("Lighting", style_lock.get("lighting"))]
     return [Section("style", "art style", _paragraph("ART STYLE", style), None),
+            Section("style_rules", "style rules", _paragraph("STYLE RULES", rules), _rank("style_rules")),
             Section("style_palette_hexes", "palette hexes", _paragraph("PALETTE COLOURS", hexes),
                     _rank("style_palette_hexes")),
             Section("style_detail", "camera and light", _paragraph("CAMERA AND LIGHT", detail), _rank("style_detail"))]
@@ -463,7 +476,7 @@ def master_sections(story, style_lock, entities, *, language, present=(), place_
     present = [cid for cid in present if cid in who.entities["characters"]]
     sections = _series_sections(story, style_lock, language=language, image=image, droppable=shot)
     style = _style_sections(style_lock, image=image)
-    sections += style[:2]
+    sections += style[:3]
 
     characters = who.entities["characters"]
     docs = {cid: shots.variant_view(characters[cid], (variants or {}).get(cid)) for cid in listed["characters"]}
@@ -528,7 +541,7 @@ def master_sections(story, style_lock, entities, *, language, present=(), place_
         sections.append(Section(f"{key}:{pid}", _bare(props[pid].get("name")) or pid,
                                 _prop_text(props[pid], who, present=is_present and shot), rank))
 
-    sections.append(style[2])
+    sections.append(style[3])
     sections.append(Section("avoid", "avoid", _avoid(style_lock, negative, humans), _rank("avoid")))
     return _finish(sections, who)
 
@@ -754,13 +767,15 @@ _ENTITY_KINDS = {"character": "characters", "place": "places", "prop": "props"}
 
 
 def entity_prompt(story, style_lock, kind, doc, core, *, limit_words, fits=None, variant=None,
-                  entities=None) -> dict:
+                  entities=None, for_reference=False) -> dict:
     """A sheet's, plate's or prop image's prompt: SERIES (+ lore) + ART STYLE
     (+ hexes, camera and light) + that one entity's paragraph (*kind* one of
     ``character``, ``place``, ``prop``) + *core*, fitted. *variant*: a
     character's appearance variant id or wardrobe set id, a place's time
     variant. *entities*: the story's, for the name sweep and a prop's owner
-    (without them only *doc*'s own name is swept)."""
+    (without them only *doc*'s own name is swept). *for_reference* (a prop only):
+    the prop's own reference image -- its paragraph without the size phrase
+    or the owner (stage 4c, A1)."""
     if kind not in _ENTITY_KINDS:
         raise ValueError(f"entity_prompt: unknown kind {kind!r}")
     story = story or {}
@@ -789,5 +804,5 @@ def entity_prompt(story, style_lock, kind, doc, core, *, limit_words, fits=None,
         parts, detail = _place_parts(doc, who, variant=variant)
         sections.append(Section(f"places:{eid}", label, _paragraph("PLACE", parts + detail), None))
     else:
-        sections.append(Section(f"props:{eid}", label, _prop_text(doc, who), None))
+        sections.append(Section(f"props:{eid}", label, _prop_text(doc, who, for_reference=for_reference), None))
     return fit(_finish(sections, who), core, limit_words=limit_words, fits=fits)

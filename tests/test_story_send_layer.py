@@ -48,7 +48,9 @@ def _with_image(store, story_id, shot):
 
 
 def test_a_made_clip_stays_current_and_its_request_carries_the_master_before_the_core(store):
-    """Fail-first. The request's prompt starts with the master (SERIES) and
+    """Fail-first. The request's prompt starts with the master (SERIES, or
+    the ART STYLE once the series line is the rung that went: the style's
+    rules, now one section of their own, outlast it, plan 26 stage 4c) and
     ends with the hashed core; the hash is the core's, as before; the clip
     made with it is still current."""
     from clipping.aistory.steps import clips
@@ -61,7 +63,7 @@ def test_a_made_clip_stays_current_and_its_request_carries_the_master_before_the
     flags = clips.shot_flags(shot, None)
 
     parts, request = _request(store, story_id, shot, link=FAST)
-    assert request.prompt.startswith("SERIES:")
+    assert request.prompt.startswith(("SERIES:", "ART STYLE:"))
     assert request.prompt.endswith(parts["prompt"]) and request.prompt != parts["prompt"]
     assert parts["sent"]["text"] == request.prompt and parts["sent"]["limit"] is not None
     assert parts["sent"]["words"] <= parts["sent"]["limit"]
@@ -210,6 +212,32 @@ def test_a_link_with_no_room_for_the_template_is_sent_the_core_alone(store, tmp_
     assert sent["text"].endswith(parts["prompt"]) and prompt_limits.fits(label, sent["text"], live={})[0]
     unbounded = assets.sent_image_prompt(ec, shot, parts, link="manual/upload")
     assert unbounded["limit"] is None and not unbounded["dropped"] and unbounded["text"].startswith("SERIES:")
+
+
+def test_a_461_word_link_keeps_the_style_and_the_present_looks_before_the_core(store, tmp_path):
+    """Fail-first (plan 26 stage 4c, B). Seedream's 3000 characters (461 words): the style's rules are the last
+    rung, so the keyframe is sent the style (rendering and palette), each character in the shot, the place and
+    the scene before its core, not the core alone -- the ART STYLE paragraph (rules included) and the core
+    filled the cap before."""
+    from clipping.aistory.steps import assets
+    from clipping.providers import prompt_limits
+
+    story_id = kf._quality(store, tmp_path)
+    ec = tas._ec(store, story_id)
+    shot = tas._shots(store, story_id)[1]
+    parts = assets.request_parts(ec, shot, note=None, link=None)
+    label = "fal/seedream-4.5-edit"
+    sent = assets.sent_image_prompt(ec, shot, parts, link=[label], live={})
+
+    assert sent["limit"] == 461 and sent["words"] <= 461 < sent["full_words"]
+    assert sent["text"] != parts["prompt"] and sent["text"].endswith("\n\n" + parts["prompt"])
+    assert sent["text"].startswith("ART STYLE: photorealistic 3D render")
+    assert "Palette: saturated natural fruit colours" in sent["text"]
+    assert "(in this shot) is an anthropomorphic character whose head is a whole" in sent["text"]
+    assert "PLACE (in this shot):" in sent["text"] and "SCENE:" in sent["text"]
+    assert "STYLE RULES" not in sent["text"] and "Character design rules" not in sent["text"]
+    assert sent["dropped"][-1] == "style rules" and "art style" not in sent["dropped"]
+    assert prompt_limits.fits(label, sent["text"], live={})[0]
 
 
 def request_link(store, story_id):

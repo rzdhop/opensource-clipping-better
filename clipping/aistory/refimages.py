@@ -413,14 +413,12 @@ def _sent(story, style_lock, kind, doc, core, *, links, variant=None, entities=N
     as it always was. ``{text, words, full_words, limit, dropped: [label]}``.
     A sheet carries no hash: nothing made turns stale. A prop's own reference
     image is told neither its scale nor its owner (A1, ``shots.render_prop``'s
-    ``for_reference``: nothing in frame to judge scale against, so a size
-    there invited a hand holding the object, and an owner a character)."""
+    ``for_reference`` and ``entity_prompt``'s: nothing in frame to judge scale
+    against, so a size there invited a hand holding the object, and an owner a
+    character)."""
     if not media_policy.is_v2(story) or not doc.get("look"):
         words = len(core.split())
         return {"text": core, "words": words, "full_words": words, "limit": None, "dropped": []}
-    if kind == "prop":
-        look = {key: value for key, value in doc["look"].items() if key not in ("scale_phrase", "scale_cm")}
-        doc = dict(doc, look=look, owner_char_id=None)
     labels = [label for label in links or () if label]
     limit = prompt_budgets.chain_words(labels, live=live)
     bounded = [label for label in labels
@@ -428,7 +426,7 @@ def _sent(story, style_lock, kind, doc, core, *, links, variant=None, entities=N
                and prompt_limits.limit_for(label, live=live) is not None]
     fits = (lambda text: all(prompt_limits.fits(label, text, live=live)[0] for label in bounded)) if bounded else None
     return prompt_templates.entity_prompt(story, style_lock, kind, doc, core, limit_words=limit, fits=fits,
-                                          variant=variant, entities=entities)
+                                          variant=variant, entities=entities, for_reference=kind == "prop")
 
 
 def _remove_other_extensions(stories, story_id, kind, eid, stem, keep) -> None:

@@ -388,6 +388,65 @@ def test_the_fit_ladder_drops_in_order_keeps_the_shot_and_falls_to_the_core_alon
     assert len(chars["text"]) <= 2000 and chars["dropped"]
 
 
+def test_the_style_rules_are_the_last_rung_so_a_small_cap_keeps_the_style_and_the_looks():
+    """Plan 26 stage 4c, B. The style is two sections: ``style`` (the rendering sentence, the palette line, the
+    forbidden colours -- never dropped) and ``style_rules`` (character design and environment rules, quality tail,
+    motion, voice -- the last rung, after the secondary details and before the core alone). A cap that holds
+    the never-dropped sections and the core but not the rules gives the style, the present look and the core --
+    never the core alone; the rules are the last label dropped; a cap above them keeps them."""
+    shot = dict(SHOT, subject_tags=["@char_rida", "#place_glass_walled_bullpen:day"], staging=[], speaks=False,
+                lines=[])
+    core = "Slow push-in toward the subject. The hacker leans over the tablet."
+    ec = _ec()
+    sections = _sections(ec, shot)
+    by_key = {section.key: section for section in sections}
+    rules, style = by_key["style_rules"], by_key["style"]
+    assert pt.DROP_ORDER[-1] == "style_rules" and style.rank is None and rules.rank == len(pt.DROP_ORDER) - 1
+    assert style.text.startswith("ART STYLE: " + STYLE["rendering"]) and STYLE["palette"]["palette_line"] in style.text
+    assert "Character design rules" not in style.text and "Environment rules" not in style.text
+    assert rules.text.startswith("STYLE RULES: Character design rules:") and "Finish: ultra detailed" in rules.text
+    assert "Motion:" in rules.text and "Voice direction:" in rules.text and "Camera" not in rules.text
+    never = sum(len(section.text.split()) for section in sections if section.rank is None) + len(core.split())
+
+    small = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=never)
+    assert small["text"] != core and small["text"].endswith("\n\n" + core) and small["words"] <= never
+    assert small["dropped"][-1] == "style rules" and "art style" not in small["dropped"]
+    assert style.text in small["text"] and rules.text not in small["text"]
+    assert "Rida (in this shot) is an anthropomorphic character whose head is a whole dragon fruit" in small["text"]
+
+    roomy = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=never + len(rules.text.split()))
+    assert rules.text in roomy["text"] and "style rules" not in roomy["dropped"]
+
+    # Below the never-dropped sections and the core: the core alone, as before.
+    assert pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=never - 1)["text"] == core
+
+
+def test_a_prop_s_reference_prompt_has_no_size_and_no_owner_but_a_shot_s_prop_paragraph_keeps_both():
+    """Plan 26 stage 4c, A. ``entity_prompt(..., kind="prop", for_reference=True)``: the prop's paragraph is
+    its descriptor, material and colour -- no size phrase, no ``cm``, no owner (they invited a hand holding
+    the object and a character into its reference image). Without the flag, and in the master's PROP
+    paragraph of a shot, both stay."""
+    entities = _entities()
+    plain = pt.entity_prompt(STORY, STYLE, "prop", copy.deepcopy(PEN), "Prop core.", limit_words=None,
+                             entities=entities, for_reference=True)
+    paragraph = plain["text"].split("PROP:", 1)[1]
+    assert "solid brushed stainless steel" in paragraph and "cool silver with mirror polish" in paragraph
+    for word in ("cm", "Size", "belongs to", "one hand", "Marie-Jeanne", "the character"):
+        assert word not in paragraph, word
+    assert plain["text"].endswith("Prop core.")
+
+    unflagged = pt.entity_prompt(STORY, STYLE, "prop", copy.deepcopy(PEN), "Prop core.", limit_words=None,
+                                 entities=entities)
+    assert "Size: fits perfectly in one hand, about 14 cm." in unflagged["text"]
+    assert "belongs to" in unflagged["text"]
+
+    master = "\n\n".join(section.text for section in pt.master_sections(
+        STORY, STYLE, entities, language="fr", present=["char_rida", "char_marie_jeanne"],
+        place_ids=["place_glass_walled_bullpen"], prop_ids=["prop_marie_jeanne_s_silver_pen"]))
+    prop = master.split("PROP (in this shot):", 1)[1].split("\n\n", 1)[0]
+    assert "about 14 cm" in prop and "Size:" in prop and "It belongs to" in prop
+
+
 def test_a_two_character_speaking_shot_keeps_who_they_are_within_veos_limit():
     """On the rich records, a two-character speaking shot fitted to Veo's
     630 words keeps both looks -- what each is made of -- the place, the
