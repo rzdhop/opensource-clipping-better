@@ -144,7 +144,8 @@ def test_a_shot_after_another_of_its_scene_sends_that_keyframe_in_its_continuity
     assert len(continuing) >= 5
     for index, shot in enumerate(board["shots"]):
         request = requests[_name(shot)]
-        assert shot["prompt_layout"] == "layered_v1" and request.prompt == shot["image_prompt"]
+        # Plan 26 (H1): the request carries the master + scene template before the stored core.
+        assert shot["prompt_layout"] == "layered_v1" and request.prompt.endswith(shot["image_prompt"])
         if index not in continuing:
             assert shots.CONTINUITY_REFERENCE not in shot["reference_images"]
             assert shot["assets"]["continuity"] is None
@@ -203,7 +204,7 @@ def test_without_the_previous_keyframe_a_shot_is_asked_alone_with_its_own_roles(
                                style_lock=ec.style_lock, consistency_mode="references", v2=True)
     request = _by_name(edit)[_name(shot)]
     # Asked as it resolves without the slot: every role names an image really sent.
-    assert request.prompt == alone["image_prompt"] and "previous shot" not in request.prompt
+    assert request.prompt.endswith(alone["image_prompt"]) and "previous shot" not in request.prompt
     assert len(request.references) == len(alone["reference_images"]) == len(shot["reference_images"]) - 1
     assert tas._board(store, story_id)["shots"][index]["assets"]["continuity"] is None
     assert f"ℹ️ Shot {shot['shot_id']}: the previous shot of its scene has no keyframe yet, so it is asked " \
