@@ -603,6 +603,9 @@
 - **A-167** — (plan 24) A reply written inside a per-line cap derived from `timing.scene_plan` (every pause paid,
   5 % margin, the provider overrun applied) never raises a `scene_over` flag at the Script step. UNCONFIRMED until
   stage 2's first episode.
+- **A-168** — (plan 25) The Handoff makes a shot on Flow in fewer taps than the Shot list did (copy, download the
+  references, upload) and nothing the human needs is missing from a card (plan 22 stage 8's question). UNCONFIRMED
+  until the human's Flow walk of 3 shots.
 
 ## Confirmed
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
