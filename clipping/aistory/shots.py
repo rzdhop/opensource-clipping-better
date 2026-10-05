@@ -120,15 +120,9 @@ def parse_tag(tag) -> tuple:
 
 # ------------------------------------------------------------------ handles
 
-def _leading_phrase(descriptor: str) -> str:
-    """The descriptor's own head-noun phrase: (1) its first sentence (split
-    at the first '. '); (2) cut at the earliest of ' serving as '/' with '/
-    ' wearing '/' who '/' that '/';'; (3) drop a leading article; (4) keep
-    only the text after that phrase's LAST comma, if it has one -- this
-    drops the leading comma-separated adjective list a K1-written
-    descriptor usually opens with ("A fuzzy, dark brown ripe kiwi fruit..."
-    -> "dark brown ripe kiwi fruit"), rather than keeping the adjectives and
-    losing the noun; (5) collapse whitespace, keep <= 10 words."""
+def _cut_descriptor(descriptor: str) -> str:
+    """:func:`_leading_phrase`'s steps 1-3: the descriptor's first sentence,
+    cut at the earliest marker, without its leading article (commas kept)."""
     text = descriptor.strip()
 
     end = text.find(". ")
@@ -144,7 +138,19 @@ def _leading_phrase(descriptor: str) -> str:
         if lowered.startswith(article):
             text = text[len(article):]
             break
+    return text
 
+
+def _leading_phrase(descriptor: str) -> str:
+    """The descriptor's own head-noun phrase: (1) its first sentence (split
+    at the first '. '); (2) cut at the earliest of ' serving as '/' with '/
+    ' wearing '/' who '/' that '/';'; (3) drop a leading article; (4) keep
+    only the text after that phrase's LAST comma, if it has one -- this
+    drops the leading comma-separated adjective list a K1-written
+    descriptor usually opens with ("A fuzzy, dark brown ripe kiwi fruit..."
+    -> "dark brown ripe kiwi fruit"), rather than keeping the adjectives and
+    losing the noun; (5) collapse whitespace, keep <= 10 words."""
+    text = _cut_descriptor(descriptor)
     if "," in text:
         text = text.rsplit(",", 1)[1]
 
@@ -217,9 +223,16 @@ def named_character(doc) -> bool:
     """Whether character *doc* is called by its proper name in every prompt
     (plan 25 stage 0, D-5): it has a name, and its descriptor's leading
     phrase names no species (:func:`_species_phrase`). A creature or fruit
-    cast never is: its handle stays the descriptor's noun phrase."""
+    cast never is: its handle stays the descriptor's noun phrase -- unless
+    its look names a species (:func:`look_species`, read first): then it is
+    always called by its name."""
     if not isinstance(doc, dict) or not _collapse_ws(str(doc.get("name") or "")):
         return False
+    if look_species(doc.get("look")):
+        # DEC-305 section 5 (plan 28 stage F4): a cast whose look names its species is a named cast in a species
+        # world, whatever its descriptor opens on ("Pear-headed woman ..." read as a species noun turned the three
+        # Dragon Fruit casts into creature casts and swept their names).
+        return True
     return not _species_phrase(_leading_phrase(str(doc.get("descriptor") or "")), doc.get("look"))
 
 
@@ -262,12 +275,75 @@ def character_handles(characters: dict) -> dict:
     return handles
 
 
+# DEC-305 section 5 (plan 28 stage F4): where a prop's head noun phrase ends -- a preposition, a relative, a
+# conjunction or (from the third word) a trailing participle ("sleek USB drive | clipped to a backpack strap").
+_PROP_ARTICLE = re.compile(r"^(a|an|the)\s+", re.IGNORECASE)
+_PROP_PHRASE_MAX_WORDS = 6
+_PROP_PHRASE_STOPS = frozenset({
+    "with", "without", "of", "in", "on", "at", "for", "from", "to", "by", "like", "near", "under", "over", "inside",
+    "atop", "beside", "behind", "that", "which", "who", "whose", "where", "and", "or", "but", "as", "than"})
+_PROP_PARTICIPLE = re.compile(r"^[a-z]+(?:ed|ing)$")
+
+
+def prop_head_phrase(descriptor) -> str:
+    """A prop's head noun phrase, without its article: the words of the
+    descriptor's first comma/period clause before the first preposition,
+    relative, conjunction or trailing participle, at most 6 ("polished half
+    coconut shell", "sleek USB drive"); '' when nothing is left. The shared
+    rule of
+    ``prompt_templates._prop_phrase`` and :func:`prop_handles` (a handle is a
+    noun phrase, never the clause a cut left behind)."""
+    clause = _PROP_ARTICLE.sub("", _collapse_ws(re.split(r"[,.;:]", str(descriptor or ""), maxsplit=1)[0]))
+    words = []
+    for index, word in enumerate(clause.split()):
+        bare = word.lower().strip("()'\"")
+        if bare in _PROP_PHRASE_STOPS or (index >= 2 and _PROP_PARTICIPLE.match(bare)):
+            break
+        words.append(word)
+        if len(words) == _PROP_PHRASE_MAX_WORDS:
+            break
+    if not words:
+        return ""
+    first = words[0].lower() if words[0][1:] == words[0][1:].lower() else words[0]
+    return " ".join([first] + words[1:])
+
+
+def _broken_prop_phrase(phrase, *, after_comma) -> bool:
+    """Whether a leading phrase is no noun phrase: empty, opening or ending
+    on a function word, or -- when it is what followed the descriptor's
+    last comma (*after_comma*) -- a participle that opens a trailing clause
+    ("pulsing", "glinting in the dark"; "glowing lamp" is a noun phrase)."""
+    words = phrase.lower().split()
+    if not words:
+        return True
+    first, last = words[0].strip("()'\""), words[-1].strip("()'\"")
+    if first in _PROP_PHRASE_STOPS or last in _PROP_PHRASE_STOPS:
+        return True
+    if after_comma and _PROP_PARTICIPLE.match(first):
+        return len(words) == 1 or any(word.strip("()'\"") in _PROP_PHRASE_STOPS for word in words)
+    return False
+
+
+def _prop_handle(descriptor) -> str:
+    """:func:`_handle_from_descriptor`, unless its phrase is no noun phrase
+    (:func:`_broken_prop_phrase`: "the pulsing" from "A sleek USB drive
+    clipped to a backpack strap, pulsing with soft cyan light"); then the
+    descriptor's head noun phrase (:func:`prop_head_phrase`), else the
+    neutral "the object"."""
+    descriptor = str(descriptor or "")
+    phrase = _leading_phrase(descriptor)
+    if not _broken_prop_phrase(phrase, after_comma="," in _cut_descriptor(descriptor)):
+        return f"the {phrase}"
+    head = prop_head_phrase(descriptor)
+    return f"the {head}" if head else _NEUTRAL_WORDS["props"]
+
+
 def prop_handles(props: dict) -> dict:
     """``{prop_id: handle}``, the same way as :func:`character_handles` but
     without the "wearing" disambiguation: a collision goes straight to
-    ``" (n)"`` in cast order."""
+    ``" (n)"`` in cast order. A handle is a noun phrase (:func:`_prop_handle`)."""
     order = list(props.keys())
-    base = {pid: _handle_from_descriptor(props[pid]["descriptor"]) for pid in order}
+    base = {pid: _prop_handle(props[pid]["descriptor"]) for pid in order}
 
     counts = {}
     for pid in order:

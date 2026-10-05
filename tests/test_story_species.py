@@ -149,14 +149,37 @@ def test_the_anchor_and_the_speech_look_of_a_named_cast_say_the_head():
                                                                   "avocado head")
 
 
+def test_a_named_cast_whose_descriptor_opens_on_its_species_keeps_its_name():
+    """DEC-305 section 5 (plan 28 stage F4): ``look.species`` is read first. The Dragon Fruit repair found a
+    descriptor opening "Pear-headed woman ..." read as a species noun, so the named cast became a creature cast and
+    its name was swept; with the species on the look the name stays the handle, whatever the descriptor opens on."""
+    doc = _doc("pear")
+    doc["descriptor"] = "Pear-headed woman in her thirties wearing a charcoal blazer"
+    assert shots.named_character(doc)
+    assert shots.character_handles({"char_marie_jeanne": doc}) == {"char_marie_jeanne": "Marie-Jeanne"}
+    assert shots.character_anchor(doc, "Marie-Jeanne").startswith("Marie-Jeanne, a woman in her thirties with a pear head")
+    # Without the species the descriptor's own phrase decides, as before; and a nameless cast is never named.
+    bare = dict(doc, look={key: value for key, value in doc["look"].items() if key != "species"})
+    assert not shots.named_character(bare)
+    assert not shots.named_character(dict(doc, name=""))
+
+
 def test_a_creature_anchor_says_a_head_its_handle_does_not():
     entities = _entities()
     victor = entities["characters"]["char_victor"]
     before = shots.character_anchors(entities["characters"])["char_victor"]
+    assert " character in " in before and not shots.named_character(victor)
+    # DEC-305 section 5 (plan 28 stage F4) re-pin: a species on the look makes the cast a named one in a species
+    # world (``shots.named_character`` reads ``look.species`` first), so Victor keeps his name and the anchor says
+    # the head, whether or not his descriptor says it too. It was: the creature handle, unchanged for "eggplant",
+    # " character with a pear head in " for "pear".
     victor["look"]["species"] = "eggplant"
-    assert shots.character_anchors(entities["characters"])["char_victor"] == before  # the handle says it already
+    assert shots.named_character(victor)
+    assert shots.character_anchors(entities["characters"])["char_victor"] == (
+        "Victor, a man in his forties with an eggplant head, in a tailored navy suit")
     victor["look"]["species"] = "pear"
-    assert " character with a pear head in " in shots.character_anchors(entities["characters"])["char_victor"]
+    assert shots.character_anchors(entities["characters"])["char_victor"].startswith(
+        "Victor, a man in his forties with a pear head")
 
 
 def test_render_look_starts_with_the_head_and_keeps_it_under_any_budget():

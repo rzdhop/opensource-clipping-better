@@ -381,6 +381,39 @@ def test_t1_v2_reply_still_refuses_a_name_that_is_not_a_scene_cast_member():
     assert any("names the character 'Broccolia'" in e for e in errors)
 
 
+# DEC-305 section 5 (plan 28 stage F4): a shot that carries a character's line must show that character. The repair
+# adds the speaker's tag to ``subjects`` (and says so); a scene character no shot shows is the validator's, a retry.
+
+def test_t1_v2_reply_adds_the_speaker_of_a_carried_line_to_subjects_and_says_so():
+    scene = tpe._F4_SCENE
+    check = _t1_v2_check(scene=scene, n_lines=3)
+    shot = tpe._good_t1_v2_shot(lines=[1, 2, 3])
+    errors = prompts.validate_t1_v2({"shots": [copy.deepcopy(shot)]}, **check)
+    assert any("'@char_mangella'" in e and "line 2" in e for e in errors)
+
+    reply = {"shots": [copy.deepcopy(shot)]}
+    added = storyboard._repair_t1_v2_reply(reply, tags_allowed=check["tags_allowed"], lines=scene["lines"])
+    assert reply["shots"][0]["subjects"] == shot["subjects"] + ["@char_mangella"]
+    assert added == ["shot 1: '@char_mangella' speaks line 2, added to subjects"]
+    assert prompts.validate_t1_v2(reply, **check) == []
+
+    # No lines given (every earlier caller): nothing added. A narrator or an unknown speaker is never a tag.
+    plain = {"shots": [copy.deepcopy(shot)]}
+    assert storyboard._repair_t1_v2_reply(plain, tags_allowed=check["tags_allowed"]) == []
+    odd = {"shots": [copy.deepcopy(shot)]}
+    lines = [{"speaker": "narrator"}, {"speaker": "char_nobody"}, {"speaker": "narrator"}]
+    assert storyboard._repair_t1_v2_reply(odd, tags_allowed=check["tags_allowed"], lines=lines) == []
+
+
+def test_t1_v2_reply_with_a_scene_character_no_shot_shows_is_left_for_a_told_why_retry():
+    scene = dict(tpe._F4_SCENE, lines=tpe._F4_SCENE["lines"][:1])
+    check = _t1_v2_check(scene=scene, n_lines=1)
+    reply = {"shots": [tpe._good_t1_v2_shot()]}
+    added = storyboard._repair_t1_v2_reply(reply, tags_allowed=check["tags_allowed"], lines=scene["lines"])
+    assert added == [] and "@char_mangella" not in reply["shots"][0]["subjects"]
+    assert any("'@char_mangella'" in e and "no shot" in e for e in prompts.validate_t1_v2(reply, **check))
+
+
 # ============================================= plan 27 stage 3 (the exchange)
 
 def test_a_t1_v2_shot_listing_a_planned_exchange_s_lines_is_valid_and_stays_one_shot():

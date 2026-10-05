@@ -21,6 +21,7 @@ has no ``build_e1``/``E1`` etc. at all, so every test below fails with
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import re
 from pathlib import Path
@@ -2160,6 +2161,76 @@ def test_t1_v2_asks_motion_and_staging():
         _pack("fr"), scene=BODY_SCENE, shots=_good_t1_shots(), index=0, note=None, lines=LINES_T1,
         characters=CHARACTERS_T1, place=PLACE_T1, props=PROPS_T1, shots_per_scene=(2, 4), camera=CAMERA_PARAGRAPH,
         modifiers_allowed=MODIFIERS_ALLOWED, hook_style="insert_prop")) == _T1R_V1_SHA256
+
+
+# DEC-305 section 5 (plan 28 stage F4): the shot plan names everyone it shows. A character that speaks a line a shot
+# carries, and every character the scene's script puts in the scene, is in some shot's ``subjects`` -- or it gets no
+# reference image and drifts from shot to shot.
+
+_F4_SCENE = dict(V2_SCENE, lines=[
+    {"line_id": "l01", "speaker": "char_kiwilo", "text": "Tu m'as menti.", "emotion": "angry"},
+    {"line_id": "l02", "speaker": "char_mangella", "text": "Pas du tout.", "emotion": "calm"},
+    {"line_id": "l03", "speaker": "narrator", "text": "Le silence tombe.", "emotion": "calm"},
+])
+_F4_TAGS = TAGS_T1 + ["@char_mangella"]
+_F4_NAMES = dict(NAMES_T1, char_mangella="Mangella")
+
+
+def _f4_check(**extra):
+    check = dict(scene=_F4_SCENE, shots_per_scene=(1, 2), modifiers_allowed=MODIFIERS_ALLOWED, tags_allowed=_F4_TAGS,
+                 n_lines=3, names=_F4_NAMES)
+    check.update(extra)
+    return check
+
+
+def test_a_t1_v2_shot_must_list_the_speaker_of_every_line_it_carries():
+    both = _good_t1_v2_shot(lines=[1, 2, 3], subjects=["@char_kiwilo", "@char_mangella", "%prop_phone",
+                                                       "#place_pool:day"])
+    assert prompts.validate_t1_v2({"shots": [copy.deepcopy(both)]}, **_f4_check()) == []
+
+    # Line 2 is Mangella's; the shot shows only Kiwilo: refused, in tags (a name would leak into the retry).
+    lonely = _good_t1_v2_shot(lines=[1, 2, 3])
+    errors = prompts.validate_t1_v2({"shots": [lonely]}, **_f4_check())
+    assert any("$.shots[0].subjects" in e and "'@char_mangella'" in e and "line 2" in e and "speaks" in e
+               for e in errors), errors
+    assert not any("Mangella" in e for e in errors)
+    # The narrator is no one to show, and Kiwilo (line 1) is listed.
+    assert not any("line 1" in e or "line 3" in e for e in errors)
+
+
+def test_a_t1_v2_scene_must_show_every_character_its_script_puts_in_it_in_some_shot():
+    # Two shots: Mangella speaks (line 2) in shot 2, so the scene shows both; nothing refused for presence.
+    shot1 = _good_t1_v2_shot(lines=[1])
+    shot2 = _good_t1_v2_shot(framing="close_up", camera_motion="hold", lines=[2, 3],
+                             subjects=["@char_mangella", "#place_pool:day"],
+                             action="@char_mangella answers, hands trembling.",
+                             motion="@char_mangella shakes her head and steps back",
+                             staging=[{"subject": "@char_mangella", "position": "left", "facing": "the camera",
+                                       "expression": "calm"}])
+    assert prompts.validate_t1_v2({"shots": [copy.deepcopy(shot1), copy.deepcopy(shot2)]}, **_f4_check()) == []
+
+    # Mangella is in the scene (scene.characters) but no shot shows her and no line is hers: told why.
+    silent = dict(_F4_SCENE, lines=[_F4_SCENE["lines"][0]], characters=["char_kiwilo", "char_mangella"])
+    errors = prompts.validate_t1_v2({"shots": [_good_t1_v2_shot()]}, **_f4_check(scene=silent, n_lines=1))
+    assert any(e.startswith("$.shots:") and "'@char_mangella'" in e and "no shot" in e for e in errors), errors
+    assert not any("Mangella" in e for e in errors)
+    # A character whose tag the call does not offer cannot be asked for (an old plan, a pruned scene).
+    assert prompts.validate_t1_v2({"shots": [_good_t1_v2_shot()]},
+                                  **_f4_check(scene=silent, n_lines=1, tags_allowed=TAGS_T1)) == []
+
+
+def test_a_t1r_v2_replacement_must_list_the_speaker_of_the_lines_it_keeps():
+    plans = [{"framing": "wide_establishing", "camera_motion": "pan_lr", "lines": [1]},
+             {"framing": "medium_single", "camera_motion": "hold", "lines": [2]}]
+    check = dict(scene=_F4_SCENE, shots=plans, index=1, modifiers_allowed=MODIFIERS_ALLOWED, tags_allowed=_F4_TAGS,
+                 n_lines=3, names=_F4_NAMES)
+    wrong = _good_t1_v2_shot(lines=[2])  # shows Kiwilo; line 2 is Mangella's
+    errors = prompts.validate_t1r_v2({"shot": wrong}, **check)
+    assert any("$.shot.subjects" in e and "'@char_mangella'" in e and "line 2" in e for e in errors), errors
+    right = _good_t1_v2_shot(lines=[2], subjects=["@char_kiwilo", "@char_mangella", "%prop_phone", "#place_pool:day"])
+    assert prompts.validate_t1r_v2({"shot": right}, **check) == []
+    # A scene character no replacement shows is the other shots' business: T1r v2 never asks for presence.
+    assert not any("appears in no shot" in e for e in errors)
 
 
 def test_the_largest_t1_v2_replies_fit_their_caps_but_not_much_smaller_ones():

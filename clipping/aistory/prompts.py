@@ -371,7 +371,8 @@ SCHEMA_NAMES.update({"E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dia
 # with their own inputs at their caps (tests/test_story_episode_prompt_budgets.py):
 # T1v2 1,756, T1rv2 1,787; each the worst case + 15 %, rounded up to ten (the
 # plan's 2,000 was an estimate). Re-measured for DEC-252 (the performance and
-# camera-variety asks): T1v2 1,865, T1rv2 1,852.
+# camera-variety asks): T1v2 1,865, T1rv2 1,852. Re-measured for DEC-305 section 5 (plan 28 stage F4: the
+# speaker's tag and every scene character in subjects): T1v2 1,900, T1rv2 1,867.
 #
 # D1 (phase 7 stage 5a, DEC-228): the bible past its cut, the world at B2's
 # caps, K1's text at its caps, 11 other cast members at their name and
@@ -433,7 +434,7 @@ SCHEMA_NAMES.update({"E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dia
 # threshold stage 6 used to give E1..T1r their own row), so it gets one too:
 # + 15 %, rounded up to ten.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2150, "T1rv2": 2130, "D1": 3890,
+                "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2190, "T1rv2": 2150, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
                 "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990, "S1v2": 2650,
                 "C1v2": 1690, "B1v3": 1480, "C1J": 1240}
@@ -4164,7 +4165,8 @@ _T1_V2_FIELDS = (
     "never 'subtle', 'small' or 'slight'; tags only; not the camera, which camera_motion already says\n"
     "- staging: 1 to 4 entries, one per character or object in the frame: subject (its tag), position (left, "
     "centre, right or back), facing (at most 4 words), expression (at most 4 words)\n"
-    "- subjects: every tag visible in this shot, from {tags}\n"
+    "- subjects: every tag visible in this shot, from {tags}; always the tag of whoever speaks a line this shot "
+    "carries\n"
 )
 
 _T1_V2_ASK_TEMPLATE = (
@@ -4175,6 +4177,7 @@ _T1_V2_ASK_TEMPLATE = (
     + _T1_V2_FIELDS +
     "- lines: which of this scene's numbered lines (1-{n_lines}) are spoken during this shot, in order; every "
     "line belongs to exactly one shot\n\n"
+    "Every character listed above is in the subjects of at least one shot of the scene.\n\n"
     "Vary the framing and the camera: never the previous shot's framing, never the previous shot's camera_motion."
     "{close_up_note}{insert_prop_note}\n\n"
     "Never use real people, brands, studio names or copyrighted characters."
@@ -4378,6 +4381,47 @@ def _t1_v2_shot_errors(errors, path, shot, *, names, previous_framing, tags_allo
         errors.append(f"{path}.subjects: framing 'insert_prop' needs a prop tag (%...) among the subjects")
 
 
+def line_speaker_tags(scene, tags_allowed) -> dict:
+    """``{line number: "@char_x"}`` for the lines of *scene* spoken by a
+    character this call offers (its tag in *tags_allowed*), numbered as T1's
+    ``lines`` field numbers them (1-based). The narrator, an unknown speaker
+    and a scene without ``lines`` give nothing: no one to show (DEC-305
+    section 5, plan 28 stage F4: whoever speaks a line a shot carries is in
+    that shot's ``subjects``, or gets no reference image)."""
+    allowed = set(tags_allowed)
+    tags = {}
+    for number, line in enumerate((scene or {}).get("lines") or (), start=1):
+        speaker = line.get("speaker") if isinstance(line, dict) else None
+        tag = f"@{speaker}" if isinstance(speaker, str) and speaker != "narrator" else None
+        if tag in allowed:
+            tags[number] = tag
+    return tags
+
+
+def _t1_v2_presence_errors(errors, shots, scene, tags_allowed) -> None:
+    """DEC-305 section 5 (plan 28 stage F4), the half of
+    :func:`validate_t1_v2` about who a shot shows: the speaker of every line
+    a shot carries is in that shot's ``subjects`` (a tag, never a name), and
+    every character the scene's script puts in the scene (``scene
+    ["characters"]``, when this call offers its tag) is in the ``subjects``
+    of at least one shot."""
+    speakers = line_speaker_tags(scene, tags_allowed)
+    for i, shot in enumerate(shots):
+        subjects = set(shot["subjects"])
+        for line_no in shot["lines"]:
+            tag = speakers.get(line_no)
+            if tag and tag not in subjects:
+                errors.append(f"$.shots[{i}].subjects: {tag!r} speaks line {line_no}, which this shot carries, but "
+                              "is not listed in subjects; list every character who speaks in the shot")
+    shown = {tag for shot in shots for tag in shot["subjects"]}
+    allowed = set(tags_allowed)
+    for char_id in (scene or {}).get("characters") or ():
+        tag = f"@{char_id}"
+        if tag in allowed and tag not in shown:
+            errors.append(f"$.shots: the scene's character {tag!r} appears in no shot's subjects; every character "
+                          "of the scene must be shown in at least one shot")
+
+
 def validate_t1_v2(reply, *, scene, shots_per_scene, modifiers_allowed, tags_allowed, n_lines, names,
                    previous_camera=None) -> list:
     """Post-validation for a T1 v2 reply: :func:`validate_t1`'s rules (shot
@@ -4387,7 +4431,9 @@ def validate_t1_v2(reply, *, scene, shots_per_scene, modifiers_allowed, tags_all
     shot (a beat shot carries its scene's lines). DEC-252: no shot repeats
     the camera motion of the shot before it -- inside the scene, and the
     first against *previous_camera* (the episode's shot just before this
-    scene; None: none)."""
+    scene; None: none). DEC-305 section 5 (plan 28 stage F4): the speaker
+    of every line a shot carries is in its ``subjects``, and every character
+    the scene puts in it is in some shot's (:func:`_t1_v2_presence_errors`)."""
     lo, hi = shots_per_scene
     errors = schemas.validate(reply, t1_v2_schema((lo, hi), modifiers_allowed, tags_allowed))
     if errors:
@@ -4416,6 +4462,7 @@ def validate_t1_v2(reply, *, scene, shots_per_scene, modifiers_allowed, tags_all
     missing = [n for n in range(1, n_lines + 1) if n not in used_lines]
     if missing:
         errors.append(f"$.shots: line(s) {missing} belong to no shot; every line belongs to exactly one shot")
+    _t1_v2_presence_errors(errors, shots, scene, tags_allowed)
     return errors
 
 
@@ -4472,6 +4519,12 @@ def validate_t1r_v2(reply, *, scene, shots, index, modifiers_allowed, tags_allow
     for line_no in shot["lines"]:
         if not (1 <= line_no <= n_lines):
             errors.append(f"$.shot.lines: {line_no} is not a valid line number (1-{n_lines})")
+    speakers = line_speaker_tags(scene, tags_allowed)
+    for line_no in shot["lines"]:
+        tag = speakers.get(line_no)
+        if tag and tag not in shot["subjects"]:  # DEC-305 section 5 (plan 28 stage F4), as validate_t1_v2
+            errors.append(f"$.shot.subjects: {tag!r} speaks line {line_no}, which this shot carries, but is not "
+                          "listed in subjects; list every character who speaks in the shot")
     old_lines = shots[index]["lines"]
     if shot["lines"] != old_lines:
         errors.append(f"$.shot.lines: {shot['lines']} does not cover the same lines as the replaced shot {old_lines}")

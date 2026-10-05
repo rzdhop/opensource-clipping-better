@@ -265,7 +265,9 @@ def test_t1r_worst_case_fits_its_budget():
 # DEC-252 re-pin (the performance and camera-variety asks, by DEC-138's method): T1v2 1,756 -> 1,865 (the
 # longer motion and camera fields, the "nobody stands idle" intro, the camera in the variety sentence), T1rv2
 # 1,787 -> 1,852 (the shared fields only); the budgets move to 2,150 and 2,130.
-MEASURED_V2 = {"T1v2": 1865, "T1rv2": 1852}
+# DEC-305 section 5 re-pin (plan 28 stage F4: the ask names the speaker's tag and every scene character): T1v2
+# 1,865 -> 1,900, T1rv2 1,852 -> 1,867 (the shared subjects field); the budgets move to 2,190 and 2,150.
+MEASURED_V2 = {"T1v2": 1900, "T1rv2": 1867}
 _DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]  # the live descriptor's (words, characters)
 
 

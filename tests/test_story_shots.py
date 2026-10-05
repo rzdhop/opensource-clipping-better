@@ -349,6 +349,25 @@ def test_prop_handles_on_the_live_story_descriptor():
     assert handles["prop_phone"] == "the polished half coconut shell shaped like a vintage telephone"
 
 
+# DEC-305 section 5 (plan 28 stage F4): a prop handle is a noun phrase from the descriptor's head, never a clause
+# the cut left behind. The descriptor below made the core say "the pulsing" (the last comma piece, a participle).
+
+@pytest.mark.parametrize("descriptor,expected", [
+    ("A sleek USB drive clipped to a backpack strap, pulsing with soft cyan light", "the sleek USB drive"),
+    ("A heavy brass key, glinting in the dark", "the heavy brass key"),
+    ("A smooth, matte black phone with a cracked screen", "the matte black phone"),  # the adjective list: as before
+    ("Sleek silver metal pen with a satisfying click mechanism, weighty and balanced", "the Sleek silver metal pen"),  # its case, as before
+])
+def test_a_prop_handle_is_the_descriptor_s_noun_phrase_never_a_cut_clause(descriptor, expected):
+    handles = shots.prop_handles({"prop_x": _prop("prop_x", descriptor, name="X")})
+    assert handles["prop_x"] == expected
+
+
+def test_a_prop_handle_with_nothing_to_say_is_the_neutral_word():
+    for descriptor in ("", "with a bow"):
+        assert shots.prop_handles({"prop_x": _prop("prop_x", descriptor, name="X")}) == {"prop_x": "the object"}
+
+
 def test_worked_example_from_the_spec_unchanged_by_the_2026_09_27_revision():
     handles = shots.character_handles({CHAR_KIWILO: CHARACTERS[CHAR_KIWILO]})
     assert handles[CHAR_KIWILO] == "the anthropomorphic kiwi"

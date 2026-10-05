@@ -629,7 +629,28 @@ def _repair_names(reply, tags_allowed, names) -> list:
     return fixed
 
 
-def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None, names=None) -> list:
+def _repair_speakers(reply, tags_allowed, lines) -> list:
+    """DEC-305 section 5's half of :func:`_repair_t1_v2_reply` (plan 28
+    stage F4): a shot carrying line *n* of the scene (*lines*, its lines in
+    order) without the speaker's tag among its ``subjects`` gets the tag --
+    the writer forgot to list who talks, and an untagged speaker gets no
+    reference image. The narrator, a speaker this call does not offer and a
+    shot whose ``subjects`` is not a list are left alone."""
+    fixed = []
+    speakers = prompts.line_speaker_tags({"lines": lines}, tags_allowed) if lines else {}
+    for i, shot in enumerate(reply["shots"]):
+        if not isinstance(shot, dict) or not isinstance(shot.get("subjects"), list) \
+                or not isinstance(shot.get("lines"), list):
+            continue
+        for line_no in shot["lines"]:
+            tag = speakers.get(line_no) if isinstance(line_no, int) else None
+            if tag and tag not in shot["subjects"]:
+                shot["subjects"].append(tag)
+                fixed.append(f"shot {i + 1}: {tag!r} speaks line {line_no}, added to subjects")
+    return fixed
+
+
+def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None, names=None, lines=None) -> list:
     """Repair a T1 v2 reply in place before its validator runs (fix B,
     found when gemini kept failing T1 v2 twice on one scene): a
     @char/%prop/#place tag used in a shot's ``action``, ``motion`` or
@@ -646,14 +667,19 @@ def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None, names=None
     the next motion costs nothing. A character's name written in an action
     or motion (*names*, ``{char_id: name}``) becomes its tag first
     (:func:`_repair_names`), so the tag repair below lists it in
-    ``subjects``. Returns one description per repair, for the caller to
-    log."""
+    ``subjects``. DEC-305 section 5 (plan 28 stage F4): the speaker of a
+    line a shot carries (*lines*, the scene's own, in order; None: not
+    checked) is added to that shot's ``subjects`` too
+    (:func:`_repair_speakers`); a character of the scene no shot shows is
+    never added -- the validator refuses it and the retry says why. Returns
+    one description per repair, for the caller to log."""
     added = []
     if not isinstance(reply, dict) or not isinstance(reply.get("shots"), list):
         return added
     added.extend(_repair_camera(reply, previous_camera))
     added.extend(_repair_names(reply, tags_allowed, names))
     added.extend(_repair_insert_prop(reply, tags_allowed))
+    added.extend(_repair_speakers(reply, tags_allowed, lines))
     allowed = set(tags_allowed)
     for i, shot in enumerate(reply["shots"]):
         if not isinstance(shot, dict) or not isinstance(shot.get("subjects"), list):
@@ -700,7 +726,7 @@ def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced, limit_s=No
 
     def validate(reply):
         added = _repair_t1_v2_reply(reply, tags_allowed=inputs["tags_allowed"], previous_camera=previous_camera,
-                                      names=inputs["names"])
+                                      names=inputs["names"], lines=scene["lines"])
         if added:
             ctx.on_log("🩹 T1 v2 reply repaired: " + "; ".join(added))
         return prompts.validate_t1_v2(reply, scene=scene, shots_per_scene=inputs["shots_per_scene"],
