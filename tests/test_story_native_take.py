@@ -268,6 +268,194 @@ def test_shot_seconds_never_cuts_under_its_floor_nor_past_the_clip():
     assert native_speech.shot_seconds(6.0, speaks=False, floor_s=5) == 6.0
 
 
+# =================================================================== an exchange (plan 27 stage 4)
+
+def _exchange_host(store, tmp_path, *, drop_second=False, seconds=8, transcribe_extra=None):
+    """A host on the exchange story (scene s02's two lines, one 8 s speaking shot) with its clip kept and the
+    transcriber answering both lines in turn (the second dropped when *drop_second*)."""
+    story_id = nsp.exchange_story(store)
+    probe, _log = _host(store, story_id)
+    shot = nsp.exchange_shot(store, story_id)
+    script = eps._script(store, story_id)
+    said = [line for scene in script["scenes"] for line in scene["lines"] if line["line_id"] in shot["lines"]]
+    first = words(said[0]["text"], start=0.5)
+    second = words(said[1]["text"], start=first[-1]["end"] + 0.5)
+    heard = first if drop_second else first + second
+    if drop_second:
+        heard = first + words("rien du tout ici", start=first[-1]["end"] + 0.5)
+    host, log = _host(store, story_id, transcribe=Transcriber(heard))
+    shot = next(item for item in host.storyboard["shots"] if item["shot_id"] == shot["shot_id"])
+    _put_clip(store, story_id, host, shot, make_clip(tmp_path / "exchange.mp4", seconds))
+    return story_id, host, log, shot, said, first, second
+
+
+def test_an_exchange_take_matches_every_line_in_order_and_trims_after_the_last_lines_last_word(store, tmp_path):
+    """Fail-first. An 8 s clip speaking both lines of the exchange in turn (the first from 0.5 s, the answer
+    0.5 s after it): the record names each line (matched, heard, start, end) in order, the shot's matched is
+    the minimum, its start the first line's and its end the last line's last word; each line has its own audio
+    from its own start; the shot is cut 0.3 s after the last word, floored at 5 s; the placements put each
+    line at its own start on the shot's timeline."""
+    from clipping.aistory import native_speech, timing
+    from clipping.aistory.steps import assets, voice_lines
+
+    _require_ffmpeg()
+    story_id, host, log, shot, said, first, second = _exchange_host(store, tmp_path)
+    host.native_take_shot(shot)
+    board = tas._board(store, story_id)
+    stored = next(item for item in board["shots"] if item["shot_id"] == shot["shot_id"])
+    record = stored["assets"]["clip"]["native_speech"]
+    assert record["state"] == "ok" and record["matched"] == 1.0 and record["line_id"] == said[0]["line_id"]
+    assert (record["start_s"], record["end_s"]) == (first[0]["start"], second[-1]["end"])
+    assert [row["line_id"] for row in record["lines"]] == [line["line_id"] for line in said]
+    assert [row["speaker"] for row in record["lines"]] == [line["speaker"] for line in said]
+    assert [(row["matched"], row["start_s"], row["end_s"]) for row in record["lines"]] == [
+        (1.0, first[0]["start"], first[-1]["end"]), (1.0, second[0]["start"], second[-1]["end"])]
+    assert record["lines"][1]["heard"] == " ".join(word["word"] for word in second)
+    assert set(record["lines"][0]) == {"line_id", "speaker", "matched", "heard", "start_s", "end_s"}
+    # the trim: 0.3 s after the last line's last word, never under 5 s nor past the 8 s clip
+    wanted = max(5.0, second[-1]["end"] + 0.3)
+    assert stored["duration_s"] == pytest.approx(min(8.0, wanted), abs=1 / 30)
+    script = eps._script(store, story_id)
+    ec = tas._ec(store, story_id)
+    for line, spoken in zip(said, (first, second)):
+        measured = next(item for scene in script["scenes"] for item in scene["lines"]
+                        if item["line_id"] == line["line_id"])
+        assert voice_lines.is_measured(ec, measured)
+        assert measured["timing"]["duration_s"] == pytest.approx(spoken[-1]["end"] - spoken[0]["start"])
+        assert _probe(assets.line_audio_path(ec, measured)) == pytest.approx(
+            spoken[-1]["end"] - spoken[0]["start"], abs=0.05)
+    offsets = timing.line_offsets(script, script["timing"], ec.template, storyboard=board)
+    start = sum(item["duration_s"] for item in board["shots"][:stored["order"] - 1])
+    assert [offsets[line["line_id"]][0] for line in said] == [
+        pytest.approx(start + first[0]["start"], abs=1e-3), pytest.approx(start + second[0]["start"], abs=1e-3)]
+    assert offsets[said[0]["line_id"]][1] <= offsets[said[1]["line_id"]][0]
+    assert any("speaks its 2 lines in turn (2 of 2 lines heard, min 1.00" in entry for entry in log)
+    assert native_speech.exchange_summary(record) == "2 of 2 lines heard, min 1.00"
+    # a second take of the same clip is not asked again
+    host.transcribe.answers = []
+    host.native_take_shot(next(item for item in host.storyboard["shots"] if item["shot_id"] == shot["shot_id"]))
+
+
+def test_an_exchange_take_missing_its_second_line_is_refused_and_the_note_names_the_line(store, tmp_path):
+    """Fail-first. The clip speaks the first line and then other words: the shot is ``mismatch`` with the
+    minimum matched, the missing line named (its id, what was heard in its place) in the record's reason, the
+    feed and the flagged summary; the first line keeps its audio, the missing one none."""
+    from clipping.aistory.steps import voice_lines
+
+    _require_ffmpeg()
+    story_id, host, log, shot, said, first, _second = _exchange_host(store, tmp_path, drop_second=True)
+    host.native_take_shot(shot, video={"link": FAST, "speech": {"speech_price": 0.10}}, row={"clip_s": 8})
+    stored = next(item for item in tas._board(store, story_id)["shots"] if item["shot_id"] == shot["shot_id"])
+    record = stored["assets"]["clip"]["native_speech"]
+    missing = said[1]["line_id"]
+    assert record["state"] == "mismatch" and record["matched"] < 0.75
+    assert [row["matched"] >= 0.75 for row in record["lines"]] == [True, False]
+    assert record["lines"][1]["heard"] == "rien du tout ici"
+    assert record["reason"] == f"{missing} heard as 'rien du tout ici'"
+    assert host.video["takes"]["flagged"][0]["missing"] == [missing]
+    assert any(f"does not speak line {missing} as written (1 of 2 lines heard" in entry
+               and f"{missing} heard as 'rien du tout ici'" in entry for entry in log)
+    ec = tas._ec(store, story_id)
+    script = eps._script(store, story_id)
+    by_id = {item["line_id"]: item for scene in script["scenes"] for item in scene["lines"]}
+    assert voice_lines.is_measured(ec, by_id[said[0]["line_id"]]) and not voice_lines.is_measured(ec, by_id[missing])
+
+
+def test_a_speaker_turn_split_deals_the_transcript_to_the_lines_and_greedy_order_otherwise():
+    """The transcription's own turns (a ``speaker`` on every word) deal one turn to each line; a line the
+    other speaker repeated words of is then matched inside its own turn only; without turns the lines are
+    matched greedily in order, a word two lines share heard once."""
+    from clipping.aistory import native_speech
+
+    lines = [{"line_id": "l08", "speaker": "char_a", "text": "Tu caches la clé depuis lundi"},
+             {"line_id": "l09", "speaker": "char_b", "text": "Et alors tu vas me dénoncer"}]
+    one, two = words(lines[0]["text"], start=0.5), words(lines[1]["text"], start=4.0)
+    plain = native_speech.evaluate_exchange_take(lines, one + two, clip_real_s=8.0, clip_s=8)
+    turned = native_speech.evaluate_exchange_take(
+        lines, [dict(w, speaker="A") for w in one] + [dict(w, speaker="B") for w in two], clip_real_s=8.0, clip_s=8)
+    for take in (plain, turned):
+        assert take["state"] == "ok" and take["matched"] == 1.0
+        assert [(row["line_id"], row["matched"]) for row in take["lines"]] == [("l08", 1.0), ("l09", 1.0)]
+        assert take["lines"][1]["start_s"] == 4.0 and take["end_s"] == two[-1]["end"]
+    # three turns for two lines: the labels are not trusted, the greedy order answers
+    three = [dict(w, speaker="A") for w in one[:3]] + [dict(w, speaker="B") for w in one[3:]] + \
+        [dict(w, speaker="C") for w in two]
+    assert native_speech.evaluate_exchange_take(lines, three, clip_real_s=8.0, clip_s=8)["state"] == "ok"
+    # a line heard past the clip's end is not ok; nothing heard is no_speech; no STT is approximate
+    late = native_speech.evaluate_exchange_take(lines, one + words(lines[1]["text"], start=7.9), clip_real_s=8.0,
+                                                clip_s=8)
+    assert late["state"] == "mismatch" and late["matched"] == 1.0
+    assert native_speech.evaluate_exchange_take(lines, [], clip_real_s=8.0, clip_s=8)["state"] == "no_speech"
+    approx = native_speech.evaluate_exchange_take(lines, None, clip_real_s=8.0, clip_s=8)
+    assert approx["state"] == "stt_unavailable" and (approx["start_s"], approx["end_s"]) == (0.35, 7.65)
+    assert approx["lines"][0]["start_s"] == 0.35 and approx["lines"][0]["end_s"] == approx["lines"][1]["start_s"]
+    assert approx["lines"][1]["end_s"] == 7.65
+
+
+def test_the_placements_put_each_line_of_an_exchange_at_its_own_start_and_a_planned_exchange_in_turn():
+    """``line_placements``: with a take's per-line starts, each line at its own; with none (an old take, or
+    the planned window) the planned lead then the lines before it one after the other; a line ends no later
+    than the next one starts; a one-line shot as always."""
+    from clipping.aistory import native_speech
+
+    script = {"scenes": [{"scene_id": "s01", "lines": [
+        {"line_id": "l01", "speaker": "char_a", "text": "a"}, {"line_id": "l02", "speaker": "char_b", "text": "b"},
+        {"line_id": "l03", "speaker": "char_a", "text": "c"}]}]}
+
+    def board(take, lines=("l01", "l02")):
+        clip = {"native_speech": take} if take else {}
+        return {"shots": [{"shot_id": "sh01", "scene_id": "s01", "order": 1, "duration_s": 8.0, "speaks": True,
+                           "lines": list(lines), "assets": {"clip": clip}},
+                          {"shot_id": "sh02", "scene_id": "s01", "order": 2, "duration_s": 6.0, "speaks": True,
+                           "lines": ["l03"], "assets": {"clip": {"native_speech": {"start_s": 0.4}}}}]}
+
+    seconds = {"l01": 2.0, "l02": 1.5, "l03": 1.0}
+    placed = native_speech.line_placements(script, board({"start_s": 0.5, "lines": [
+        {"line_id": "l01", "start_s": 0.5}, {"line_id": "l02", "start_s": 4.0}]}), lambda line: seconds[line["line_id"]])
+    assert placed == {"l01": (0.5, 2.0), "l02": (4.0, 1.5), "l03": (8.4, 1.0)}
+    planned = native_speech.line_placements(script, board(None), lambda line: seconds[line["line_id"]])
+    assert planned["l01"] == (0.35, 2.0) and planned["l02"] == (2.35, 1.5)
+    # a first line the take heard, a second it did not: the second follows the first in plan
+    partial = native_speech.line_placements(script, board({"start_s": 0.5, "lines": [
+        {"line_id": "l01", "start_s": 0.5}, {"line_id": "l02", "start_s": None}]}),
+        lambda line: seconds[line["line_id"]])
+    assert partial["l01"] == (0.5, 2.0) and partial["l02"] == (2.5, 1.5)
+    # overlapping measured lengths are cut at the next start
+    tight = native_speech.line_placements(script, board({"lines": [
+        {"line_id": "l01", "start_s": 0.5}, {"line_id": "l02", "start_s": 1.5}]}), lambda line: 3.0)
+    assert tight["l01"] == (0.5, 1.0) and tight["l02"] == (1.5, 3.0)
+
+
+def test_an_exchange_take_is_not_current_for_another_set_of_lines():
+    from clipping.aistory.steps import native_take
+
+    take = {"state": "ok", "clip_sha256": SHA, "line_id": "l08", "lines": [{"line_id": "l08"}, {"line_id": "l09"}]}
+    assert native_take.is_current(take, clip_sha256=SHA, line_id="l08", line_ids=["l08", "l09"])
+    assert not native_take.is_current(take, clip_sha256=SHA, line_id="l08", line_ids=["l08", "l10"])
+    assert native_take.is_current({"state": "ok", "clip_sha256": SHA, "line_id": "l08"}, clip_sha256=SHA,
+                                  line_id="l08", line_ids=["l08"])
+
+
+def test_a_one_line_take_keeps_its_recorded_shape_byte_for_byte(store, tmp_path):
+    """The one-line record: exactly today's keys, no ``lines``, no exchange wording."""
+    from clipping.aistory.steps import native_take
+
+    _require_ffmpeg()
+    story_id = nsp.planned_story(store)
+    probe_host, _log = _host(store, story_id)
+    text = _line(probe_host, _shot(probe_host, 6))["text"]
+    host, log = _host(store, story_id, transcribe=Transcriber(words(text)))
+    shot = _shot(host, 6)
+    _put_clip(store, story_id, host, shot, make_clip(tmp_path / "one.mp4", 6))
+    host.native_take_shot(shot)
+    record = next(item for item in tas._board(store, story_id)["shots"]
+                  if item["shot_id"] == shot["shot_id"])["assets"]["clip"]["native_speech"]
+    assert list(record) == ["state", "matched", "heard", "start_s", "end_s", "aligned_by", "clip_sha256",
+                            "clip_real_s", "line_id", "checked_at"]
+    assert "lines" not in record and native_take.retake_reason(record) is None
+    assert any("its clip speaks its line (100 % of the words heard" in entry for entry in log)
+
+
 # =================================================================== flagged
 
 def test_a_take_that_does_not_speak_its_line_is_flagged_and_a_studio_story_is_told_how_to_retake(store, tmp_path):

@@ -3606,6 +3606,15 @@ _STORYBOARD_NATIVE_TAKE_SCHEMA = _or_null(_document({
     "checked_at": _NON_EMPTY_STRING,
 }, optional={
     "reason": {"type": ["string", "null"], "maxLength": 1000},
+    # Plan 27 stage 4: an exchange's take, line by line, in the shot's order (a one-line take has none).
+    "lines": {"type": "array", "minItems": 2, "maxItems": 4, "items": _document({
+        "line_id": {"type": "string", "pattern": r"^l[0-9]{2}$"},
+        "speaker": {"type": "string", "minLength": 1, "maxLength": 80},
+        "matched": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "heard": {"type": ["string", "null"], "maxLength": 400},
+        "start_s": {"type": ["number", "null"], "minimum": 0},
+        "end_s": {"type": ["number", "null"], "minimum": 0},
+    })},
 }))
 _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     "state": {"type": "string", "enum": list(CLIP_STATES)},

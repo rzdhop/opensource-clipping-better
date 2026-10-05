@@ -48,6 +48,7 @@ from . import (
     defaults,
     imaging,
     media_policy,
+    native_speech,
     platforms,
     prompting,
     prompts,
@@ -3826,6 +3827,10 @@ def _shot_clip(ec, script, shot, doc, *, link, tier, image_sha) -> dict:
         view["speaks"] = bool(shot["speaks"])
         view["take"] = None if take is None else {key: take.get(key) for key in (
             "state", "matched", "heard", "start_s", "end_s", "aligned_by", "reason")}
+        if take is not None and take.get("lines"):
+            # Plan 27 stage 4: an exchange's take, line by line.
+            view["take"]["lines"] = [dict(row) for row in take["lines"]]
+            view["take"]["summary"] = native_speech.exchange_summary(take)
     return view
 
 

@@ -3972,15 +3972,17 @@ class _Assets(voice_lines.LineMeasurement):
         if not shot.get("speaks"):
             self._native_length(shot, path)
             return
-        _scene, line = clips.speech_line(self.script, shot)
-        if line is None:
+        said = clips.speech_lines(self.script, shot)
+        if not said:
             return
+        line = said[0]
         sha = sha or _sha256_file(path)
-        if take_mod.is_current(clip.get("native_speech"), clip_sha256=sha, line_id=line["line_id"]) and (
+        if take_mod.is_current(clip.get("native_speech"), clip_sha256=sha, line_id=line["line_id"],
+                               line_ids=[item["line_id"] for item in said]) and (
                 clip["native_speech"]["state"] not in native_speech.TAKES_WITH_SPEECH
-                or voice_lines.is_measured(ec, line)):
+                or all(voice_lines.is_measured(ec, item) for item in self._cut_lines(said, clip["native_speech"]))):
             return
-        take = self._take(shot, line, path, sha)
+        take = self._take(shot, said, path, sha)
         if take is None:
             return
         summary = self.take_summary()
@@ -3989,8 +3991,12 @@ class _Assets(voice_lines.LineMeasurement):
         elif take["state"] == native_speech.TAKE_STT_UNAVAILABLE:
             summary["approximate"].append(shot_id)
         else:
-            summary["flagged"].append({"shot_id": shot_id, "state": take["state"], "matched": take.get("matched"),
-                                       "heard": take.get("heard")})
+            flagged = {"shot_id": shot_id, "state": take["state"], "matched": take.get("matched"),
+                       "heard": take.get("heard")}
+            if take.get("lines"):
+                # Plan 27 stage 4: an exchange names the lines its clip does not speak.
+                flagged["missing"] = [row["line_id"] for row in native_speech.missing_lines(take)]
+            summary["flagged"].append(flagged)
             if video is not None and row is not None:
                 self.retake_shot(shot, video=video, row=row, image_link=image_link)
 
@@ -4014,11 +4020,13 @@ class _Assets(voice_lines.LineMeasurement):
             self.write_board()
             self.save()
 
-    def _take(self, shot, line, path, sha):
-        """The take itself (:meth:`native_take_shot`); the record, or None
-        when the clip cannot be read (said)."""
+    def _take(self, shot, said, path, sha):
+        """The take itself (:meth:`native_take_shot`) of the shot's lines
+        *said* (one, or an exchange's 2-4, plan 27 stage 4: every line
+        matched, cut and recorded in order); the record, or None when the
+        clip cannot be read (said)."""
         ec, ctx = self.ec, self.ctx
-        shot_id, line_id = shot["shot_id"], line["line_id"]
+        shot_id, line_id = shot["shot_id"], said[0]["line_id"]
         clip = shot["assets"]["clip"]
         try:
             real = take_mod.clip_seconds(path, run=self.native_run)
@@ -4050,15 +4058,23 @@ class _Assets(voice_lines.LineMeasurement):
                                                        cancel=ctx.cancel)
                     except Exception as exc:  # noqa: BLE001 - an STT link that fails leaves the take approximate
                         words, reason = None, f"the transcription failed ({exc})"
-            take = native_speech.evaluate_take(line["text"], words, clip_real_s=real, clip_s=clip["clip_s"],
-                                               aligned_by=aligned_by)
+            if len(said) > 1:
+                take = native_speech.evaluate_exchange_take(said, words, clip_real_s=real, clip_s=clip["clip_s"],
+                                                            aligned_by=aligned_by)
+            else:
+                take = native_speech.evaluate_take(said[0]["text"], words, clip_real_s=real, clip_s=clip["clip_s"],
+                                                   aligned_by=aligned_by)
             if take["state"] == native_speech.TAKE_NO_SPEECH and reason is None and full is not None:
                 reason = "nothing was heard in the clip's sound"
-            if (take["state"] in native_speech.TAKES_WITH_SPEECH and full is not None
-                    and take.get("start_s") is not None and take.get("end_s") is not None):
-                written = self._take_audio(shot, line, path, take, work)
-                if written is not None:
-                    reason = written
+            if reason is None:
+                reason = take_mod.retake_reason(take)
+            if take["state"] in native_speech.TAKES_WITH_SPEECH and full is not None:
+                for part, spoken in self._parts(said, take):
+                    if part.get("start_s") is None or part.get("end_s") is None:
+                        continue
+                    written = self._take_audio(shot, spoken, path, part, work)
+                    if written is not None:
+                        reason = written
         now = llm_call.utc_now()
         if take["state"] == native_speech.TAKE_OK:
             reason = None
@@ -4072,6 +4088,28 @@ class _Assets(voice_lines.LineMeasurement):
         self.save()
         ctx.on_log(take_mod.summary_line(shot_id, dict(take, reason=reason)))
         return dict(take, reason=reason)
+
+    @staticmethod
+    def _cut_lines(said, take) -> list:
+        """The lines of *said* whose audio the recorded *take* cut from the
+        clip: every line of a one-line shot; an exchange's lines the take
+        heard (a line the clip does not speak has no audio to measure, and
+        asking again would not find one)."""
+        rows = {row.get("line_id"): row for row in take.get("lines") or ()}
+        if len(said) == 1 or not rows:
+            return list(said)
+        return [line for line in said if (rows.get(line["line_id"]) or {}).get("start_s") is not None]
+
+    @staticmethod
+    def _parts(said, take) -> list:
+        """``[(take of one line, its line)]``: the take itself for a one-line
+        shot, the take's own line rows (their start, end and words, the
+        link that aligned them) for an exchange."""
+        if len(said) == 1:
+            return [(take, said[0])]
+        rows = {row["line_id"]: row for row in take.get("lines") or ()}
+        return [(dict(rows[line["line_id"]], aligned_by=take.get("aligned_by")), line) for line in said
+                if line["line_id"] in rows]
 
     def _take_audio(self, shot, line, path, take, work):
         """The take's speech as the line's audio (``assets/voice/line_NN.wav``)

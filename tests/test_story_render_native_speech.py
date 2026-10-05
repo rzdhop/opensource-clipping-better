@@ -155,6 +155,28 @@ def test_the_native_board_places_each_line_where_its_clip_speaks_it(render):
     assert timeline["total_s"] == total["total_s"] == pytest.approx(6.6)
 
 
+def test_an_exchange_shot_places_each_of_its_lines_at_its_own_take_start_in_order():
+    """Plan 27 stage 4, fail-first. ``sh03`` speaks an exchange of two lines (``l03`` then ``l04``): the take
+    heard ``l03`` from 0.5 s and ``l04`` from 1.1 s; the timeline places each at its shot's start plus its own
+    start, in order, ``l03`` ending no later than ``l04`` starts; the one-line shots are as the test above."""
+    docs = _documents()
+    script, board = docs["script"], docs["storyboard"]
+    script["scenes"][1]["lines"].append(golden._line("l04", "char_a", "Go now", 0.5))
+    script["scenes"][1]["lines"][-1]["timing"].update(source="audio_duration_only", voice="native/clip")
+    shot = board["shots"][2]
+    shot["lines"] = ["l03", "l04"]
+    shot["assets"]["clip"]["native_speech"].update(
+        start_s=0.5, end_s=1.6, lines=[
+            {"line_id": "l03", "speaker": "char_b", "matched": 1.0, "heard": "Run now", "start_s": 0.5, "end_s": 1.0},
+            {"line_id": "l04", "speaker": "char_a", "matched": 1.0, "heard": "Go now", "start_s": 1.1, "end_s": 1.6}])
+    timeline = rt.build_timeline(script, board, docs["template"], "en", style_lock=docs["style_lock"])
+    lines = {line["line_id"]: line for line in timeline["lines"]}
+    assert (lines["l03"]["start_s"], lines["l04"]["start_s"]) == (4.5, 5.1)
+    assert lines["l03"]["start_s"] + lines["l03"]["duration_s"] <= lines["l04"]["start_s"] + 1e-6
+    assert lines["l04"]["start_s"] + lines["l04"]["duration_s"] <= 6.0 + 1e-6
+    assert lines["l01"]["start_s"] == 0.3 and lines["l02"]["start_s"] == 2.35
+
+
 def test_a_speaking_shots_clip_is_heard_in_place_of_its_line_and_a_silent_one_under_the_narrator(render):
     """The mix: each speaking clip's tone from its shot's first frame, its
     line's own file never heard; the narrator's line heard over the silent

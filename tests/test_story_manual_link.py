@@ -396,6 +396,48 @@ def test_an_8_s_upload_on_a_6_s_plan_is_judged_on_its_real_length(store, tmp_pat
     assert out["duration_s"] == pytest.approx(6.8, abs=1 / 30)
 
 
+def test_an_exchange_upload_is_taken_per_line_and_the_brief_says_the_lines_heard(store, tmp_path):
+    """Plan 27 stage 4, fail-first. A clip uploaded for an exchange shot, speaking its first line and then
+    other words: the take is flagged ``mismatch`` with each line's record, the missing one named (its id and
+    what was heard in its place); the brief's take reads "1 of 2 lines heard"; the same clip speaking both
+    lines reads "2 of 2 lines heard, min 1.00" and is ``take_ok``."""
+    import shutil
+
+    import test_story_native_take as tnt
+    from clipping.aistory import manual_uploads
+
+    tnt._require_ffmpeg()
+    story_id = nsp.exchange_story(store, profile=PROFILE)
+    _planted(store, story_id)
+    shot = nsp.exchange_shot(store, story_id)
+    script = tas.eps._script(store, story_id)
+    said = [line for scene in script["scenes"] for line in scene["lines"] if line["line_id"] in shot["lines"]]
+    first = tnt.words(said[0]["text"], start=0.5)
+    second = tnt.words(said[1]["text"], start=first[-1]["end"] + 0.5)
+    folder = manual_uploads.clips_folder(store, story_id, 1)
+
+    def upload(heard, name):
+        received = f"{folder}/.{name}.part"
+        shutil.copyfile(tnt.make_clip(tmp_path / f"{name}.mp4", 8), received)
+        return manual_uploads.accept_clip(store, story_id, 1, shot["shot_id"], received, filename=f"{name}.mp4",
+                                          env=tas._settings(), transcribe=tnt.Transcriber(heard))
+
+    out = upload(first + tnt.words("rien du tout ici", start=first[-1]["end"] + 0.5), "short")
+    take = out["take"]
+    assert take["state"] == "mismatch" and take["reason"] == f"{said[1]['line_id']} heard as 'rien du tout ici'"
+    assert [row["line_id"] for row in take["lines"]] == [line["line_id"] for line in said]
+    entry = next(item for item in _brief(store, story_id, "flow")["shots"] if item["shot_id"] == shot["shot_id"])
+    assert entry["state"] == "mismatch" and entry["take"]["summary"] == "1 of 2 lines heard, min 0.00"
+    assert [row["matched"] for row in entry["take"]["lines"]] == [1.0, 0.0]
+    out = upload(first + second, "whole")
+    assert out["take"]["state"] == "ok" and out["state"] == "take_ok"
+    entry = next(item for item in _brief(store, story_id, "flow")["shots"] if item["shot_id"] == shot["shot_id"])
+    assert entry["take"]["summary"] == "2 of 2 lines heard, min 1.00"
+    single = next(item for item in _brief(store, story_id, "flow")["shots"]
+                  if item["speaks"] and item["shot_id"] != shot["shot_id"])
+    assert single["take"] is None
+
+
 def test_a_story_whose_images_are_yours_awaits_its_keyframes_and_asks_nothing(store):
     """``images: manual``: no keyframe is asked of anything (the image
     adapters are never called); the step waits for the keyframes first --

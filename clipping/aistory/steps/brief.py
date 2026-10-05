@@ -45,7 +45,7 @@ import zipfile
 
 from clipping.providers import generation as gen
 
-from .. import media_policy, platforms, prompt_templates, prompting, schemas, video_plan
+from .. import media_policy, native_speech, platforms, prompt_templates, prompting, schemas, video_plan
 from .. import shots as shots_mod
 from . import clips, episode_common
 
@@ -452,6 +452,11 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None, wardrobe=None) -> d
     take = ((shot.get("assets") or {}).get("clip") or {}).get("native_speech")
     entry["take"] = ({key: take.get(key) for key in ("state", "matched", "heard", "start_s", "end_s", "reason")}
                      if take else None)
+    if take and take.get("lines"):
+        # Plan 27 stage 4: an exchange's take, line by line ("2 of 2 lines heard, min 0.91").
+        entry["take"]["lines"] = [{key: row.get(key) for key in ("line_id", "speaker", "matched", "heard")}
+                                  for row in take["lines"]]
+        entry["take"]["summary"] = native_speech.exchange_summary(take)
     return entry
 
 

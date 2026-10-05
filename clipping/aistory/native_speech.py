@@ -143,7 +143,11 @@ def _matches(text, stt_words) -> tuple:
     (punctuation alone is not: a French "?" is no word to hear), and the
     ``(word index, heard index)`` pairs matched, compared as
     ``wordtiming.align`` compares them."""
-    tokens = wordtiming.tokens(text)
+    return _matches_tokens(wordtiming.tokens(text), stt_words)
+
+
+def _matches_tokens(tokens, stt_words) -> tuple:
+    """:func:`_matches` on already split *tokens*."""
     ours = [wordtiming.normalise(word) or f"\0{i}" for i, word in enumerate(tokens)]
     spoken = [i for i, word in enumerate(tokens) if wordtiming.normalise(word)]
     theirs = [wordtiming.normalise((word or {}).get("word")) or f"\1{j}" for j, word in enumerate(stt_words or ())]
@@ -192,18 +196,160 @@ def evaluate_take(text, stt_words, *, clip_real_s, clip_s, aligned_by=None) -> d
         return {"state": TAKE_MISMATCH, "matched": matched, "heard": heard_text(heard), "start_s": None,
                 "end_s": None, "aligned_by": aligned_by, "words": None}
     # The speech runs from the first word of the line heard to the last one.
-    spans = wordtiming._spans(heard, clip_real_s)
-    start = spans[pairs[0][1]][0]
-    end = max(spans[pairs[-1][1]][1], start + 0.05)
-    window = [dict(word, start=max(0.0, float(word["start"]) - start), end=max(0.0, float(word["end"]) - start))
-              for word in heard[pairs[0][1]:pairs[-1][1] + 1]]
-    aligned = wordtiming.align(text, window, end - start) or []
+    start, end, words = _line_span(heard, pairs, clip_real_s, text)
     # Judged against the clip's REAL length: a clip longer than planned (an 8 s upload for a 4 s line) may
     # speak past the planned length; ``clip_s`` is only what the plan bought.
     ok = matched >= MIN_MATCHED and end <= clip_real_s - END_MARGIN_S + 1e-9
-    words = [{"word": word["word"], "start": word["start"], "end": word["end"]} for word in aligned]
     return {"state": TAKE_OK if ok else TAKE_MISMATCH, "matched": matched, "heard": heard_text(heard),
             "start_s": round(start, 3), "end_s": round(end, 3), "aligned_by": aligned_by, "words": words}
+
+
+def _line_span(heard, pairs, clip_real_s, text):
+    """``(start, end, words)`` of one line from its matched *pairs*
+    (``(word index, heard index)``, in the line's own word indexes) in the
+    *heard* transcription: the speech runs from the first heard word of the
+    line to the last one; ``words`` are the line's words timed from
+    ``start``."""
+    spans = wordtiming._spans(heard, clip_real_s)
+    first, last = pairs[0][1], pairs[-1][1]
+    start = spans[first][0]
+    end = max(spans[last][1], start + 0.05)
+    window = [dict(word, start=max(0.0, float(word["start"]) - start), end=max(0.0, float(word["end"]) - start))
+              for word in heard[first:last + 1]]
+    aligned = wordtiming.align(text, window, end - start) or []
+    return start, end, [{"word": word["word"], "start": word["start"], "end": word["end"]} for word in aligned]
+
+
+def _turns(heard, count) -> list | None:
+    """The transcription's speaker turns -- runs of words carrying the same
+    ``speaker`` -- as ``[(first index, last index)]`` when every word carries
+    one and there are exactly *count* turns; else None (the greedy order)."""
+    labels = [word.get("speaker") for word in heard]
+    if not heard or any(label in (None, "") for label in labels):
+        return None
+    runs, begin = [], 0
+    for index in range(1, len(heard) + 1):
+        if index == len(heard) or labels[index] != labels[begin]:
+            runs.append((begin, index - 1))
+            begin = index
+    return runs if len(runs) == count else None
+
+
+def _exchange_pairs(lines, heard) -> list:
+    """For each of *lines*, its ``(spoken, pairs)`` against *heard*: by
+    speaker turn when the transcription carries exactly one turn per line
+    (:func:`_turns`), else greedy in order -- the lines' words as one text,
+    matched once against the whole transcription, so a word two lines share
+    is heard once and a line missing from the clip matches nothing -- the
+    pairs then dealt back to their line."""
+    tokens = [wordtiming.tokens(line["text"]) for line in lines]
+    turns = _turns(heard, len(lines))
+    if turns is not None:
+        found = []
+        for words, (first, last) in zip(tokens, turns):
+            spoken, pairs = _matches_tokens(words, heard[first:last + 1])
+            found.append((spoken, [(a, b + first) for a, b in pairs]))
+        return found
+    spoken_all, pairs_all = _matches_tokens([word for words in tokens for word in words], heard)
+    found, offset = [], 0
+    for words in tokens:
+        low, high = offset, offset + len(words)
+        spoken = [i - low for i in spoken_all if low <= i < high]
+        found.append((spoken, [(a - low, b) for a, b in pairs_all if low <= a < high]))
+        offset = high
+    return found
+
+
+def evaluate_exchange_take(lines, stt_words, *, clip_real_s, clip_s, aligned_by=None) -> dict:
+    """What the clip's own sound says of an exchange's *lines* (plan 27 stage
+    4; ``[{line_id, speaker, text}]`` in the shot's order), line by line::
+
+        {"state", "matched", "heard", "start_s", "end_s", "aligned_by", "words",
+         "lines": [{"line_id", "speaker", "matched", "heard", "start_s", "end_s", "words"}]}
+
+    Each line is matched as :func:`evaluate_take` matches a one-line shot
+    (:func:`_exchange_pairs` deals the transcription to the lines), its
+    ``heard`` the words of the transcription that fall to it. The shot's
+    ``matched`` is the MINIMUM of the lines': the gate refuses a take when
+    any line is below :data:`MIN_MATCHED`, and a mean would let one heard
+    line hide a missing one. ``start_s`` is the first line's and ``end_s``
+    the last one's last word (what the trim reads); the state is ``ok`` when
+    every line is ``ok`` (its words matched, its last word ending before the
+    clip's end), ``no_speech`` when nothing is heard, ``mismatch`` otherwise.
+    ``stt_unavailable``: the planned window is shared among the lines by
+    their words (each approximate)."""
+    clip_real_s = float(clip_real_s)
+    if stt_words is None:
+        start, end = planned_window(clip_real_s)
+        weights = [max(1, words_of(line["text"])) for line in lines]
+        total, cursor, rows = float(sum(weights)), start, []
+        for line, weight in zip(lines, weights):
+            until = round(cursor + (end - start) * weight / total, 3)
+            rows.append({"line_id": line["line_id"], "speaker": line["speaker"], "matched": None, "heard": None,
+                         "start_s": round(cursor, 3), "end_s": until, "words": None})
+            cursor = until
+        return {"state": TAKE_STT_UNAVAILABLE, "matched": None, "heard": None, "start_s": start, "end_s": end,
+                "aligned_by": None, "words": None, "lines": rows}
+    heard = [word for word in stt_words if isinstance(word, dict) and str(word.get("word") or "").strip()]
+    rows = [{"line_id": line["line_id"], "speaker": line["speaker"], "matched": 0.0, "heard": "", "start_s": None,
+             "end_s": None, "words": None} for line in lines]
+    if not heard:
+        return {"state": TAKE_NO_SPEECH, "matched": 0.0, "heard": "", "start_s": None, "end_s": None,
+                "aligned_by": aligned_by, "words": None, "lines": rows}
+    found = _exchange_pairs(lines, heard)
+    anchored = [i for i, (_spoken, pairs) in enumerate(found) if pairs]
+    ok = True
+    for line, row, (spoken, pairs) in zip(lines, rows, found):
+        row["matched"] = round(len(pairs) / len(spoken), 3) if spoken else 0.0
+        if not pairs:
+            ok = False
+            continue
+        start, end, words = _line_span(heard, pairs, clip_real_s, line["text"])
+        row.update(start_s=round(start, 3), end_s=round(end, 3), words=words)
+        ok = ok and row["matched"] >= MIN_MATCHED and end <= clip_real_s - END_MARGIN_S + 1e-9
+    # What each line heard: its own words (the first from the clip's start, the last to its end); a line
+    # no word matched gets the words between its neighbours' (nothing when none is left).
+    for index, row in enumerate(rows):
+        pairs = found[index][1]
+        if pairs:
+            low = 0 if index == 0 else pairs[0][1]
+            high = len(heard) - 1 if index == len(lines) - 1 else pairs[-1][1]
+        else:
+            before = [found[i][1][-1][1] for i in anchored if i < index]
+            after = [found[i][1][0][1] for i in anchored if i > index]
+            low = (before[-1] + 1) if before else 0
+            high = (after[0] - 1) if after else len(heard) - 1
+        row["heard"] = heard_text(heard[low:high + 1]) if high >= low else ""
+    matched = min(row["matched"] for row in rows)
+    first = next((row for row in rows if row["start_s"] is not None), None)
+    last = next((row for row in reversed(rows) if row["end_s"] is not None), None)
+    if first is None:
+        return {"state": TAKE_MISMATCH, "matched": matched, "heard": heard_text(heard), "start_s": None,
+                "end_s": None, "aligned_by": aligned_by, "words": None, "lines": rows}
+    return {"state": TAKE_OK if ok else TAKE_MISMATCH, "matched": matched, "heard": heard_text(heard),
+            "start_s": first["start_s"], "end_s": last["end_s"], "aligned_by": aligned_by, "words": None,
+            "lines": rows}
+
+
+def missing_lines(take) -> list:
+    """The per-line records of an exchange *take* whose line the clip does
+    not speak as written (matched below :data:`MIN_MATCHED`); empty for a
+    take with speech approved, a one-line take (no ``lines``) or one the
+    STT could not check."""
+    if not isinstance(take, dict) or take.get("state") not in (TAKE_MISMATCH, TAKE_NO_SPEECH):
+        return []
+    return [row for row in take.get("lines") or () if (row.get("matched") or 0.0) < MIN_MATCHED]
+
+
+def exchange_summary(take) -> str | None:
+    """"2 of 2 lines heard, min 0.91" for an exchange *take*, else None."""
+    rows = take.get("lines") if isinstance(take, dict) else None
+    if not rows:
+        return None
+    if take.get("state") == TAKE_STT_UNAVAILABLE:
+        return f"{len(rows)} lines, not checked"
+    heard = sum(1 for row in rows if (row.get("matched") or 0.0) >= MIN_MATCHED)
+    return f"{heard} of {len(rows)} lines heard, min {min((row.get('matched') or 0.0) for row in rows):.2f}"
 
 
 def _frames_down(seconds) -> float:
@@ -242,7 +388,12 @@ def line_placements(script, storyboard, language_duration) -> dict:
     *storyboard* places: a speaking shot's line at its shot's offset in the
     scene plus its take's ``start_s`` (the planned lead without one), a
     narrator's at its shot's offset plus :data:`NARRATOR_LEAD_S`; never past
-    its shot's end. *language_duration(line)* is the line's own length."""
+    its shot's end. *language_duration(line)* is the line's own length.
+
+    An exchange (plan 27 stage 4: a speaking shot of several lines) places
+    each line at its own start: the take's per-line ``start_s``, else the
+    planned lead plus the lines before it (their ``language_duration``, one
+    after the other); a line ends no later than the next one starts."""
     by_scene = {}
     for shot in sorted(storyboard["shots"], key=lambda item: item["order"]):
         by_scene.setdefault(shot["scene_id"], []).append(shot)
@@ -253,15 +404,25 @@ def line_placements(script, storyboard, language_duration) -> dict:
         for shot in shots:
             duration = float(shot["duration_s"] or 0.0)
             take = take_of(shot)
-            for line_id in shot["lines"]:
-                line = lines.get(line_id)
-                if line is None:
-                    continue
+            spoken = [line_id for line_id in shot["lines"] if line_id in lines]
+            heard = {row.get("line_id"): row for row in (take or {}).get("lines") or ()}
+            planned = PLANNED_LEAD_S
+            leads, seconds_of = [], []
+            for position, line_id in enumerate(spoken):
                 lead = NARRATOR_LEAD_S
+                seconds = float(language_duration(lines[line_id]))
                 if shot.get("speaks"):
-                    lead = float(take["start_s"]) if take and take.get("start_s") is not None else PLANNED_LEAD_S
-                seconds = float(language_duration(line))
-                lead = min(lead, max(0.0, duration - 0.05))
+                    start = (heard.get(line_id) or {}).get("start_s")
+                    if start is None and position == 0 and not heard and take:
+                        start = take.get("start_s")
+                    lead = float(start) if start is not None else planned
+                    planned = lead + seconds
+                leads.append(min(lead, max(0.0, duration - 0.05)))
+                seconds_of.append(seconds)
+            for position, line_id in enumerate(spoken):
+                lead, seconds = leads[position], seconds_of[position]
+                if position + 1 < len(spoken) and leads[position + 1] > lead:
+                    seconds = min(seconds, leads[position + 1] - lead)
                 seconds = max(0.05, min(seconds, duration - lead))
                 placed[line_id] = (round(offset + lead, 3), round(seconds, 3))
             offset += duration

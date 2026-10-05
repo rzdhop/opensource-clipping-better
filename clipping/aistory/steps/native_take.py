@@ -117,21 +117,34 @@ def line_timing(line, *, duration_s, voice, audio_rel) -> dict:
 
 
 def record(take, *, clip_sha256, clip_real_s, line_id, now, reason=None) -> dict:
-    """``assets.clip.native_speech``: the take as the storyboard keeps it."""
+    """``assets.clip.native_speech``: the take as the storyboard keeps it.
+    An exchange's take (plan 27 stage 4: it carries ``lines``) adds the
+    per-line ``{line_id, speaker, matched, heard, start_s, end_s}``; its
+    ``line_id`` is the first line's, ``matched`` the minimum of the lines'.
+    A one-line take keeps its shape exactly."""
     entry = {"state": take["state"], "matched": take.get("matched"), "heard": take.get("heard"),
              "start_s": take.get("start_s"), "end_s": take.get("end_s"), "aligned_by": take.get("aligned_by"),
              "clip_sha256": clip_sha256, "clip_real_s": round(float(clip_real_s), 3), "line_id": line_id,
              "checked_at": now}
+    if take.get("lines"):
+        entry["lines"] = [{key: row.get(key) for key in ("line_id", "speaker", "matched", "heard", "start_s",
+                                                         "end_s")} for row in take["lines"]]
     if reason:
         entry["reason"] = reason[:1000]
     return entry
 
 
-def is_current(take, *, clip_sha256, line_id) -> bool:
+def is_current(take, *, clip_sha256, line_id, line_ids=None) -> bool:
     """Whether *take* (``assets.clip.native_speech``) is the take of the clip
-    whose sha256 is *clip_sha256*, for line *line_id*."""
-    return (isinstance(take, dict) and take.get("clip_sha256") == clip_sha256 and take.get("line_id") == line_id
-            and take.get("state") in native_speech.TAKE_STATES)
+    whose sha256 is *clip_sha256*, for line *line_id* (an exchange's first;
+    *line_ids* all of them, in order: a take of another set of lines is not
+    this one's)."""
+    if not (isinstance(take, dict) and take.get("clip_sha256") == clip_sha256 and take.get("line_id") == line_id
+            and take.get("state") in native_speech.TAKE_STATES):
+        return False
+    if line_ids is not None and len(line_ids) > 1:
+        return [row.get("line_id") for row in take.get("lines") or ()] == list(line_ids)
+    return True
 
 
 def pinned_voice(ec, speaker) -> str | None:
@@ -144,16 +157,55 @@ def pinned_voice(ec, speaker) -> str | None:
     return voices.voice_label(voice_lines.speaker_voice(ec, speaker))
 
 
+def _percent(value) -> int:
+    return round((value or 0) * 100)
+
+
 def summary_line(shot_id, take) -> str:
-    """The feed's line for a take."""
+    """The feed's line for a take. An exchange's names every line the clip
+    does not speak as written, with what was heard in its place."""
     state = take["state"]
+    rows = take.get("lines") or []
     if state == native_speech.TAKE_OK:
-        return (f"🗣 Shot {shot_id}: its clip speaks its line ({round((take.get('matched') or 0) * 100)} % of the "
+        if rows:
+            return (f"🗣 Shot {shot_id}: its clip speaks its {len(rows)} lines in turn "
+                    f"({native_speech.exchange_summary(take)}, {take['start_s']:.2f}-{take['end_s']:.2f} s, by "
+                    f"{take.get('aligned_by') or 'stt'})")
+        return (f"🗣 Shot {shot_id}: its clip speaks its line ({_percent(take.get('matched'))} % of the "
                 f"words heard, {take['start_s']:.2f}-{take['end_s']:.2f} s, by {take.get('aligned_by') or 'stt'})")
     if state == native_speech.TAKE_STT_UNAVAILABLE:
-        return (f"🗣 Shot {shot_id}: its clip's speech could not be checked ({take.get('reason') or 'no STT link'}): "
+        what = f"its {len(rows)} lines" if rows else "its clip's speech"
+        return (f"🗣 Shot {shot_id}: {what} could not be checked ({take.get('reason') or 'no STT link'}): "
                 "the subtitles are split evenly over the planned window (approximate)")
+    if rows:
+        missing = native_speech.missing_lines(take) or rows
+        names = "; ".join(line_heard(row) for row in missing)
+        if state == native_speech.TAKE_NO_SPEECH:
+            return (f"⚠️ Shot {shot_id}: its clip speaks no word of its {len(rows)} lines (nothing heard): flagged "
+                    "for a retake")
+        return (f"⚠️ Shot {shot_id}: its clip does not speak {_and_lines(missing)} as written "
+                f"({native_speech.exchange_summary(take)}: {names}): flagged for a retake")
     if state == native_speech.TAKE_NO_SPEECH:
         return f"⚠️ Shot {shot_id}: its clip speaks no word of its line (nothing heard): flagged for a retake"
-    return (f"⚠️ Shot {shot_id}: its clip does not speak its line as written ({round((take.get('matched') or 0) * 100)} "
+    return (f"⚠️ Shot {shot_id}: its clip does not speak its line as written ({_percent(take.get('matched'))} "
             f"% of the words heard: \"{(take.get('heard') or '')[:120]}\"): flagged for a retake")
+
+
+def line_heard(row) -> str:
+    """"l09 heard as 'bonjour'" (or "heard as nothing") for an exchange's line record."""
+    heard = (row.get("heard") or "").strip()
+    return f"{row['line_id']} heard as '{heard[:120]}'" if heard else f"{row['line_id']} heard as nothing"
+
+
+def _and_lines(rows) -> str:
+    ids = [row["line_id"] for row in rows]
+    return f"line {ids[0]}" if len(ids) == 1 else "lines " + ", ".join(ids[:-1]) + f" and {ids[-1]}"
+
+
+def retake_reason(take) -> str | None:
+    """What an exchange's mismatch says to the retake (the record's
+    ``reason``, the brief's take): each line below the threshold named with
+    what the clip said in its place; None for a one-line take or a take that
+    speaks every line."""
+    rows = native_speech.missing_lines(take)
+    return "; ".join(line_heard(row) for row in rows) or None
