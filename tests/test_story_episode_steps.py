@@ -1059,6 +1059,45 @@ def test_the_script_step_repairs_dropped_french_elisions_in_every_field(store):
     assert script["next_episode_teaser"] == "Demain, l'alliance eclate."
 
 
+def test_a_french_e2_reply_without_on_screen_text_is_an_ordinary_schema_error_and_retried(store):
+    """Plan 23 D7 follow-up: a one-link chain without a strict schema can
+    answer an E2 reply that lacks ``on_screen_text``. The French elision
+    repair used to read it bare (a KeyError no caller catches, so the whole
+    script step died with no retry); it now leaves the key alone, the schema
+    validator refuses the reply as any other, and the retry's complete reply
+    is applied and repaired exactly as before."""
+    m = _new()
+    story_id = _continuity_story(store, entries=((1, _memory_entry("Un resume.", [])),), chosen=None)
+    e1 = copy.deepcopy(E1_REPLY)
+    e1["scenes"].insert(0, _stub("recap", PARLOIR, "day", [KIWILO], [], "Ce qui s est passe au parloir.",
+                                 "tension", 2.5))
+
+    recap = {"lines": [{"speaker": KIWILO, "text": "Hier soir.", "emotion": "tension", "delivery": "hushed"}],
+             "on_screen_text": None}
+
+    def e2_without_on_screen_text(call):
+        reply = e2_reply(call)
+        del reply["on_screen_text"]
+        return reply
+
+    def e2_complete(call):
+        reply = e2_reply(call)
+        reply["lines"][0]["text"] = "C est l alliance qu il voulait."
+        reply["on_screen_text"] = "l alliance"
+        return reply
+
+    llm = _script_llm(E1=[e1], E2=[e2_without_on_screen_text, e2_complete] + [e2_reply] * (len(BODY) - 1),
+                      E3=[dict(E3_FULL, recap=recap)], E4=[E4_PASSED])
+
+    _, log = _run(m.script, store, story_id, llm=llm, ep=2)
+
+    assert any("E2 reply rejected" in line and "on_screen_text" in line for line in log)
+    script = _script(store, story_id, 2)
+    assert _scene(script, "s02")["lines"][0]["text"] == "C'est l'alliance qu'il voulait."
+    assert _scene(script, "s02")["on_screen_text"] == "l'alliance"
+    assert llm.prompts().count("E2") == len(BODY) + 1
+
+
 def test_a_story_with_no_props_gets_every_scenes_props_emptied_before_e1_is_checked(store):
     """T2-F9 (live, 2026-09-29): on a story with no props the free tier
     filled every scene's ``props`` with object names ('magnifying glass')

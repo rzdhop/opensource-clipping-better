@@ -429,10 +429,17 @@ def _repair_e2_reply(ec, reply) -> None:
     (what the word-budget floor below counts) and the on-screen text."""
     if ec.language != "fr":
         return
-    for line in reply["lines"]:
-        line["text"] = prompts.repair_fr_elisions(line["text"])
-    if reply["on_screen_text"]:
-        reply["on_screen_text"] = prompts.repair_fr_elisions(reply["on_screen_text"])
+    # A reply without a strict schema may miss a key or type it wrongly: touch
+    # only what is a list / a str and let the schema validator refuse the rest
+    # as an ordinary error (a KeyError here would end the step with no retry).
+    lines = reply.get("lines")
+    if isinstance(lines, list):
+        for line in lines:
+            if isinstance(line, dict) and isinstance(line.get("text"), str):
+                line["text"] = prompts.repair_fr_elisions(line["text"])
+    on_screen = reply.get("on_screen_text")
+    if isinstance(on_screen, str) and on_screen:
+        reply["on_screen_text"] = prompts.repair_fr_elisions(on_screen)
 
 
 def _repair_e3_reply(ec, reply) -> None:
