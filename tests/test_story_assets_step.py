@@ -57,6 +57,8 @@ GEN_VARS = (
     "STT_CHAIN", "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL",
 )
 
+STOCK_VARS = ("PEXELS_API_KEY", "PIXABAY_API_KEY", "BROLL_LOCAL_DIR", "BROLL_SOURCES")
+
 
 @pytest.fixture(autouse=True)
 def hermetic(monkeypatch, tmp_path):
@@ -65,11 +67,13 @@ def hermetic(monkeypatch, tmp_path):
     lifted (the allowances still count), so two dozen images do not wait."""
     from clipping.config import PROVIDER_KEYS  # before the delenv: it reads .env (A-049)
     from clipping.providers import adapters, budget, images, limits, llm, local_comfyui, pacing, transport
+    from clipping.stock import base as stock_base
 
     for _name, (_attr, env_name) in PROVIDER_KEYS.items():
         monkeypatch.delenv(env_name, raising=False)
-    for name in eps.CHAIN_VARS + GEN_VARS:
+    for name in eps.CHAIN_VARS + GEN_VARS + STOCK_VARS:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("STOCK_CACHE_DIR", str(tmp_path / "stock-cache"))
     for name in list(os.environ):
         if name.startswith("LIMIT_"):
             monkeypatch.delenv(name, raising=False)
@@ -95,6 +99,11 @@ def hermetic(monkeypatch, tmp_path):
     monkeypatch.setattr(local_comfyui, "urllib_transport", no_network)
     monkeypatch.setattr(images, "_openai_client", no_sdk)
 
+    def no_stock_request():
+        raise AssertionError("a real stock request was attempted")
+
+    monkeypatch.setattr(stock_base, "opener", no_stock_request)
+
     before = {path: eps._fingerprint(path) for path in eps.REAL_FILES + eps.REAL_STORIES}
     yield
     assert limits.default_usage_path().startswith(str(tmp_path))
@@ -105,6 +114,18 @@ def hermetic(monkeypatch, tmp_path):
     llm.reset_negotiation()
     llm.reset_model_fallbacks()
     assert {path: eps._fingerprint(path) for path in eps.REAL_FILES + eps.REAL_STORIES} == before
+
+
+def test_the_hermetic_fixture_closes_the_stock_surface(tmp_path):
+    """Plan 23 B8: the stock keys and folders of the machine (the project's ``.env`` loads
+    ``PEXELS_API_KEY``) never reach a test, the stock cache is private, the opener refuses."""
+    from clipping.stock import base as stock_base
+
+    for name in STOCK_VARS:
+        assert name not in os.environ, name
+    assert stock_base.cache_root().startswith(str(tmp_path))
+    with pytest.raises(AssertionError, match="stock request"):
+        stock_base.opener()
 
 
 @pytest.fixture
