@@ -1,16 +1,19 @@
-## CURRENT STATE — plan 25 (the handoff) APPROVED (DEC-301); phase IMPLEMENT — stages 0 and 1 in worktrees (2026-10-05, local session)
+## CURRENT STATE — plan 25 (the handoff): stages 0, 1, 2, 5 MERGED; stages 3 (the Handoff view) and 4 (the tiles) in worktrees (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `80baa5a` (+ this docs commit), clean tree,
-  CI green (f3849a5). Plan: `.claude/plans/ai-story/25-handoff-plan.md` (six stages + stage 0). Running: stage 0
-  (Opus, `feat/plan25-s0`, worktree plan25-s0: human-cast handles/anchors by name) and stage 1 (Opus,
-  `feat/plan25-s1`, worktree plan25-s1: `shot_modes` per shot through `class_link`, `upload_target_refusal`, the
-  assets step and the gate; `PATCH …/shots/{id}/mode`). Next: stage 2 (handoff document + routes, Sonnet) → 3 (the
-  Handoff view, Opus; image rebuild at 0 jobs) → 4 (tiles) → 5 (wizard) → 6 (docs + the human's Flow walk).
-- **Live:** main 10defae's code (bundle index-DU7H2ro8.js), health 200. Plan 24 closed (DEC-298/300); its Tier-2 walk
-  (regenerate e7412a3efcc6 ep1) still the human's. Plan 23's human items unchanged (keys, fal top-up, the A/B).
-- **Rules in force:** unchanged (worktrees, DEC-234 both envs + prompts.py → test_story_prompts_episode.py, DEC-297
-  pin files, deploy at 0 jobs after the 3.11 compile, no full local suite, no source edits during a job, money only
-  on the human's go).
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `7634830` (+ this docs commit), clean tree,
+  CI green through e3d8596 (later runs in progress). Running: stage 3 (Opus, `feat/plan25-s3`, worktree plan25-s3:
+  `HandoffPage.jsx` at `/story/:id/episodes/:ep/handoff`, the Shot list retired, `#shots` kept) and stage 4 (Sonnet,
+  `feat/plan25-s4`: `PromptDrawer.jsx` on the Cast / Places / Props tiles from the image brief). Next: merge both →
+  **deploy at 0 jobs (3.11 compile, rm -sfv + rebuild: stages 0, 1, 2 Python + 3, 4, 5 dashboard)** → stage 6 docs
+  (`docs/AI_STORY.md` "Your own clips" around the Handoff; DEC for the shipped shape) → the human's Flow walk from the
+  Handoff + the refresh of e7412a3efcc6's storyboard prompts (stage 0's names; stales its made keyframes — the
+  human's call).
+- **Merged this plan:** stage 0 34b46fe (human casts named), stage 1 597513a (`shot_modes` per shot, the gate prices
+  auto rows only, `PATCH …/shots/{sid}/mode`), stage 5 cc65a66 (How clips / images are made controls), stage 2
+  4041470 (`GET/PATCH …/handoff`, per-shot references.zip, image-brief.zip). None deployed yet.
+- **Live:** main 10defae's code (bundle index-DU7H2ro8.js), health 200. Plan 24's walk and plan 23's human items
+  unchanged.
+- **Rules in force:** unchanged.
 - **Open questions:** none blocking.
 
 ## CURRENT STATE — plan 24 (the timing harness) CODE + DOCS COMPLETE and LIVE; close-out pending the human's walk; plan 23 follow-ups ALL DONE (2026-10-05, local session)
