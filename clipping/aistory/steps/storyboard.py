@@ -37,6 +37,7 @@ A storyboard written here is never approved (``build_storyboard`` clears
 
 from __future__ import annotations
 
+import re
 import time
 
 from clipping.providers import pricing
@@ -589,7 +590,38 @@ def _repair_camera(reply, previous_camera) -> list:
     return fixed
 
 
-def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None) -> list:
+def _repair_names(reply, tags_allowed, names) -> list:
+    """The name half of :func:`_repair_t1_v2_reply`: the writer is shown the
+    human-named casts by name (plan 25), so it writes "Rida" or
+    "Marie-Jeanne's pen" in a shot's ``action`` or ``motion``, which
+    :func:`clipping.aistory.prompts.validate_t1_v2` refuses ("names the
+    character ... instead of using a tag") and the step then pays a retry
+    per scene. Each whole-word, case-insensitive occurrence of the name of a
+    character *of this scene* (its tag in *tags_allowed*) becomes that tag,
+    a possessive keeping its ``'s``; the tag then joins ``subjects`` through
+    the tag repair that follows. A name of a character outside the scene is
+    left for the validator. *names* is ``{char_id: name}``."""
+    fixed = []
+    allowed = set(tags_allowed)
+    mapping = sorted(((name, f"@{cid}") for cid, name in (names or {}).items()
+                      if isinstance(name, str) and name.strip() and f"@{cid}" in allowed),
+                     key=lambda pair: -len(pair[0]))
+    for i, shot in enumerate(reply["shots"]):
+        if not isinstance(shot, dict):
+            continue
+        for field in ("action", "motion"):
+            text = shot.get(field)
+            if not isinstance(text, str):
+                continue
+            for name, tag in mapping:
+                text, count = re.subn(rf"\b{re.escape(name)}\b", lambda _m, tag=tag: tag, text, flags=re.IGNORECASE)
+                if count:
+                    fixed.append(f"shot {i + 1}: {name!r} -> {tag!r} in {field}")
+            shot[field] = text
+    return fixed
+
+
+def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None, names=None) -> list:
     """Repair a T1 v2 reply in place before its validator runs (fix B,
     found when gemini kept failing T1 v2 twice on one scene): a
     @char/%prop/#place tag used in a shot's ``action``, ``motion`` or
@@ -603,12 +635,16 @@ def _repair_t1_v2_reply(reply, *, tags_allowed, previous_camera=None) -> list:
     refuse as it always has. DEC-252: a camera motion repeating the shot's
     before it (*previous_camera* for the scene's first) is moved on
     (:func:`_repair_camera`) rather than refused -- a retry costs a call,
-    the next motion costs nothing. Returns one description per repair, for
-    the caller to log."""
+    the next motion costs nothing. A character's name written in an action
+    or motion (*names*, ``{char_id: name}``) becomes its tag first
+    (:func:`_repair_names`), so the tag repair below lists it in
+    ``subjects``. Returns one description per repair, for the caller to
+    log."""
     added = []
     if not isinstance(reply, dict) or not isinstance(reply.get("shots"), list):
         return added
     added.extend(_repair_camera(reply, previous_camera))
+    added.extend(_repair_names(reply, tags_allowed, names))
     added.extend(_repair_insert_prop(reply, tags_allowed))
     allowed = set(tags_allowed)
     for i, shot in enumerate(reply["shots"]):
@@ -655,7 +691,8 @@ def plan_scene_v2(ctx, ec, script, plans, scene, *, tools, announced, limit_s=No
                                                **_builder_kwargs(inputs))
 
     def validate(reply):
-        added = _repair_t1_v2_reply(reply, tags_allowed=inputs["tags_allowed"], previous_camera=previous_camera)
+        added = _repair_t1_v2_reply(reply, tags_allowed=inputs["tags_allowed"], previous_camera=previous_camera,
+                                      names=inputs["names"])
         if added:
             ctx.on_log("🩹 T1 v2 reply repaired: " + "; ".join(added))
         return prompts.validate_t1_v2(reply, scene=scene, shots_per_scene=inputs["shots_per_scene"],

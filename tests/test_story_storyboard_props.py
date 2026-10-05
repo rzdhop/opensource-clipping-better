@@ -332,3 +332,47 @@ def test_t1_v2_reply_leaves_a_tag_outside_the_scene_for_the_validator():
 
     errors = prompts.validate_t1_v2(reply, **check)
     assert any("@char_broccolia" in e and "not listed in subjects" in e for e in errors)
+
+
+# Plan 25 DEC-302 shows the writer the human-named casts by name, so a reply writes "Rida" or "Marie-Jeanne"
+# in action/motion; the validator refused it and the step paid for a retry per scene.
+# ``_repair_t1_v2_reply(names=...)`` maps a cast name to its tag first.
+
+def test_t1_v2_reply_maps_a_cast_name_to_its_tag_instead_of_a_retry():
+    names = dict(tpe.NAMES_T1, char_rida="Rida", char_marie_jeanne="Marie-Jeanne")
+    tags = tpe.TAGS_T1 + ["@char_rida", "@char_marie_jeanne"]
+    check = _t1_v2_check(tags_allowed=tags, names=names)
+    shot = tpe._good_t1_v2_shot(
+        action="Rida leans over the pool rail while Marie-Jeanne's pen taps %prop_phone, daring @char_kiwilo to talk.",
+        motion="rida steps back as MARIE-JEANNE lifts %prop_phone slowly",
+    )
+    errors = prompts.validate_t1_v2({"shots": [copy.deepcopy(shot)]}, **check)
+    assert any("names the character 'Rida'" in e and ".action" in e for e in errors)
+    assert any("names the character 'Marie-Jeanne'" in e and ".motion" in e for e in errors)
+
+    reply = {"shots": [copy.deepcopy(shot)]}
+    added = storyboard._repair_t1_v2_reply(reply, tags_allowed=tags, names=names)
+    fixed = reply["shots"][0]
+    assert fixed["action"] == ("@char_rida leans over the pool rail while @char_marie_jeanne's pen taps %prop_phone, "
+                               "daring @char_kiwilo to talk.")
+    assert fixed["motion"] == "@char_rida steps back as @char_marie_jeanne lifts %prop_phone slowly"
+    assert fixed["subjects"] == shot["subjects"] + ["@char_rida", "@char_marie_jeanne"]
+    assert "shot 1: 'Rida' -> '@char_rida' in action" in added
+    assert "shot 1: 'Marie-Jeanne' -> '@char_marie_jeanne' in action" in added
+    assert "shot 1: 'Rida' -> '@char_rida' in motion" in added
+    assert "shot 1: 'Marie-Jeanne' -> '@char_marie_jeanne' in motion" in added
+    assert any("'@char_rida' added to subjects" in line for line in added)
+    assert prompts.validate_t1_v2(reply, **check) == []
+
+
+def test_t1_v2_reply_still_refuses_a_name_that_is_not_a_scene_cast_member():
+    names = dict(tpe.NAMES_T1, char_broccolia="Broccolia")
+    check = _t1_v2_check(names=names)
+    shot = tpe._good_t1_v2_shot(
+        action="@char_kiwilo glances toward Broccolia offscreen, then turns back to the pool.",
+    )
+    reply = {"shots": [copy.deepcopy(shot)]}
+    added = storyboard._repair_t1_v2_reply(reply, tags_allowed=check["tags_allowed"], names=names)
+    assert added == [] and reply["shots"][0]["action"] == shot["action"]
+    errors = prompts.validate_t1_v2(reply, **check)
+    assert any("names the character 'Broccolia'" in e for e in errors)
