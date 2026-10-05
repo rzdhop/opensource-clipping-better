@@ -1,11 +1,13 @@
-## CURRENT STATE — plan 27 (5–10 s shots that carry an exchange) PLANNED, awaiting the human's Go (2026-10-05, local session)
+## CURRENT STATE — plan 27 (5–10 s shots that carry an exchange) APPROVED; stages 1–2 merged (NOT deployed), stage 3 running (2026-10-05, local session)
 
-- **In-progress header:** phase = PLAN (approval pending). Checkpoint commit = main (this commit); live = c36e592 +
-  the plan 26 hotfixes (restarted at 0 jobs). Plan: `.claude/plans/ai-story/27-exchanges-plan.md` (5 stages; stage 3
-  riskiest; D1 the Flow/Veo 6–8 s clamp, D2 Dragon Fruit re-scripted on the next regen).
-- **Next action:** on the Go → stage 1 (lengths, Sonnet) ∥ stage 2 (the line plan + the exchange grouping, Opus) →
-  3 → 4 → 5 + deploy.
-- **Open questions:** D1, D2 (defaulted yes).
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `3ec6d40` (stages 1–2 merged + pushed; stage 3
+  running on feat/plan27-s3, Opus). **Live = c36e592** (plan 26 + hotfixes): main is AHEAD of the live code and must
+  NOT be deployed before stage 3 lands (stage 2's exchange plan with the old one-shot-per-line split would make a
+  scene's clips exceed its slot). Plan: `.claude/plans/ai-story/27-exchanges-plan.md`; D1/D2 defaulted yes.
+- **Next action:** merge stage 3 (gate: both envs exit 0, studio_prompts/before_d5 goldens unmodified) → stage 4 (the
+  take per line, Sonnet) → stage 5 docs + DEC-304 + A-177… → deploy at 0 jobs (restart; a rebuild only if the dashboard
+  changed) → the human regenerates one episode and sees 2–4 lines per shot.
+- **Open questions:** none.
 
 ## CURRENT STATE — plan 26 (rich prompts on every link + Copy + species in a fruit world) CODE + DOCS COMPLETE and LIVE; close-out pending the human's Tier 2 (2026-10-05, local session)
 
