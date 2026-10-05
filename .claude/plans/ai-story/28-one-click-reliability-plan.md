@@ -134,6 +134,20 @@ native_speech, speech_model fast, narrator on, episode template serial_60s_v2, m
   day fallback); wardrobe continuity checked against the ledger at the script step. F7 The Handoff shows the J2
   verdict per shot and refuses the zip/upload until the keyframes are current.
 
+### Track S — simple screens (the human, 2026-10-05: "the UI became too complicated, too much term I do not understand")
+- **S1 New story = four choices.** The idea, the language, the look (style cards with a picture), and how the
+  clips are made (two cards: "I make them on Flow / Higgsfield — about $1 of app cost per episode" or "The app
+  makes them — about $5 per episode"). Everything else (tier, route, budget profile, pipeline, speech model,
+  consistency mode, universe, frame, episode format) is decided by the app from those four and hidden behind one
+  "Advanced" fold. The format is chosen so the clips always fit (A4). Files: NewStoryWizard.jsx, HowMadeControls,
+  stories.py (the offer), media_policy.new_story_profile.
+- **S2 Plain words everywhere the human reads.** Step names, chips, warnings, refusals and job-log lines written for
+  a non-technical reader: no "T1", "J2", "tier 3", "native speech", "budget profile", "v2", link ids. A short
+  glossary-free copy pass over the workspace, the episode studio, the Handoff and Settings; internal ids stay in
+  the API and logs' debug level only. Files: the dashboard copy, gates.py sentences, fast_track.stopped text.
+- **S3 One button per step.** "Make episode 1" (the one-click run), "Approve all" (track C), "Regenerate", and the
+  Handoff's "Copy" and "Upload". Hide per-shot modes unless the human opens a shot.
+
 ### Track G — docs + close-out
 - docs/AI_STORY.md (the one-click promise, the money table, the strict rules, no voices, Approve all,
   generated concepts), VISION, DECISIONS (DEC-305…), ASSUMPTIONS, CHECKPOINT, action log. Deploy at 0 jobs.
