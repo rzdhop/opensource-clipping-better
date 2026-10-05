@@ -75,7 +75,7 @@ Section = namedtuple("Section", "key label text rank")
 # rendering and palette line, those looks, the place, the scene); when they do not fit either, the core alone.
 DROP_ORDER = ("avoid", "characters_absent", "places_absent", "props_absent", "series_lore", "style_palette_hexes",
               "personality", "relationships", "scene_summary", "style_detail", "series", "props", "place_detail",
-              "character_detail", "style_rules")
+              "character_detail", "style_rules", "style_rendering")
 
 SHORT_WARNING = ("Short prompt: {words} words — the template expects at least {floor}; the cast and place records "
                  "are thin.")
@@ -219,6 +219,13 @@ def _head_thing(phrase) -> str:
     return "" if not thing or re.search(r"human", thing, re.IGNORECASE) else thing
 
 
+def _person_sentence(species) -> str:
+    """How a species character is said (the human, 2026-10-05: "only human traits on fruit animated people");
+    the medium line of ART STYLE carries the long form, so this stays short."""
+    return (f"is a {species} person: the whole head is one {species}, stem and skin intact, with cartoon eyes and "
+            "a mouth drawn on it; a cartoon body in human clothes; never a human face, never real human skin")
+
+
 def _species(doc, style_lock):
     """``(human, sentence)``: whether character *doc* is a human, and what it
     is, in a sentence. A creature is said by the head its look names ("dragon
@@ -231,8 +238,7 @@ def _species(doc, style_lock):
     look = doc.get("look") or {}
     named_species = shots.look_species(look)
     if named_species:
-        return False, (f"is an anthropomorphic character whose head is a whole {named_species}, the face carved "
-                       "into its surface, never a human head")
+        return False, _person_sentence(named_species)
     texts = [look.get(key) for key in ("face", "hair", "skin_material")] + [doc.get("descriptor")]
     texts = [_ws(text) for text in texts if _ws(text)]
     heads = [_head_thing(match.group(1)) for text in texts for match in _HEAD_PHRASE.finditer(text)]
@@ -243,8 +249,7 @@ def _species(doc, style_lock):
     explicit_human = any(_HUMAN_WORD.search(_ws(look.get(key))) for key in ("face", "hair", "skin_material"))
     if heads and not explicit_human:
         head = heads[0]
-        return False, (f"is an anthropomorphic character whose head is a whole {head}, the face carved into its "
-                       "surface, never a human head")
+        return False, _person_sentence(head)
     if species and not explicit_human:
         return False, f"is an anthropomorphic {species}"
     if not shots.named_character(doc) and doc.get("descriptor") and not explicit_human:
@@ -410,11 +415,19 @@ def _series_sections(story, style_lock, *, language, image, droppable=False):
 # The medium said first in ART STYLE, per style template (the human, 2026-10-05: a Veo render of the fruit
 # style came out as live action with a fruit mask -- "photorealistic 3D render" alone reads as a photograph).
 # A frozen style lock has no ``medium`` key, so the template id picks one here; ``style_lock["medium"]`` wins.
-_CGI = ("a fully computer-animated 3D CGI film in the manner of a Pixar or DreamWorks feature: every character, "
-        "set and prop is rendered CGI; the characters' heads are their real heads, not masks, costumes or "
-        "prosthetics on actors; no live-action footage, no real people, no photographs")
+_CGI = ("a stylised 3D cartoon animation in the manner of a Pixar or DreamWorks feature, fully computer-generated: "
+        "cartoon proportions, smooth CGI surfaces, large expressive eyes; the characters' heads are their real heads, "
+        "not masks, costumes or prosthetics on actors; never real human skin, no live-action footage, no real "
+        "people, no photographs")
+_FRUIT_PEOPLE = ("a stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The "
+                 "characters are fruit and vegetable people: each one's whole head IS the fruit itself, stem, leaves "
+                 "and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; "
+                 "cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with "
+                 "human hands; only their traits and manners are human. Smooth CGI surfaces; never a human face, "
+                 "never real human skin, never a mask or costume on a person; no live-action footage, no real "
+                 "people, no photographs")
 MEDIUM = {
-    "fruit_drama": _CGI,
+    "fruit_drama": _FRUIT_PEOPLE,
     "family_3d": _CGI,
     "viral_3d": _CGI,
     "anime": "a hand-drawn 2D anime episode, cel-shaded animation; no live action, no real people, no 3D render, "
@@ -443,9 +456,15 @@ def _style_sections(style_lock, *, image):
     the ladder), the palette hexes and the camera and light, in that order."""
     palette = style_lock.get("palette") or {}
     forbidden = _join(palette.get("forbidden"), " or ")
-    style = [_labelled("Medium", medium_of(style_lock)), _sentence(style_lock.get("rendering")),
-             _labelled("Palette", palette.get("palette_line")),
-             _sentence(f"Never use {forbidden}") if forbidden else ""]
+    medium = medium_of(style_lock)
+    rendering = str(style_lock.get("rendering") or "")
+    if medium and "live-action cinematic" not in medium:
+        # An animated medium: the lock's "photorealistic" would pull the generator back to a photograph.
+        rendering = re.sub(r"photo-?realistic", "stylised, high-end", rendering, flags=re.IGNORECASE)
+    # The medium and the palette line never drop; the lock's rendering sentence is the very last rung, so a small
+    # cap (seedream, 461 words) still says the medium and the present looks before the core.
+    style = [_labelled("Medium", medium), _labelled("Palette", palette.get("palette_line"))]
+    rendering_part = [_sentence(rendering), _sentence(f"Never use {forbidden}") if forbidden else ""]
     rules = [_labelled("Character design rules", style_lock.get("character_design_rules")),
              _labelled("Environment rules", style_lock.get("environment_rules")),
              _labelled("Finish", style_lock.get("quality_tail"))]
@@ -455,6 +474,7 @@ def _style_sections(style_lock, *, image):
     hexes = [_labelled("Primary", _join(palette.get("primary"))), _labelled("Accents", _join(palette.get("accents")))]
     detail = [_labelled("Camera", style_lock.get("camera")), _labelled("Lighting", style_lock.get("lighting"))]
     return [Section("style", "art style", _paragraph("ART STYLE", style), None),
+            Section("style_rendering", "rendering", _paragraph("RENDERING", rendering_part), _rank("style_rendering")),
             Section("style_rules", "style rules", _paragraph("STYLE RULES", rules), _rank("style_rules")),
             Section("style_palette_hexes", "palette hexes", _paragraph("PALETTE COLOURS", hexes),
                     _rank("style_palette_hexes")),
@@ -472,6 +492,10 @@ def _avoid(style_lock, negative, style_human) -> str:
     if style_human:
         # A human of the cast has a human head: the style's "human head" would contradict its own paragraph.
         terms = [term for term in terms if term.lower() not in _HUMAN_TERMS]
+    medium = medium_of(style_lock)
+    if medium and "live-action cinematic" not in medium:
+        # Under an animated medium the lock's bare "cartoon" (meant: flat 2D) would contradict the medium line.
+        terms = ["2D cartoon" if term.lower() == "cartoon" else term for term in terms]
     return f"AVOID: {', '.join(terms)}." if terms else ""
 
 
@@ -752,6 +776,20 @@ def _scene_sections(ec, shot, script, *, image) -> tuple:
             head.append(_labelled(f"Delivery of the line by {said}", delivery))
         if emotion:
             head.append(_labelled(f"Emotion of {said} while speaking", emotion))
+    if not image:
+        seconds = shot.get("clip_s") or shot.get("duration_s")
+        length = f"the whole {int(round(float(seconds)))}-second clip" if seconds else "the whole clip"
+        if speaker:
+            said = who.char(speaker)
+            others = [who.char(cid) for cid in chars if cid != speaker]
+            react = (f"{others[0]} reacts" if len(others) == 1 else f"{_join(others, ' and ')} react") if others \
+                else "the scene answers"
+            head.append(f"Pacing: the action fills {length}; {said} delivers the line early, then {react} and "
+                        f"{said} holds with living motion (a breath, a glance, a shift of weight) until the last "
+                        "frame; nobody freezes, the ambience never drops, no dead air, no empty hold.")
+        else:
+            head.append(f"Pacing: the action and the ambience run through {length} to the last frame; nobody "
+                        "freezes, no dead air, no empty hold.")
     summary = _paragraph("SCENE SUMMARY", [_sentence(scene.get("summary"))])
     sections = [Section("scene_summary", "scene summary", summary, _rank("scene_summary")),
                 Section("scene", "scene", _paragraph("SCENE", head), None)]

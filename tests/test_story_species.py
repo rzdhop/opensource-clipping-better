@@ -221,8 +221,8 @@ def test_the_template_says_the_head_and_never_a_human(species):
     entities = _entities()
     entities["characters"]["char_marie_jeanne"]["look"]["species"] = species
     text = pt.master_prompt(STORY, STYLE, entities, language="fr")["text"]
-    assert (f"CHARACTER: Marie-Jeanne is an anthropomorphic character whose head is a whole {species}, the face "
-            "carved into its surface, never a human head.") in text
+    assert (f"CHARACTER: Marie-Jeanne is a {species} person: the whole head is one {species}, stem and skin "
+            "intact,") in text and "never a human face" in text
     assert "Marie-Jeanne is a human" not in text
     assert "Skin and surface: Fair human skin" in text  # the record's own words, until 7c repairs them
     # The other casts read as before.
@@ -238,10 +238,10 @@ def test_a_head_said_in_free_text_never_splices_a_fragment_into_the_species_sent
                            "in a linen shirt")}
     human, sentence = pt._species(kiwi, {})
     assert not human
-    assert sentence == ("is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit, the face "
-                        "carved into its surface, never a human head")
+    assert sentence.startswith("is a dark brown ripe kiwi fruit person: the whole head is one dark brown ripe kiwi fruit")
+    assert sentence.endswith("never a human face, never real human skin")
     assert "serving as" not in sentence and "human-scale" not in sentence
     # With the field, the field alone names the head.
     kiwi["look"] = {"species": "kiwi"}
-    assert pt._species(kiwi, {}) == (False, "is an anthropomorphic character whose head is a whole kiwi, the face "
-                                            "carved into its surface, never a human head")
+    assert pt._species(kiwi, {}) == (False, pt._person_sentence("kiwi"))
+    assert pt._person_sentence("kiwi").startswith("is a kiwi person: the whole head is one kiwi")

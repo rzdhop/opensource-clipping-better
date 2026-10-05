@@ -234,7 +234,8 @@ def test_a_thin_story_s_brief_warns_of_a_short_prompt(store):
     thin = dict(ec.story, title="", logline="", tone="", genre_tags=[], world={})
     for cid in list(ec.entities["characters"]):
         ec.entities["characters"][cid] = {key: value for key, value in ec.entities["characters"][cid].items()
-                                          if key not in ("look", "personality", "relationships", "signature_items")}
+                                          if key not in ("look", "personality", "relationships", "signature_items",
+                                                         "dossier", "voice")}
     lock = {key: value for key, value in ec.style_lock.items() if key in ("motion_rules", "negative_prompt")}
     ec = dataclasses.replace(ec, story=thin, style_lock=lock)
     brief = brief_mod.shot_brief(ec, platform="flow")

@@ -363,19 +363,19 @@ def test_the_fit_ladder_drops_in_order_keeps_the_shot_and_falls_to_the_core_alon
     ec = _ec(style=style)
 
     full = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=None)
-    fitted = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=230)
+    fitted = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=300)
 
     assert full["dropped"] == [] and full["text"].startswith("SERIES:")
-    assert full["full_words"] > 230 >= fitted["words"] == len(fitted["text"].split())
-    assert fitted["full_words"] == full["full_words"] and fitted["limit"] == 230
+    assert full["full_words"] > 300 >= fitted["words"] == len(fitted["text"].split())
+    assert fitted["full_words"] == full["full_words"] and fitted["limit"] == 300
     assert fitted["text"].endswith("\n\n" + core)
     # The order: the ranks of what was dropped never go back down the ladder; the first is AVOID.
     ranks = [pt.DROP_ORDER.index(key) for key in _dropped_keys(ec, shot, fitted["dropped"])]
     assert ranks == sorted(ranks) and ranks[0] == pt.DROP_ORDER.index("avoid")
     assert fitted["dropped"][:5] == ["avoid", "Victor", "Chloe", "Sam", "Marie-Jeanne"]  # not in the shot, last first
     # What is never dropped: the style's rendering, the present character's look, the place and its light.
-    assert style["rendering"] in fitted["text"]
-    assert "Rida (in this shot) is an anthropomorphic character whose head is a whole dragon fruit" in fitted["text"]
+    assert "ART STYLE: Medium:" in fitted["text"]
+    assert "Rida (in this shot) is a dragon fruit person: the whole head is one dragon fruit" in fitted["text"]
     assert "curly magenta dragon fruit scales" in fitted["text"]
     assert "bright natural daylight" in fitted["text"]
 
@@ -402,8 +402,11 @@ def test_the_style_rules_are_the_last_rung_so_a_small_cap_keeps_the_style_and_th
     sections = _sections(ec, shot)
     by_key = {section.key: section for section in sections}
     rules, style = by_key["style_rules"], by_key["style"]
-    assert pt.DROP_ORDER[-1] == "style_rules" and style.rank is None and rules.rank == len(pt.DROP_ORDER) - 1
-    assert style.text.startswith("ART STYLE: Medium: ") and STYLE["rendering"] in style.text
+    assert pt.DROP_ORDER[-2:] == ("style_rules", "style_rendering") and style.rank is None
+    assert rules.rank == len(pt.DROP_ORDER) - 2
+    assert style.text.startswith("ART STYLE: Medium: ") and "Palette:" in style.text
+    rendering = by_key["style_rendering"]
+    assert "3D render of anthropomorphic fruits" in rendering.text and "photorealistic" not in rendering.text
     assert STYLE["palette"]["palette_line"] in style.text
     assert "Character design rules" not in style.text and "Environment rules" not in style.text
     assert rules.text.startswith("STYLE RULES: Character design rules:") and "Finish: ultra detailed" in rules.text
@@ -412,11 +415,12 @@ def test_the_style_rules_are_the_last_rung_so_a_small_cap_keeps_the_style_and_th
 
     small = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=never)
     assert small["text"] != core and small["text"].endswith("\n\n" + core) and small["words"] <= never
-    assert small["dropped"][-1] == "style rules" and "art style" not in small["dropped"]
+    assert small["dropped"][-1] == "rendering" and "art style" not in small["dropped"]
     assert style.text in small["text"] and rules.text not in small["text"]
-    assert "Rida (in this shot) is an anthropomorphic character whose head is a whole dragon fruit" in small["text"]
+    assert "Rida (in this shot) is a dragon fruit person: the whole head is one dragon fruit" in small["text"]
 
-    roomy = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=never + len(rules.text.split()))
+    rendering_words = len(by_key["style_rendering"].text.split())
+    roomy = pt.shot_clip_prompt(ec, shot, SCRIPT, core, limit_words=never + len(rules.text.split()) + rendering_words)
     assert rules.text in roomy["text"] and "style rules" not in roomy["dropped"]
 
     # Below the never-dropped sections and the core: the core alone, as before.
@@ -458,7 +462,7 @@ def test_a_two_character_speaking_shot_keeps_who_they_are_within_veos_limit():
 
     assert result["full_words"] > veo >= result["words"]
     assert result["text"].endswith("\n\n" + CORE)
-    assert "Rida (in this shot) is an anthropomorphic character whose head is a whole dragon fruit" in result["text"]
+    assert "Rida (in this shot) is a dragon fruit person: the whole head is one dragon fruit" in result["text"]
     assert "Marie-Jeanne (in this shot) is a human" in result["text"]
     assert "ART STYLE:" in result["text"] and "PLACE (in this shot):" in result["text"]
     assert "Staging: Rida on the right" in result["text"]

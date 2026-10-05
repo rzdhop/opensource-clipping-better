@@ -224,6 +224,9 @@ def test_a_461_word_link_keeps_the_style_and_the_present_looks_before_the_core(s
 
     story_id = kf._quality(store, tmp_path)
     ec = tas._ec(store, story_id)
+    # The fruit style's medium line is ~110 words of its own; a short medium keeps the fixture inside the cap so
+    # the ladder (not the core-alone fallback) is what this test exercises.
+    ec.style_lock["medium"] = "a CGI animated film"
     shot = tas._shots(store, story_id)[1]
     parts = assets.request_parts(ec, shot, note=None, link=None)
     label = "fal/seedream-4.5-edit"
@@ -233,10 +236,10 @@ def test_a_461_word_link_keeps_the_style_and_the_present_looks_before_the_core(s
     assert sent["text"] != parts["prompt"] and sent["text"].endswith("\n\n" + parts["prompt"])
     assert sent["text"].startswith("ART STYLE: Medium: ")
     assert "Palette: saturated natural fruit colours" in sent["text"]
-    assert "(in this shot) is an anthropomorphic character whose head is a whole" in sent["text"]
+    assert "(in this shot) is a " in sent["text"] and " person: the whole head is one " in sent["text"]
     assert "PLACE (in this shot):" in sent["text"] and "SCENE:" in sent["text"]
     assert "STYLE RULES" not in sent["text"] and "Character design rules" not in sent["text"]
-    assert sent["dropped"][-1] == "style rules" and "art style" not in sent["dropped"]
+    assert sent["dropped"][-1] in ("style rules", "rendering") and "art style" not in sent["dropped"]
     assert prompt_limits.fits(label, sent["text"], live={})[0]
 
 
