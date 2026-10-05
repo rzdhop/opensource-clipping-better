@@ -268,3 +268,93 @@ def test_store_line_plans_writes_a_valid_plan_on_every_scene(monkeypatch):
         assert schemas.validate(scene["line_plan"], schemas._EPISODE_SCRIPT_LINE_PLAN_SCHEMA) == []
     assert scenes[0]["line_plan"]["max_words"] <= 11
     assert timing.plan_budget(scenes[1]["line_plan"], line_lo=5)["words"][1] == scenes[1]["line_plan"]["max_words"]
+
+
+# ------------------------------------------------- plan 24 stage 5 (D-6): which scenes carry a character line
+
+def _assigned(function, flag, **kw):
+    scene = _scene(function, **kw)
+    if flag is not None:
+        scene["character_line"] = flag
+    return scene
+
+
+def _plan_of(scene, *, native, template=NARRATED, narrator=True):
+    return timing.scene_plan(template, scene, lang=FR, native=native, narrator_provider="edge" if narrator else None,
+                             narrator=narrator, speakers={"char_rida": "gemini"},
+                             tail_floor=timing.plan_tail_floor(template))
+
+
+def test_a_narrator_only_body_scene_plans_one_narrator_line_taking_the_whole_allowed_speech():
+    plan = _plan_of(_assigned("setup", False), native=False)
+    (narrator,) = plan["lines"]
+    assert narrator["kind"] == "narrator" and narrator["seconds"] == plan["allowed_speech_s"] == 11.637
+    # The whole allowed speech at Edge French: 25 words where the two-line split held 14 + 7.
+    assert narrator["max_words"] == timing.words_for_seconds(plan["allowed_speech_s"], FR, provider="edge") == 25
+    assert plan["max_words"] == 25 and plan["min_words"] == 12
+
+
+def test_a_native_narrator_only_scene_snaps_its_clip_up_within_the_slot():
+    plan = _plan_of(_assigned("setup", False), native=True)
+    (narrator,) = plan["lines"]
+    # One silent clip holds the narration (at most the longest, 8 s, less its 0.7 s lead): 7.3 s, 15 words.
+    assert (narrator["kind"], narrator["clip_s"], narrator["seconds"], narrator["max_words"]) == (
+        "narrator", 8, 7.3, 15)
+    assert narrator["clip_s"] <= plan["slot_s"][1]
+    # The two-line plan of the same scene is unchanged: the character's clip first, the narrator the rest.
+    both = _plan_of(_assigned("setup", True), native=True)
+    assert [(line["kind"], line["clip_s"], line["max_words"]) for line in both["lines"]] == [
+        ("narrator", 6, 11), ("character", 6, 12)]
+    assert both == _plan_of(_assigned("setup", None), native=True)  # no assignment: as stage 2 planned it
+
+
+def test_the_assignment_only_moves_a_body_scene_with_the_narrator_on():
+    hook = _plan_of(_assigned("hook", False, scene_id="s01"), native=True)
+    assert hook == _plan_of(_assigned("hook", None, scene_id="s01"), native=True)
+    # The narrator off: the exchange is the characters' whatever the key says (a stale key is ignored).
+    off = _plan_of(_assigned("setup", False), native=True, narrator=False)
+    assert [line["kind"] for line in off["lines"]] == ["character", "character"]
+    # The confrontation never carries the key; a stray one changes nothing there (no narrator slot in the body).
+    conf = _plan_of(_assigned("rising", False), native=True, template=CONFRONTATION, narrator=False)
+    assert conf == _plan_of(_assigned("rising", None), native=True, template=CONFRONTATION, narrator=False)
+
+
+def test_the_planned_narrator_share_is_a_number_over_the_planned_caps_and_only_for_a_narrated_template():
+    scenes = []
+    for sid, function, flag in (("s01", "hook", None), ("s02", "setup", False), ("s03", "rising", True),
+                                ("s04", "cliffhanger", None)):
+        scene = _assigned(function, flag, scene_id=sid)
+        plan = _plan_of(scene, native=True)
+        scene["slot_s"], scene["line_plan"] = plan["slot_s"], {
+            key: plan[key] for key in ("allowed_speech_s", "lines", "max_words", "min_words")}
+        scenes.append(scene)
+    caps = [(line["kind"], line["max_words"]) for scene in scenes for line in scene["line_plan"]["lines"]]
+    narrator = sum(words for kind, words in caps if kind == "narrator")
+    share = timing.plan_narrator_share({"scenes": scenes}, NARRATED)
+    assert share == round(narrator / sum(words for _kind, words in caps), 3)
+    assert NARRATED["narrator_share"][0] <= share <= NARRATED["narrator_share"][1]
+    assert timing.plan_narrator_share({"scenes": scenes}, CONFRONTATION) is None
+    assert timing.plan_narrator_share({"scenes": [_scene("setup")]}, NARRATED) is None  # no plan stored
+
+
+def test_retime_stores_the_planned_narrator_share_for_a_narrated_script_only():
+    from clipping.aistory.steps import episode_common
+
+    ec = _ec(template=NARRATED)
+    scenes = []
+    for sid, function, flag in (("s01", "hook", None), ("s02", "setup", False), ("s03", "cliffhanger", None)):
+        scene = _assigned(function, flag, scene_id=sid)
+        plan = _plan_of(scene, native=False)
+        scene["slot_s"], scene["line_plan"] = plan["slot_s"], {
+            key: plan[key] for key in ("allowed_speech_s", "lines", "max_words", "min_words")}
+        scenes.append(_written(scene, plan, {"narrator": "edge"}))
+    script = {"scenes": scenes, "cliffhanger": {"scene_id": "s03", "reveal": None, "cut_to_black": True},
+              "timing": None}
+    episode_common.retime(script, ec)
+    # Every planned line is the narrator's here: the share is 1.0, a number in the stored timing.
+    assert script["timing"]["narrator_share"] == timing.plan_narrator_share(script, NARRATED) == 1.0
+    assert schemas.validate(script["timing"], schemas._EPISODE_SCRIPT_TIMING_SCHEMA) == []
+    # A script with no stored plan carries no such key.
+    bare = {"scenes": [_written(_scene("setup"), plan, {"narrator": "edge"})],
+            "cliffhanger": {"scene_id": None, "reveal": None, "cut_to_black": True}, "timing": None}
+    assert "narrator_share" not in episode_common.retime(bare, ec)["timing"]

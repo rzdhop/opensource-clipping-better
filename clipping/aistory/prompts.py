@@ -500,7 +500,10 @@ def anthropic_effort(prompt_id):
 # planned line, the framing parts' seconds and caps): E2v3 2,705 -> 3,120
 # (was 3,030), E3v3 3,488 -> 4,020 (was 4,000; past the spec's 4,000 by 20
 # tokens, like J1v3 on the premium chain -- nothing is trimmed to fit).
-WRITING_V3_INPUT_BUDGET = {"E1v3": 3230, "E2v3": 3120, "E3v3": 4020, "J1v3": 4700}
+# Plan 24 stage 5 (2026-10-05), re-measured on purpose: a narrated format's E1v3
+# asks each body scene for its ``character_line`` and the episode for its
+# 2-4 character lines (+74 tokens on the worst case): E1v3 2,807 -> 2,881, 3,230 -> 3,320.
+WRITING_V3_INPUT_BUDGET = {"E1v3": 3320, "E2v3": 3120, "E3v3": 4020, "J1v3": 4700}
 # Plan 23 stage D5: N1v2's input -- N1's French worst case with the variant
 # block at its caps (eight characters, each with two 40-character variants
 # and room for a third, and the ask) measures 3,613; + 15 %, rounded up to ten
@@ -5020,6 +5023,55 @@ def narration_e2_line_v3(narration) -> str:
     return NARRATED_E2_LINE_V3.format(**_narration_values(narration)) if narration else ""
 
 
+# Plan 24 stage 5 (D-6): the narrated format's rhythm is planned, not hoped
+# for. E1v3 says, scene by scene, whether a body scene carries one character
+# line (``character_line``) with the template's ``character_lines`` range
+# enforced across the episode; E2v3 is then told what the scene's plan holds.
+# A template without ``character_lines`` (the confrontation) carries none of
+# this and its prompts stay byte for byte.
+NARRATED_E1_CHARACTER_LINE_ASK_V3 = (
+    "- character_line: true when this body scene carries one character line, false when the narrator tells it "
+    "alone (always false on the recap, hook and cliffhanger)\n"
+)
+NARRATED_E1_CHARACTER_LINES_V3 = (
+    "Exactly {lines_lo} to {lines_hi} body scenes carry a character line (each needs a character in its "
+    "characters); every other scene is the narrator's alone.\n\n"
+)
+NARRATED_E2_NO_CHARACTER_LINE_V3 = (
+    "Narrated drama: the narrator carries {share_lo}-{share_hi}% of this episode's words, in a telenovela tone "
+    "(dramatic, slightly over the top, never explaining what the picture shows); the characters speak "
+    "{lines_lo}–{lines_hi} complete lines in the whole episode -- in this scene there is no character line: the "
+    "narrator carries it.\n\n"
+)
+NARRATED_E2_ONE_CHARACTER_LINE_V3 = (
+    "Narrated drama: the narrator carries {share_lo}-{share_hi}% of this episode's words, in a telenovela tone "
+    "(dramatic, slightly over the top, never explaining what the picture shows); the characters speak "
+    "{lines_lo}–{lines_hi} complete lines in the whole episode -- here one character line ({who}), where it moves "
+    "the story most.\n\n"
+)
+
+
+def narration_e1_character_lines_v3(narration) -> str:
+    """E1v3's character-line count sentence (:data:`NARRATED_E1_CHARACTER_LINES_V3`),
+    "" without *narration*."""
+    return NARRATED_E1_CHARACTER_LINES_V3.format(**_narration_values(narration)) if narration else ""
+
+
+def narration_e2_planned_line_v3(narration, plan, names) -> str:
+    """E2v3's narrated-drama line told from the scene's *plan*
+    (``timing.scene_plan``; plan 24 stage 5): no character line here (the
+    narrator carries the scene), or the one character line and who speaks it
+    (*names*: ``{char_id: name}``). The unplanned line
+    (:func:`narration_e2_line_v3`) without *narration* or *plan*."""
+    if not narration or plan is None:
+        return narration_e2_line_v3(narration)
+    speakers = [line["speaker"] for line in plan["lines"] if line["kind"] == "character"]
+    if not speakers:
+        return NARRATED_E2_NO_CHARACTER_LINE_V3.format(**_narration_values(narration))
+    return NARRATED_E2_ONE_CHARACTER_LINE_V3.format(who=names.get(speakers[0], speakers[0]),
+                                                    **_narration_values(narration))
+
+
 # Plan 24 stage 2 (D-3, D-4): the writer is told the scene's seconds and each
 # planned line's hard cap (``timing.scene_plan``); a reply over a cap is
 # refused with the line, its words, its cap and its seconds named. Every
@@ -5154,7 +5206,7 @@ _E1_V3_ASK_TEMPLATE = (
     "- summary: {summary_ask}\n"
     "- emotion: one of {emotions}\n"
     "- target_duration_s: a hint inside its own slot's range -- {slot_ranges}\n"
-    "{payoff_line}\n"
+    "{payoff_line}{character_line_ask}\n"
     "Read in order, the summaries retell spine.logline.\n\n"
     "Aim for the upper half of each range so the scenes sum near {target_s} s.\n\n"
     "{shape_line}"
@@ -5203,15 +5255,22 @@ def character_states_block(variants) -> str:
     return "Appearance variants of the cast:\n" + "\n".join(lines)
 
 
-def e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None, new_objects_allowed=False, variants=None) -> dict:
+def e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None, new_objects_allowed=False, variants=None,
+                 character_line=False) -> dict:
     """E1v2's schema (:func:`e1_schema`, v2) with the ``spine`` first and the
     scene ``summary`` described as v3 asks it. *variants* (plan 23 stage D5,
     :func:`character_states_block`'s list) adds each scene's ``states``;
-    None or empty leaves the schema as it was."""
+    None or empty leaves the schema as it was. *character_line* (plan 24
+    stage 5, D-6: a narrated format, the narrator on) adds each scene's
+    boolean ``character_line``; False leaves the schema as it was."""
     base = e1_schema(cast_ids, place_ids, prop_ids, payoff_hooks=payoff_hooks, new_objects_allowed=new_objects_allowed)
     scene = base["properties"]["scenes"]["items"]
     scene["properties"]["summary"] = {
         "type": "string", "description": "one or two complete sentences, at most 30 words: what happens and why"}
+    if character_line:
+        scene["properties"]["character_line"] = {
+            "type": "boolean", "description": "true: one character line in this scene; false: the narrator alone"}
+        scene["required"] = list(scene["properties"])
     rows = [entry for entry in variants or () if entry.get("variants")]
     if rows:
         state = _llm_obj({
@@ -5277,7 +5336,8 @@ def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places
         props_line=_E1_PROPS_LINE_V2 if new_objects else (_E1_PROPS_LINE if props else _E1_NO_PROPS_LINE),
         new_objects_line=_E1_NEW_OBJECTS_LINE if new_objects else "",
         payoff_line=_E1_PAYOFF_LINE if hooks else "",
-        v2_lines=_E1_V2_LINES + narration_e1_line_v3(narration),
+        character_line_ask=NARRATED_E1_CHARACTER_LINE_ASK_V3 if narration else "",
+        v2_lines=_E1_V2_LINES + narration_e1_line_v3(narration) + narration_e1_character_lines_v3(narration),
     )
     states = character_states_block(variants)
     if states:
@@ -5286,7 +5346,8 @@ def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places
     place_ids = [p["place_id"] for p in places]
     prop_ids = [p["prop_id"] for p in props]
     return _system(pack), user, e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=hooks,
-                                             new_objects_allowed=new_objects, variants=variants if states else None)
+                                             new_objects_allowed=new_objects, variants=variants if states else None,
+                                             character_line=bool(narration))
 
 
 def _states_errors(errors, reply, variants) -> None:
@@ -5307,18 +5368,51 @@ def _states_errors(errors, reply, variants) -> None:
             seen.add(cid)
 
 
+def _character_line_errors(errors, reply, narration) -> None:
+    """Each scene's ``character_line`` against the narrated format (plan 24
+    stage 5, D-6): only a body scene carries one, with a character among its
+    characters, and the episode's count sits inside the template's
+    ``character_lines`` -- its low end held to the body scenes that can carry
+    one."""
+    lo, hi = narration["character_lines"]
+    eligible = 0
+    carrying = 0
+    for i, scene in enumerate(reply["scenes"]):
+        body = scene["function"] in schemas.BODY_FUNCTIONS
+        eligible += 1 if body and scene["characters"] else 0
+        if not scene["character_line"]:
+            continue
+        carrying += 1
+        path = f"$.scenes[{i}].character_line"
+        if not body:
+            errors.append(f"{path}: only a body scene carries a character line; the {scene['function']} is the "
+                          "narrator's alone")
+        elif not scene["characters"]:
+            errors.append(f"{path}: a scene with a character line names at least one character in characters")
+    lo = min(lo, eligible)
+    if not lo <= carrying <= hi:
+        allowed = f"{lo} to {hi}" if lo != hi else f"{hi}"
+        errors.append(f"$.scenes: {carrying} scene{' carries' if carrying == 1 else 's carry'} a character line, "
+                      f"the format allows {allowed}")
+
+
 def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, prop_ids, open_hooks=None,
-                   variants=None) -> list:
+                   variants=None, narration=None) -> list:
     """Post-validation for an E1v3 reply: its schema (:func:`e1_v3_schema`),
     the spine's caps (:data:`SPINE_MAX_WORDS`), each summary within
     :data:`SUMMARY_V3_MAX_WORDS` words, then every check of
     :func:`validate_e1` (v2) on the scenes -- run on a copy without the
     spine whose summaries are cut to E1v2's 15 words, their own cap checked
-    here."""
+    here.
+
+    *narration* (plan 24 stage 5, D-6: :func:`narration_of`, a narrated
+    format with the narrator on) adds each scene's ``character_line`` and its
+    checks (:func:`_character_line_errors`); None: exactly as before."""
     hooks = offered_hooks(ep, open_hooks)
     offered = [entry for entry in variants or () if entry.get("variants")] or None
     schema = e1_v3_schema(list(cast_ids), list(places), list(prop_ids), payoff_hooks=hooks,
-                          new_objects_allowed=offers_new_objects(ep, True), variants=offered)
+                          new_objects_allowed=offers_new_objects(ep, True), variants=offered,
+                          character_line=bool(narration))
     errors = schemas.validate(reply, schema)
     if errors:
         return errors
@@ -5329,8 +5423,11 @@ def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, p
         _text_errors(errors, f"$.scenes[{i}].summary", scene["summary"], max_words=SUMMARY_V3_MAX_WORDS)
     if offered:
         _states_errors(errors, reply, offered)
+    if narration:
+        _character_line_errors(errors, reply, narration)
     scenes = [{key: value for key, value in dict(scene, summary=" ".join(scene["summary"].split()[:15])
-                                                 or scene["summary"]).items() if key != "states"}
+                                                 or scene["summary"]).items()
+               if key not in ("states", "character_line")}
               for scene in reply["scenes"]]
     v2_reply = {key: value for key, value in reply.items() if key != "spine"}
     v2_reply["scenes"] = scenes
@@ -5346,7 +5443,7 @@ def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, p
 _E2_V3_ASK_TEMPLATE = (
     "Write this scene's dialogue.\n\n"
     "Give:\n"
-    "- lines: {n_text} lines, each with speaker (one of {speakers}), text, emotion (one of {emotions}) and "
+    "- lines: {n_text}, each with speaker (one of {speakers}), text, emotion (one of {emotions}) and "
     "delivery (English, at most 12 words; the story's voice performance is {voice_direction}). Each text is one "
     "or two complete sentences in {language}, {w_lo} to {w_hi} words, that this person would say aloud right "
     "now.\n"
@@ -5434,10 +5531,11 @@ def build_e2_v3(pack, *, scene, outline, next_scene, so_far, spine, budget, cast
         lines.append(f"First time on screen in this episode: {', '.join(new)} -- say or show who they are and "
                      "what they want.")
     if plan is None:
-        n_text = f"{n_lo} to {n_hi}"
+        n_text = f"{n_lo} to {n_hi} lines"
         total_line = f"Write {t_lo}-{t_hi} words of dialogue in total: not fewer than {t_lo}, not more than {t_hi}."
     else:
-        n_text = _count_range(n_lo, n_hi)
+        # Plan 24 stage 5: a narrator-only scene's plan holds one line ("1 line", not "1 lines").
+        n_text = _count_range(n_lo, n_hi) + (" line" if n_hi == 1 else " lines")
         total_line = plan_block_v3(plan, names, line_hi=w_hi)
     user += _E2_V3_ASK_TEMPLATE.format(
         n_text=n_text, speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS),
@@ -5445,7 +5543,7 @@ def build_e2_v3(pack, *, scene, outline, next_scene, so_far, spine, budget, cast
         sfx_cues=", ".join(sfx_cue_names) if sfx_cue_names else "none available for this story",
         line_rule=LINE_RULE_V3, native_line=_native_line(native, speakers, w_hi, planned=plan is not None),
         total_line=total_line,
-        v3_lines="\n".join(lines) + "\n\n" + narration_e2_line_v3(narration),
+        v3_lines="\n".join(lines) + "\n\n" + narration_e2_planned_line_v3(narration, plan, names),
         french_line=_french_block(pack),
     )
     return _system(pack), user, e2_v3_schema(speakers, sfx_cue_names, lines=(n_lo, n_hi), line_words=(w_lo, w_hi))
@@ -5498,8 +5596,10 @@ def _plan_line_errors(errors, lines, caps, *, floor, path="$.lines") -> None:
         seen[kind] += 1
         if k >= len(planned[kind]):
             count = len(planned[kind])
+            none = (f"; the narrator carries this scene alone, so a {kind} line has no place in it"
+                    if count == 0 and kind == "character" else "")
             errors.append(f"{path}[{i}]: one {kind} line too many: this scene's plan holds {count} {kind} "
-                          f"line{'s' if count != 1 else ''}")
+                          f"line{'s' if count != 1 else ''}{none}")
             continue
         entry = planned[kind][k]
         count = _word_count(text)

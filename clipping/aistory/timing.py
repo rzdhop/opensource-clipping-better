@@ -567,7 +567,12 @@ def _plan_speakers(scene: dict, *, narrator: bool, speakers: dict, line_count_hi
     other scene one line of its first character. *line_count_hint* (1-4)
     sets the count instead, the narrator first when on, then the scene's
     characters in turn. The characters are the scene's own (E1 named
-    them), else *speakers*' handles."""
+    them), else *speakers*' handles.
+
+    Plan 24 stage 5 (D-6): on a narrated format's beat sheet a body scene
+    carries ``character_line`` -- with the narrator on, ``False`` plans the
+    narrator alone (one line taking the whole allowed speech), ``True`` the
+    narrator and one line of the scene's first character; absent, as above."""
     characters = [cid for cid in scene.get("characters") or () if cid != "narrator"]
     if not characters:
         characters = [handle for handle in (speakers or {}) if handle != "narrator"]
@@ -584,6 +589,9 @@ def _plan_speakers(scene: dict, *, narrator: bool, speakers: dict, line_count_hi
             k += 1
         return out
     if narrator:
+        assigned = scene.get("character_line")
+        if body and assigned is False:
+            return ["narrator"]
         return ["narrator", characters[0]] if body and characters else ["narrator"]
     if not characters:
         return []
@@ -753,6 +761,24 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
     total = sum(line["max_words"] for line in lines)
     return {"slot_s": [lo, hi], "allowed_speech_s": round(allowed, 3), "lines": lines, "max_words": total,
             "min_words": math.floor(0.5 * total + 1e-9)}
+
+
+def plan_narrator_share(script: dict, template: dict):
+    """The narrator's share of *script*'s planned words (plan 24 stage 5,
+    D-6): the narrator lines' caps over every planned line's, across the
+    scenes' stored ``line_plan`` -- a consequence of which scenes carry a
+    character line and how each splits, reported in the stored ``timing``
+    (never a refusal). None unless *template* is a narrated one
+    (``narrator_share``) and a scene has a plan."""
+    if "narrator_share" not in (template or {}):
+        return None
+    narrator = total = 0
+    for scene in script.get("scenes") or ():
+        for line in (scene.get("line_plan") or {}).get("lines") or ():
+            total += int(line["max_words"])
+            if line["kind"] == "narrator":
+                narrator += int(line["max_words"])
+    return round(narrator / total, 3) if total else None
 
 
 def plan_budget(plan: dict, *, line_lo: int = 1) -> dict:

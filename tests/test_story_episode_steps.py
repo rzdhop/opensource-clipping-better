@@ -2356,3 +2356,103 @@ def test_a_narrated_story_s_beat_sheet_and_scenes_are_asked_for_the_narration(st
     assert (e1_line in e1_call["user"]) is narrated
     assert all((e2_line in call["user"]) is narrated for call in e2_calls)
     assert _script(store, story_id)["template_id"] == template_id
+
+
+# ------------------------------- plan 24 stage 5 (D-6): the narrated format's character lines are planned
+
+def _narrated_v3_story(store):
+    story_id = _ready_story(store, v2=True, writing="v3")
+    store.update(story_id, lambda doc: doc.update(episode_template_id="narrated_drama_60s_v2",
+                                                  narrator=dict(doc["narrator"], enabled=True)), now=NOW)
+    return story_id
+
+
+def _narrated_e1v3(flags):
+    """The narrated template's episode 1 beat sheet (a hook, four body scenes, a cliffhanger) with the four body
+    scenes' ``character_line`` set from *flags*; the hook and the cliffhanger are the narrator's."""
+    reply = _e1_reply_for(templates.load_episode_template("narrated_drama_60s_v2"))
+    body = iter(flags)
+    scenes = [dict(scene, character_line=next(body) if scene["function"] in schemas.BODY_FUNCTIONS else False)
+              for scene in reply["scenes"]]
+    return dict(reply, spine=dict(V3_SPINE), scenes=scenes)
+
+
+def e2_v3_by_plan(call):
+    """What the plan holds, written inside its caps: the narrator alone (14 words) where the prompt says the
+    narrator carries the scene, else a narrator line (8) and one character line (6)."""
+    tag, speakers = _v3_tag(call), _speakers(call)
+    say = lambda who, n: {"speaker": who, "text": " ".join(f"{who[:2]}{k}{tag}" for k in range(n)),  # noqa: E731
+                          "emotion": "tension", "delivery": "quiet"}
+    if "no character line: the narrator carries it" in call["user"]:
+        lines = [say("narrator", 14)]
+    else:
+        lines = [say("narrator", 8), say(next(who for who in speakers if who != "narrator"), 6)]
+    return {"lines": lines, "sfx_cues": [], "on_screen_text": None}
+
+
+def _narrated_llm(e1, e2=()):
+    return FakeLLM(E1v3=e1, E2v3=list(e2), E3v3=[E3_FULL], E4=[E4_PASSED],
+                   default={"E2v3": e2_v3_by_plan, "J1v3": J1_PASSED})
+
+
+def test_a_narrated_v3_beat_sheet_assigns_the_character_lines_and_each_scene_is_planned_and_told_from_them(store):
+    story_id = _narrated_v3_story(store)
+    llm = _narrated_llm([_narrated_e1v3([True, False, True, False])])
+
+    _run(_new().script, store, story_id, llm=llm)
+
+    (e1_call,) = llm.of("E1v3")
+    assert ("Exactly 2 to 4 body scenes carry a character line (each needs a character in its characters)"
+            in e1_call["user"])
+    script = _script(store, story_id)
+    body = [scene for scene in script["scenes"] if scene["function"] in schemas.BODY_FUNCTIONS]
+    assert [scene.get("character_line") for scene in script["scenes"]] == [False, True, False, True, False, False]
+    assert [[line["kind"] for line in scene["line_plan"]["lines"]] for scene in body] == [
+        ["narrator", "character"], ["narrator"], ["narrator", "character"], ["narrator"]]
+    told = {_v3_tag(call): call["user"] for call in llm.of("E2v3")}
+    for scene in body:
+        user = next(user for user in told.values() if f"This scene ({scene['scene_id']}," in user)
+        assert ("in this scene there is no character line: the narrator carries it." in user) is (
+            len(scene["line_plan"]["lines"]) == 1)
+        assert ("here one character line (" in user) is (len(scene["line_plan"]["lines"]) == 2)
+    # The estimate carries the planned share: a number, with no refusal behind it.
+    share = script["timing"]["narrator_share"]
+    assert share == timing.plan_narrator_share(script, templates.load_episode_template("narrated_drama_60s_v2"))
+    assert 0 < share <= 1
+
+
+def test_a_beat_sheet_with_too_many_or_too_few_character_lines_is_refused_then_retried(store):
+    story_id = _narrated_v3_story(store)
+    llm = _narrated_llm([_narrated_e1v3([False] * 4), _narrated_e1v3([True, False, True, False])])
+
+    _run(_new().script, store, story_id, llm=llm)
+
+    first, second = llm.of("E1v3")
+    assert "$.scenes: 0 scenes carry a character line, the format allows 2 to 4" in second["user"]
+    assert "refused" not in first["user"]
+    assert [scene.get("character_line") for scene in _script(store, story_id)["scenes"]][1:5] == [
+        True, False, True, False]
+
+
+def test_a_character_line_in_a_narrator_only_scene_is_refused_by_name_and_never_trimmed(store):
+    story_id = _narrated_v3_story(store)
+
+    def wrong(call):
+        reply = e2_v3_by_plan(call)
+        if "no character line: the narrator carries it" in call["user"]:
+            speaker = next(who for who in _speakers(call) if who != "narrator")
+            reply["lines"] = [dict(reply["lines"][0], text=" ".join(reply["lines"][0]["text"].split()[:8])),
+                              dict(reply["lines"][0], speaker=speaker,
+                                   text=" ".join(reply["lines"][0]["text"].split()[:6]) + " enfin")]
+        return reply
+
+    llm = _narrated_llm([_narrated_e1v3([True, False, True, False])], e2=[e2_v3_by_plan, wrong, e2_v3_by_plan])
+
+    _run(_new().script, store, story_id, llm=llm)
+
+    refused = [call for call in llm.of("E2v3") if "Your previous reply was refused: " in call["user"]]
+    assert len(refused) == 1
+    assert ("$.lines[1]: one character line too many: this scene's plan holds 0 character lines; the narrator "
+            "carries this scene alone, so a character line has no place in it") in refused[0]["user"]
+    assert _trim_calls(llm) == []
+    assert _scene(_script(store, story_id), "s03")["state"] == "written"

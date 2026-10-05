@@ -552,6 +552,10 @@ def retime(script, ec, storyboard=None) -> dict:
     script["timing"], _scenes = timing.episode_pass(script, ec.template, ec.language, style_lock=ec.style_lock,
                                                     storyboard=storyboard,
                                                     whole_frames=timing.board_whole_frames(storyboard))
+    # Plan 24 stage 5 (D-6): a narrated template's planned narrator share rides on the stored timing.
+    share = timing.plan_narrator_share(script, ec.template)
+    if share is not None:
+        script["timing"]["narrator_share"] = share
     return script
 
 

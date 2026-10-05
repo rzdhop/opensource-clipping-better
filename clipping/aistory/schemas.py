@@ -3085,6 +3085,11 @@ _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     # Absent on every scene written before, and on every v1/v2 scene.
     "slot_s": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 2, "maxItems": 2},
     "line_plan": _EPISODE_SCRIPT_LINE_PLAN_SCHEMA,
+    # Plan 24 stage 5 (D-6): on a narrated format's writing-v3 beat sheet, whether
+    # the body scene carries one character line (true) or is the narrator's alone
+    # (false); ``timing.scene_plan`` plans the scene's lines from it. Absent on
+    # every other scene: the plan is what it was.
+    "character_line": {"type": "boolean"},
 })
 
 _EPISODE_SCRIPT_HOOK_SCHEMA = _document({"on_screen_text": {"type": ["string", "null"]}})
@@ -3120,6 +3125,11 @@ _EPISODE_SCRIPT_TIMING_SCHEMA = _or_null(_document({
     "flags": {"type": "array", "items": _EPISODE_SCRIPT_TIMING_FLAG_SCHEMA},
     "estimated_lines": {"type": "integer"},
     "measured_lines": {"type": "integer"},
+}, optional={
+    # Plan 24 stage 5 (D-6): the narrator's share of the episode's planned words
+    # (``timing.plan_narrator_share``), stored on a narrated template's writing-v3
+    # script only; a report, never a refusal.
+    "narrator_share": {"type": "number", "minimum": 0, "maximum": 1},
 }))
 
 _EPISODE_SCRIPT_ISSUE_SCHEMA = _document({

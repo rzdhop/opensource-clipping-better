@@ -522,6 +522,9 @@ def _repair_e1_reply(ec, reply, *, new_objects_offered=False) -> None:
                 scene["props"] = []
             if isinstance(scene.get("pays_off"), list) and scene.get("function") not in schemas.BODY_FUNCTIONS:
                 scene["pays_off"] = []
+            # Plan 24 stage 5 (D-6): only a body scene carries a character line, the same repair.
+            if scene.get("character_line") is True and scene.get("function") not in schemas.BODY_FUNCTIONS:
+                scene["character_line"] = False
     if ec.language != "fr":
         return
     reply["title"] = prompts.repair_fr_elisions(reply["title"])
@@ -752,6 +755,9 @@ def apply_e1(ec, script, reply) -> tuple:
                   if state.get("char_id") in scene["characters"]}
         if states:
             scene["states"] = states
+        # Plan 24 stage 5 (D-6): a narrated format's beat sheet says whether the scene carries a character line.
+        if isinstance(stub.get("character_line"), bool):
+            scene["character_line"] = stub["character_line"]
         # Phase 5 stage 3: the open hooks the scene pays off, verbatim (never
         # repaired: each must stay the exact text of a hook), each once;
         # nothing is stored for none.
@@ -868,7 +874,8 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
             errors = prompts.validate_e1_v3(reply, ep=ec.ep, template=ec.template,
                                             episode_defaults=ec.episode_defaults,
                                             cast_ids=[doc["char_id"] for doc in cast], places=ec.places,
-                                            prop_ids=ec.prop_ids, open_hooks=hooks, variants=variants)
+                                            prop_ids=ec.prop_ids, open_hooks=hooks, variants=variants,
+                                            narration=prompts.narration_of(ec.template, ec.narrator))
         else:
             errors = prompts.validate_e1(reply, ep=ec.ep, template=ec.template, episode_defaults=ec.episode_defaults,
                                          cast_ids=[doc["char_id"] for doc in cast], places=ec.places,

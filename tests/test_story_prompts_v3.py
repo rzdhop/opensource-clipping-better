@@ -559,7 +559,9 @@ def test_the_spine_is_an_optional_key_of_the_script_and_capped():
 # the narrator offered. Budget = worst case + 15 %, rounded up to ten.
 
 # Plan 24 stage 2 (2026-10-05): E2v3 2,628 -> 2,705 and E3v3 3,475 -> 3,488, planned (_worst_plan below).
-MEASURED_V3 = {"E1v3": 2807, "E2v3": 2705, "E3v3": 3488, "J1v3": 4083}
+# Plan 24 stage 5 (2026-10-05): E1v3 2,807 -> 2,881 (the narrated format's character_line ask and count
+# sentence) and E2v3 2,705 -> 2,706 (the scene's planned character-line sentence); budgets 3,230 -> 3,320 and 3,120.
+MEASURED_V3 = {"E1v3": 2881, "E2v3": 2706, "E3v3": 3488, "J1v3": 4083}
 MEASURED_V3_REPLY = {"E1v3": 2232.1, "E1v3-payoff": 2770.3, "J1v3": 854.1}
 SPINE_AT_CAPS = {key: budgets._fr(words) for key, words in prompts.SPINE_MAX_WORDS.items()}
 SCENES_V3 = [dict(scene, summary=budgets._fr(prompts.SUMMARY_V3_MAX_WORDS)) for scene in budgets.SCENES]
@@ -853,3 +855,130 @@ def test_the_script_pane_shows_the_spine_as_what_happens_above_the_scenes():
     assert "<dd>{spine[key]}</dd>" in card
     body = src.split("export default function ScriptPane(", 1)[1]
     assert body.index("<SpineCard spine={script.spine} />") < body.index("{script.scenes.map((scene) => (")
+
+
+# ================================================================ plan 24 stage 5: the narrated format's rhythm
+#
+# D-6: the narrated template's ``character_lines`` [2, 4] and its narrator share
+# are a plan-level constraint. E1v3 says which body scenes carry one character
+# line (``character_line``); the count is enforced across the episode; E2v3 is
+# told what its scene's plan holds and refuses a character line where none is
+# planned. A template without ``character_lines`` (the confrontation) is
+# untouched: its prompts and validators are what they were.
+
+NARRATED_BODY = ["setup", "rising", "peak", "turn"]
+
+
+def _narrated_e1_reply(flags):
+    """Episode 1 of the narrated template (a hook, four body scenes, a
+    cliffhanger), the four body scenes' ``character_line`` set from *flags*."""
+    def stub(function, summary, line):
+        lo, hi = NARRATED["slots"]["body" if function in NARRATED_BODY else function]["duration_s"]
+        return {"function": function, "place_id": "place_hall", "time_variant": "day",
+                "characters": ["char_rouge", "char_nude"], "props": [], "summary": summary, "emotion": "tension",
+                "target_duration_s": (lo + hi) / 2, "character_line": line}
+
+    body = [stub(function, OUTLINE[1]["summary"], flag) for function, flag in zip(NARRATED_BODY, flags)]
+    return {"spine": dict(SPINE), "title": "Le capuchon de Nude",
+            "scenes": [stub("hook", OUTLINE[0]["summary"], False)] + body
+            + [stub("cliffhanger", OUTLINE[3]["summary"], False)]}
+
+
+def _check_narrated_e1(reply, narration=NARRATION):
+    return prompts.validate_e1_v3(reply, ep=1, template=NARRATED, episode_defaults=dict(DEFAULTS, max_places=1),
+                                  cast_ids=["char_rouge", "char_nude"], places={"place_hall": ["day"]}, prop_ids=[],
+                                  narration=narration)
+
+
+def test_validate_e1v3_holds_the_narrated_format_to_its_character_lines():
+    assert _check_narrated_e1(_narrated_e1_reply([True, False, True, True])) == []
+    assert _check_narrated_e1(_narrated_e1_reply([True, False, True, False])) == []  # the low end, 2
+    assert _check_narrated_e1(_narrated_e1_reply([True] * 4)) == []  # the high end, 4
+    # More than the format allows: five scenes cannot all carry one (4 body scenes, so a hook does it).
+    reply = _narrated_e1_reply([True] * 4)
+    reply["scenes"][0]["character_line"] = True
+    errors = _check_narrated_e1(reply)
+    assert "$.scenes: 5 scenes carry a character line, the format allows 2 to 4" in errors
+    assert "$.scenes[0].character_line: only a body scene carries a character line; the hook is the narrator's "\
+        "alone" in errors
+    # Fewer: none, and one.
+    assert _check_narrated_e1(_narrated_e1_reply([False] * 4)) == [
+        "$.scenes: 0 scenes carry a character line, the format allows 2 to 4"]
+    assert _check_narrated_e1(_narrated_e1_reply([True, False, False, False])) == [
+        "$.scenes: 1 scene carries a character line, the format allows 2 to 4"]
+    # A character line needs a character in the scene.
+    reply = _narrated_e1_reply([True, True, False, False])
+    reply["scenes"][1]["characters"] = []
+    assert _check_narrated_e1(reply) == [
+        "$.scenes[1].character_line: a scene with a character line names at least one character in characters"]
+
+
+def test_the_e1v3_narrated_prompt_asks_the_character_line_and_its_count_and_the_schema_requires_it():
+    _s, user, schema = _e1v3(template=NARRATED, narration=NARRATION)
+    assert ("- character_line: true when this body scene carries one character line, false when the narrator tells "
+            "it alone (always false on the recap, hook and cliffhanger)\n") in user
+    assert ("Exactly 2 to 4 body scenes carry a character line (each needs a character in its characters); every "
+            "other scene is the narrator's alone.\n") in user
+    scene = schema["properties"]["scenes"]["items"]
+    assert scene["properties"]["character_line"]["type"] == "boolean" and "character_line" in scene["required"]
+    # The reply without the key is refused by the schema; the key is never asked of a template without it.
+    reply = _narrated_e1_reply([True, True, False, False])
+    del reply["scenes"][2]["character_line"]
+    assert any("character_line" in error for error in _check_narrated_e1(reply))
+
+
+def test_a_narrator_only_scene_is_told_the_narrator_carries_it_and_a_planned_one_names_its_speaker():
+    narrator_only = dict(S02, character_line=False)
+    plan = timing.scene_plan(NARRATED, narrator_only, lang="fr", native=False, narrator_provider="edge",
+                             speakers={"char_rouge": "gemini"}, tail_floor=timing.plan_tail_floor(NARRATED))
+    assert [line["kind"] for line in plan["lines"]] == ["narrator"]
+    _s, user, _ = _e2v3(scene=narrator_only, plan=plan, budget=timing.plan_budget(plan, line_lo=5),
+                        cast=PERSONALITIES[:1], narrator_enabled=True, narration=NARRATION)
+    assert "in this scene there is no character line: the narrator carries it." in user
+    assert "- lines: 1 line, each with speaker" in user
+    assert "here at most one character line" not in user and "one character line (" not in user
+    # The scene that carries one: the plan names who.
+    _s, user, _ = _e2v3(scene=S02, plan=_s02_plan(), budget=timing.plan_budget(_s02_plan(), line_lo=5),
+                        cast=PERSONALITIES[:1], narrator_enabled=True, narration=NARRATION)
+    assert "here one character line (Rouge), where it moves the story most." in user
+    assert "no character line" not in user
+
+
+def test_validate_e2v3_refuses_a_character_line_where_none_is_planned_and_it_is_not_a_cap_error():
+    from clipping.aistory.steps import script as script_step
+
+    narrator_only = dict(S02, character_line=False)
+    plan = timing.scene_plan(NARRATED, narrator_only, lang="fr", native=True, narrator_provider="edge",
+                             speakers={"char_rouge": "gemini"}, tail_floor=timing.plan_tail_floor(NARRATED))
+
+    def check(*lines):
+        return prompts.validate_e2_v3(_e2_reply(*lines), scene=narrator_only, narrator_enabled=True,
+                                      sfx_cues=["gasp_crowd"], budget=timing.plan_budget(plan, line_lo=5), floor=5,
+                                      plan=plan)
+
+    assert check(_line("narrator", _words(15, "n"))) == []
+    errors = check(_line("narrator", _words(6, "n")), _line("char_rouge", _words(6, "c")))
+    assert errors == ["$.lines[1]: one character line too many: this scene's plan holds 0 character lines; the "
+                      "narrator carries this scene alone, so a character line has no place in it"]
+    assert script_step.over_cap_errors(errors) == []  # a structure error: no trim pass for it
+    # Over its caps as well, the cap errors come first and the structure error rides with them.
+    both = check(_line("narrator", _words(8, "n")), _line("char_rouge", _words(8, "c")))
+    assert both[0] == "$.lines: 16 words in total, at most 15 (a 13 s scene)" and errors[0] in both
+    assert script_step.over_cap_errors(both) != both  # a real problem rides along: nothing for a trim to fix alone
+
+
+def test_the_confrontation_prompts_and_validators_do_not_know_the_character_line():
+    _s, user, schema = _e1v3()
+    assert "character_line" not in user and "character_line" not in json.dumps(schema)
+    assert "Exactly" not in user.split("The hook scene:")[0].split("Read in order")[-1]
+    assert prompts.narration_e1_character_lines_v3(None) == ""
+    # E2v3 without a narration says nothing of it, planned or not.
+    plan = _s02_plan()
+    planned = _e2v3(scene=S02, plan=plan, budget=timing.plan_budget(plan, line_lo=5), cast=PERSONALITIES[:1])
+    assert "character line" not in planned[1].split("Hard limits")[0].rsplit("Line 2", 1)[-1]
+    assert prompts.narration_e2_planned_line_v3(None, plan, {}) == ""
+    # The reply that has no character_line is valid for the confrontation, the one that has it is not.
+    assert _check_e1(_e1v3_reply()) == []
+    keyed = _e1v3_reply()
+    keyed["scenes"][1]["character_line"] = True
+    assert _check_e1(keyed) != []
