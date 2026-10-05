@@ -1,32 +1,27 @@
-## CURRENT STATE — plan 23 follow-through: the human's six calls in order (2026-10-05, local session)
+## CURRENT STATE — plan 24 (the timing harness) IMPLEMENT stage 1 + plan 23 D5 follow-up, in worktrees; the human's calls delegated (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT of the follow-through list (the human's message of 2026-10-05). (1) keys +
-  zone: WAITS for the human to set `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `PIXABAY_API_KEY`,
-  `BUDGET_TIMEZONE=Europe/Paris` in Settings (free checks ready: `POST /api/settings/check-anthropic-key`, ElevenLabs
-  `GET /v1/voices`, one Pixabay search, `GET /api/budget/today`). (2) D7's A/B: dry-run done (Flash $0.10 / Sonnet $0.53 /
-  Opus $1.33 one try = $1.96; upper $3.91 > `--max-usd 3.00`, Opus would be cut short, never overspent); WAITS for the go +
-  the Anthropic key. (3) C2: `tools/probe_speech_link.py` MERGED (main 122c25d; 6 tests; real dry-run: est $0.54 on
-  shot_01.jpg of d16026f12e77, gates pass); the paid clip WAITS for the go: `python3 tools/probe_speech_link.py --image
-  outputs/stories/d16026f12e77/episodes/ep01/assets/shots/shot_01.jpg --allow-paid --max-usd 0.60`; C4/C5 only if
-  matched ≥ 0.8 and the ear. (4) follow-ups: A8 (e38efca), D7 (db931d1), B8 (526b4b8), A5 (09f6884) MERGED and pushed,
-  each with its selection green in both envs; D5 (variant sheets in the image brief) WAITS for the human's scope call
-  (brief only vs brief + variant upload route + dashboard tile). (5) DONE (500a720). (6) the phone walks: steps to give
-  once (1)–(3) are settled. Checkpoint commit = main `a25d999`, clean tree. No deploy needed so far: the merged Python
-  (script.py, refimages.py, cli.py) is read by the bind mount at the next job start; the bundle is unchanged.
-- **CI is RED on main since 9423685 (2026-10-04 23:15, plan 23 B6) with the last green at 9a69f1f.** The golden-key
-  annotations explained it until 500a720; 500a720 and 7a65f47 (keys added) still fail with NO annotation, so another
-  x86_64/CI-only failure hides behind (the job log needs admin rights; `gh` is not installed; the REST annotations show
-  only `::error` lines). Diagnosis running: the A-096 CI-faithful replica (app image Python 3.11, `python -S`, pytest
-  only, `--network none`) on a git-archive of fd5de94, output in the session scratchpad `replica.txt` (one F seen at
-  42 %). Next: read its `-rfE` summary, fix forward as its own stage, push, confirm CI green.
-- **Live state:** health 200, 356 jobs (0 running; the human ran 10 jobs this morning), today (UTC) $0.673 of the $4
-  cap (e7412a3efcc6), zone UTC. Deployed bundle index-BfVk0EWS.js.
-- **Rules in force:** worktrees off main; DEC-234 selections in both envs per stage; refusal-text changes run the two
-  refusal-pin files (DEC-297); requirements pins mirrored in pyproject; deploy only at 0 running jobs after compiling the
-  tree with the image's Python 3.11; no full local suite (DEC-278 — the replica above is a CI diagnosis, not a Tier 1);
-  no edits to main's source while a job runs; nothing that spends without the human's go.
-- **Open questions (the human):** the keys; the A/B go; the probe go; D5's scope; whether A-157 (all ten universes)
-  reads right.
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `cc1d734` (+ this docs commit), clean tree.
+  Running: plan 24 stage 1 (Opus, `feat/plan24-s1`, worktree plan24-s1: `timing.seconds_for`, `timing.scene_plan`,
+  `slot_s`/`line_plan` on the scene, the provider overrun in the Script-step estimate) and the D5 follow-up (Opus,
+  `feat/plan23-d5-follow`: variant sheets in the image brief + `?variant=` upload + tiles; image rebuild at 0 jobs
+  after the merge). Next: stage 1 merge → stage 2 (prompts told seconds + hard caps + retry text + under-only
+  acceptance, Opus) → stage 3 (trim pass + failure sentence) → stage 4 (storyboard follows the plan) → stage 5
+  (narrator share / 2–4 character lines) → stage 6 (the dashboard Trim action, rebuild) → stage 7 docs + the walk
+  (regenerate e7412a3efcc6 ep1 to 0 warnings). Plan: `.claude/plans/ai-story/24-timing-harness-plan.md`; DEC-298.
+- **Plan 23 follow-through status:** (1) keys + zone: STILL WAITS for the human to set `ANTHROPIC_API_KEY`,
+  `ELEVENLABS_API_KEY`, `PIXABAY_API_KEY`, `BUDGET_TIMEZONE=Europe/Paris` (free checks ready). (2) the A/B: dry-run
+  done ($1.96 one try); runs on the delegated go once the Anthropic key is set. (3) C2: the tool merged (122c25d);
+  the paid probe ATTEMPTED on the delegated go and REFUSED by fal (HTTP 403, exhausted balance): nothing booked;
+  **the human tops up fal, then re-run:** `python3 tools/probe_speech_link.py --image
+  outputs/stories/d16026f12e77/episodes/ep01/assets/shots/shot_01.jpg --allow-paid --max-usd 0.60`. (4) A8, D7,
+  B8, A5 merged; D5 in progress (DEC-299). (5) done; CI's hidden second failure (the two-mode route test vs
+  `/settings#budget`) fixed in d3eac3f — **CI result on cc1d734 pending; must be green**. (6) the walks after.
+- **Live state:** health 200, 0 running jobs, today (UTC) $0.848 of the $4 cap (all e7412a3efcc6), zone UTC;
+  bundle index-BfVk0EWS.js (the D5 tiles and plan 24 stage 6 need a rebuild).
+- **Rules in force:** as before (worktrees, DEC-234 both envs, DEC-297 pin files, pins mirrored, deploy at 0 jobs
+  after the 3.11 compile, no full local suite, no source edits during a job, money only on the human's go — the
+  delegated go covers the probe and the A/B as listed, nothing else).
+- **Open questions:** none blocking; the keys and the fal top-up are the human's hands.
 
 ## CURRENT STATE — plan 23 (the upgrade ideas) CODE COMPLETE and DEPLOYED; phase DOCUMENT / close-out (2026-10-05, local session)
 

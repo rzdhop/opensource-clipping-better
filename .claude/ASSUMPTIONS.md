@@ -597,6 +597,12 @@
 - **A-165** — (plan 23, C2) The probe books through `budget.record` alone (spend.json, the local day) from inside the
   journal's `book` callback; no story ledger row exists for it. The journal under `data/probes/gen` makes a re-run with
   the same inputs free (a kept answer), so a second clip needs a new seed on purpose. UNCONFIRMED until the probe runs.
+- **A-166** — (plan 24, stage 1) Written French dialogue averages 6.6 characters per word (6.2–7.3 per scene on
+  e7412a3efcc6), so a v3 word budget converted at 5.7 under-counts seconds by ~15 %; 6.6 is the right constant for
+  v3 budgets until measured on more scripts. UNCONFIRMED.
+- **A-167** — (plan 24) A reply written inside a per-line cap derived from `timing.scene_plan` (every pause paid,
+  5 % margin, the provider overrun applied) never raises a `scene_over` flag at the Script step. UNCONFIRMED until
+  stage 2's first episode.
 
 ## Confirmed
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
