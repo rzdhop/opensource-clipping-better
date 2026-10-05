@@ -761,13 +761,31 @@ def _variant_entries(stories, story, character, *, env, lock):
 
 
 def _keyframe_entries(ec, storyboard, assets_doc):
+    """The image brief's keyframe entries. On a v2 story (plan 26 H1) each
+    prompt is the image master and the scene template before the core
+    (``assets.sent_image_prompt``), fitted to the link the keyframe is held
+    to (``assets.shot_image_link``: none on a hand-made one), with its
+    ``fit`` and -- not on a shot kept still or cut from stock -- its
+    ``prompt_warning``."""
     from . import assets as assets_step  # the step imports this module: a cycle at import time
 
     link = assets_step.recorded_image_link(assets_doc)
     missing = {item["shot_id"] for item in missing_keyframes(ec, storyboard, assets_doc)}
+    v2 = media_policy.is_v2(getattr(ec, "story", None))
+    # Plan 26: the script and the ledger are read once for every shot (an empty map: each look's first set).
+    script = None
+    if v2:
+        try:
+            script = episode_common.read_episode(ec, episode_common.SCRIPT_DOC)
+        except episode_common.StepFailed:
+            script = None  # the template then says no scene; the core is the brief's all the same
+    wardrobe = (clips.wardrobe_of(ec) or {}) if v2 else None
     entries = []
     for shot in sorted(storyboard["shots"], key=lambda item: item["order"]):
         parts = assets_step.request_parts(ec, shot, note=None, link=link)
+        sent = assets_step.sent_image_prompt(ec, shot, parts,
+                                             link=assets_step.shot_image_link(ec.story, shot, link, assets_doc),
+                                             wardrobe=wardrobe, script=script)
         refs = []
         for number, path in enumerate(shot.get("reference_images") or (), start=1):
             bits = path.split("/")
@@ -775,11 +793,19 @@ def _keyframe_entries(ec, storyboard, assets_doc):
                 continue
             refs.append({"kind": bits[0].rstrip("s"), "label": f"{bits[1]} — {bits[3]}", "path": path,
                          "name": bits[3], "url": f"/api/stories/{ec.story_id}/media/{bits[0]}/{bits[1]}/{bits[3]}"})
-        entries.append({"kind": "keyframe", "entity": "shots", "id": shot["shot_id"], "slot": "keyframe",
-                        "label": f"Shot {shot['shot_id']} — keyframe", "role": "keyframe",
-                        "prompt": parts["prompt"], "negative_prompt": parts.get("negative") or "",
-                        "references": refs, "state": "missing" if shot["shot_id"] in missing else "uploaded",
-                        "upload_slot": keyframe_slot(ec.story_id, ec.ep, shot["shot_id"])})
+        entry = {"kind": "keyframe", "entity": "shots", "id": shot["shot_id"], "slot": "keyframe",
+                 "label": f"Shot {shot['shot_id']} — keyframe", "role": "keyframe",
+                 "prompt": sent["text"], "negative_prompt": parts.get("negative") or "",
+                 "references": refs, "state": "missing" if shot["shot_id"] in missing else "uploaded",
+                 "upload_slot": keyframe_slot(ec.story_id, ec.ep, shot["shot_id"])}
+        if v2:
+            entry["fit"] = {key: sent[key] for key in ("limit", "words", "full_words", "dropped")}
+            still = (clips.shot_flags(shot, assets_doc).get("keep_still")
+                     or shot["assets"].get("route") == schemas.STOCK_ROUTE)
+            warning = None if still else prompt_templates.short_warning(sent["full_words"])
+            if warning:
+                entry["prompt_warning"] = warning
+        entries.append(entry)
     return entries
 
 
@@ -823,7 +849,10 @@ def render_image_markdown(brief) -> str:
     for number, entry in enumerate(brief["images"], start=1):
         lines += [f"## {number}. {entry['label']} — {entry['state']}", "",
                   f"**Size:** {entry['size'][0]}x{entry['size'][1]} (at least {entry['min_size'][0]}x"
-                  f"{entry['min_size'][1]})", "", "**Prompt:**", "", _fence(entry["prompt"]), ""]
+                  f"{entry['min_size'][1]})", ""]
+        if entry.get("prompt_warning"):
+            lines += [f"**{entry['prompt_warning']}**", ""]
+        lines += ["**Prompt:**", "", _fence(entry["prompt"]), ""]
         if entry.get("negative_prompt"):
             lines += ["**Negative prompt:**", "", _fence(entry["negative_prompt"]), ""]
         if entry["references"]:
@@ -922,7 +951,8 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
          "next_missing": <the first of them> | None,
          "shots": [{shot_id, order, scene_id, purpose, speaks, keep_still, length_s, clip_s, aspect,
                     "image": {mode, mode_explicit, mode_editable, state, source, link, est_usd, gate,
-                              prompt, negative_prompt, size, min_size, references, upload_slot, zip_url},
+                              prompt, negative_prompt, size, min_size, references, upload_slot, zip_url,
+                              fit: {limit, words, full_words, dropped} | None, prompt_warning?},
                     "clip": {mode, mode_explicit, mode_editable, state, source, link, est_usd, gate,
                              model, model_label, how, prompt, negative_prompt, length_s, line, speaker,
                              voice_line, checks, references, upload_slot, zip_url, take, stock,
@@ -992,7 +1022,11 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
             "size": keyframe["size"], "min_size": keyframe["min_size"],
             "references": keyframe["references"], "upload_slot": keyframe["upload_slot"],
             "zip_url": (_zip_url(ec.story_id, ec.ep, shot_id, kind="image") if keyframe["references"] else None),
+            # Plan 26: the image brief's own fit (None on a v1 story) and its short-prompt warning.
+            "fit": keyframe.get("fit"),
         }
+        if keyframe.get("prompt_warning"):
+            image["prompt_warning"] = keyframe["prompt_warning"]
         if not image_mine:
             image["gate"] = keyframe_gate()
             image.update(link=image["gate"]["link"], est_usd=image["gate"]["est_usd"])

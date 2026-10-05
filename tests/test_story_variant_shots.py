@@ -510,8 +510,11 @@ def _image_brief_cases(store_factory) -> dict:
 def test_a_story_without_variants_gets_the_image_brief_byte_for_byte_as_before(tmp_path):
     """The image brief's record (``image_brief_before_d5follow.json``,
     captured from ``main`` at cc1d734 before variant sheets entered the
-    brief, never re-recorded): with no variant, every entry, label, prompt,
-    size and upload slot -- and the markdown -- is what it was."""
+    brief): with no variant, every entry, label, prompt, size and upload
+    slot -- and the markdown -- is what it was. Re-recorded by plan 26 H1
+    alone, a brief-layer pin (never a hash): stage 4a, each keyframe's
+    prompt is the image master and scene template before the same core,
+    with its ``fit``."""
     counter = iter(range(10))
 
     def factory():

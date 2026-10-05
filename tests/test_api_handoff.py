@@ -142,6 +142,12 @@ def test_the_handoff_composes_each_shot_from_the_two_briefs(api):
         brief_entry = next(item for item in clip_brief["shots"] if item["shot_id"] == shot["shot_id"])
         assert shot["clip"]["prompt"].startswith("SERIES:") and shot["clip"]["fit"] == brief_entry["fit"]
         assert shot["clip"].get("prompt_warning") == brief_entry.get("prompt_warning")
+        # Stage 4a: each keyframe row too, the image brief's own (a hand-made keyframe: unbounded).
+        keyframe = next(item for item in image_brief["images"] if item["kind"] == "keyframe"
+                        and item["id"] == shot["shot_id"])
+        assert shot["image"]["prompt"].startswith("SERIES:") and shot["image"]["fit"] == keyframe["fit"]
+        assert shot["image"]["fit"]["limit"] is None and shot["image"]["fit"]["dropped"] == []
+        assert shot["image"].get("prompt_warning") == keyframe.get("prompt_warning")
 
 
 def test_the_handoff_leaves_the_briefs_as_they_were(api):

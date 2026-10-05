@@ -168,13 +168,13 @@ import time
 from types import SimpleNamespace
 
 from clipping.providers import budget as budget_mod
-from clipping.providers import gating, gen_timings, gencache, local_comfyui
+from clipping.providers import gating, gen_timings, gencache, local_comfyui, prompt_limits
 from clipping.providers import generation as gen
 from clipping.providers import lipsync as lipsync_providers
 from clipping.providers.registry import ChainError, Link, describe
 
-from .. import (defaults, hardware, imaging, media_policy, native_speech, prompt_budgets, prompting, refimages,
-               schemas, stock_cutaways, timing, video_plan, voices, wordtiming)
+from .. import (defaults, hardware, imaging, media_policy, native_speech, prompt_budgets, prompt_templates, prompting,
+               refimages, schemas, stock_cutaways, timing, video_plan, voices, wordtiming)
 from .. import ledger as ledger_mod
 from .. import names as names_mod
 from .. import shots as shots_mod
@@ -892,6 +892,44 @@ def request_parts(ec, shot, *, note, link=None, continuity=None, alone=None) -> 
         sent, missing = reference_paths(ec, alone_shot, link=link)
     return {"kind": kind, "prompt": sent_prompt, "negative": negative, "consistency": mode, "size": size,
             "references": sent, "missing": missing, "hash": digest, "over": over, "refit": refit}
+
+
+def sent_image_prompt(ec, shot, parts, *, link, live=None, wardrobe=None, script=None) -> dict:
+    """The keyframe prompt sent for *shot* (plan 26 H1): on a v2 story the
+    image master and the scene template (``prompt_templates.shot_keyframe_prompt``)
+    before *parts*' prompt -- the core :func:`request_parts` built, its note
+    and any DEC-249 refit included, unchanged and last -- fitted to *link*'s
+    whole-prompt words (``prompt_budgets.link_words``: none on a manual link)
+    and its own check (``prompt_limits.fits``); *link* may be a role chain
+    (a list of labels, no link recorded yet): fitted to its smallest bound
+    (``prompt_budgets.chain_words``) and every bounded link's check, so no
+    fallback refuses it. On a v1 story, or a shot whose ``prompt_override``
+    the user wrote (:func:`effective_prompt` sends it as written), the core
+    alone. ``{text, words, full_words, limit, dropped: [label]}``. *parts*
+    (its ``prompt`` and ``hash``) is never touched: the hash stays the
+    core's, so nothing made turns stale. *wardrobe* as
+    ``clips.sent_clip_prompt``'s; *script* the episode's (None: read)."""
+    core = parts["prompt"]
+    if not media_policy.is_v2(getattr(ec, "story", None)) or shot.get("prompt_override"):
+        words = len(core.split())
+        return {"text": core, "words": words, "full_words": words, "limit": None, "dropped": []}
+    if isinstance(link, (list, tuple)):
+        labels = [label if isinstance(label, str) else describe(label) for label in link]
+    else:
+        labels = [link if isinstance(link, str) or link is None else describe(link)]
+    labels = [label for label in labels if label]
+    limit = prompt_budgets.chain_words(labels, live=live)
+    bounded = [label for label in labels
+               if not label.startswith(prompt_budgets.UNBOUNDED_PREFIXES)
+               and prompt_limits.limit_for(label, live=live) is not None]
+    fits = (lambda text: all(prompt_limits.fits(label, text, live=live)[0] for label in bounded)) if bounded else None
+    if script is None:
+        try:
+            script = episode_common.read_episode(ec, SCRIPT_DOC)
+        except StepFailed:
+            script = None
+    return prompt_templates.shot_keyframe_prompt(ec, shot, script, core, limit_words=limit, fits=fits,
+                                                 wardrobe=wardrobe if wardrobe is not None else clips.wardrobe_of(ec))
 
 
 def _read_assets_doc(ec):
@@ -2906,10 +2944,16 @@ class _Assets(voice_lines.LineMeasurement):
             if not pinned:
                 raise self.gone(f"it is not a link of {chain_name(ec, kind)} any more")
             chain = pinned
+        # Plan 26 H1: the master and the scene template before the core, fitted to the link -- or, with none
+        # recorded yet, to the chain's smallest bound (a fallback never refuses it); the hash stays the core's.
+        parts["sent"] = sent_image_prompt(ec, shot, parts, link=[describe(candidate) for candidate in chain],
+                                          script=self.script)
+        if parts["sent"]["dropped"]:
+            ctx.on_log(_fit_line(shot_id, link or chain_name(ec, kind), parts["sent"], kind="keyframe"))
         route = ec.story["generation_profile"]["route"]
         cache = self.cache(kind, unit="image", qty=1)
         with tempfile.TemporaryDirectory(prefix="shot-image-") as incoming:
-            request = gen.GenRequest(kind=kind, prompt=parts["prompt"], negative=parts["negative"],
+            request = gen.GenRequest(kind=kind, prompt=parts["sent"]["text"], negative=parts["negative"],
                                      width=shot_size(ec.story)[0], height=shot_size(ec.story)[1], seed=seed,
                                      references=tuple(parts["references"]), out_dir=incoming,
                                      extra={"name": f"shot_{shot_id[2:]}"})
@@ -4812,12 +4856,13 @@ def _refit_line(shot_id, kind, link, info) -> str:
             f"to {info['to']} words -- its context shortened, nothing of the note cut.")
 
 
-def _fit_line(shot_id, link, sent) -> str:
-    """The feed line of a clip prompt whose template was fitted to its link
-    (plan 26): "Veo accepts 630 words: 812 → 618, dropped Chloe, the props"."""
+def _fit_line(shot_id, link, sent, *, kind="clip") -> str:
+    """The feed line of a clip (or *kind* ``keyframe``) prompt whose template
+    was fitted to its link (plan 26): "Veo accepts 630 words: 812 → 618,
+    dropped Chloe, the props"; *link* may be a chain's name."""
     label = link if isinstance(link, str) else describe(link)
     accepts = f"{label} accepts {sent['limit']} words" if sent.get("limit") else f"{label}'s limit"
-    return (f"ℹ️ Shot {shot_id}'s clip prompt: {accepts}: {sent['full_words']} → {sent['words']}, dropped "
+    return (f"ℹ️ Shot {shot_id}'s {kind} prompt: {accepts}: {sent['full_words']} → {sent['words']}, dropped "
             f"{', '.join(sent['dropped'])}.")
 
 

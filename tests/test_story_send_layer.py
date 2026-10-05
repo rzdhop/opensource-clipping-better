@@ -1,11 +1,14 @@
-"""The clip prompt's template at the send layer (plan 26 stage 3, H1).
+"""The prompt templates at the send layer (plan 26 stages 3 and 4, H1).
 
 On a v2 story the request a clip is sent with carries the master prompt and
 the scene template before today's prompt -- the *core*, unchanged and last --
 fitted to the link's whole-prompt words; the core alone is hashed, so a clip
 made before stays current and nothing uploaded turns stale. A v1 story's
 request is the one it always was (RC-Q1). A local Wan template is bounded by
-its umT5 window.
+its umT5 window. A keyframe (stage 4a) is sent the image master and the
+scene template before its core the same way, fitted to its link or -- none
+recorded yet -- to its role chain's smallest bound; a user's
+``prompt_override`` is sent as written.
 
 Stdlib + pytest (DEC-012). No provider call.
 """
@@ -14,8 +17,12 @@ from __future__ import annotations
 
 import test_story_assets_step as tas
 import test_story_clip_estimate as tce
+import test_story_keyframe_consistency as kc
+import test_story_keyframe_fix as kf
 import test_story_native_speech_plan as nsp
 from test_story_assets_step import hermetic, store  # noqa: F401 - the step's fixtures (hermetic is autouse)
+from test_story_keyframe_gate import unpaced  # noqa: F401 - the free Gemini tier's pacing lifted
+from test_story_video_phase import timings_path  # noqa: F401 - the measured clip timings under tmp_path
 from test_story_shot_modes import _current_api_clip, _speaking
 
 NOW = tas.NOW
@@ -112,3 +119,171 @@ def test_the_fit_line_names_the_link_the_words_and_what_was_dropped():
                             {"limit": 630, "words": 618, "full_words": 812, "dropped": ["Chloe", "Sam", "the props"]})
     assert "gemini/veo-3.1-fast accepts 630 words: 812 → 618, dropped Chloe, Sam, the props" in line
     assert line.startswith("ℹ️ Shot sh04's clip prompt")
+
+
+# ================================================================ the keyframes (stage 4a)
+
+def _spied(monkeypatch):
+    """``assets.sent_image_prompt`` recording ``(shot_id, core, sent)`` of each call."""
+    from clipping.aistory.steps import assets
+
+    seen = []
+    real = assets.sent_image_prompt
+
+    def spy(ec, shot, parts, **kwargs):
+        sent = real(ec, shot, parts, **kwargs)
+        seen.append((shot["shot_id"], parts["prompt"], sent))
+        return sent
+
+    monkeypatch.setattr(assets, "sent_image_prompt", spy)
+    return seen
+
+
+def _requests(image):
+    return {request.extra["name"]: request for request in image.requests}
+
+
+def _roomy(monkeypatch, store, story_id, chars=8000):
+    """A live read publishing *chars* for every link of the keyframe chain
+    (fal raising its cap): room for the master on top of the core. The
+    stored cores are built to the keyframe ceiling all the same (320 words
+    under both caps), so nothing made moves."""
+    from clipping.aistory.steps import assets
+    from clipping.providers import gating, prompt_limits
+    from clipping.providers import generation as gen
+
+    ec = tas._ec(store, story_id)
+    labels = assets._chain_labels(ec, gen.IMAGE_EDIT, gating.merged_env(kf.SETTINGS))
+    assert labels
+    live = {label: {"status": prompt_limits.PUBLISHED, "prompt_max_chars": chars, "endpoint": label,
+                    "read_at": "2026-10-05T00:00:00+00:00"} for label in labels}
+    monkeypatch.setattr(prompt_limits, "read_live", lambda path=None: live)
+    return labels
+
+
+def test_a_made_keyframe_stays_made_and_its_request_carries_the_image_master_before_the_core(store, tmp_path,
+                                                                                               monkeypatch):
+    """Fail-first. Each keyframe request starts with the image master and
+    ends with the core ``request_parts`` built (its hash basis), fitted to
+    the chain's smallest bound; every keyframe made is current after."""
+    from clipping.aistory import prompt_budgets
+    from clipping.aistory.steps import assets
+    from clipping.providers import prompt_limits
+
+    story_id = kf._quality(store, tmp_path)
+    labels = _roomy(monkeypatch, store, story_id)
+    seen = _spied(monkeypatch)
+    image = kc.SeededImage(price=kf.PRICE)
+    kf._run(store, story_id, image=image)
+
+    requests = _requests(image)
+    assert seen and len(seen) == len(requests)
+    for shot_id, core, sent in seen:
+        request = requests[f"shot_{shot_id[2:]}"]
+        assert request.prompt == sent["text"]
+        assert request.prompt.startswith(("SERIES:", "ART STYLE:"))
+        assert request.prompt.endswith(core) and request.prompt != core
+        assert sent["limit"] == prompt_budgets.chain_words(labels[:1] if request_link(store, story_id) else labels)
+        assert sent["words"] <= sent["limit"]
+        assert all(prompt_limits.fits(label, request.prompt)[0] for label in labels)
+    ec = tas._ec(store, story_id)
+    for shot in tas._shots(store, story_id):
+        assert assets.shot_state(ec, shot) == "current"
+
+
+def test_a_link_with_no_room_for_the_template_is_sent_the_core_alone(store, tmp_path):
+    """The fit's last rung (stage 2): when even the never-dropped sections
+    do not fit the link (the table's 3000 characters of Seedream's editor
+    here), the core alone is sent -- the template adds no refusal."""
+    from clipping.aistory.steps import assets
+    from clipping.providers import prompt_limits
+
+    story_id = kf._quality(store, tmp_path)
+    ec = tas._ec(store, story_id)
+    shot = tas._shots(store, story_id)[1]
+    parts = assets.request_parts(ec, shot, note=None, link=None)
+    label = "fal/seedream-4.5-edit"
+    sent = assets.sent_image_prompt(ec, shot, parts, link=[label], live={})
+    assert sent["full_words"] > sent["words"]
+    if sent["text"] == parts["prompt"]:
+        assert sent["dropped"]
+    assert sent["text"].endswith(parts["prompt"]) and prompt_limits.fits(label, sent["text"], live={})[0]
+    unbounded = assets.sent_image_prompt(ec, shot, parts, link="manual/upload")
+    assert unbounded["limit"] is None and not unbounded["dropped"] and unbounded["text"].startswith("SERIES:")
+
+
+def request_link(store, story_id):
+    from clipping.aistory.steps import assets
+
+    return assets.recorded_image_link(tas._assets_doc(store, story_id))
+
+
+def test_a_keyframe_override_is_sent_as_written(store, tmp_path, monkeypatch):
+    from clipping.aistory.steps import assets
+
+    story_id = kf._quality(store, tmp_path)
+    kf._run(store, story_id)
+    board = tas._board(store, story_id)
+    shot = next(item for item in board["shots"] if item["shot_id"] == "sh05")
+    shot["prompt_override"] = "Kiwilo alone, lit from below, in the parlour."
+    store.write_episode_doc(story_id, 1, "storyboard.json", board, now=NOW)
+    seen = _spied(monkeypatch)
+    image = kc.SeededImage(price=kf.PRICE)
+    kf._run(store, story_id, image=image)
+
+    assert list(_requests(image)) == ["shot_05"]
+    ec = tas._ec(store, story_id)
+    assert image.requests[0].prompt == assets.effective_prompt(shot, ec.entities) == seen[0][1]
+    assert "Kiwilo" not in image.requests[0].prompt and seen[0][2]["limit"] is None
+
+
+def test_a_v1_story_s_keyframe_request_is_its_core_byte_for_byte(store, tmp_path, monkeypatch):
+    story_id = tas._episode(store, tmp_path)
+    seen = _spied(monkeypatch)
+    image = tas.FakeImage()
+    tas._run(store, story_id, adapters=tas._adapters(image=image))
+    requests = _requests(image)
+    assert seen and requests
+    for shot in tas._shots(store, story_id):
+        request = requests.get(f"shot_{shot['shot_id'][2:]}")
+        if request is not None:
+            assert request.prompt == shot["image_prompt"]
+    for _shot_id, core, sent in seen:
+        assert sent == {"text": core, "words": len(core.split()), "full_words": len(core.split()), "limit": None,
+                        "dropped": []}
+
+
+def test_the_image_brief_s_keyframe_carries_the_master_fitted_to_its_link(store, tmp_path, monkeypatch):
+    from clipping.aistory.steps import assets, brief
+
+    story_id = kf._quality(store, tmp_path)
+    _roomy(monkeypatch, store, story_id)
+    kf._run(store, story_id)
+    ec = tas._ec(store, story_id)
+    doc = brief.image_brief(store, store.get(story_id), ec=ec)
+    keyframes = [entry for entry in doc["images"] if entry["kind"] == "keyframe"]
+    assert keyframes
+    link = request_link(store, story_id)
+    for entry in keyframes:
+        shot = next(item for item in tas._shots(store, story_id) if item["shot_id"] == entry["id"])
+        core = assets.request_parts(ec, shot, note=None, link=link)["prompt"]
+        assert entry["prompt"].startswith(("SERIES:", "ART STYLE:")) and entry["prompt"].endswith(core)
+        assert set(entry["fit"]) == {"limit", "words", "full_words", "dropped"}
+        assert entry["fit"]["words"] == len(entry["prompt"].split())
+        assert entry["fit"]["limit"] is not None and entry["fit"]["words"] <= entry["fit"]["limit"]
+    markdown = brief.render_image_markdown(doc)
+    assert all(entry["prompt"] in markdown for entry in keyframes)
+    # A keyframe that is the human's own by its mode is held to manual/upload: the template unbounded.
+    board, assets_doc = tas._board(store, story_id), tas._assets_doc(store, story_id)
+    mine = dict(assets_doc, shot_modes={"sh02": {"image": "manual"}})
+    own = next(entry for entry in brief._keyframe_entries(ec, board, mine) if entry["id"] == "sh02")
+    assert own["fit"]["limit"] is None and own["fit"]["dropped"] == []
+    assert own["fit"]["words"] == own["fit"]["full_words"] >= keyframes[1]["fit"]["words"]
+
+
+def test_the_keyframe_fit_line_says_keyframe():
+    from clipping.aistory.steps import assets
+
+    line = assets._fit_line("sh04", "fal/seedream-4.5-edit", {"limit": 461, "words": 455, "full_words": 700,
+                                                              "dropped": ["Chloe"]}, kind="keyframe")
+    assert line.startswith("ℹ️ Shot sh04's keyframe prompt: fal/seedream-4.5-edit accepts 461 words: 700 → 455")

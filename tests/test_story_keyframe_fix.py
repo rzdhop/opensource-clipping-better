@@ -129,7 +129,8 @@ def test_a_flagged_keyframe_is_redrawn_with_a_fresh_seed_and_its_verdict_s_note_
     assert redraw.extra["name"] == "shot_05" and redraw.seed == 4242
     # The note says who it is about in the prompt's own words, never "the character" (it ends with its own
     # period now: the framing order's).
-    assert redraw.prompt == _shot(store, story_id, "sh05")["image_prompt"] + f" Author's note: {note}"
+    # Plan 26 H1: the core ends the request (the master before it, as the link fits it).
+    assert redraw.prompt.endswith(_shot(store, story_id, "sh05")["image_prompt"] + f" Author's note: {note}")
     # Checked again, with the shot after it (its previous keyframe changed).
     assert judge.seen["sh05"] == 2 and judge.seen["sh06"] == 2 and judge.seen["sh04"] == 1
     shot = _shot(store, story_id, "sh05")
@@ -338,7 +339,7 @@ def test_a_framing_mismatch_note_restates_the_required_framing(store, tmp_path, 
     phrase = prompting.FRAMING_PHRASES[shot["framing"]]
     tail = "." if shot["framing"] == "wide_establishing" else ", nothing wider."
     note = f"Keyframe check: draw it again with the framing asked. Frame this as {phrase}{tail}"
-    assert image.requests[-1].prompt == shot["image_prompt"] + f" Author's note: {note}"
+    assert image.requests[-1].prompt.endswith(shot["image_prompt"] + f" Author's note: {note}")
     fix = tas._assets_doc(store, story_id)["keyframe_fixes"]["sh05"]
     first, second = fix["history"]
     # J2's own field, kept on the verdict and named in the feed and the history like the other findings.
