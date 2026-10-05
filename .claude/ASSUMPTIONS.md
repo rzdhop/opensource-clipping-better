@@ -590,6 +590,13 @@
   `cinematic_real` episode with `stock_cutaways` on.
 - **A-163** — (plan 23, B7) Higgsfield accepts 16:9 uploads, per its Veo 3.1 guide (`platforms/higgsfield.json` lists
   `9:16` and `16:9`); Freepik is unchecked. UNCONFIRMED.
+- **A-164** — (plan 23, C2) The probe's defaults stand in for a real shot: a 12-word French accusation
+  (`Tu as vendu mon étal à ma sœur sans me le dire.`, the 6 s capacity at 2.4 wps), a local 9:16 keyframe given with
+  `--image` (the data URL path fal already takes), 720p / 9:16 fixed (1080p would double the $0.54). A pass on these
+  inputs says LTX-2.5 Fast can speak French on a still, not that a story line will. UNCONFIRMED until the probe runs.
+- **A-165** — (plan 23, C2) The probe books through `budget.record` alone (spend.json, the local day) from inside the
+  journal's `book` callback; no story ledger row exists for it. The journal under `data/probes/gen` makes a re-run with
+  the same inputs free (a kept answer), so a second clip needs a new seed on purpose. UNCONFIRMED until the probe runs.
 
 ## Confirmed
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
