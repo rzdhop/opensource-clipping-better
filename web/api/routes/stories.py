@@ -1335,10 +1335,13 @@ async def delete_story(story_id: str) -> dict:
 
 @router.get("/{story_id}/concepts")
 async def list_concepts(story_id: str, language: Optional[str] = None,
-                        style: Optional[str] = None) -> dict:
+                        style: Optional[str] = None, include_library: bool = False) -> dict:
     """``{"library": [cards], "generated": [cards]}``.
 
-    Library cards are the shipped concepts localized to ``language`` (default:
+    Plan 28 stage D1 (DEC-305): the shipped concepts are hidden from the
+    product, so ``library`` is ``[]`` unless ``?include_library=1`` is sent
+    (the library ids stay choosable, for the CLI and the tests). With the flag,
+    library cards are the shipped concepts localized to ``language`` (default:
     the story's), each with its ``concept_id``, keeping only those whose
     default or alternative style is ``style`` when one is given. Generated
     cards are the story's ``concepts.json``, as written. 400 for a language or
@@ -1360,7 +1363,7 @@ async def list_concepts(story_id: str, language: Optional[str] = None,
         )
 
     library = []
-    for concept in templates.load_concepts():
+    for concept in (templates.load_concepts() if include_library else []):
         fit = concept["style_fit"]
         if style and style != fit["default"] and style not in fit["alternatives"]:
             continue

@@ -132,10 +132,6 @@ def read_count(params) -> int:
     return value
 
 
-def _library_titles(language) -> list:
-    return [concept["title"][language] for concept in templates.load_concepts()]
-
-
 def _writing_gate(story) -> bool:
     """Whether this story writes its concepts from the brief (plan 22 stage
     2, DEC-274): a non-empty ``seed_text`` and ``generation_profile.writing
@@ -258,7 +254,6 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
 
     cards = _existing_cards(store, ctx.story_id)
     number = _next_number(cards)
-    library_titles = _library_titles(language)
     generated_titles = [card["title"] for card in cards]
 
     new_ids = []
@@ -290,7 +285,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
                 language=language,
                 template=template,
                 seed_text=seed,
-                avoid_titles=library_titles + generated_titles[::-1],
+                avoid_titles=generated_titles[::-1],
             )
         llm_call.announce_trimmed(ctx, pack, announced)
 

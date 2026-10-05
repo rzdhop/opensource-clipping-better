@@ -180,6 +180,13 @@ def test_choose_concept_sends_concept_id():
     )
 
 
+def test_concepts_step_shows_generated_cards_only_with_a_plain_empty_state():
+    # Plan 28 stage D1 (DEC-305): the shipped library is hidden from the product.
+    src = CONCEPTS_STEP.read_text(encoding="utf-8")
+    assert "No concepts yet — tap Generate." in src
+    assert "Library" not in src
+
+
 # ------------------------------------------------- StyleStep.jsx: overridesAgainst
 #
 # Phone-review follow-up (spec 10, finding 5): only a path whose value

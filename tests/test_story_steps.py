@@ -313,7 +313,13 @@ def test_a_second_run_continues_the_numbering_and_trims_the_avoid_list_once(stor
     assert schemas.story_concepts_errors(doc) == []
     assert [card["concept_id"] for card in doc["concepts"]] == [f"gen_{n:02d}" for n in range(1, 21)]
     assert summary["concept_ids"] == [f"gen_{n:02d}" for n in range(11, 21)]
-    # 10 library + 11 titles on call 2: over the pack's 20, said once, not per call.
+    # Plan 28 stage D1 (DEC-305): the library no longer counts toward the cap, so 10 + 9 titles fit.
+    assert not [line for line in log if line.startswith("✂️")]
+
+    # A third run starts from 20 titles; the 25th title (call 6) goes over the pack's 24:
+    # said once, not per call.
+    ctx, log = _ctx(story_store, story_id)
+    m.concepts.run(ctx, runner=FakeRunner(*(c1_reply(k, offset=20) for k in range(1, 11))))
     trimmed = [line for line in log if line.startswith("✂️")]
     assert trimmed == ["✂️ The list of titles to avoid was trimmed for the prompt (the context pack is budgeted)."]
 
@@ -334,7 +340,7 @@ def test_numbering_goes_to_three_digits_past_99(story_store):
     assert schemas.story_concepts_errors(story_store.read_doc(story_id, "concepts.json")) == []
 
 
-def test_each_call_avoids_the_library_titles_and_every_earlier_title(story_store):
+def test_each_call_avoids_every_earlier_generated_title_and_not_the_library(story_store):
     m = _new()
     story_id = _story(story_store)
     ctx, _ = _ctx(story_store, story_id)
@@ -344,11 +350,15 @@ def test_each_call_avoids_the_library_titles_and_every_earlier_title(story_store
 
     assert len(runner.calls) == 10
     for k, call in enumerate(runner.calls, 1):
-        avoid = _avoid_titles(call["user"])
         earlier = [f"Titre {n}" for n in range(1, k)]
-        assert set(avoid) == set(LIBRARY_TITLES_FR) | set(earlier), f"call {k}"
-        # The library first, so it is never what the pack's cap cuts.
-        assert avoid[: len(LIBRARY_TITLES_FR)] == LIBRARY_TITLES_FR
+        if not earlier:
+            assert "Do not repeat" not in call["user"], "call 1 has no title to avoid"
+            continue
+        avoid = _avoid_titles(call["user"])
+        # Plan 28 stage D1 (DEC-305): the shipped concepts are hidden from the
+        # product, so their titles are no longer on the avoid list.
+        assert set(avoid) == set(earlier), f"call {k}"
+        assert not set(avoid) & set(LIBRARY_TITLES_FR), f"call {k}"
 
 
 def test_a_story_without_a_style_sends_no_style_line_and_its_seed(story_store):

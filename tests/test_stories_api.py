@@ -267,7 +267,10 @@ def test_create_choose_bible_approve_style_approve(api):
     assert [e["story_id"] for e in c.get("/api/stories").json()["stories"]] == [story_id]
 
     # Step 2: the library in French, the fruit_drama ones, then a choice.
-    body = c.get(f"/api/stories/{story_id}/concepts", params={"style": "fruit_drama"}).json()
+    # Plan 28 stage D1 (DEC-305): the library is hidden by default.
+    assert c.get(f"/api/stories/{story_id}/concepts", params={"style": "fruit_drama"}).json()["library"] == []
+    body = c.get(f"/api/stories/{story_id}/concepts",
+                 params={"style": "fruit_drama", "include_library": 1}).json()
     # Plan 20 stage 2: re-pinned on purpose -- the four fruit-drama pack concepts join the filter.
     assert [card["concept_id"] for card in body["library"]] == [
         "citrus_ball", "kitchen_heir", "midnight_fridge", "orchard_inheritance", "pineapple_crown",
@@ -892,7 +895,11 @@ def test_a_patch_while_a_step_is_in_flight_is_a_409(api):
 
 def test_the_library_follows_the_language_asked_for(api):
     story_id = _create(api, "fr")["story_id"]
-    body = api.client.get(f"/api/stories/{story_id}/concepts", params={"language": "en"}).json()
+    # Plan 28 stage D1 (DEC-305): hidden by default, back behind include_library=1.
+    hidden = api.client.get(f"/api/stories/{story_id}/concepts", params={"language": "en"}).json()
+    assert hidden["library"] == []
+    body = api.client.get(f"/api/stories/{story_id}/concepts",
+                          params={"language": "en", "include_library": 1}).json()
     card = next(c for c in body["library"] if c["concept_id"] == "tentafruit_island")
     assert card["title"] == TENTAFRUIT["title"]["en"]
     assert len(body["library"]) == len(templates.load_concepts())
