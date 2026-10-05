@@ -585,6 +585,11 @@
   Elli, Josh, Sam) still exist on the human's key; confirm with `GET /v1/voices` before the first paid line. UNCONFIRMED.
 - **A-161** — (plan 23, B3) `language_code` is accepted by Flash v2.5 only and refused by Multilingual v2 (from the docs);
   the adapter sends it for `flash` alone. UNCONFIRMED on a key.
+- **A-162** — (plan 23, B8) Pexels and Pixabay return a usable establishing clip for the deterministic place query (name,
+  four descriptor keywords, day or night) often enough to be worth the opt-in. UNCONFIRMED until the first
+  `cinematic_real` episode with `stock_cutaways` on.
+- **A-163** — (plan 23, B7) Higgsfield accepts 16:9 uploads, per its Veo 3.1 guide (`platforms/higgsfield.json` lists
+  `9:16` and `16:9`); Freepik is unchecked. UNCONFIRMED.
 
 ## Confirmed
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`

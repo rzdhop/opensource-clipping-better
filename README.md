@@ -292,6 +292,8 @@ what's kept on disk. Added since, each described there:
   `fal/ltx-2.5-fast` as the last video link.
 - Per-story choices: a subtitle look, ten universes with a Viral 3D style, a
   one-image front-and-back character sheet, and action-style clip prompts.
+- A story's frame (9:16, 16:9 or 1:1), a character's own voice cloned locally by
+  chatterbox (with consent), and opt-in free stock cutaways for establishing shots.
 
 ---
 

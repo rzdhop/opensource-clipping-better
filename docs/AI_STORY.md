@@ -92,13 +92,21 @@ for the character sheets, the place plates and the props, and a story may
 prefer it ("Costs and providers"). Around that: Clips mode takes B-roll from
 Pexels, Pixabay and a folder of your own ("Stock footage for Clips mode");
 ElevenLabs voices exist, paid and never chosen for you; a story carries its
-own subtitle look ("11. Render"); the renderer can draw 16:9 and 1:1, though
-no story can choose them yet; `fal/ltx-2.5-fast` ends the video chain;
+own subtitle look ("11. Render"); a story can be made at 16:9 or 1:1
+("1. New story"); `fal/ltx-2.5-fast` ends the video chain;
 Claude can write the premium calls; and the creators' method came in as
 choices on a v2 story, not as a new pipeline: ten universes and a Viral 3D
 style, one front-and-back character sheet, bodies made of the character's
 own matter, clip prompts written as one continuous action, and appearance
 variants of a character ("What else the form decides").
+
+**Plan 23 is complete (code).** Its last stages added a voice recording a
+character can speak with, cloned locally by chatterbox ("5. Cast"); the story's
+frame, 16:9 and 1:1 as well as 9:16 ("1. New story"); stock cutaways that fill
+establishing shots for free ("Stock cutaways (AI Story)"); and an A/B bench of
+the writing models ("Benchmarks"). What is left is yours: the one-clip French
+probe for LTX-2.5, the writer A/B, the rebuild with `INSTALL_LOCAL_TTS=1` if you
+want cloned voices, and your own walk of each.
 
 ## The quality pipeline (v2)
 
@@ -500,7 +508,7 @@ form, or the Visual tier card, if you'd rather not.
    refused, with the reason, rather than silently cropped or accepted: not
    an **MP4 or MOV** ("the clip is not an MP4 (or MOV): download the take
    from the platform as MP4 and send that"), shorter than **2 s**, not
-   **9:16 within 2 %** — the story's own frame on a 16:9 story — (the render would crop any other shape, cutting the
+   **the story's frame within 2 %** (9:16, or 16:9 on a 16:9 story — the render would crop any other shape, cutting the
    characters out of frame — refused instead of cropped), or a speaking
    shot's clip with **no sound track**.
 7. Once stored, the clip is **taken** for free: its audio is transcribed and
@@ -706,26 +714,48 @@ byte what it was. The image brief for manual uploads does not list variant
 sheets yet.
 
 **Frame (16:9 and 1:1).** The generation profile's **Frame** select picks
-the story's output frame: Vertical 9:16 (the default, every story made
-before), Landscape 16:9 or Square 1:1 (`generation_profile.aspect`). It is
-chosen when the story is made and never changes after — its plates,
-keyframes and clips are made at it — so `PATCH` and the pipeline switch
-answer 409 "the frame is chosen when the story is made"; an existing story
-is never converted. The plates and keyframes are asked at the frame, each
-clip says it to its link (seedance and LTX `aspect_ratio`, Veo
-`aspectRatio`; Kling follows its keyframe), and the render, the cover and
-the subtitles follow it. A frame a profile cannot make is disabled in the
-form with the reason, and refused on creation: 16:9 and 1:1 need the v2
-pipeline; a local ComfyUI renders 9:16 clips only (v1), so neither the
-`local` route nor the `free` profile at tier 2+ takes another frame; Veo,
-LTX and Google Flow make 9:16 and 16:9 but no 1:1, so a 1:1 story is a
-Tier 1 story or one whose clips are on Seedance (or Kling) — no 1:1 with
-native speech or your own Flow clips. The clip estimate skips a link that
-cannot make the story's frame, with the reason. Stays 9:16 in v1: the
-character sheets (references, not output), the style preview, local
-ComfyUI clips, the tier-2 render golden, and Clips mode. A 16:9 episode's
-metadata pack records its frame with a note — upload it as a regular
-YouTube video, not Shorts (a YouTube landscape entry is not written yet).
+the story's output frame: Vertical 9:16 (the default, and every story made
+before), Landscape 16:9 or Square 1:1 (`generation_profile.aspect`; sent on
+creation, absent = 9:16). It is **chosen when the story is made and never
+changes after**: its plates, keyframes and clips are all made at it, so
+`PATCH` and the pipeline switch answer 409 "the frame is chosen when the story
+is made" (make a new story for another frame), and an existing story is never
+converted. The page shows it read-only on the profile card.
+
+What a frame changes: the plates and keyframes are asked at the frame and cut
+to its exact even size; each clip says it to its link; the render, the cover
+and the subtitles follow it (see "11. Render"); a manual story's clips and
+keyframes must match it (see "Your own clips"); and the metadata pack records
+it with a note ("upload as a regular YouTube video, not Shorts" for 16:9; a
+YouTube landscape entry is not written yet). A 9:16 story is byte for byte
+what it was.
+
+**Which link makes which frame.** A link that cannot make the story's frame is
+skipped by the clip estimate, with the reason, and refused before anything is
+sent.
+
+| Link | 9:16 | 16:9 | 1:1 |
+|---|---|---|---|
+| `fal/seedance-1-pro-fast`, `fal/kling-2.5-turbo-std` | yes | yes | yes |
+| `fal/ltx-2.3-fast`, `fal/ltx-2.5-fast` | yes | yes | no |
+| Veo 3.1 (`lite`, `fast`, standard) | yes | yes | no |
+| Your own clips: Google Flow, Higgsfield | yes | yes | no |
+| Local ComfyUI clips | yes | no | no |
+
+(Kling follows its keyframe's shape; seedance and LTX take `aspect_ratio`, Veo
+`aspectRatio`.) The form disables a frame a profile cannot make, with the
+server's own reason, and creation refuses it with a 400 for the same cases:
+
+- 16:9 and 1:1 need the **v2 pipeline** (a legacy story stays 9:16);
+- the `local` route, and the `free` profile at tier 2 or above (it animates on
+  a local ComfyUI only), take **9:16 only**;
+- **1:1** is refused with native speech on Veo, and with your own Flow clips;
+  a 1:1 story is a Tier 1 story, or one whose clips are on Seedance or Kling;
+- a story that is made at 16:9 or 1:1 cannot later be moved off v2.
+
+**Still 9:16 only in v1:** the character sheets (they are references, not
+output), the style preview, local ComfyUI clips, the tier-2 render golden,
+Clips mode (the other mode of the app), and every story that already exists.
 
 **Episode formats.** Five templates ship, each a story-level choice
 (`episode_template_id`, sent on creation or patched while no episode has a
@@ -936,6 +966,57 @@ described before the text is written". The description folds into what K1
 writes — a conflicting reference (say, a real photo) is bent toward the
 story's own style, never copied. **Design references for stylised
 characters. Imitating real people is not supported.**
+
+#### Your own voice (chatterbox)
+
+A character can speak with a voice you give it: your own, or a friend's who
+agreed. Each character card has a **Voice recording** slot under its voice.
+It takes **5 to 30 seconds** of one voice speaking clearly (WAV, MP3, M4A,
+OGG or FLAC), up to **10 MB**, and a **consent box** must be ticked first:
+"This is my voice, or I have the speaker's permission to use it." Without
+it the upload is refused before a byte is read. The box is your statement,
+not something the app can check; the story keeps it with the recording
+(`voice_reference: {name, sha256, duration_s, uploaded_at, consent: true}`).
+
+The file is untrusted: it is re-encoded on upload to `voice_reference.wav`
+(mono, 24 kHz, 16-bit, no metadata, no original file name) at the root of
+the character's folder, and a file that has no audio track, is not 5 to 30
+seconds long or is over the size limit is refused with the reason. The same
+upload over the API is `POST /api/stories/{id}/characters/{char_id}/voice-reference?consent=true`
+(multipart, field `file`; see `docs/api.md`). A new recording replaces the
+old one; if the old one was the pinned voice, the character's voice sample
+and the cast approval go with it (the sample was spoken with the old file).
+
+**Use as voice (chatterbox)** pins the recording as the character's voice
+(`chatterbox/reference`), through the same voice regenerate as any other
+pick, and the character's voice sample is spoken again with it. From then on
+every line of the character is spoken by the local chatterbox engine from the
+recording. Nothing is sent to a provider and nothing is billed, but:
+
+- **chatterbox must be installed.** The default image does not have it:
+  build with `INSTALL_LOCAL_TTS=1` (`docker compose build --build-arg
+  INSTALL_LOCAL_TTS=1`, or set it in the shell or `.env` compose reads), which
+  adds the `[local-tts]` extra — about **2 GB** of torch and the engines. Until
+  then the **Use as voice** button stays disabled and says why (the engine
+  probe's own sentence). Uploading the recording itself works either way.
+- **It is slow on this host.** On a 4-core ARM box with no GPU, cloning runs
+  slower than real time: a minute of speech takes more than a minute. The cost
+  is time, not money.
+- chatterbox returns no word timings, so the subtitles of such lines are timed
+  by estimate ("approximate", as for any voice without cues).
+- A recording is the character's own: no other lead can take it, and it **cannot
+  be removed while it is the pinned voice** (`DELETE` answers 409 — pin another
+  voice first). Removing it afterwards deletes the file and the entry.
+- **Lines already voiced keep their audio** when you upload a new recording or
+  replace the old one: a measured line is re-voiced only by a **regenerate** of
+  that line's voice (the generation cache follows the file's bytes, so a new
+  recording speaks anew, an unchanged one is served from the cache).
+
+An upload is refused with 409 while a step of the story is queued or running
+(it may be speaking in this voice): add or remove the recording once that step
+is done, or cancel it. This amends the old rule on references (DEC-281): a
+photo is still a design reference for stylised characters only, and no hosted
+voice-cloning service is used.
 
 **Approve** one character at a time; each needs its text, portrait,
 turnaround, expressions sheet, a pinned voice and its sample. **The cast is
@@ -1426,22 +1507,21 @@ the story's font. A story with no look renders exactly as before. `PATCH
 clears it.
 
 **Framing.** Every still and, since phase 6, every Tier ≥ 2 clip is fit to
-the vertical frame the same way: centred and **cropped** to an exact 9:16
+the story's frame (9:16 unless the story was made at 16:9 or 1:1, "1. New
+story") the same way: centred and **cropped** to the exact frame
 when it isn't already close to one — a still more than 2% off, or any clip,
 since a hosted video model can hand back its own shape regardless of what
 was asked for (Kling, for one, keeps the input keyframe's own aspect ratio
 rather than cropping or padding to what was requested) — never stretched and
-never letterboxed. A source already at 9:16, or within 2% of it, keeps
+never letterboxed. A source already at the frame, or within 2% of it, keeps
 exactly the encode it had before.
 
-**Frame geometry.** The renderer can draw three frames: 9:16 (1080×1920),
+**Frame geometry.** The renderer draws three frames: 9:16 (1080×1920),
 16:9 (1920×1080) and 1:1 (1080×1080), with the text sizes unchanged (the
-short side is 1080 in all three). Only 9:16 is reachable today. Nothing in a
-story, the dashboard or the API selects another frame yet, because a 16:9
-episode also needs its pictures and clips made at 16:9 (a 9:16 keyframe cut
-to a 16:9 frame loses the characters), and that is a later stage; the cover
-stays 9:16 as well. The 9:16 render is byte for byte what it was before the
-change. The other two frames exist as tested builders and reference frames
+short side is 1080 in all three). A story's frame is the one it was made at
+("1. New story"): the encoder, the cover and the subtitles follow it, and a
+9:16 render is byte for byte what it was before. The tier-2 render golden stays
+9:16; the other two frames have tested builders and reference frames
 (`python3 tools/render_golden.py --aspect 16:9`).
 
 The finished video plays back in a player below (its poster is the cover),
@@ -1882,6 +1962,58 @@ Exit codes: `0` done, `1` refused or failed (reason on stderr), `2` a usage
 error, `130` interrupted (Ctrl-C cancels the step cleanly; whatever it had
 already written stays — every write is atomic).
 
+### Benchmarks
+
+`tools/bench_llm.py` measures the writing models without touching a story.
+Its `--episode-ab` mode (plan 23) writes **one episode with the writing-v3
+chain once per model** and puts the scripts side by side, so you can read them
+and rate the models yourself: complete lines, the hook, the validator pass
+rate, retries, the real cost, the latency.
+
+```
+python3 tools/bench_llm.py --episode-ab outputs/stories/<id> --dry-run \
+    --chains "gemini-paid/gemini-3.8-flash,anthropic/claude-sonnet-5-5" --max-usd 2.50
+python3 tools/bench_llm.py --episode-ab outputs/stories/<id> --episode 1 \
+    --chains "gemini-paid/gemini-3.8-flash,anthropic/claude-sonnet-5-5" --allow-paid --max-usd 2.50
+```
+
+- **What runs.** For each link in `--chains`, the script step's own writing
+  calls (the beat sheet E1v3, the body scenes E2v3, the framing E3v3, then the
+  first-watch judge J1v3), each link alone — a one-link chain, no fallback to
+  another model — with the step's own prompts, validators and retry-once
+  ladder. No fill pass, no repair: you read what each model wrote.
+- **A throwaway copy.** It runs against a copy of the story's JSON documents in
+  a temporary folder. The story's own episode files are never read for writing
+  and never written; an existing script of the episode is not in the copy, so
+  the episode is written afresh (from episode 2 on, from the memory of the
+  episodes before it). If the story is not on writing v3 the copy is stamped v3,
+  and the summary says so. Episode 1 is the usual choice.
+- **Free links run by default; a paid link needs two keys.** The paid links are
+  listed and skipped unless you give `--allow-paid` **and** `allow_paid` is on in
+  Settings (the Settings switch wins: `--allow-paid` with it off is refused). A
+  paid link also needs `--max-usd`, a hard cap for the whole run: before each
+  request — a validator retry counts — its estimate is added to what the run has
+  booked, and a request that would cross the cap is refused unsent. Each request
+  is also checked against the live caps (the daily cap, the story's cap). This
+  is the one exception to the rule that the bench never spends (DEC-296).
+- **`--dry-run`** prints each link's estimate (and its upper bound, which doubles
+  it when every call retries) and exits without calling anything. The run prints
+  today's spending before and after.
+- **Where it lands.** `outputs/stories/<id>/bench/<timestamp>/`: `summary.md`
+  and `summary.json`, and one `<link>.json` per model with its script and the
+  judge's verdict, all rewritten after each link, so Ctrl-C keeps a partial
+  summary. Nothing else of the story changes.
+- **The ledger.** Every answered paid request is booked as usual (`spend.json`
+  and the story's own ledger, step `bench`, the served model on the row), as a
+  **story-level** row with no episode: an experiment is not part of an episode's
+  production cost, and an episode that has already spent its cap must not decide
+  an A/B.
+
+A dry run on one real story estimated about $0.10 for Gemini Flash, $0.53 for
+Claude Sonnet and $1.33 for Claude Opus, one try each: `--max-usd 2.50` fits one
+try of all three, `3.00` leaves room for retries. The run is yours to start; the
+app never starts it.
+
 ## Costs and providers
 
 **LLM calls** (concepts, bible) run on the same `LLM_CHAIN` clip jobs use —
@@ -2283,7 +2415,7 @@ sources as Clips mode's B-roll (`BROLL_SOURCES`: your local folder, Pexels, Pixa
   clip is searched with a fixed query (the place's name, a few words of its descriptor, day or night),
   downloaded to `assets/clips/shot_NN.stock.mp4`, and a frame at 0.5 s becomes the shot's keyframe (so the
   cover, the brief and the thumbnails work). It costs nothing and is not judged. A shot with no match is
-  generated as usual, with a line in the feed. Manual stories (your own clips) are filled the same way.
+  generated as usual, with a line in the feed. Manual stories (your own clips) are filled the same way, and that is the one place a manual story reaches the network: with the switch on, the assets step makes one **free** stock search per eligible shot (a request to Pexels or Pixabay, or a look in your local folder; never a paid call, never a booking). Leave the switch off and a manual story sends nothing, as before.
 - **Never replaces.** A keyframe or a clip already there (made, bought or uploaded), and a locked image, are
   never touched. A stock clip stays current only while the switch is on, the shot is still eligible and its
   query still matches (a place renamed, another frame); otherwise the shot is made as any other. You can
@@ -2295,7 +2427,8 @@ sources as Clips mode's B-roll (`BROLL_SOURCES`: your local folder, Pexels, Pixa
   `cinematic_real` style matches it; on the others the card says so.
 - **Credits.** `assets/stock_credits.json` and `.txt` list each clip; the metadata pack carries `credits` and
   each description ends with "Stock footage: ..." (only when there are credits), and the episode page shows
-  "Videos provided by Pexels / Pixabay" with the links Pexels asks for.
+  "Videos provided by Pexels / Pixabay" with the links Pexels asks for. The assets estimate carries it as
+  `units.stock` (`docs/api.md`).
 
 Rolling back: turn the switch off and run the assets step (the stock shots are made as usual); to remove the
 feature, strip `stock_cutaways` and the stock clip records from the stories and delete the `.stock.mp4` files.
@@ -2316,9 +2449,9 @@ not shipped yet:
   the dashboard's Settings store, for any step — including the ones this
   phase adds. If you keep your keys in Settings, either mirror them into
   `.env` for a CLI session or use the dashboard for the steps that need one.
-- **16:9 and 1:1 in a story.** The renderer can draw them ("11. Render");
-  choosing one when a story is made, and making its images and clips at that
-  frame, is a later stage.
+- **16:9 and 1:1 beyond what "1. New story" lists.** The character sheets,
+  the style preview, local ComfyUI clips, Clips mode and stories that already
+  exist stay 9:16.
 - **LTX-2.5 as a speaking model.** It waits for a one-clip French probe that
   has not been run ("Native speech (API route)").
 - **Per-character LoRA training** — teaching a model's own weights a

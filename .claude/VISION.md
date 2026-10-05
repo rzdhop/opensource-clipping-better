@@ -37,10 +37,14 @@ budget and every free call counted against its daily limit.
   numbers, one click allows more for today only (ceiling $25, logged), the day follows `BUDGET_TIMEZONE`, a v2 cast is
   checked whole before any portrait is bought, and Gemini is a second sheet link. Beside it: Clips B-roll from Pexels,
   Pixabay and a local folder with credits; ElevenLabs voices (paid, never auto-picked); a per-story subtitle look; a
-  renderer that can draw 16:9 and 1:1 (no story can choose them yet); `fal/ltx-2.5-fast` last in the video chain, its
+  renderer that can draw 16:9 and 1:1 (a story chooses one since B7); `fal/ltx-2.5-fast` last in the video chain, its
   speaking use gated on a probe not yet run; Claude (Sonnet 5.5 default) as an optional premium writer; and the creators'
   method as per-story choices — ten universes, one front-and-back sheet, all-matter bodies, action clip prompts, appearance variants — with no
   doctrine prompt. Every key is optional, absent = unchanged; no GPU box exists, so local LTX-2.5 stays a runbook.
+  Last stages (DEC-294…297): a character can speak with a recording of the human's own voice, cloned locally by
+  chatterbox with a consent box (B4); a story is made at 9:16, 16:9 or 1:1 (B7); opt-in free stock cutaways fill
+  establishing shots, never replacing a clip (B8); a writer A/B bench (D7). Code complete; the LTX-2.5 probe, the writer
+  A/B and the walks are the human's.
 - **2026-10-04 — three tasks after the competitive analysis (plan 18, DEC-263):** the episode-2 walk's six defects
   fixed (bookings released on unbilled refusals, stable shot ids across re-plans, framing orders in redraws, a check-only
   script run, the one click approving over spent repairs; DEC-264…266); the **fruit-drama pack** (narrated-drama and
