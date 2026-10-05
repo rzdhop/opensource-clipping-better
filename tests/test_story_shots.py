@@ -1068,6 +1068,18 @@ def _golden_sha(doc, notes) -> str:
     return hashlib.sha256(json.dumps([doc, notes], ensure_ascii=False, indent=2).encode("utf-8")).hexdigest()
 
 
+def _serial_60s_v2_before_plan_28():
+    """serial_60s_v2 as the golden above was taken on it: plan 28 stage A2 (DEC-305) re-slotted the shipped file
+    (scenes 5-6, min_shot_s 5, body 10-16 s ...), and the golden pins the code, not the template's data."""
+    template = copy.deepcopy(templates.load_episode_template("serial_60s_v2"))
+    template.update(scenes=[6, 10], min_shot_s=3.0, default_body_count=6)
+    slots = template["slots"]
+    slots["recap"]["duration_s"], slots["hook"]["duration_s"] = [3.0, 4.0], [3.0, 6.0]
+    slots["body"].update(count=[4, 7], duration_s=[5.0, 11.0])
+    slots["cliffhanger"]["duration_s"] = [4.0, 10.0]
+    return template
+
+
 def test_a_storyboard_built_with_no_previous_board_is_byte_identical_to_before_stable_ids():
     import test_story_prompt_layers as layers
 
@@ -1077,7 +1089,7 @@ def test_a_storyboard_built_with_no_previous_board_is_byte_identical_to_before_s
     assert [shot["shot_id"] for shot in doc["shots"]] == [f"sh{n:02d}" for n in range(1, len(doc["shots"]) + 1)]
     assert _golden_sha(doc, notes) == _NO_PREVIOUS_GOLDEN["fast"]
 
-    template_v2 = templates.load_episode_template("serial_60s_v2")
+    template_v2 = _serial_60s_v2_before_plan_28()  # re-pinned on purpose (plan 28 stage A2): the golden's own input
     script, v2_plans = _v2_script(), _v2_plans()
     doc, notes = shots.build_storyboard(script, v2_plans, {sid: "t1" for sid in v2_plans}, entities=ENTITIES,
                                         style_lock=FRUIT_DRAMA, template=template_v2, language=EN,

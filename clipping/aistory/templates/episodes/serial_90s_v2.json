@@ -6,23 +6,23 @@
   "window_s": [80, 100],
   "target_s": 90,
   "tighten_above_s": 97,
-  "scenes": [8, 12],
+  "scenes": [7, 8],
   "shots": [8, 24],
-  "min_shot_s": 3.0,
+  "min_shot_s": 5,
   "recap_from_episode": 2,
-  "default_body_count": 8,
+  "default_body_count": 5,
   "shots_per_scene": [1, 2],
   "max_shot_s": 12,
   "slots": {
-    "recap":       {"functions": ["recap"], "count": [1, 1], "duration_s": [3.0, 4.0]},
-    "hook":        {"functions": ["hook"], "count": [1, 1], "duration_s": [3.0, 6.0]},
-    "body":        {"functions": ["setup", "rising", "peak", "turn"], "count": [5, 9], "duration_s": [5.0, 11.0]},
-    "cliffhanger": {"functions": ["cliffhanger"], "count": [1, 1], "duration_s": [4.0, 10.0]}
+    "recap":       {"functions": ["recap"], "count": [1, 1], "duration_s": [5.0, 6.0]},
+    "hook":        {"functions": ["hook"], "count": [1, 1], "duration_s": [5.0, 8.0]},
+    "body":        {"functions": ["setup", "rising", "peak", "turn"], "count": [5, 6], "duration_s": [10.0, 16.0]},
+    "cliffhanger": {"functions": ["cliffhanger"], "count": [1, 1], "duration_s": [6.0, 10.0]}
   },
   "pauses_s": {"before_first_line": 0.35, "between_lines": 0.25, "tail": 0.6, "tail_peak": 1.2, "tail_floor": 0.3},
   "tail_peak_functions": ["peak", "cliffhanger"],
   "hold_extension_max_s": 1.0,
   "end_card_s": 1.0,
   "transitions_s": {"cut": 0.0, "dissolve": 0.4, "fadeblack": 0.4, "fadewhite": 0.3, "wipeleft": 0.3, "wiperight": 0.3, "slideup": 0.3},
-  "notes": "Fruit-drama pack stage 1 (plan 20): serial_60s_v2's shape at an 80-100 s window (target 90, tightening above 97). The per-shot and per-slot timings are serial_60s_v2's; the body count scales to 5-9 (8 by default: 10 scenes on episode 1, 11 with the recap; 12 is the script's own scene cap) and the shot range to 8-24 (9 body scenes x 2 plus recap, hook and a cliffhanger of two)."
+  "notes": "Fruit-drama pack stage 1 (plan 20): serial_60s_v2's shape at an 80-100 s window (target 90, tightening above 97). The per-shot and per-slot timings are serial_60s_v2's; the body count scales to 5-9 (8 by default: 10 scenes on episode 1, 11 with the recap; 12 is the script's own scene cap) and the shot range to 8-24 (9 body scenes x 2 plus recap, hook and a cliffhanger of two). Plan 28 stage A2 (DEC-305): serial_60s_v2's re-slotted shape (min_shot_s 5; recap 5-6, hook 5-8, body 10-16, cliffhanger 6-10 s) at 5 body scenes (scenes [7, 8]: 7 on episode 1, 8 with the recap) so a native episode fits 80-100 s: on Veo or an upload (6/8 s), in French, 6 + 5 x 14 + 8 = 84 s on episode 1 and 6 + 6 + 5 x 14 + 8 = 90 s with the recap, 0.6 s more under a cut to black; a 6th body scene (6 + 6 + 6 x 14 + 8 = 104 s with the recap) cannot fit."
 }

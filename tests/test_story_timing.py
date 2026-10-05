@@ -909,12 +909,18 @@ def test_v2_template_passes_its_schema_and_an_episode_of_6_to_10_shots_lands_in_
     assert schemas.episode_template_errors(template) == []
     # DEC-252 re-pin: two beat shots per body scene by default, so the template's shots range is 6-18 (7 body
     # scenes x 2, the recap, the hook and a cliffhanger past Veo's 8 s); the boards below stay one a scene.
-    assert (template["window_s"], template["scenes"], template["shots"]) == ([55, 75], [6, 10], [6, 18])
-    assert (template["shots_per_scene"], template["max_shot_s"], template["min_shot_s"]) == ([1, 2], 12, 3.0)
-    assert template["slots"]["hook"]["duration_s"] == [3.0, 6.0]
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): re-slotted to the native 5-10 s shot window -- 5-6
+    # scenes (4 body scenes of 10-16 s on episode 1, 3 with the recap), min_shot_s 5, the hook 5-8 s;
+    # max_shot_s stays 12 (a TTS beat shot on seedance).
+    assert (template["window_s"], template["scenes"], template["shots"]) == ([55, 75], [5, 6], [6, 18])
+    assert (template["shots_per_scene"], template["max_shot_s"], template["min_shot_s"]) == ([1, 2], 12, 5)
+    assert template["slots"]["hook"]["duration_s"] == [5.0, 8.0]
 
     for ep in (1, 2):
-        script = _v2_episode(ep)
+        # Re-pinned on purpose (plan 28 stage A2, DEC-305): fewer, longer scenes need fuller lines to reach the
+        # window (two 5.5 s lines a 10-16 s body scene, a 4.5 s hook line, a 6.5 s cliffhanger line), and a scene
+        # past max_shot_s is two beat shots, as the storyboard plans it.
+        script = _v2_episode(ep, body_lines=(5.5, 5.5), hook_line=4.5, cliff_line=6.5)
         board = _storyboard_from_scenes(script["scenes"], transition_types={
             i: ("dissolve" if a["place_id"] == b["place_id"] else "fadeblack", 0.4)
             for i, (a, b) in enumerate(zip(script["scenes"], script["scenes"][1:]))})
@@ -922,8 +928,10 @@ def test_v2_template_passes_its_schema_and_an_episode_of_6_to_10_shots_lands_in_
         assert 6 <= len(board["shots"]) <= 10, ep
         assert result["state"] == "ok" and 55 <= result["total_s"] <= 75, (ep, result["total_s"])
         for scene in script["scenes"]:
-            durations, extra = timing.allocate_shots(scene, scene_t[scene["scene_id"]], [{"lines": []}], template)
-            assert extra == 0.0 and durations[0] <= V2_MAX_SHOT_S
+            timed = scene_t[scene["scene_id"]]
+            beats = [{"lines": []}] * (2 if timed["duration_s"] > V2_MAX_SHOT_S else 1)
+            durations, extra = timing.allocate_shots(scene, timed, beats, template)
+            assert extra == 0.0 and max(durations) <= V2_MAX_SHOT_S
 
 
 def test_v2_scene_plus_hold_never_exceeds_12s():
@@ -932,11 +940,16 @@ def test_v2_scene_plus_hold_never_exceeds_12s():
     DEC-208), a v2 scene's one shot, its held tail and the window pass's hold
     extension included, never runs past 12 s; a hook lasts 3-6 s. Short
     episodes (held to reach the window) and long ones (tightened) alike, with
-    and without the family_3d clamp (peak/tender up to 12 s)."""
+    and without the family_3d clamp (peak/tender up to 12 s).
+
+    Re-pinned on purpose (plan 28 stage A2, DEC-305): a body slot now runs
+    10-16 s, so a scene past max_shot_s (12 s) is two beat shots, as the
+    storyboard plans it (``storyboard.beat_shot_count``: two past the clip's
+    cap) -- each still at most 12 s; the hook lasts 5-8 s."""
     template = _v2_template()
     rng = random.Random(20261001)
     checked = 0
-    for _ in range(300):
+    for _ in range(400):  # re-pinned (plan 28 stage A2): 6 scenes an episode, not 8-9 -- more episodes, as many checks
         ep = rng.choice((1, 2))
         script = _v2_episode(
             ep, body_lines=tuple(round(rng.uniform(0.6, 4.6), 3) for _ in range(rng.randint(1, 3))),
@@ -949,11 +962,14 @@ def test_v2_scene_plus_hold_never_exceeds_12s():
             timed = scene_t[scene["scene_id"]]
             if timed["state"] == "over":
                 continue  # the writer overfilled it: flagged, its clip is held (DEC-208)
-            (shot,), extra = timing.allocate_shots(scene, timed, [{"lines": [scene["lines"][0]["line_id"]]}],
-                                                   template)
+            beats = [{"lines": [scene["lines"][0]["line_id"]]}]
+            if timed["duration_s"] > V2_MAX_SHOT_S:
+                beats.append({"lines": []})
+            durations, extra = timing.allocate_shots(scene, timed, beats, template)
             assert extra == 0.0
-            assert shot == timed["duration_s"] <= V2_MAX_SHOT_S, (scene["function"], timed)
+            assert sum(durations) == pytest.approx(timed["duration_s"], abs=0.002)
+            assert all(shot <= V2_MAX_SHOT_S for shot in durations), (scene["function"], timed, durations)
             if scene["function"] == "hook":
-                assert 3.0 <= shot <= 6.0, timed
+                assert durations == [timed["duration_s"]] and 5.0 <= timed["duration_s"] <= 8.0, timed
             checked += 1
     assert checked > 2000

@@ -309,6 +309,11 @@ def test_a_body_scene_with_two_lines_is_two_beat_shots_and_a_hook_one(store):
     scene = copy.deepcopy(next(s for s in script["scenes"] if s["function"] in schemas.BODY_FUNCTIONS))
     line = copy.deepcopy(scene["lines"][0])
     scene["lines"] = [line, dict(copy.deepcopy(line), line_id="l99")]
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): the fixture's ten scenes overrun the re-slotted six-scene
+    # format's window, which squeezes this one to 9.8 s, under two 5 s shots; timed at 11 s, a body scene of the
+    # new 10-16 s slot, it is the two-line scene this test is about.
+    squeezed = script["timing"]["scenes"][scene["scene_id"]]["duration_s"]
+    script["timing"]["scenes"][scene["scene_id"]]["duration_s"] = 11.0
     seconds = storyboard.expected_scene_seconds(ec, script, scene)
     assert 2 * ec.template["min_shot_s"] <= seconds <= 12, seconds
     assert storyboard.beat_shot_count(ec, script, scene) == (2, 2)
@@ -320,12 +325,16 @@ def test_a_body_scene_with_two_lines_is_two_beat_shots_and_a_hook_one(store):
     # One line and one character: one beat.
     alone = dict(scene, lines=[line], characters=scene["characters"][:1])
     assert storyboard.beat_shot_count(ec, script, alone) == (1, 1)
-    # Two lines too short for two shots of min_shot_s (no stored timing: the estimate): one beat.
+    # Two lines too short for two shots of min_shot_s: one beat. Re-pinned on purpose (plan 28 stage A2, DEC-305):
+    # timed on the re-slotted template alone (no stored timing: the estimate), a body scene is never under its
+    # 10 s floor -- two 5 s shots -- so the short scene is this one as the window squeezes it in the fixture.
     brief = dict(scene, scene_id="s99", lines=[dict(line, text="Non.", line_id="l98", timing=None),
                                                dict(line, text="Si.", line_id="l99", timing=None)])
-    brief_seconds = storyboard.expected_scene_seconds(ec, script, brief)
+    assert storyboard.expected_scene_seconds(ec, script, brief) == 2 * ec.template["min_shot_s"]
+    script["timing"]["scenes"][scene["scene_id"]]["duration_s"] = squeezed
+    brief_seconds = storyboard.expected_scene_seconds(ec, script, scene)
     assert brief_seconds < 2 * ec.template["min_shot_s"], brief_seconds
-    assert storyboard.beat_shot_count(ec, script, brief) == (1, 1)
+    assert storyboard.beat_shot_count(ec, script, scene) == (1, 1)
 
 
 def test_the_storyboard_plans_two_beats_for_body_scenes_and_never_plans_an_old_storyboard_again(store, monkeypatch):
@@ -363,7 +372,10 @@ def test_the_storyboard_plans_two_beats_for_body_scenes_and_never_plans_an_old_s
     for shot in board["shots"]:
         prompt = shot["video_prompt"]
         assert prompting.IDENTITY_KEEPS in prompt and "small natural" not in prompt
-        assert any(said in prompt for said in ("mouth moving on the words", "visibly", "the moment out")), prompt
+        # Re-pinned on purpose (plan 28 stage A2, DEC-305): a one-beat scene of two speakers now (the fixture's
+        # hook) says it in shots.py's plural, the same performance rule: "speak in turn, mouths moving on the words".
+        assert any(said in prompt for said in ("mouth moving on the words", "mouths moving on the words", "visibly",
+                                               "the moment out")), prompt
 
     # Another story planned one beat a scene (as before DEC-252) is never planned again for the new default.
     other_id = amb._v2_storyboard_story(store)

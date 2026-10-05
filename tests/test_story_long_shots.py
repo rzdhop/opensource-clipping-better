@@ -229,6 +229,10 @@ def test_the_storyboard_step_plans_two_beat_shots_where_the_voices_will_run_past
     per_scene = {}
     for shot in eps._storyboard(store, story_id)["shots"]:
         per_scene[shot["scene_id"]] = per_scene.get(shot["scene_id"], 0) + 1
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): the step re-times the script on the re-slotted template
+    # before it plans (a body scene held up to its 10 s floor), so the rhythm is read on the scenes as it timed them.
+    timed = eps._script(store, story_id)
+    expected = {scene["scene_id"]: storyboard.expected_scene_seconds(ec, timed, scene) for scene in timed["scenes"]}
     for call, scene in zip(llm.calls, script["scenes"]):
         asked = tsp.two_beats(scene, expected[scene["scene_id"]])  # DEC-252 re-pin: + the rhythm
         assert per_scene[scene["scene_id"]] == asked, (scene["scene_id"], plain, expected)

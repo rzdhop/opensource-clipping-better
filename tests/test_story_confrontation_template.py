@@ -4,7 +4,10 @@ The human's reference: a 52 s confrontation in one place, in real time,
 about 15 shots of 2-5 s, every line spoken on camera. The format:
 
 - window 44-58 s, target 50, 4-6 scenes (hook, 2-3 body beats of 10-16 s, a
-  cliffhanger, the recap from episode 2), shots of 2-8 s;
+  cliffhanger, the recap from episode 2), shots of 2-8 s; plan 28 stage A2
+  (DEC-305): the window ends at 59 s (a native episode 1 plans 58 s of clips
+  on Veo, the end card 0.6 s more) and 4-5 scenes keep episode 2 at two body
+  beats beside the recap;
 - ``single_place``: E1 is told one continuous place and ``max_places`` is 1;
 - ``scene_transition: "cut"``: every boundary a cut -- on this template
   only, every other one keeps its grammar byte for byte;
@@ -43,8 +46,11 @@ def test_the_template_validates_with_the_plans_values():
     tpl = CONFRONTATION
     assert schemas.episode_template_errors(tpl) == []
     assert defaults.EPISODE_TEMPLATE_ID_CONFRONTATION in defaults.EPISODE_TEMPLATE_IDS
-    assert (tpl["window_s"], tpl["target_s"], tpl["tighten_above_s"]) == ([44, 58], 50, 55)
-    assert (tpl["scenes"], tpl["shots"], tpl["min_shot_s"], tpl["max_shot_s"]) == ([4, 6], [9, 16], 5, 10)
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): the window ends at 59 s (8 + 3 x 14 + 8 = 58 s of Veo
+    # clips and the 0.6 s end card), and scenes [4, 5] keeps episode 2 at two body beats (6 + 8 + 2 x 14 + 8 = 50 s;
+    # three would be 64 s).
+    assert (tpl["window_s"], tpl["target_s"], tpl["tighten_above_s"]) == ([44, 59], 50, 55)
+    assert (tpl["scenes"], tpl["shots"], tpl["min_shot_s"], tpl["max_shot_s"]) == ([4, 5], [9, 16], 5, 10)
     slots = tpl["slots"]
     assert slots["hook"]["duration_s"] == [5.0, 8.0] and slots["cliffhanger"]["duration_s"] == [6.0, 10.0]
     assert slots["body"]["count"] == [2, 3] and slots["body"]["duration_s"] == [10.0, 16.0]
@@ -54,7 +60,7 @@ def test_the_template_validates_with_the_plans_values():
         "single_place": True, "scene_transition": "cut", "narrator_slots": ["recap"], "line_words": [5, 17],
         "episode_words": [95, 125], "reaction_shots": [0, 1]}
     assert timing.episode_slots(tpl, 1) == ["hook", "body", "body", "body", "cliffhanger"]
-    assert timing.episode_slots(tpl, 2) == ["recap", "hook", "body", "body", "body", "cliffhanger"]
+    assert timing.episode_slots(tpl, 2) == ["recap", "hook", "body", "body", "cliffhanger"]  # re-pinned, as above
     # The keys are optional: no other shipped template has any (their prompts and timing are unchanged).
     for template_id in defaults.EPISODE_TEMPLATE_IDS:
         if template_id != "confrontation_50s_v2":
@@ -156,8 +162,11 @@ def test_without_episode_words_the_budget_is_its_seconds_at_2_4_words():
     # 8 s x 2.4 x (1 - (0.35 + 0.6) / 8) = 16.9 -> 16; the low end three quarters of it.
     assert budget == {"words": [12, 16], "lines": [1, 2], "line_words": [5, 22]}
     assert timing.word_budget_v3(scene, SERIAL_V2, native=True)["line_words"] == [5, 17]
-    # The v2 budget is untouched (RC-W3): 8 s of French body speech is 17 words, as before.
-    assert timing.word_budget("setup", 8.0, "fr", SERIAL_V2) == 17
+    # The v2 budget is untouched (RC-W3): 8 s of French body speech is 17 words, as before. Re-pinned on purpose
+    # (plan 28 stage A2, DEC-305): serial_60s_v2's body slot starts at 10 s now, so an 8 s hint is priced at the
+    # slot's floor -- 10 s, 22 words -- and the 8 s figure is checked where 8 s is still a body scene (v1's slot).
+    assert timing.word_budget("setup", 8.0, "fr", SERIAL_V2) == timing.word_budget("setup", 10.0, "fr", SERIAL_V2) == 22
+    assert timing.word_budget("setup", 8.0, "fr", templates.load_episode_template("serial_60s_v1")) == 17
 
 
 # ------------------------------------------------------------ the suggestion rule (DEC-268)
@@ -188,7 +197,7 @@ def test_the_store_and_the_wizard_follow_the_same_rule(tmp_path):
     assert quality["episode_template_id"] == "serial_60s_v2"
 
     formats = (STORY_SRC / "episodeTemplates.js").read_text(encoding="utf-8")
-    assert ("  { id: 'confrontation_50s_v2', label: 'Confrontation 50 s (44–58)', pipeline: 'v2',\n"
+    assert ("  { id: 'confrontation_50s_v2', label: 'Confrontation 50 s (44–59)', pipeline: 'v2',\n"  # A2 re-pin
             "    help: 'One place, real time: a confrontation, one shot per spoken line.' },") in formats
     profiles = re.search(r"const NATIVE_SPEECH_PROFILES = \[([^\]]*)\]", formats).group(1)
     assert re.findall(r"'([a-z_]+)'", profiles) == list(defaults.NATIVE_SPEECH_PROFILES)

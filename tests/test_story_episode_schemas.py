@@ -176,7 +176,9 @@ def test_story_bible_episode_template_id_stays_an_enum_of_shipped_ids():
 
 @pytest.mark.parametrize("template_id,ep1,ep2", [
     ("narrated_drama_60s_v2", 6, 7),  # hook+4 longer body passages+cliffhanger; +recap from ep2
-    ("serial_90s_v2", 10, 11),        # hook+8 body+cliffhanger; +recap from ep2 (12 is the script's cap)
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): serial_90s_v2 re-slotted to 10-16 s body scenes, 5 of them
+    # (hook+5 body+cliffhanger; +recap from ep2) -- 6 would leave a native episode no room for its end card.
+    ("serial_90s_v2", 7, 8),
 ])
 def test_the_new_templates_slot_lists(template_id, ep1, ep2):
     from clipping.aistory import timing
@@ -194,13 +196,16 @@ def test_the_narrated_template_carries_the_narration_and_the_others_do_not():
     assert narrated["end_card_cta"] is True
     assert narrated["window_s"][0] <= 60 and narrated["tighten_above_s"] == 75
     v2 = templates.load_episode_template("serial_60s_v2")
-    # Fewer, longer body passages than the v2 template it comes from.
-    assert narrated["default_body_count"] < v2["default_body_count"]
-    assert narrated["slots"]["body"]["duration_s"][0] > v2["slots"]["body"]["duration_s"][0]
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): serial_60s_v2 is re-slotted to the narrated template's
+    # 10-16 s body passages (no longer "fewer, longer" than it): the same body slot and default count, a
+    # narrower window (55-75 s against 58-78 s).
+    assert narrated["default_body_count"] == v2["default_body_count"] == 4
+    assert narrated["slots"]["body"]["duration_s"] == v2["slots"]["body"]["duration_s"] == [10.0, 16.0]
     for key in ("shots_per_scene", "pauses_s", "transitions_s"):
         assert narrated[key] == v2[key], key
-    # Plan 27: the narrated template's shots are the 5-10 s window (serial_60s_v2 keeps its own).
+    # Plan 27: the narrated template's shots are the 5-10 s window (serial_60s_v2 keeps its own max, 12 s).
     assert (narrated["min_shot_s"], narrated["max_shot_s"]) == (5, 10)
+    assert (v2["min_shot_s"], v2["max_shot_s"]) == (5, 12)
     assert [narrated["slots"][slot]["duration_s"] for slot in ("recap", "hook", "body", "cliffhanger")] == [
         [5.0, 6.0], [5.0, 8.0], [10.0, 16.0], [6.0, 10.0]]
     # RC-M1: the narration fields exist on the narrated template only.

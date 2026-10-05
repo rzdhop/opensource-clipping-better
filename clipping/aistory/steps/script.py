@@ -360,10 +360,53 @@ def store_line_plans(ec, script) -> None:
     """Every scene of *script* (in place) gains its ``slot_s`` and its
     ``line_plan`` (:func:`line_plan`; plan 24 stage 1, D-2). The writer
     never reads the stored plan: E2v3/E3v3 recompute it when they write a
-    scene (:func:`current_plan`, plan 24 stage 2)."""
+    scene (:func:`current_plan`, plan 24 stage 2).
+
+    Plan 28 stage A2: on a native-speech story the plans are held inside the
+    episode's window first (``timing.fit_episode_plans``: a plain body scene
+    the narrator alone, then a scene's clips a second under what they sum
+    to), and what the fit changed is stored on the scene (``character_line``
+    False, ``clip_cap_s``) so :func:`current_plan` recomputes the same plan.
+    A plan that still cannot fit is left as cheap as it got: the Script step
+    refuses it (:func:`plan_fit_refusal`). A scene no clip of this story's
+    links fits at all is refused here, in one plain sentence."""
     floors = timing.plan_tail_floors(script, ec.template)
+
+    def plan_of(scene):
+        return line_plan(ec, script, scene, tail_floor=floors[scene["scene_id"]])
+
+    try:
+        if not media_policy.native_speech(ec.story):
+            for scene in script["scenes"]:
+                _store_plan(scene, plan_of(scene))
+            return
+        fit = timing.fit_episode_plans(ec.template, script["scenes"], plan_of,
+                                       window_hi=float(ec.template["window_s"][1]),
+                                       end_card_s=timing.plan_end_card_s(script, ec.template))
+    except timing.PlanError as exc:
+        raise _plan_failure(ec, exc) from None
     for scene in script["scenes"]:
-        _store_plan(scene, line_plan(ec, script, scene, tail_floor=floors[scene["scene_id"]]))
+        scene.update(fit["changes"].get(scene["scene_id"], {}))
+        _store_plan(scene, fit["plans"][scene["scene_id"]])
+
+
+def _plan_failure(ec, exc) -> StepFailed:
+    """A scene no shape fits (``timing.PlanError``, plan 28 stage A2), as the
+    step's one plain sentence."""
+    return StepFailed(timing.plan_slot_refusal(ec.ep, exc.function, exc.need_s, exc.slot_hi_s))
+
+
+def beat_sheet_slots(ec) -> list:
+    """The slot list E1 is asked to fill (``timing.episode_slots``): on a
+    native-speech story (plan 28 stage A2) as many body scenes as the plan's
+    floor lets fit the window on this story's links, the narrator and the
+    cliffhanger's end card counted -- the template's default whenever it
+    fits; every other story's, the template's default."""
+    if not media_policy.native_speech(ec.story):
+        return timing.episode_slots(ec.template, ec.ep)
+    return timing.episode_slots(ec.template, ec.ep, lengths=_speech_lengths(ec), narrator=bool(ec.narrator),
+                                lang=ec.language, style_lock=ec.style_lock,
+                                end_card=ec.episode_defaults.get("cliffhanger_style") == "cut_to_black")
 
 
 def plan_fit_refusal(ec, script=None, *, log=None):
@@ -388,6 +431,11 @@ def plan_fit_refusal(ec, script=None, *, log=None):
         cut = ec.episode_defaults.get("cliffhanger_style") == "cut_to_black"
         preview = timing.plan_floor_preview(ec.template, ec.ep, _speech_lengths(ec), bool(ec.narrator),
                                             lang=ec.language, style_lock=ec.style_lock, end_card=cut)
+        unplannable = preview.get("unplannable")
+        if unplannable:
+            # Plan 28 stage A2: a part of the format no clip of this story's links fits at all.
+            return timing.plan_slot_refusal(ec.ep, unplannable["function"], unplannable["need_s"],
+                                            unplannable["slot_hi_s"])
         floor, scenes = preview["floor_s"], preview["scenes"]
         rows = [(f"slot {k + 1}", slot, clip) for k, (slot, clip) in enumerate(preview["per_scene"])]
         end_card = floor - sum(clip for _sid, _function, clip in rows)
@@ -403,8 +451,12 @@ def current_plan(ec, script, scene) -> dict:
     """*scene*'s line plan as it stands now (:func:`line_plan`: the voices,
     the clip lengths and the neighbours of this moment), stored on the scene
     in place of whatever plan it had (plan 24 stage 2: a stale stored plan is
-    never trusted)."""
-    plan = line_plan(ec, script, scene)
+    never trusted). A scene no shape fits (plan 28 stage A2) is refused in
+    one plain sentence."""
+    try:
+        plan = line_plan(ec, script, scene)
+    except timing.PlanError as exc:
+        raise _plan_failure(ec, exc) from None
     _store_plan(scene, plan)
     return plan
 
@@ -891,7 +943,7 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
     ``_repair_e1_reply``), so they all agree on whether ``new_objects`` is
     offered this call."""
     pack = _pack(ec, ctx, announced)
-    slots = timing.episode_slots(ec.template, ec.ep)
+    slots = beat_sheet_slots(ec)
     hooks = episode_open_hooks(ec)
     cast = e1_cast(ec)
     v2 = media_policy.is_v2(ec.story)

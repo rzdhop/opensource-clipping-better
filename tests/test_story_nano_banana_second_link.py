@@ -101,7 +101,9 @@ def test_nano_banana_lite_is_second_for_both_kinds(profile):
 def test_preset_estimate_unchanged():
     """fal is still first, so the numbers and the keys the preset asks for are what they were."""
     estimate = media_policy.preset_estimate()
-    assert estimate["episode_usd"] == pytest.approx(1.728)
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): serial_60s_v2's episode 1 is 6 scenes now, so 6 seedance
+    # clips of 62 / 6 s rounded up to 11 s (66 s x $0.022) and 6 keyframes ($0.04): $1.692 (8 x 8 s before, $1.728).
+    assert estimate["episode_usd"] == pytest.approx(1.692)
     assert estimate["story_usd"] == pytest.approx(0.56)
     assert estimate["keys"] == ["FAL_KEY"] == list(media_policy.QUALITY_KEYS)
     story = estimate["story"]

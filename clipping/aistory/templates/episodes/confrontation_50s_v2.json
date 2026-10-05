@@ -3,10 +3,10 @@
   "template_id": "confrontation_50s_v2",
   "version": 1,
   "label": {"fr": "Confrontation de 50 secondes (un lieu, temps réel)", "en": "50-second confrontation (one place, real time)"},
-  "window_s": [44, 58],
+  "window_s": [44, 59],
   "target_s": 50,
   "tighten_above_s": 55,
-  "scenes": [4, 6],
+  "scenes": [4, 5],
   "shots": [9, 16],
   "min_shot_s": 5,
   "recap_from_episode": 2,
@@ -30,5 +30,5 @@
   "line_words": [5, 17],
   "episode_words": [95, 125],
   "reaction_shots": [0, 1],
-  "notes": "Plan 22 stage 3 (the human's reference: a 52 s confrontation in one place, about 15 shots of 2-5 s, every line spoken on camera). One continuous scene in real time: the hook, two or three body beats of 10-16 s and the cliffhanger, all in one place (single_place: E1 is told so and max_places is 1), cut together with no time jump (scene_transition: every boundary a cut). The antagonist drives it with demands and accusations, each with its reason; the target answers little; it ends right before the threatened act. Lines of 5-17 words (line_words: on a native-speech story one line is one shot of at most 8 s, 17 words at 2.4 words/s; plan 27: shots are 5-10 s, min_shot_s 5, max_shot_s 10, a reaction shot 6 s), 95-125 spoken words in all (episode_words, spread over the scenes by their length), at most one silent reaction shot a scene (reaction_shots). The narrator speaks only in the recap (narrator_slots; amends DEC-231 for this format only). shots_per_scene [1, 2] is the beat-shot pair of a story that does not speak natively (a body beat past max_shot_s is two shots); a native-speech board plans one shot a line instead. The format a native-speech story starts on (defaults.episode_template_for; DEC-268: still a per-story choice)."
+  "notes": "Plan 22 stage 3 (the human's reference: a 52 s confrontation in one place, about 15 shots of 2-5 s, every line spoken on camera). One continuous scene in real time: the hook, two or three body beats of 10-16 s and the cliffhanger, all in one place (single_place: E1 is told so and max_places is 1), cut together with no time jump (scene_transition: every boundary a cut). The antagonist drives it with demands and accusations, each with its reason; the target answers little; it ends right before the threatened act. Lines of 5-17 words (line_words: on a native-speech story one line is one shot of at most 8 s, 17 words at 2.4 words/s; plan 27: shots are 5-10 s, min_shot_s 5, max_shot_s 10, a reaction shot 6 s), 95-125 spoken words in all (episode_words, spread over the scenes by their length), at most one silent reaction shot a scene (reaction_shots). The narrator speaks only in the recap (narrator_slots; amends DEC-231 for this format only). shots_per_scene [1, 2] is the beat-shot pair of a story that does not speak natively (a body beat past max_shot_s is two shots); a native-speech board plans one shot a line instead. The format a native-speech story starts on (defaults.episode_template_for; DEC-268: still a per-story choice). Plan 28 stage A2 (DEC-305): on Veo or an upload (6/8 s) episode 1 plans 8 + 3 x 14 + 8 = 58 s of clips and the end card adds 0.6 s when the cliffhanger cuts to black, so the window ends at 59 s (was 58; the smallest change: no slot, no word cap, no end card moves); episode 2 adds the 6 s recap, so scenes [4, 5] keeps it at 2 body beats: 6 + 8 + 2 x 14 + 8 = 50 s (3 would be 64 s)."
 }

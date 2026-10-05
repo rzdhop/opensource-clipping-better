@@ -185,9 +185,11 @@ def test_off_native_the_narrator_gets_the_low_end_of_the_share():
 def test_native_clips_sum_inside_the_slot(template, function, narrator):
     scene = _scene(function, characters=("char_rida", "char_marie"))
     # Plan 27 stage 2: a shot's clip counted once (an exchange's lines share it); the 6/8 s
-    # table from 12 s up (two clips of 6 s at least), a table with 4 s below.
-    for hi, lengths in ((9.0, (4, 6, 8)), (11.0, (4, 6, 8)), (12.0, (6, 8)), (13.0, (6, 8)), (16.0, (6, 8)),
-                        (16.0, (8,)), (16.0, (5, 10))):
+    # table from 12 s up (two clips of 6 s at least), a table with 4 s below. Plan 28 stage A2 (DEC-305):
+    # the 6/8 s table at 11 s too, the case this test used to leave out -- the narrator and a character
+    # (6 + 6 s) cannot share it, so the scene is planned again, never stored over its slot.
+    for hi, lengths in ((9.0, (4, 6, 8)), (11.0, (4, 6, 8)), (11.0, (6, 8)), (12.0, (6, 8)), (13.0, (6, 8)),
+                        (16.0, (6, 8)), (16.0, (8,)), (16.0, (5, 10))):
         tight = copy.deepcopy(template)
         slot = timing.slot_name(function, tight)
         tight["slots"][slot]["duration_s"] = [3.0, hi]

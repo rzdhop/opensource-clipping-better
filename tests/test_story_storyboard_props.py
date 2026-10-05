@@ -175,11 +175,14 @@ def t1_v2_reply(call):
          "subjects": who, "lines": span} for i, span in enumerate(spans)]}
 
 
-def two_beats(scene, seconds, *, cap_s=12, min_shot_s=3.0):
+def two_beats(scene, seconds, *, cap_s=12, min_shot_s=5.0):
     """How many beat shots T1 v2 is asked for *scene* of *seconds*
     (``storyboard.beat_shot_count``): two past the clip's *cap_s*, and --
     DEC-252's rhythm -- two for a body scene with two lines or two
-    characters and room for two shots of *min_shot_s*; one otherwise."""
+    characters and room for two shots of *min_shot_s*; one otherwise.
+
+    Re-pinned on purpose (plan 28 stage A2, DEC-305): *min_shot_s* is
+    serial_60s_v2's own, 5 s since its re-slot (3 s before)."""
     from clipping.aistory import schemas
 
     rhythm = (scene["function"] in schemas.BODY_FUNCTIONS

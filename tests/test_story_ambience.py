@@ -649,7 +649,10 @@ def test_the_preset_is_priced_on_veo_with_its_sound_when_its_key_is_set():
         VEO, template["target_s"] / episode["shots"])
     assert estimate["episode_usd"] == pytest.approx(episode["billed_seconds"] * pricing.PRICES[VEO].usd
                                                     + episode["shots"] * episode["keyframe_usd"])
-    assert 3.0 < estimate["episode_usd"] <= budget_mod.profile_settings("quality")["cap_usd"]
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): serial_60s_v2's episode 1 is 6 scenes now (the hook, 4
+    # body scenes, the cliffhanger), 6 Veo clips of 8 s and 6 keyframes: 48 s x $0.05 + 6 x $0.04 = $2.64.
+    assert episode["shots"] == 6 and estimate["episode_usd"] == pytest.approx(2.64)
+    assert estimate["episode_usd"] <= budget_mod.profile_settings("quality")["cap_usd"]
     assert estimate["ambience"] is True
     assert "each clip brings its own ambience and sound effects" in estimate["summary"]
     assert estimate["keys"] == list(media_policy.QUALITY_KEYS)

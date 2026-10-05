@@ -3119,8 +3119,13 @@ _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     # Plan 24 stage 5 (D-6): on a narrated format's writing-v3 beat sheet, whether
     # the body scene carries one character line (true) or is the narrator's alone
     # (false); ``timing.scene_plan`` plans the scene's lines from it. Absent on
-    # every other scene: the plan is what it was.
+    # every other scene: the plan is what it was. Plan 28 stage A2: on a native-speech
+    # story with the narrator on, the episode's fit (timing.fit_episode_plans) sets it
+    # False on a plain body scene of any format when the episode's clips cannot fit.
     "character_line": {"type": "boolean"},
+    # Plan 28 stage A2: the seconds a native-speech scene's clips are held under (below
+    # its slot's top) by the episode's fit, so the plan recomputes the same; absent: the slot's top.
+    "clip_cap_s": {"type": "number", "minimum": 1},
 })
 
 _EPISODE_SCRIPT_HOOK_SCHEMA = _document({"on_screen_text": {"type": ["string", "null"]}})

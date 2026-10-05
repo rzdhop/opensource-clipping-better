@@ -49,15 +49,16 @@ def _e1v3(template_id):
 
 # ---------------------------------------------------- (a) the plan's floor, and the refusal after E1
 
-def test_a_narrator_and_a_character_clip_in_an_11s_slot_make_the_floor_pass_the_window():
+def test_a_plan_s_clip_floor_is_its_shots_and_the_end_card():
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): the narrator and a character clip (6 + 6 s) in an 11 s
+    # slot is no longer planned at all -- scene_plan plans that scene the narrator alone (one 8 s clip, pinned in
+    # tests/test_story_plan_fit.py) -- so the 12 s plan the floor's arithmetic is checked on is built by hand.
     template = copy.deepcopy(SERIAL)
     template["window_s"] = [3, 11]
-    scene = {"scene_id": "s02", "function": "setup", "place_id": "p", "characters": ["char_rida"],
-             "emotion": "neutral", "target_duration_s": 8.0, "lines": []}
-    plan = timing.scene_plan(template, scene, lang="fr", native=True, narrator=True, narrator_provider="edge",
-                             speakers={"char_rida": None}, speech_lengths=(6, 8), silent_lengths=(6, 8))
-    assert plan["slot_s"][1] == 11 and [shot["clip_s"] for shot in plan["shots"]] == [6, 6]
-    script = {"scenes": [dict(scene, line_plan=plan)], "cliffhanger": {"cut_to_black": False}}
+    shots = [{"clip_s": 6, "line_ids": ["l08"], "words_min": 3, "words_max": 11, "speaks": False},
+             {"clip_s": 6, "line_ids": ["l09"], "words_min": 9, "words_max": 12, "speaks": True}]
+    script = {"scenes": [{"scene_id": "s02", "function": "setup", "line_plan": {"shots": shots}}],
+              "cliffhanger": {"cut_to_black": False}}
 
     assert timing.plan_clip_floor_s(script, template) == 12.0
     assert timing.plan_floor_refusal(1, 1, 12.0, 11) is not None
@@ -67,35 +68,51 @@ def test_a_narrator_and_a_character_clip_in_an_11s_slot_make_the_floor_pass_the_
 
 
 def _tight_narrated(monkeypatch):
-    """narrated_drama_60s_v2 with an 11 s top to its body slot and a 60 s window: a body scene with the narrator
-    and a character line plans 6 + 6 s there, the narrator alone 8 s."""
+    """narrated_drama_60s_v2 with an 11 s top to its body slot and a 40 s window. Re-pinned on purpose (plan 28
+    stage A2, DEC-305): a narrator and a character clip (6 + 6 s) no longer fit an 11 s body scene, which is planned
+    the narrator alone (8 s), and the episode's fit holds the clips inside the window -- four body scenes fit
+    (6 + 4 x 6 + 6 = 36 s at the cheapest, 40 s as fitted), five cannot (7 x 6 = 42 s)."""
     real = templates.load_episode_template
 
     def load(template_id):
         template = real(template_id)
         if template_id == "narrated_drama_60s_v2":
             template["slots"]["body"]["duration_s"] = [7.0, 11.0]
-            template["window_s"] = [40, 60]
+            template.update(window_s=[20, 40], target_s=34, tighten_above_s=38)
         return template
 
     monkeypatch.setattr(templates, "load_episode_template", load)
 
 
+def _five_body_e1v3():
+    """The narrated beat sheet with five body scenes (the format allows 3-5; E1 is asked for 4), each with a
+    character line but the last two."""
+    template = copy.deepcopy(templates.load_episode_template("narrated_drama_60s_v2"))
+    template["default_body_count"] = 5
+    reply = eps._e1_reply_for(template)
+    body = iter([True, True, True, False, False])
+    scenes = [dict(scene, character_line=next(body) if scene["function"] in ("setup", "rising", "peak", "turn")
+                   else False) for scene in reply["scenes"]]
+    return dict(reply, spine=dict(eps.V3_SPINE), scenes=scenes)
+
+
 def test_the_script_step_refuses_the_beat_sheet_that_cannot_fit_and_writes_no_scene(store, monkeypatch):
     _tight_narrated(monkeypatch)
     story_id = _native_story(store, "narrated_drama_60s_v2")
-    # Two character lines is the format's floor: the cheapest shape (56 s) fits the 60 s window and E1 is asked...
+    # Four body scenes is what E1 is asked for, and they fit the 40 s window as fitted...
     ctx, _log = eps._ctx(store, story_id)
-    assert script_step.plan_fit_refusal(episode_common.load_episode_context(ctx)) is None
-    # ... but this beat sheet gives all four body scenes a character line: 8 + 4 x 12 + 8 = 64 s of clips.
-    llm = eps.FakeLLM(E1v3=[eps._narrated_e1v3([True] * 4)], E2v3=[], E3v3=[], E4=[], default={})
+    ec = episode_common.load_episode_context(ctx)
+    assert script_step.plan_fit_refusal(ec) is None
+    assert script_step.beat_sheet_slots(ec).count("body") == 4
+    # ... but this beat sheet writes five (legal for the format): 7 scenes of one 6 s clip at the cheapest, 42 s.
+    llm = eps.FakeLLM(E1v3=[_five_body_e1v3()], E2v3=[], E3v3=[], E4=[], default={})
 
     message, log = eps._failed(eps._new().script, store, story_id, llm=llm)
 
     assert llm.prompts() == ["E1v3"]  # the beat sheet was bought; no scene, no framing, no check
-    assert message == ("Episode 1 cannot fit: its 6 scenes need at least 64 s of clips on this link, more than "
-                       "the 60 s this format allows. Pick a format that fits, or let the app choose one.")
-    assert any("(setup): 12 s of clips" in line for line in log)  # the arithmetic, scene by scene
+    assert message == ("Episode 1 cannot fit: its 7 scenes need at least 42 s of clips on this link, more than "
+                       "the 40 s this format allows. Pick a format that fits, or let the app choose one.")
+    assert any("(setup): 6 s of clips" in line for line in log)  # the arithmetic, scene by scene
     assert eps._script(store, story_id)["scenes"]  # the beat sheet is kept
     # A run again on the kept beat sheet is refused the same way, before a scene is written.
     again = eps.FakeLLM(E2v3=[], E3v3=[], E4=[], default={})
@@ -103,22 +120,38 @@ def test_the_script_step_refuses_the_beat_sheet_that_cannot_fit_and_writes_no_sc
     assert again.calls == []
 
 
-def test_a_plan_whose_cheapest_shape_cannot_fit_is_refused_before_the_first_call(store):
-    # Tonight's story: serial_60s_v2, the narrator on, Veo: a narrator and a character clip (6 + 6 s) in
-    # every body scene, 8 scenes, 86 s against 75 s.
+def _tight_serial(monkeypatch):
+    """serial_60s_v2 with a 28 s window: even its fewest scenes (a hook, 3 body scenes, a cliffhanger) at one 6 s
+    clip each need 30 s."""
+    real = templates.load_episode_template
+
+    def load(template_id):
+        template = real(template_id)
+        if template_id == "serial_60s_v2":
+            template.update(window_s=[20, 28], target_s=24, tighten_above_s=26)
+        return template
+
+    monkeypatch.setattr(templates, "load_episode_template", load)
+
+
+def test_a_plan_whose_cheapest_shape_cannot_fit_is_refused_before_the_first_call(store, monkeypatch):
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): tonight's story (serial_60s_v2, the narrator on, Veo:
+    # 86 s against 75 s) now fits -- the format is re-slotted and the episode's fit drops a character line --
+    # so the refusal is checked on a window no plan of the format can fit.
+    fits = _native_story(store, "serial_60s_v2")
+    ctx, _log = eps._ctx(store, fits)
+    assert script_step.plan_fit_refusal(episode_common.load_episode_context(ctx)) is None
+
+    _tight_serial(monkeypatch)
     story_id = _native_story(store, "serial_60s_v2")
     llm = eps.FakeLLM(default={})
 
     message, _log = eps._failed(eps._new().script, store, story_id, llm=llm)
 
     assert llm.calls == []
-    assert message == ("Episode 1 cannot fit: its 8 scenes need at least 86 s of clips on this link, more than "
-                       "the 75 s this format allows. Pick a format that fits, or let the app choose one.")
+    assert message == ("Episode 1 cannot fit: its 5 scenes need at least 30 s of clips on this link, more than "
+                       "the 28 s this format allows. Pick a format that fits, or let the app choose one.")
     assert not re.search(r"T1|native|speech|_v2|manual/|E1", message)
-    # Without the narrator the same format fits (an exchange a body scene): 62 s.
-    quiet = _native_story(store, "serial_60s_v2", narrator=False)
-    ctx, _log = eps._ctx(store, quiet)
-    assert script_step.plan_fit_refusal(episode_common.load_episode_context(ctx)) is None
 
 
 # ---------------------------------------------------- (b) a plan that fits passes unchanged
@@ -151,9 +184,11 @@ def test_a_narrated_beat_sheet_that_fits_goes_on_to_its_scenes(store):
 
 # ---------------------------------------------------- (c) the estimate says so before the click
 
-def test_the_fast_track_estimate_reports_the_refusal_before_any_call(store):
+def test_the_fast_track_estimate_reports_the_refusal_before_any_call(store, monkeypatch):
     from clipping.aistory.steps import fast_track
 
+    # Re-pinned on purpose (plan 28 stage A2, DEC-305): serial_60s_v2 fits now; a 28 s window cannot.
+    _tight_serial(monkeypatch)
     story_id = _native_story(store, "serial_60s_v2")
     ec = episode_common.load_context(store, story_id, 1)
 
@@ -161,8 +196,8 @@ def test_the_fast_track_estimate_reports_the_refusal_before_any_call(store):
 
     assert estimate["stops_at"]["step"] == "script"
     reason = estimate["stops_at"]["reason"]
-    assert re.fullmatch(r"Episode 1 cannot fit: its 8 scenes need at least \d+ s of clips on this link, more than "
-                        r"the 75 s this format allows\. Pick a format that fits, or let the app choose one\.", reason)
+    assert re.fullmatch(r"Episode 1 cannot fit: its 5 scenes need at least \d+ s of clips on this link, more than "
+                        r"the 28 s this format allows\. Pick a format that fits, or let the app choose one\.", reason)
 
     fits = _native_story(store, "narrated_drama_60s_v2")
     stop = fast_track.estimate(episode_common.load_context(store, fits, 1), env=tas._settings())["stops_at"]

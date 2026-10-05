@@ -1,7 +1,9 @@
 // The episode formats shipped (spec 6.2; serial_60s_v2 since phase 7,
 // DEC-227: 6-10 beat shots of 5-12 s, every shot animated; serial_90s_v2 and
 // narrated_drama_60s_v2 since the fruit-drama pack, plan 20 stage 1;
-// confrontation_50s_v2 since plan 22 stage 3): one
+// confrontation_50s_v2 since plan 22 stage 3; plan 28 stage A2, DEC-305:
+// both serial v2 formats re-slotted to the native 5-10 s shot window, the
+// confrontation's window to 44-59 s): one
 // list for the new-story form's "Episode format" and the episode page's
 // "Episode length". FR/EN-agnostic English labels, since the story's
 // language is the *cast's* language, not the workspace UI's (the template
@@ -15,12 +17,12 @@ export const EPISODE_TEMPLATES = [
   { id: 'serial_90s_v1', label: '90 s (75–100)', pipeline: '',
     help: 'Classic, longer: 8–12 scenes over 75–100 s.' },
   { id: 'serial_60s_v2', label: '60 s beat shots (55–75)', pipeline: 'v2',
-    help: '6–10 beat shots of 5–12 s, each one a clip.' },
+    help: '6 scenes of beat shots of 5–12 s, each one a clip.' },
   { id: 'serial_90s_v2', label: '90 s beat shots (80–100)', pipeline: 'v2',
-    help: '8–12 scenes of beat shots over 80–100 s, each shot a clip.' },
+    help: '7–8 scenes of beat shots over 80–100 s, each shot a clip.' },
   { id: 'narrated_drama_60s_v2', label: 'Narrated drama 60 s (58–78)', pipeline: 'v2',
     help: 'Narrated drama: one dramatic narrator, 2–4 character lines.' },
-  { id: 'confrontation_50s_v2', label: 'Confrontation 50 s (44–58)', pipeline: 'v2',
+  { id: 'confrontation_50s_v2', label: 'Confrontation 50 s (44–59)', pipeline: 'v2',
     help: 'One place, real time: a confrontation, one shot per spoken line.' },
 ]
 
