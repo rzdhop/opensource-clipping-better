@@ -1439,3 +1439,36 @@ def test_a_status_probe_is_cut_at_its_timeout_even_when_the_request_itself_hangs
 
     assert elapsed < 0.2 + 0.5
     assert (ok, note) == (False, "unreachable at http://comfy.test:8188 (no answer within 0.2s)")
+
+
+# ------------------------------------------------- the quality advice's keys
+
+def _advice_row(link, est_usd):
+    return {"link": link, "status": "refused", "reason": "x", "paid": True, "est_usd": est_usd}
+
+
+def test_the_quality_advice_names_the_key_of_every_link_of_the_chain():
+    """Plan 23 A8 follow-up: gemini/nano-banana-2-lite is the sheet role's
+    second link and reads GEMINI_PAID_API_KEY, so the advice asks for it next
+    to FAL_KEY (fal is first in the chain), without repeating a key."""
+    readiness = {"units": {"images": 2},
+                 "links": [_advice_row("fal/seedream-4.5-edit", 0.04),
+                           _advice_row("gemini/nano-banana-2-lite", 0.039),
+                           _advice_row("fal/flux-kontext-pro", 0.04)]}
+
+    assert _new().quality_advice(readiness) == (
+        "Add FAL_KEY or GEMINI_PAID_API_KEY in Settings and allow paid providers "
+        "(est $0.040 for 2 images on fal/seedream-4.5-edit): "
+        "this story's images run on quality links only.")
+
+
+def test_the_quality_advice_is_unchanged_when_fal_is_the_only_key_the_chain_needs():
+    refimages = _new()
+    readiness = {"units": {"images": 2}, "links": [_advice_row("fal/seedream-4.5-edit", 0.04)]}
+
+    assert refimages.quality_advice(readiness) == (
+        "Add FAL_KEY in Settings and allow paid providers (est $0.040 for 2 images on fal/seedream-4.5-edit): "
+        "this story's images run on quality links only.")
+    # No usable link in the rows: the quality keys of the preset stand.
+    assert refimages.quality_advice({"links": []}) == (
+        "Add FAL_KEY in Settings and allow paid providers: this story's images run on quality links only.")

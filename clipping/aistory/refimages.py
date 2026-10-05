@@ -190,17 +190,33 @@ class RefImageError(Exception):
 LEGACY_EDITOR_ADVICE = "Start ComfyUI, or allow a paid editor, or switch the story to prompt-only consistency."
 
 
+def _advice_keys(readiness) -> tuple:
+    """The env keys the chain's links read, in chain order and without
+    repeats (plan 23 A8: ``gemini/nano-banana-2-lite`` reads
+    GEMINI_PAID_API_KEY next to fal's FAL_KEY); ``media_policy.QUALITY_KEYS``
+    when the rows name no link that needs a key."""
+    keys = []
+    for row in readiness.get("links") or ():
+        try:
+            link = gen.parse_chain([row["link"]], providers=gen.GEN_PROVIDERS)[0]
+            names = gen.env_keys_for(link)
+        except (KeyError, IndexError, TypeError, ChainError):
+            continue
+        keys.extend(name for name in names if name not in keys)
+    return tuple(keys) or tuple(media_policy.QUALITY_KEYS)
+
+
 def quality_advice(readiness) -> str:
-    """What a v2 story's stop-and-ask asks for (DEC-221): the quality keys and
-    ``allow_paid``, with the estimate of the first paid link -- never the
-    prompt-only switch, which a v2 story does not have."""
+    """What a v2 story's stop-and-ask asks for (DEC-221): the keys of its
+    quality links and ``allow_paid``, with the estimate of the first paid link
+    -- never the prompt-only switch, which a v2 story does not have."""
     paid = next((row for row in readiness.get("links") or () if row.get("paid")), None)
     estimate = ""
     if paid is not None:
         qty = (readiness.get("units") or {}).get("images", 1)
         estimate = (f" (est ${paid['est_usd']:.3f} for {qty} image{'' if qty == 1 else 's'} on "
                     f"{paid['link']})")
-    return (f"Add {' and '.join(media_policy.QUALITY_KEYS)} in Settings and allow paid providers{estimate}: "
+    return (f"Add {' or '.join(_advice_keys(readiness))} in Settings and allow paid providers{estimate}: "
             "this story's images run on quality links only.")
 
 
