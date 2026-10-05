@@ -929,6 +929,8 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
     if "episode_template_id" in values:
         check_episode_template(stories, story, values["episode_template_id"])
 
+    check_narrator_voices(story, values)
+
     clears_bible = bool(set(values) & set(BIBLE_FIELDS))
 
     def mutate(doc):
@@ -941,6 +943,23 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
             doc["approvals"]["bible"] = None
 
     return update(stories, story_id, mutate, now=now)
+
+
+def check_narrator_voices(story, values) -> None:
+    """``invalid`` when the patch *values* would leave *story* with the
+    narrator on and no generated voice (plan 28 stage B1, DEC-305): the
+    narrator is a TTS voice-over, and a ``voices: none`` story has none. The
+    profile and the narrator as they would be after the patch (each merged
+    as :func:`patch_story` merges it)."""
+    profile = values.get("generation_profile", story["generation_profile"])
+    narrator = values.get("narrator")
+    enabled = (narrator.get("enabled") if isinstance(narrator, dict) and "enabled" in narrator
+               else (story.get("narrator") or {}).get("enabled"))
+    if enabled and media_policy.no_voices({"generation_profile": profile}):
+        raise WorkflowError(
+            INVALID,
+            "This story has no generated voices (its characters speak in their own clips), so it cannot have a "
+            "narrator: turn the narrator off, or set generation_profile.voices to tts first.")
 
 
 def prompt_style_change(stories, story_id, fields) -> dict | None:
@@ -1050,7 +1069,9 @@ def _follow_pipeline_switch(stories, story, values) -> None:
     values.setdefault("episode_template_id", defaults.episode_template_for(profile))
     narrator = values.get("narrator")
     if not (isinstance(narrator, dict) and "enabled" in narrator):
-        values["narrator"] = {**(narrator if isinstance(narrator, dict) else {}), "enabled": v2}
+        # Plan 28 stage B1: never on a profile without generated voices.
+        enabled = v2 and not media_policy.no_voices({"generation_profile": profile})
+        values["narrator"] = {**(narrator if isinstance(narrator, dict) else {}), "enabled": enabled}
 
 
 # The code of the structured refusal of a pipeline switch over written
@@ -1304,7 +1325,9 @@ def character_missing(stories, story_id, doc, *, story=None) -> list:
     (a pinned voice) and ``sample`` (its voice sample, on disk). An image or a
     sample counts only as a regular file where the store keeps it. Plan 23
     stage D4: only the images the story's ``sheet_mode`` draws
-    (``refimages.character_images``; read from *story*, else from the store)."""
+    (``refimages.character_images``; read from *story*, else from the store).
+    Plan 28 stage B1: a story without generated voices
+    (``media_policy.no_voices``) never lacks a ``voice`` or a ``sample``."""
     cid = doc["char_id"]
     missing = [] if character_written(doc) else ["text"]
     if story is None:
@@ -1312,6 +1335,8 @@ def character_missing(stories, story_id, doc, *, story=None) -> list:
     for which in refimages.character_images(story):
         if not _has(stories, story_id, CHARACTERS, cid, doc["refs"][which]):
             missing.append(which)
+    if media_policy.no_voices(story):
+        return missing  # plan 28 stage B1: no generated voice, so no voice or sample to wait for
     if not doc["voice"]:
         missing.append("voice")
     if not entities_step.has_sample(stories, story_id, cid):
@@ -1476,7 +1501,8 @@ def progress(stories, story, *, env, probe_local=False) -> dict:
     ``references`` mode that has its portrait, lacks a sheet, and whose
     sheets no editor can make now -- spec 8.1's "stop and ask".
     ``pick_voice``: the characters whose text is written but who have no
-    pinned voice (no catalogue voice was left for them).
+    pinned voice (no catalogue voice was left for them); none on a story
+    without generated voices (plan 28 stage B1).
     """
     story_id = story["story_id"]
     characters = entities_step.cast_order(list_entities(stories, story_id, CHARACTERS))
@@ -1503,7 +1529,9 @@ def progress(stories, story, *, env, probe_local=False) -> dict:
         "characters": out_characters,
         "places": {doc["place_id"]: {"missing": place_missing(stories, story_id, doc)} for doc in places},
         "props": {doc["prop_id"]: {"missing": prop_missing(stories, story_id, doc)} for doc in props},
-        "pick_voice": [doc["char_id"] for doc in characters if doc["voice_hints"] and not doc["voice"]],
+        # Plan 28 stage B1: a story without generated voices has no voice to pick.
+        "pick_voice": ([] if media_policy.no_voices(story)
+                       else [doc["char_id"] for doc in characters if doc["voice_hints"] and not doc["voice"]]),
         "edit_readiness": readiness,
     }
 
@@ -1761,7 +1789,8 @@ def cast_units(stories, story, *, selected=(), custom=()) -> dict:
         units["llm_calls"] += 3 if v2 else 1
         units["images"] += 1
         sheets(len(sheet_slots))
-        units["tts_chars"] += SAMPLE_CHARS_ESTIMATE
+        if not media_policy.no_voices(story):  # plan 28 stage B1: no sample without generated voices
+            units["tts_chars"] += SAMPLE_CHARS_ESTIMATE
     return units
 
 

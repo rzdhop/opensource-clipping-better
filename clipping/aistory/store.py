@@ -330,6 +330,9 @@ _PROFILE_CHOICES = {
     "prompt_style": defaults.PROMPT_STYLES,
     # Plan 23 stage D5: the explicit opt-in to appearance variants (absent: sheet_mode decides).
     "variants": defaults.VARIANTS_MODES,
+    # Plan 28 stage B1 (DEC-305): "none" -- no generated voice, no narrator (native speech only);
+    # absent is "tts". Listed before the frame: aspect and stock_cutaways stay the last two keys.
+    "voices": defaults.VOICES_MODES,
     # Plan 23 stage B7: the output frame (absent: 9:16), chosen at creation only -- never clearable.
     "aspect": defaults.ASPECTS,
     # Plan 23 stage B8: the opt-in to stock cutaways (absent: off), patchable any time.
@@ -607,6 +610,11 @@ def _merge_generation_profile(partial) -> dict:
         raise ValueError(
             "generation_profile.consistency_mode must be references on a v2 story (pipeline v2), "
             f"not {profile['consistency_mode']!r}: it never falls back to prompt-only consistency")
+    if profile.get("voices") == defaults.VOICES_NONE and not defaults.speaks_natively(profile):
+        # Plan 28 stage B1 (DEC-305): only a story whose clips speak its lines can go without voices.
+        raise ValueError(
+            "generation_profile.voices can be none only on a native-speech story (the characters speak in "
+            "their own clips); this story's lines are read by generated voices, so it needs voices tts")
     return profile
 
 
@@ -862,6 +870,10 @@ class StoryStore:
         # writing version of its own (a test fixture, or a future explicit
         # "v2" choice).
         profile.setdefault("writing", defaults.WRITING_V3)
+        # Plan 28 stage B1 (DEC-305): a native-speech story created from now on has no generated
+        # voice -- its characters speak in their own clips -- unless the caller named "tts".
+        if defaults.speaks_natively(profile):
+            profile.setdefault("voices", defaults.VOICES_NONE)
 
         approvals = {key: None for key, _ in _APPROVAL_STEPS}
         doc = {
@@ -888,10 +900,10 @@ class StoryStore:
             # starts on the v2 template (DEC-227); a legacy one as before.
             "episode_template_id": defaults.episode_template_for(profile, episode_template_id),
             "generation_profile": profile,
-            # A v2 story opens with the narrator on (phase 7 stage 6c, the
-            # human's CLARIFY answer 7); legacy stays off as before. The cast
-            # step pins the narrator's voice once the profile is v2.
-            "narrator": {"enabled": media_policy.is_v2({"generation_profile": profile}), "voice": None},
+            # Plan 28 stage B1 (DEC-305): every new story opens with the
+            # narrator off, whatever its pipeline (phase 7 stage 6c's "on for
+            # v2" is now opt-in, a PATCH; never on a no-voice story).
+            "narrator": {"enabled": False, "voice": None},
             "approvals": approvals,
             "status": derive_status(approvals),
             "created_at": now,

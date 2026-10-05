@@ -983,6 +983,8 @@ def _predicted_voices(ec, chars, *, env, adapters) -> dict:
     *chars* characters -- the upper bound: however the lines fall, no voice
     speaks more than all of them -- and ``paid_usd`` the dearest paid one."""
     speakers = [doc["char_id"] for doc in ec.cast] + (["narrator"] if ec.narrator else [])
+    if media_policy.no_voices(ec.story):
+        speakers = []  # plan 28 stage B1: no generated voice speaks a line of this story
     items, unvoiced, seen = [], [], set()
     for speaker in speakers:
         voice = voice_lines.speaker_voice(ec, speaker)

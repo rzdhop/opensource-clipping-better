@@ -263,14 +263,15 @@ def test_a_new_story_has_every_field_as_a_draft(stories):
         assert doc[key] == [], key
 
 
-def test_a_v2_story_opens_with_the_narrator_on(stories):
-    """Phase 7 stage 6c: a story created on the v2 pipeline starts with the
-    narrator enabled (the human's CLARIFY answer 7); legacy (the default
-    generation profile, no ``pipeline`` key) keeps it off, as
-    ``test_a_new_story_has_every_field_as_a_draft`` already pins."""
+def test_a_v2_story_opens_with_the_narrator_off(stories):
+    """Re-pinned on purpose (plan 28 stage B1, DEC-305: the human, on the
+    narrator, "remove"): phase 7 stage 6c opened a v2 story with the
+    narrator enabled; every story created from now on opens with it off,
+    v2 as legacy (``test_a_new_story_has_every_field_as_a_draft`` pins the
+    legacy one). A PATCH may still turn it on, on a story that has voices."""
     doc = stories.create(language="en", generation_profile=defaults.quality_generation_profile(), now=NOW)
     assert doc["generation_profile"]["pipeline"] == defaults.PIPELINE_V2
-    assert doc["narrator"] == {"enabled": True, "voice": None}
+    assert doc["narrator"] == {"enabled": False, "voice": None}
 
 
 def test_story_json_keeps_a_readable_field_order(stories, outputs):

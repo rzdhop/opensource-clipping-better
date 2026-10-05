@@ -261,6 +261,15 @@ export function variantsEnabled(story) {
 
 const VARIANTS_MAX = 3
 
+/** Whether the story has no generated voice (plan 28 stage B1, DEC-305,
+ * clipping.aistory.media_policy.no_voices): `generation_profile.voices:
+ * "none"` -- the characters speak in their own clips, so the cast shows no
+ * voice pin, sample or picker. Absent is "tts": every older story. */
+export function noVoices(story) {
+  const profile = (story && story.generation_profile) || {}
+  return profile.voices === 'none'
+}
+
 function VariantThumb({ storyId, character, slot, refDoc }) {
   const [url, setUrl] = useState(null)
   useEffect(() => {
@@ -827,7 +836,7 @@ function DossierSection({ storyId, character, castNames, disabled, onChange }) {
 // -------------------------------------------------------------- one character
 
 function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames,
-  withVariants, manualImages, brief, speciesPool }) {
+  withVariants, manualImages, brief, speciesPool, withoutVoices }) {
   const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
@@ -970,13 +979,15 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
         disabled={cardBusy}
         rows={1}
       />
-      <EditableText
-        label="Sample line"
-        value={character.voice ? character.voice.sample_line : (character.voice_hints || {}).sample_line}
-        onSave={saveSampleLine}
-        disabled={cardBusy}
-        rows={1}
-      />
+      {!withoutVoices && (
+        <EditableText
+          label="Sample line"
+          value={character.voice ? character.voice.sample_line : (character.voice_hints || {}).sample_line}
+          onSave={saveSampleLine}
+          disabled={cardBusy}
+          rows={1}
+        />
+      )}
       <RegenerateControl disabled={cardBusy} onRegenerate={regenerateText} />
 
       {isV2 && (
@@ -1001,15 +1012,20 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
         </>
       )}
 
-      <VoiceSection
-        storyId={storyId}
-        character={character}
-        pickVoiceIds={pickVoiceIds}
-        disabled={cardBusy}
-        onChange={onChange}
-      />
+      {/* Plan 28 stage B1: no voice picker or recording on a story without generated voices. */}
+      {!withoutVoices && (
+        <>
+          <VoiceSection
+            storyId={storyId}
+            character={character}
+            pickVoiceIds={pickVoiceIds}
+            disabled={cardBusy}
+            onChange={onChange}
+          />
 
-      <VoiceReferenceSlot storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
+          <VoiceReferenceSlot storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
+        </>
+      )}
 
       <UploadsSection storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
 
@@ -1133,8 +1149,9 @@ function ContinueCast({ storyId, disabled, onChange, consistencyMode }) {
 
 // ------------------------------------------------------------ the card grid
 
-/** A character's tile in the cast grid: the portrait, the name, the role, the approval and the voice. */
-function characterTile(character, info, pickVoiceIds) {
+/** A character's tile in the cast grid: the portrait, the name, the role, the approval and the voice (none
+ * on a story without generated voices, plan 28 stage B1). */
+function characterTile(character, info, pickVoiceIds, withoutVoices) {
   const portrait = character.refs && character.refs.portrait
   const missing = (info && info.missing) || []
   const voice = character.voice
@@ -1150,7 +1167,7 @@ function characterTile(character, info, pickVoiceIds) {
         {character.approved_at
           ? <Badge tone="success" dot>Approved</Badge>
           : <Badge tone="warning" dot>To approve</Badge>}
-        {voice
+        {withoutVoices ? null : voice
           ? <Chip icon={Mic} title={`${voice.provider}/${voice.voice_id}`}>{voice.voice_id}</Chip>
           : <Chip icon={Mic} tone={pickVoiceIds.includes(character.char_id) ? 'warning' : 'neutral'}>No voice</Chip>}
       </>
@@ -1202,6 +1219,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
   const needsEditor = Object.values(charProgress).some((info) => info.needs_editor)
   const anyMissing = Object.values(charProgress).some((info) => (info.missing || []).length > 0)
   const pickVoiceIds = progress.pick_voice || []
+  const withoutVoices = noVoices(story)
   // Only a v2 story has a dossier and a look (clipping.aistory.defaults.PIPELINE_V2).
   const isV2 = story.generation_profile.pipeline === 'v2'
   const castNames = Object.fromEntries(characters.map((c) => [c.char_id, c.name]))
@@ -1226,7 +1244,8 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
       <EntityGallery
         storyId={storyId}
         label="Characters"
-        items={characters.map((character) => characterTile(character, charProgress[character.char_id], pickVoiceIds))}
+        items={characters.map((character) => characterTile(character, charProgress[character.char_id], pickVoiceIds,
+          withoutVoices))}
         openId={openId}
         onToggle={toggleOpen}
         renderEditor={(item) => {
@@ -1253,6 +1272,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
               manualImages={imagesManual(story)}
               brief={entityBrief(briefImages, 'characters', character.char_id)}
               speciesPool={speciesPool}
+              withoutVoices={withoutVoices}
             />
             </>
           )

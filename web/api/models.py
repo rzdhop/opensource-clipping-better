@@ -687,6 +687,9 @@ class GenerationProfileModel(BaseModel):
     aspect: Optional[Literal["16:9","1:1"]] = None
     # Optional (plan 23 stage B8): "on" fills eligible establishing shots with stock clips; left out, off.
     stock_cutaways: Optional[Literal["on"]] = None
+    # Optional (plan 28 stage B1): "none" -- no generated voice and no narrator (a native-speech
+    # story only); left out, a native-speech story starts on "none", any other is "tts".
+    voices: Optional[Literal["tts","none"]] = None
 
     @model_serializer(mode="wrap")
     def _without_unset_pipeline(self, handler):
@@ -699,7 +702,7 @@ class GenerationProfileModel(BaseModel):
         if isinstance(data, dict) and data.get("images") is None:
             data.pop("images", None)
         for key in ("sheet_mode", "body_rule", "universe", "image_preference", "prompt_style", "variants", "aspect",
-                    "stock_cutaways"):
+                    "stock_cutaways", "voices"):
             if isinstance(data, dict) and data.get(key) is None:
                 data.pop(key, None)
         return data

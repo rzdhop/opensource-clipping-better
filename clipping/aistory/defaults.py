@@ -176,6 +176,18 @@ FRAME_ASPECTS = (ASPECT_PORTRAIT,) + ASPECTS
 STOCK_CUTAWAYS_ON = "on"
 STOCK_CUTAWAYS_MODES = (STOCK_CUTAWAYS_ON,)
 
+# Plan 28 stage B1 (DEC-305): the optional ``generation_profile.voices``.
+# "tts" -- what every story made before it has (the field absent is read as
+# "tts"): characters and narrator get a pinned TTS voice and a sample.
+# "none" -- no generated voice at all (no voice pin, no sample, no narrator):
+# the characters speak in their own clips. Only a native-speech story may
+# have it (its renderer takes each line's audio from the clip); a story
+# created on a native-speech profile from now on starts on it
+# (``store.create``, ``media_policy.no_voices``).
+VOICES_TTS = "tts"
+VOICES_NONE = "none"
+VOICES_MODES = (VOICES_TTS, VOICES_NONE)
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

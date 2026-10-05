@@ -788,6 +788,9 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (plan 23 stage B8): "on" fills the eligible establishing shots with stock clips
         # at the next assets run, never replacing a clip (defaults.STOCK_CUTAWAYS_MODES).
         "stock_cutaways": {"type": "string", "enum": list(defaults.STOCK_CUTAWAYS_MODES)},
+        # Optional (plan 28 stage B1, DEC-305): "none" -- no generated voice, no narrator (a
+        # native-speech story only); absent is "tts", every story made before it (defaults.VOICES_MODES).
+        "voices": {"type": "string", "enum": list(defaults.VOICES_MODES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,

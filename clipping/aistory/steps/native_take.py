@@ -39,7 +39,7 @@ import subprocess
 
 from clipping.providers import tts
 
-from .. import native_speech, timing, voices, wordtiming
+from .. import native_speech, timing, wordtiming
 
 # The line's audio as the TTS lines are kept: 24 kHz mono 16-bit WAV.
 AUDIO_RATE = 24000
@@ -151,10 +151,11 @@ def pinned_voice(ec, speaker) -> str | None:
     """The speaker's pinned voice label: what a measured line records, so
     ``voice_lines.is_measured`` reads the take as current while the
     speaker's voice is unchanged (the voice line the clip was asked with is
-    built from the same character)."""
+    built from the same character). Plan 28 stage B1: ``clip/<char_id>`` on
+    a story without generated voices (``voice_lines.line_voice_label``)."""
     from . import voice_lines
 
-    return voices.voice_label(voice_lines.speaker_voice(ec, speaker))
+    return voice_lines.line_voice_label(ec, speaker)
 
 
 def _percent(value) -> int:

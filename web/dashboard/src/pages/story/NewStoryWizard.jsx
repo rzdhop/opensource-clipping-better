@@ -425,7 +425,7 @@ function CreateStoryForm() {
             ) : nativeSpeech ? (
               <p className="chip chip-wrap">
                 Native speech (Veo): each character line is spoken on camera by its own clip, lips and voice one
-                take; the narrator stays a voice-over{speech ? `: ${speech.summary}.` : '.'}
+                take; no narrator and no generated voice{speech ? `: ${speech.summary}.` : '.'}
               </p>
             ) : fullyAnimated ? (
               <p className="chip chip-wrap">

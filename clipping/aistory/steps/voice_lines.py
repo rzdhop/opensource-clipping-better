@@ -100,6 +100,24 @@ def speaker_voice(ec, speaker):
     return (ec.entities["characters"].get(speaker) or {}).get("voice")
 
 
+# Plan 28 stage B1: the provider part of the label a native take records as
+# its line's voice on a story without generated voices (``clip/<char_id>``):
+# the character's own clip speaks it, no TTS voice does.
+CLIP_VOICE_PROVIDER = "clip"
+
+
+def line_voice_label(ec, speaker):
+    """What a measured line of *speaker* records as ``timing.voice``, and
+    what :func:`is_measured` compares it with: the speaker's pinned voice
+    label (``voices.voice_label``), None without one. Plan 28 stage B1: on a
+    story without generated voices (``media_policy.no_voices``) a
+    character's lines are its clips' own speech, labelled
+    ``clip/<char_id>`` -- no voice is ever pinned for it."""
+    if speaker != "narrator" and media_policy.no_voices(ec.story):
+        return f"{CLIP_VOICE_PROVIDER}/{speaker}"
+    return voices.voice_label(speaker_voice(ec, speaker))
+
+
 def speech_provider(ec, speaker):
     """The TTS provider whose voice speaks *speaker*'s lines (plan 24 stage
     1, D-1/D-5): the narrator's or the character's pinned voice's
@@ -143,7 +161,7 @@ def is_measured(ec, line) -> bool:
     fallen back to the estimate, ``timing.line_duration``), with the voice
     its speaker has pinned now, and its audio still on disk."""
     current = line["timing"]
-    label = voices.voice_label(speaker_voice(ec, line["speaker"]))
+    label = line_voice_label(ec, line["speaker"])
     return (current["source"] in voices.MEASURED_SOURCES and current["text_hash"] == timing.text_hash(line["text"])
             and label is not None and current.get("voice") == label and _audio_kept(ec, current.get("audio")))
 
@@ -193,7 +211,11 @@ def spoken_by_clip(ec, line) -> bool:
 
 def lines_to_measure(ec, script) -> list:
     """Every line of *script* the measurement would synthesise, in reading
-    order -- never one its clip speaks (:func:`spoken_by_clip`)."""
+    order -- never one its clip speaks (:func:`spoken_by_clip`), and none on
+    a story without generated voices (plan 28 stage B1,
+    ``media_policy.no_voices``: no TTS at all)."""
+    if media_policy.no_voices(ec.story):
+        return []
     return [line for scene in script["scenes"] for line in scene["lines"]
             if not is_measured(ec, line) and not spoken_by_clip(ec, line)]
 

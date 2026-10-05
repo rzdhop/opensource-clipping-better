@@ -581,6 +581,16 @@ def native_speech(story) -> bool:
     return _profile_of(story).get("tier3_native_audio") == SPEECH
 
 
+def no_voices(story) -> bool:
+    """Whether *story* has no generated voice at all (plan 28 stage B1,
+    DEC-305): ``generation_profile.voices == "none"`` -- no voice pinned for
+    a character or the narrator, no voice sample, no narrator, no line audio
+    made by TTS; each character line is spoken by its own clip (the store
+    allows it on a native-speech story only). Absent, or "tts": every story
+    made before it, voiced as before."""
+    return ((story or {}).get("generation_profile") or {}).get("voices") == defaults.VOICES_NONE
+
+
 def speech_model(story) -> str:
     """The speaking clips' model of *story* (plan 22): its own
     ``generation_profile.speech_model`` (the per-story switch), else its
@@ -1101,12 +1111,15 @@ def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
     if missing or stt_missing:
         need = missing + [f"{' or '.join(stt_missing)} (the speech check)"] if stt_missing else missing
         summary += f"; add {' and '.join(need)} in Settings"
+    # Plan 28 stage B1: a story made from now on (no *story* yet, or one without voices) has no narrator.
+    narrator_words = ("the narrator stays a free TTS voice-over" if story is not None and not no_voices(story_doc)
+                      else "no narrator and no generated voice")
     assumptions = (f"An episode: {PRESET_SPEECH_SHOTS} character lines, each one clip that speaks it "
                    f"({PRESET_SPEECH_SECONDS} s on {speech}), {PRESET_SILENT_SHOTS} silent shots "
                    f"({PRESET_SILENT_SECONDS} s on {silent}) at {resolution}, a keyframe each on "
                    f"{quality['episode']['keyframe_link']} (${keyframe_usd:g} each = {_usd(keyframes_usd)}), and the "
-                   f"retake budget ({_usd(retake_usd)}). No TTS and no lip-sync for the characters' lines; the "
-                   f"narrator stays a free TTS voice-over. Prices from the table of {pricing.PRICES_AS_OF}.")
+                   f"retake budget ({_usd(retake_usd)}). No TTS and no lip-sync for the characters' lines; "
+                   f"{narrator_words}. Prices from the table of {pricing.PRICES_AS_OF}.")
     if manual:
         assumptions = (f"An episode: {PRESET_SPEECH_SHOTS} character lines, each one clip that speaks it, and "
                        f"{PRESET_SILENT_SHOTS} silent shots, every clip made by you on your own subscription from "
@@ -1114,8 +1127,8 @@ def native_speech_estimate(merged=None, *, model=None, story=None) -> dict:
                        + ("every image uploaded by you too. " if images_manual(story_doc) else
                           f"a keyframe each on {quality['episode']['keyframe_link']} (${keyframe_usd:g} each = "
                           f"{_usd(keyframes_usd)}). ")
-                       + "No TTS and no lip-sync for the characters' lines; the narrator stays a free TTS "
-                       f"voice-over. Prices from the table of {pricing.PRICES_AS_OF}.")
+                       + f"No TTS and no lip-sync for the characters' lines; {narrator_words}. Prices from the "
+                       f"table of {pricing.PRICES_AS_OF}.")
     return {
         "profile": profile_name, "label": label, "speech_model": chosen, "manual": manual,
         "images_manual": images_manual(story_doc),

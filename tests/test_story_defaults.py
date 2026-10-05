@@ -215,7 +215,10 @@ def test_new_story_is_v2_quality_when_keys_present(monkeypatch, tmp_path, capsys
     # does not (it never reaches ``store.create``), so only these three gain the key.
     assert created() == dict(defaults.default_generation_profile(), writing=defaults.WRITING_V3)
     monkeypatch.setenv("FAL_KEY", "fk")
-    assert created() == dict(manual, writing=defaults.WRITING_V3)  # re-pinned (DEC-235): FAL_KEY alone is enough
+    # Re-pinned on purpose (plan 28 stage B1, DEC-305): a native-speech story made from now on has no
+    # generated voice -- store.create stamps "voices": "none" on it (the other two are not native).
+    assert created() == dict(manual, writing=defaults.WRITING_V3,
+                             voices=defaults.VOICES_NONE)  # re-pinned (DEC-235): FAL_KEY alone is enough
     assert created("--tier", "1") == dict(defaults.default_generation_profile(), writing=defaults.WRITING_V3)
 
     # 3. the store's own default is today's

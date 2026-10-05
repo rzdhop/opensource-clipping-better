@@ -1067,9 +1067,13 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
                 raise
             ctx.on_log(f"ℹ️ {character['name']} was removed while the step ran; skipped.")
 
-    _pin_voices(run_, ctx, store, story)
-    _pin_narrator(run_, ctx, store, story)
-    _samples(run_, ctx, store, tools)
+    # Plan 28 stage B1 (DEC-305): a story without generated voices pins none, for
+    # a character or the narrator, and synthesises no sample -- its characters
+    # speak in their own clips.
+    if not media_policy.no_voices(story):
+        _pin_voices(run_, ctx, store, story)
+        _pin_narrator(run_, ctx, store, story)
+        _samples(run_, ctx, store, tools)
     _pace(run_, ctx, store, tools, budget)
 
     if run_.needs_editor:
