@@ -1,7 +1,7 @@
-## CURRENT STATE — plan 26 (rich prompts on every link + working Copy) APPROVED; phase IMPLEMENT — stages 1–3 merged; 4, 5 and 7a running in worktrees (2026-10-05, local session)
+## CURRENT STATE — plan 26 (rich prompts on every link + working Copy) APPROVED; phase IMPLEMENT — stages 1–5, 7a–7c merged; 4c and the docs running; the deploy next (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `3f6ba2b` (stages 1–3 merged and pushed; running: stage 4 on
-  feat/plan26-s4 (Opus), stage 5 on feat/plan26-s5 (Sonnet), stage 7a on feat/plan26-s7a (Opus)); the deployed code is still a07180c; clean tree (`FETCH_HEAD` untracked, left alone). Tier-1 baseline: CI green on
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `0b444c3` (stages 1–5 and 7a–7c merged and pushed; running: 4c on
+  feat/plan26-s4c (Sonnet: prop reference text, ART STYLE rules a late rung), docs on docs/plan26-docs (Sonnet)); the deployed code is still a07180c; clean tree (`FETCH_HEAD` untracked, left alone). Tier-1 baseline: CI green on
   the deployed code a07180c (DEC-278; no local full run). Plan: `.claude/plans/ai-story/26-rich-handoff-prompts-plan.md`
   (v3 approved; the approved text also at `~/.claude/plans/inherited-baking-lerdorf.md`). Live: a07180c unchanged.
 - **The design in one line (H1):** the master + scene template is prepended at the send layer (`assets.clip_request`,
@@ -14,10 +14,12 @@
   5 the Handoff screen → 6 docs + DEC-303 + A-169… + one deploy at 0 jobs (rm -sfv + rebuild) + the human's Gemini re-test.
 - **Regression contract at risk:** DEC-292 (brief formatting outside the hash), DEC-294/295, the goldens
   `studio_prompts.json` and `before_d5.json` byte-identical, RC-M9 no-auth guards, RC-Q1 v1 byte-identical.
-- **Next action:** merge 7a, 4 (rebase; 4b re-records image_brief_before_d5follow.json once), 5 as they land (gate: both
-  envs exit 0, before_d5/studio_prompts goldens unmodified) → 7b (K1/D2 species block, Sonnet) → 7c (Cast tile select +
-  the Dragon Fruit repair on the human's go) → stage 6 docs/DEC-303/A-169… → one deploy at 0 jobs (rm -sfv + rebuild)
-  → the human's Tier 2 (Copy on the phone, sh11 on Gemini/Flow, the Flow length check). Follow-ups logged: the species classifier
+- **Next action:** merge 4c and the docs → DEPLOY at 0 running jobs (health showed 0 running, 371 jobs): compile the
+  tree with the image's Python 3.11, `sudo -n docker compose rm -sfv backend && up -d --build backend`, health 200, the
+  bundle name changes, `GET …/e7412a3efcc6/episodes/1/handoff` has master_prompt + 10 keyframes made → the Dragon Fruit
+  repair (three PATCHes: Marie-Jeanne pear, Chloe pear, Sam avocado; face '<species> head, …', skin fruit; no storyboard
+  refresh) → VISION paragraph + CHECKPOINT close-out → the human's Tier 2 (Copy on the phone, sh11 on Gemini/Flow,
+  the Flow length check, the sh11 verdict re-asked). DEC-303 and A-169…A-175 are written. Follow-ups logged: the species classifier
   (named_character on Rida/Victor), shots.prop_handles' broken prop names.
 - **Stage 7 added (the human: 'in a fruit world head must be fruits'):** 7a the `look.species` field + its readers
   (Opus, worktree plan26-s7a, in parallel with stage 3 — disjoint files), 7b the K1/D2 species block, 7c the Cast tile
