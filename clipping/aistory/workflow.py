@@ -4785,7 +4785,9 @@ def _edit_script(ec, script, fields, errors) -> tuple:
         # Other words, or another voice: the measured take no longer times
         # the line (its file stays on disk until it is measured again).
         if isinstance(line["text"], str) and (line["text"] != before["text"] or line["speaker"] != before["speaker"]):
-            line["timing"] = timing.estimated_timing(line["text"], ec.language)
+            # Plan 24 stage 1 (D-1/D-5): at the speaking voice's overrun.
+            line["timing"] = timing.estimated_timing(
+                line["text"], ec.language, provider=voice_lines.speech_provider(ec, line["speaker"]))
         if line != before:
             touched.add(scene["scene_id"])
             # The shots were planned from who speaks and how they feel

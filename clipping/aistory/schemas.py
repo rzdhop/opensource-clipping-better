@@ -2995,6 +2995,11 @@ _EPISODE_SCRIPT_LINE_TIMING_SCHEMA = _document({
     "text_hash": {"type": "string", "pattern": TEXT_HASH_PATTERN},
     "voice": {"type": ["string", "null"]},
     "audio": {"type": ["string", "null"]},
+}, optional={
+    # Plan 24 stage 1 (D-1): an estimate spoken by a voice whose overrun is
+    # not 1.0 records it (``timing.estimated_timing``); absent on every line
+    # estimated or measured before, which validates as is.
+    "speech_factor": {"type": "number", "minimum": 0.1},
 })
 
 _EPISODE_SCRIPT_LINE_SCHEMA = _document({
@@ -3030,6 +3035,23 @@ SCENE_SUMMARY_MAX_CHARS = 400
 # effect); every other script keeps 15 (``episode_script_errors``).
 SCENE_SUMMARY_V3_MAX_WORDS = 30
 
+_EPISODE_SCRIPT_LINE_PLAN_LINE_SCHEMA = _document({
+    "kind": {"type": "string", "enum": ["narrator", "character"]},
+    "speaker": {"type": "string", "pattern": SPEAKER_PATTERN},
+    "seconds": {"type": "number", "minimum": 0},
+    "max_words": {"type": "integer", "minimum": 1},
+}, optional={
+    # A native-speech story's planned clip length for the line.
+    "clip_s": {"type": "integer", "minimum": 1},
+})
+
+_EPISODE_SCRIPT_LINE_PLAN_SCHEMA = _document({
+    "allowed_speech_s": {"type": "number", "minimum": 0},
+    "lines": {"type": "array", "items": _EPISODE_SCRIPT_LINE_PLAN_LINE_SCHEMA, "maxItems": 4},
+    "max_words": {"type": "integer", "minimum": 0},
+    "min_words": {"type": "integer", "minimum": 0},
+})
+
 _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     "scene_id": {"type": "string", "pattern": SCENE_ID_PATTERN},
     "function": {"type": "string", "enum": list(SCENE_FUNCTIONS)},
@@ -3058,6 +3080,11 @@ _EPISODE_SCRIPT_SCENE_SCHEMA = _document({
     # ({char_id: variant_id}, E1v3's character states block, offered only when the cast
     # has variants). Absent on every other scene: each character in its base look.
     "states": {"type": "object"},
+    # Plan 24 stage 1 (D-2): the scene's slot [lo, hi] and its line plan
+    # (``timing.scene_plan``), stored when a writing-v3 beat sheet is applied.
+    # Absent on every scene written before, and on every v1/v2 scene.
+    "slot_s": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 2, "maxItems": 2},
+    "line_plan": _EPISODE_SCRIPT_LINE_PLAN_SCHEMA,
 })
 
 _EPISODE_SCRIPT_HOOK_SCHEMA = _document({"on_screen_text": {"type": ["string", "null"]}})

@@ -41,6 +41,23 @@ CHARS_PER_WORD = {"fr": 5.7, "en": 5.5}
 # A line never estimates shorter than this, even a single short word.
 MIN_LINE_S = 0.5
 
+# How much longer a provider's voices speak a line than the per-character
+# rate above says (DEC-250): the French rate was measured on Edge voices;
+# Gemini's prebuilt voices ran 1.16-1.80x the estimate over the 18 lines of
+# story d0ee5ebd745d's first episode (2026-10-03; mean 1.35, speech alone,
+# pauses aside -- A-134). A provider not named speaks at the estimate (1.0).
+# Plan 24 stage 1 (D-1, the one clock): the table lives here so the estimate,
+# the line plan and the storyboard read one number; ``voices.SPEECH_OVERRUN``
+# is this very table.
+SPEECH_OVERRUN = {"gemini": 1.35}
+
+# Characters per word of written v3 French (plan 24 stage 1, D-1): measured
+# on the scripts of 2026-10-05 at 6.6 (6.2-7.3 a scene) -- the 5.7 of
+# CHARS_PER_WORD turned seconds into ~15 % too many words. Used only to turn
+# a line plan's seconds into words (:func:`scene_plan`); the v1/v2
+# :func:`word_budget` keeps CHARS_PER_WORD.
+CHARS_PER_WORD_V3 = {"fr": 6.6, "en": 5.5}
+
 # The render's frame rate (``render.profiles.FPS``: kept here so this module
 # stays pure; ``tests/test_story_frame_stable_timing.py`` checks the two
 # agree). Timed in whole frames (the ``whole_frames`` keyword below, DEC-142
@@ -106,23 +123,70 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()[:16]
 
 
-def estimate_line(text: str, language: str) -> float:
-    """A deterministic duration estimate before any audio exists."""
+def speech_factor(provider: str = None, factor: float = None) -> float:
+    """How much longer than the per-character rate a line is spoken: *factor*
+    when given (a story's measured per-voice rate), else the provider's
+    :data:`SPEECH_OVERRUN`, else 1.0 (plan 24 stage 1, D-1)."""
+    if factor is not None:
+        return float(factor)
+    return float(SPEECH_OVERRUN.get(provider, 1.0)) if provider else 1.0
+
+
+def estimate_line(text: str, language: str, *, provider: str = None, factor: float = None) -> float:
+    """A deterministic duration estimate before any audio exists.
+
+    Plan 24 stage 1 (D-1): times the speaking voice's :func:`speech_factor`
+    (its *provider*'s overrun, or a measured *factor*); with neither -- every
+    call made before -- the result is exactly what it always was."""
     _check_language(language)
     normalised = _normalise(text)
     seconds = len(normalised) * RATE_PER_CHAR[language]
-    return round(max(MIN_LINE_S, seconds), 3)
+    base = round(max(MIN_LINE_S, seconds), 3)
+    over = speech_factor(provider, factor)
+    if over == 1.0:
+        return base
+    return round(base * over, 3)
 
 
-def estimated_timing(text: str, language: str) -> dict:
-    """A fresh ``timing`` block for a line that has never been measured."""
-    return {
+def seconds_for(text: str, lang: str, *, provider: str = None, factor: float = None) -> float:
+    """The one speech clock (plan 24 stage 1, D-1): how long *text* lasts in
+    language *lang* spoken by a voice of *provider* (``"edge"``,
+    ``"gemini"``, ...; None: the measured Edge rate), or at a measured
+    *factor* over the per-character rate. The Script step's estimate
+    (:func:`estimated_timing`), the line plan (:func:`scene_plan`) and the
+    storyboard read this one number."""
+    return estimate_line(text, lang, provider=provider, factor=factor)
+
+
+def estimated_timing(text: str, language: str, *, provider: str = None, factor: float = None) -> dict:
+    """A fresh ``timing`` block for a line that has never been measured.
+
+    Plan 24 stage 1 (D-1, D-5): spoken by a voice whose
+    :func:`speech_factor` is not 1.0 (a Gemini voice), the estimate carries
+    it and the block records it as ``speech_factor`` -- so nothing adds the
+    overrun a second time (:func:`estimate_carries_overrun`). Any other
+    block is byte for byte what it always was."""
+    over = speech_factor(provider, factor)
+    block = {
         "source": "estimated",
-        "duration_s": estimate_line(text, language),
+        "duration_s": estimate_line(text, language, factor=over),
         "text_hash": text_hash(text),
         "voice": None,
         "audio": None,
     }
+    if over != 1.0:
+        block["speech_factor"] = over
+    return block
+
+
+def estimate_carries_overrun(line: dict) -> bool:
+    """Whether *line*'s current timing is an estimate that already carries
+    its voice's overrun (:func:`estimated_timing`'s ``speech_factor``, for
+    the line's current text): such a line's estimate needs no overrun added
+    (``storyboard.expected_scene_seconds``)."""
+    current = line.get("timing") or {}
+    return (current.get("source") == "estimated" and current.get("speech_factor") is not None
+            and current.get("text_hash") == text_hash(line["text"]))
 
 
 def line_duration(line: dict, language: str) -> tuple:
@@ -427,6 +491,247 @@ def word_budget_v3(scene: dict, template: dict, episode_words=None, *, total_s: 
     lines_lo = min(V3_LINES_MAX, max(1, math.ceil(lo / line_hi - 1e-9)))
     lines_hi = min(V3_LINES_MAX, max(lines_lo, math.ceil(hi / middle - 1e-9)))
     return {"words": [lo, hi], "lines": [lines_lo, lines_hi], "line_words": [line_lo, line_hi]}
+
+
+# ------------------------------------------------- the line plan (plan 24 stage 1)
+#
+# D-2: before a scene is written, its slot's high end is split into one
+# slot a line -- every pause paid, a margin kept -- and each line slot turned
+# into a hard word cap with the one clock (:func:`seconds_for`), so a reply
+# inside its caps can never run over its slot. Stage 1 computes and stores
+# the plan (``slot_s``, ``line_plan`` on the scene); the writer and the
+# storyboard read it from stage 2 on. :func:`word_budget_v3` is untouched.
+
+# The share of a scene's speech seconds the plan keeps aside: the estimate's
+# noise (a word a little longer than CHARS_PER_WORD_V3, a frame of rounding).
+PLAN_MARGIN = 0.05
+# The narrator's share of a scene's speech when the template names none and
+# the scene has both a narrator and a character line.
+PLAN_NARRATOR_SHARE = 0.5
+# Speech lengths a native-speech clip is planned at when the caller names
+# none (``native_speech.SPEECH_LENGTHS``, Veo's 4/6/8 s; kept as numbers so
+# this module keeps its imports) and the seconds of a clip that are not
+# speech (``native_speech.SPEECH_OVERHEAD_S``).
+PLAN_SPEECH_LENGTHS = (4, 6, 8)
+PLAN_SPEECH_OVERHEAD_S = 0.7
+
+
+def seconds_per_word_v3(lang: str, *, provider: str = None, factor: float = None) -> float:
+    """Seconds one written v3 word lasts on the one clock:
+    ``CHARS_PER_WORD_V3 x RATE_PER_CHAR x`` the voice's
+    :func:`speech_factor` (plan 24 stage 1)."""
+    _check_language(lang)
+    return CHARS_PER_WORD_V3[lang] * RATE_PER_CHAR[lang] * speech_factor(provider, factor)
+
+
+def words_for_seconds(seconds: float, lang: str, *, provider: str = None, factor: float = None) -> int:
+    """The most words that fit in *seconds* of speech on the one clock
+    (rounded down; never below 0)."""
+    per_word = seconds_per_word_v3(lang, provider=provider, factor=factor)
+    return max(0, math.floor(max(0.0, seconds) / per_word + 1e-9))
+
+
+def plan_tail_floor(template: dict) -> float:
+    """The tail floor a scene's plan pays when the caller knows nothing of
+    its neighbours: the template's ``tail_floor``, raised to the longest
+    dissolve or fade the predicted grammar may leave it with (spec 6.3) --
+    unless the template cuts every boundary (:func:`cuts_between_scenes`)."""
+    floor = template["pauses_s"]["tail_floor"]
+    if cuts_between_scenes(template):
+        return floor
+    transitions_s = template["transitions_s"]
+    return max([floor] + [transitions_s[kind] for kind in ("dissolve", "fadeblack") if kind in transitions_s])
+
+
+def plan_tail_floors(script: dict, template: dict) -> dict:
+    """``{scene_id: tail floor}`` for every scene of *script* as the Script
+    step times it (no storyboard yet: the predicted boundaries) --
+    :func:`_effective_tail_floor`, the floor the warning's own pass shrinks a
+    tail to, so the plan pays exactly what the warning will charge."""
+    scenes = script["scenes"]
+    boundary = _boundary_transitions(scenes, template, None)
+    return {scene["scene_id"]: _effective_tail_floor(i, scenes, boundary, template, script)
+            for i, scene in enumerate(scenes)}
+
+
+def _plan_speakers(scene: dict, *, narrator: bool, speakers: dict, line_count_hint) -> list:
+    """The planned speakers of *scene*, in line order: with the narrator on
+    in the scene, the narrator first and -- a body scene naming a character
+    -- one character line after it; without it, a body scene's exchange
+    between its first two characters (or its one character twice), any
+    other scene one line of its first character. *line_count_hint* (1-4)
+    sets the count instead, the narrator first when on, then the scene's
+    characters in turn. The characters are the scene's own (E1 named
+    them), else *speakers*' handles."""
+    characters = [cid for cid in scene.get("characters") or () if cid != "narrator"]
+    if not characters:
+        characters = [handle for handle in (speakers or {}) if handle != "narrator"]
+    body = scene["function"] in schemas.BODY_FUNCTIONS
+    if line_count_hint is not None:
+        count = min(V3_LINES_MAX, max(1, int(line_count_hint)))
+        out = ["narrator"] if narrator else []
+        k = 0
+        while len(out) < count:
+            if not characters:
+                out.append("narrator")
+                continue
+            out.append(characters[k % len(characters)])
+            k += 1
+        return out
+    if narrator:
+        return ["narrator", characters[0]] if body and characters else ["narrator"]
+    if not characters:
+        return []
+    if body:
+        return [characters[0], characters[1] if len(characters) > 1 else characters[0]]
+    return [characters[0]]
+
+
+def _snap_down(seconds: float, lengths) -> int:
+    """The longest of *lengths* not past *seconds*, else the shortest."""
+    ordered = sorted(lengths)
+    fit = [length for length in ordered if length <= seconds + 1e-9]
+    return int(fit[-1] if fit else ordered[0])
+
+
+def _snap_up(seconds: float, lengths) -> int:
+    """The shortest of *lengths* at least *seconds* long, else the longest
+    (``native_speech.silent_clip_s``)."""
+    ordered = sorted(lengths)
+    return int(next((length for length in ordered if length >= seconds - 1e-9), ordered[-1]))
+
+
+def _clip_capacity(clip_s: float) -> int:
+    """``native_speech.capacity``: the words a speaking clip of *clip_s*
+    seconds holds, ``floor((L - 0.7) x 2.4)`` (4 s: 7, 6 s: 12, 8 s: 17)."""
+    return max(0, math.floor((float(clip_s) - PLAN_SPEECH_OVERHEAD_S) * SPEECH_WPS_V3 + 1e-9))
+
+
+def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator_provider: str = None,
+               speakers: dict = None, line_count_hint: int = None, narrator: bool = None,
+               style_lock: dict = None, tail_floor: float = None, speech_lengths=PLAN_SPEECH_LENGTHS,
+               silent_lengths=None) -> dict:
+    """The line plan of *scene* (plan 24 stage 1, D-2)::
+
+        {"slot_s": [lo, hi], "allowed_speech_s": s,
+         "lines": [{"kind": "narrator" | "character", "speaker", "seconds", "clip_s" (native only),
+                    "max_words"}, ...],
+         "max_words": sum of the caps, "min_words": floor(0.5 x it)}
+
+    The slot's high end (:func:`slot_range`, the style lock's clamp
+    included) pays the pre-roll, a gap between each pair of lines and the
+    tail floor (*tail_floor*: the scene's own, :func:`plan_tail_floors`;
+    else :func:`plan_tail_floor`), then keeps :data:`PLAN_MARGIN` of what is
+    left aside: ``allowed_speech_s``. The planned lines
+    (:func:`_plan_speakers`; *narrator* says whether the narrator speaks in
+    the scene -- by default whenever a *narrator_provider* is named) share
+    it: the narrator the middle of the template's ``narrator_share`` when a
+    character line is planned too, each kind's lines evenly. Each line's
+    seconds become a hard word cap on the one clock (:func:`words_for_seconds`
+    at its voice's provider: *narrator_provider*, ``speakers[handle]``).
+
+    *native* (a native-speech story; *speech_lengths* its speech link's clip
+    lengths, *silent_lengths* its silent link's, the same by default): a
+    character line is its clip -- its seconds snap DOWN to a speech length
+    (never under the shortest), its cap the clip's capacity (spoken by the
+    clip, at no TTS overrun); the narrator gets what is left, at most the
+    longest silent clip less its 0.7 s, its clip that plus 0.7 s snapped UP
+    (as ``shots.speech_shot_plan`` sizes it). While the clips sum past the
+    slot's high end, the narrator's clip shrinks to the next length first,
+    then a character's.
+
+    Pure; a line's cap is never below 1 word."""
+    _check_language(lang)
+    speakers = dict(speakers or {})
+    if narrator is None:
+        narrator = narrator_provider is not None
+    lo, hi = slot_range(scene, template, style_lock=style_lock)
+    planned = _plan_speakers(scene, narrator=narrator, speakers=speakers, line_count_hint=line_count_hint)
+    n = len(planned)
+    pauses = template["pauses_s"]
+    floor = plan_tail_floor(template) if tail_floor is None else float(tail_floor)
+    silent = (pauses["before_first_line"] + pauses["between_lines"] * (n - 1) + floor) if n else 0.0
+    allowed = max(0.0, (hi - silent) * (1.0 - PLAN_MARGIN)) if n else 0.0
+
+    kinds = ["narrator" if who == "narrator" else "character" for who in planned]
+    n_narr, n_char = kinds.count("narrator"), kinds.count("character")
+    if n_narr and n_char:
+        share = template.get("narrator_share")
+        narr_share = (float(share[0]) + float(share[1])) / 2 if share else PLAN_NARRATOR_SHARE
+    else:
+        narr_share = 1.0 if n_narr else 0.0
+    narr_s = allowed * narr_share / n_narr if n_narr else 0.0
+    char_s = allowed * (1.0 - narr_share) / n_char if n_char else 0.0
+
+    def provider_of(who):
+        return narrator_provider if who == "narrator" else speakers.get(who)
+
+    lines = []
+    if not native:
+        for who, kind in zip(planned, kinds):
+            seconds = narr_s if kind == "narrator" else char_s
+            cap = max(1, words_for_seconds(seconds, lang, provider=provider_of(who)))
+            lines.append({"kind": kind, "speaker": who, "seconds": round(seconds, 3), "max_words": cap})
+    else:
+        speech = tuple(speech_lengths or PLAN_SPEECH_LENGTHS)
+        silent_ls = tuple(silent_lengths or speech)
+        narr_max = max(silent_ls) - PLAN_SPEECH_OVERHEAD_S
+        char_clips = [_snap_down(char_s, speech) for _ in range(n_char)]
+
+        def narration(clips):
+            return min(narr_max, max(0.0, (allowed - sum(clips)) / n_narr)) if n_narr else 0.0
+
+        narr_seconds = narration(char_clips)
+        narr_clips = [_snap_up(narr_seconds + PLAN_SPEECH_OVERHEAD_S, silent_ls)] * n_narr
+        ordered_silent, ordered_speech = sorted(silent_ls), sorted(speech)
+        while sum(narr_clips) + sum(char_clips) > hi + 1e-9:
+            smaller_narr = [length for length in ordered_silent if narr_clips and length < narr_clips[0]]
+            if smaller_narr:
+                narr_clips = [smaller_narr[-1]] * n_narr
+                narr_seconds = min(narr_seconds, smaller_narr[-1] - PLAN_SPEECH_OVERHEAD_S)
+                continue
+            longest = max(range(len(char_clips)), key=lambda k: char_clips[k]) if char_clips else None
+            smaller_char = ([length for length in ordered_speech if length < char_clips[longest]]
+                            if longest is not None else [])
+            if not smaller_char:
+                break
+            char_clips[longest] = smaller_char[-1]
+        # A clip raised to the shortest length may hold more than the scene
+        # can pay on the estimate: the estimate's share then caps the words.
+        roomy = sum(char_clips) <= allowed + 1e-9
+        c = 0
+        for who, kind in zip(planned, kinds):
+            if kind == "narrator":
+                cap = max(1, words_for_seconds(narr_seconds, lang, provider=provider_of(who)))
+                lines.append({"kind": kind, "speaker": who, "seconds": round(narr_seconds, 3),
+                              "clip_s": int(narr_clips[0]), "max_words": cap})
+            else:
+                clip = char_clips[c]
+                c += 1
+                seconds = float(clip) if roomy else min(float(clip), allowed / n_char)
+                cap = max(1, min(_clip_capacity(clip), words_for_seconds(seconds, lang)))
+                lines.append({"kind": kind, "speaker": who, "seconds": round(seconds, 3), "clip_s": int(clip),
+                              "max_words": cap})
+
+    total = sum(line["max_words"] for line in lines)
+    return {"slot_s": [lo, hi], "allowed_speech_s": round(allowed, 3), "lines": lines, "max_words": total,
+            "min_words": math.floor(0.5 * total + 1e-9)}
+
+
+def plan_budget(plan: dict, *, line_lo: int = 1) -> dict:
+    """A line plan (:func:`scene_plan`, or a scene's stored ``line_plan``)
+    as :func:`word_budget_v3`'s answer -- ``{"words": [min_words,
+    max_words], "lines": [n, n], "line_words": [lo, the largest cap],
+    "caps": [each line's cap]}`` -- what the writer reads once stage 2
+    switches it to the plan (*line_lo*: the template's line floor,
+    :func:`line_words_v3`, never above the smallest cap)."""
+    caps = [int(line["max_words"]) for line in plan["lines"]]
+    n = max(1, len(caps))
+    hi = int(plan["max_words"])
+    largest = max(caps) if caps else hi
+    smallest = min(caps) if caps else hi
+    return {"words": [min(int(plan["min_words"]), hi), hi], "lines": [n, n],
+            "line_words": [min(int(line_lo), smallest), largest], "caps": caps}
 
 
 # --------------------------------------------------------------- transitions

@@ -63,7 +63,7 @@ from clipping.providers import generation, gating, limits, pricing, tts
 from clipping.providers.registry import ChainError, Link, describe
 
 from . import ledger as ledger_mod
-from . import schemas, voice_reference
+from . import schemas, timing, voice_reference
 
 STEP = "voice_sample"
 MEASURE_STEP = "voice_measure"
@@ -83,8 +83,9 @@ MEASURED_SOURCES = (tts.SOURCE_WORDS, tts.SOURCE_DURATION)
 # aside -- A-134). A provider not named speaks at the estimate (1.0). What the
 # storyboard step adds to a scene's estimated length before deciding whether
 # one clip can cover it (``storyboard.expected_scene_seconds``); a measured
-# line needs none.
-SPEECH_OVERRUN = {"gemini": 1.35}
+# line needs none. Plan 24 stage 1 (D-1, the one clock): the table is
+# ``timing.SPEECH_OVERRUN`` itself, which the estimate and the line plan read.
+SPEECH_OVERRUN = timing.SPEECH_OVERRUN
 
 
 def speech_overrun(voice) -> float:

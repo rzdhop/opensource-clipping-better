@@ -136,7 +136,7 @@ from .llm_call import StepFailed
 # reachable here for every caller of phase 3.
 from .voice_lines import (  # noqa: F401 -- re-exported
     STORY_TTS_CALL_SECONDS, VOICE_ASSETS, BudgetSpent, LineMeasurement, asset_name, is_measured, lines_to_measure,
-    measure_estimate, no_voice_reason, speaker_name, speaker_voice,
+    measure_estimate, no_voice_reason, speaker_name, speaker_voice, speech_provider,
 )
 
 FRAMING_FUNCTIONS = ("recap", "hook", "cliffhanger")
@@ -324,6 +324,45 @@ def _word_budget_v3(ec, script, scene) -> dict:
                                  native=media_policy.native_speech(ec.story))
 
 
+def _speech_lengths(ec) -> tuple:
+    """``(speaking lengths, silent lengths)`` of a native-speech story's
+    clips (``clips.speech_lengths``: its links' own tables, Veo's 4/6/8 s by
+    default)."""
+    from . import clips as clips_step
+
+    return clips_step.speech_lengths(ec.story)
+
+
+def line_plan(ec, script, scene, *, tail_floor=None) -> dict:
+    """``timing.scene_plan`` of *scene* on this story (plan 24 stage 1,
+    D-2): the narrator when it may speak in the scene (:func:`narrator_in`),
+    each voice at its provider's overrun (``voice_lines.speech_provider``),
+    a native-speech story's clips on its links' lengths, the tail floor the
+    Script step's own timing will charge (``timing.plan_tail_floors``)."""
+    native = media_policy.native_speech(ec.story)
+    speech, silent = _speech_lengths(ec) if native else (timing.PLAN_SPEECH_LENGTHS, None)
+    narrator = narrator_in(ec, scene)
+    if tail_floor is None:
+        tail_floor = timing.plan_tail_floors(script, ec.template).get(scene["scene_id"])
+    return timing.scene_plan(
+        ec.template, scene, lang=ec.language, native=native,
+        narrator_provider=speech_provider(ec, "narrator") if narrator else None, narrator=narrator,
+        speakers={cid: speech_provider(ec, cid) for cid in scene["characters"]}, style_lock=ec.style_lock,
+        tail_floor=tail_floor, speech_lengths=speech, silent_lengths=silent)
+
+
+def store_line_plans(ec, script) -> None:
+    """Every scene of *script* (in place) gains its ``slot_s`` and its
+    ``line_plan`` (:func:`line_plan`; plan 24 stage 1, D-2) -- stored, not
+    yet read: the writer switches to it in stage 2 (``timing.plan_budget``),
+    :func:`_word_budget_v3`'s numbers stay what they were."""
+    floors = timing.plan_tail_floors(script, ec.template)
+    for scene in script["scenes"]:
+        plan = line_plan(ec, script, scene, tail_floor=floors[scene["scene_id"]])
+        scene["slot_s"] = list(plan["slot_s"])
+        scene["line_plan"] = {key: plan[key] for key in ("allowed_speech_s", "lines", "max_words", "min_words")}
+
+
 def narrator_in(ec, scene) -> bool:
     """Whether the narrator may speak in *scene*: the story's narrator is on
     and -- plan 22 stage 3 -- the template's ``narrator_slots``, when it has
@@ -467,7 +506,8 @@ def _line(ec, sid, k, line) -> dict:
     return {
         "line_id": schemas.line_id_for(sid, k), "speaker": line["speaker"], "text": text,
         "emotion": line["emotion"], "delivery": line["delivery"].strip(),
-        "timing": timing.estimated_timing(text, ec.language),
+        # Plan 24 stage 1 (D-1/D-5): the estimate at the speaking voice's overrun.
+        "timing": timing.estimated_timing(text, ec.language, provider=speech_provider(ec, line["speaker"])),
     }
 
 
@@ -654,6 +694,8 @@ def apply_e1(ec, script, reply) -> tuple:
     # Plan 22 stage 3: E1v3's spine (an E1/E1v2 reply has none, and leaves none).
     if isinstance(reply.get("spine"), dict):
         script["spine"] = {key: _fr_text(ec, reply["spine"][key]) for key in schemas.SPINE_KEYS}
+        # Plan 24 stage 1 (D-2): a v3 beat sheet's scenes carry their line plan.
+        store_line_plans(ec, script)
     else:
         script.pop("spine", None)
     return before, after

@@ -100,6 +100,18 @@ def speaker_voice(ec, speaker):
     return (ec.entities["characters"].get(speaker) or {}).get("voice")
 
 
+def speech_provider(ec, speaker):
+    """The TTS provider whose voice speaks *speaker*'s lines (plan 24 stage
+    1, D-1/D-5): the narrator's or the character's pinned voice's
+    ``provider``; None when there is no voice yet, and for a character on a
+    native-speech story -- its lines are spoken by its clips
+    (:func:`spoken_by_clip`), at no TTS overrun."""
+    if speaker != "narrator" and media_policy.native_speech(ec.story):
+        return None
+    voice = speaker_voice(ec, speaker)
+    return voice.get("provider") if isinstance(voice, dict) else None
+
+
 def no_voice_reason(ec, speaker) -> str:
     if speaker == "narrator":
         return "the narrator has no voice yet"

@@ -339,6 +339,10 @@ def expected_scene_seconds(ec, script, scene) -> float:
     for line in scene["lines"]:
         if shots._measured_for_its_words(line):
             continue
+        # Plan 24 stage 1 (D-1): an estimate made at its voice's overrun
+        # already carries it -- never added twice.
+        if timing.estimate_carries_overrun(line):
+            continue
         over = voices.speech_overrun(voice_lines.speaker_voice(ec, line["speaker"]))
         if over > 1.0:
             seconds += timing.estimate_line(line["text"], ec.language) * (over - 1.0)
