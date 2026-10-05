@@ -1,3 +1,35 @@
+## CURRENT STATE — plan 23 (the upgrade ideas) CODE COMPLETE and DEPLOYED; phase DOCUMENT / close-out (2026-10-05, local session)
+
+- **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main `c88023c`, clean tree (`FETCH_HEAD`
+  untracked, left alone). Tier-1 baseline: CI on the pushed main (DEC-278); every stage ran its DEC-234 selection in both
+  envs (counts in the action log). **Deployed 2026-10-05** (image from e4fd1bd): health 200, bundle index-BfVk0EWS.js,
+  `ZoneInfo('Europe/Paris')` ok, anthropic 1.11.0, `/app/broll` mounted, 343 jobs intact.
+- **Shipped (27 code stages + 2 docs passes, DEC-279…DEC-297, A-151…A-163):** track A — the three-number cap refusal + the
+  Allow-today panel + the today chip + `/api/budget/today[/extra]` + the full-cast gate + `BUDGET_TIMEZONE` + nano-banana-2-lite
+  second on sheets + `image_preference`; track B — `clipping/stock` (Pexels/Pixabay/local) in Clips mode, ElevenLabs voices, a
+  per-character voice reference with consent (chatterbox), subtitle overrides, render geometry + the story frame 16:9 / 1:1,
+  stock cutaways; track C — `fal/ltx-2.5-fast` priced and last in the chain (the speaking model waits for the probe); track D —
+  the Anthropic provider (Sonnet 5.5 default, Opus 5.5 by name, fallbacks on), universes (no doctrine), two-view sheets +
+  all_matter, variants, action-dense clip prompts, the writer A/B bench. Two hotfixes on main (A8's refusal pins; the tzdata
+  pyproject pin). Live Tier 2 (a): the cast 409 of e7412a3efcc6 showed the three numbers; the UTC day has rolled over since,
+  so that cast ($0.60) now fits the $4 day.
+- **The human's calls (money or hands):** (1) `BUDGET_TIMEZONE=Europe/Paris` in Settings → Budget if wanted; (2) keys:
+  `ANTHROPIC_API_KEY` (the Claude writer + the A/B), `ELEVENLABS_API_KEY`, `PIXABAY_API_KEY`; (3) C2 the LTX-2.5 French speech
+  probe ≈ $0.54 (`tools/probe_speech_link.py` is NOT written — C2 was not started without the go) → C4/C5 only if it passes;
+  (4) D7's A/B run: `python3 tools/bench_llm.py --episode-ab outputs/stories/d16026f12e77 --episode 1 --chains
+  "gemini-paid/gemini-3.8-flash,anthropic/claude-sonnet-5-5,anthropic/claude-opus-5-5" --allow-paid --max-usd 3.00`
+  (dry-run first; ≈ $2 one try); (5) the phone walks: the cap panel, a two-view cast on a new story, the action brief on
+  Flow, a 16:9 story on seedance; (6) CI's x86_64 golden keys for `framemd5_16x9/1x1.json` from the CI annotation.
+- **Follow-ups logged (not done):** the CLI cast gate still checks the portraits only (A5); `script._repair_e2_reply` KeyError
+  on a missing `on_screen_text` (D7); the assets hermetic fixture does not cover the stock keys (B8); the image brief does not
+  list variant sheets for manual upload (D5); the edit-refusal hint names FAL_KEY only (A8); Fish Audio (B4) deferred.
+- **Regression contract:** every RC item of plans 19–22 kept (goldens, the tier-2 keys, RC-N1's Veo body sha, RC-M1 prompt
+  pins, RC-W2/W3 byte-identity, RC-A1 re-recorded once for core.py on purpose, RC-S4 third exception recorded, RC-V6 one gate
+  function, RC-N4 nuance recorded in DEC-295); new byte-identity fixtures: portrait_before_b6, studio_prompts, before_d5.
+- **Close-out per file:** CHECKPOINT (this header), VISION (the plan-23 paragraph by the docs passes), ASSUMPTIONS
+  (A-151…A-163 added, UNCONFIRMED), DECISIONS (DEC-279…DEC-297), action log (one line per stage, deploy and deviation).
+- **Open questions:** none blocking.
+
 ## CURRENT STATE — plan 23 (the upgrade ideas of 2026-10-04) APPROVED; phase IMPLEMENT — stages A1, D1, B1 in worktrees (2026-10-04, local session)
 
 - **In-progress header:** phase = IMPLEMENT. Checkpoint commit `50914c7` (main, clean tree; code identical to the deployed
