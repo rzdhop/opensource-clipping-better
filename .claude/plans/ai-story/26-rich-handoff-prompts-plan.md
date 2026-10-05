@@ -211,3 +211,36 @@ the master prompt.
 DEC-247 (ceilings) — amended: the ceiling bounds the hashed core, the link's limit bounds the full prompt. DEC-240
 (dispatch check) — kept as the backstop. DEC-249 (refit outside the hash) and DEC-292 (brief formatting outside the
 hash) — the pattern H1 extends. DEC-302 (the handoff document) — extended. DEC-294/295 — untouched. No conflicts.
+
+## Stage 7 — "In a fruit world every head is a fruit" (added 2026-10-05 on the human's rule; EXPLORE by a Sonnet agent)
+
+**Root cause.** The species is never a field. K1 (`prompts.py:970/1005`) and D2 (`:1369/1412`, `schemas.d2_schema` :5383)
+get the style's `character_design_rules` but no species block (the universe reaches only the concept writer,
+`steps/concepts.py:257-286`; `media_policy.universe(explicit=True)` is None for Dragon Fruit; `_k1_character`
+`steps/cast.py:292` drops the sketch's species). So three casts were written as humans ("Fair human skin"); the sheet
+model, told "a whole fruit head", picked pear / pear / avocado on its own; the J2 judge (`steps/judge._character_look`
+:~556, `_IDENTITY_FIELDS` :482) compares the image against "Fair human skin" and flags the pear as a continuity error.
+`shots.named_character` (:216) / `named_look` (:688) say "a woman in her thirties in a charcoal blazer" — no head;
+`render_look` (:450) has no species slot; the storyboard `_layered` prompt carries no head word.
+
+**The human's answers:** Marie-Jeanne pear, Chloe pear, Sam avocado (as drawn, no sheet redrawn); Marie-Jeanne's eight
+keyframes stay made (no storyboard refresh); only the sh11 verdict is re-asked.
+
+- **7a — the field and its readers (Opus; byte-identical when the field is absent).** `look.species` (optional string)
+  in `CHARACTER_LOOK_SCHEMA` (schemas.py ~1655) and `CHARACTER_SCHEMA`; `prompt_templates._species` reads it first;
+  `shots.named_look` / `character_anchor` / `speech_look` say "with a pear head" when set (the hashed core moves only
+  for characters that carry the field — the human's edit already marks their storyboard prompts outdated);
+  `render_look` puts "<species> head" first and never drops it; `visual_cues` / the sheet prompts say it once;
+  `judge._character_look` adds "Head: <species>" and drops a "human" skin line when a species is set;
+  `_J2_SHEET_ISSUE` compares the head. Tests: a fixture character with `species` → the anchor, the render look, the
+  sheet prompt, the judge brief and the template all carry the head; without it every output byte-identical (the
+  existing goldens prove it).
+- **7b — the writers (Sonnet).** In a species world (`media_policy.universe(story)` non-explicit → the style default,
+  or the lock's rules naming fruit/vegetable heads) K1 and D2 get a species block (the pool, the species already taken
+  by the other casts, "every character is a <species>; no human head"); `d2_schema`/`d2_look` gain `species`, required
+  in a species world; `d2_errors` rejects "human" in `skin_material` there; D2 writes the head into `face`;
+  `_k1_character` keeps the sketch's species; the pool check advisory ("dragon fruit" is outside the fruits pool).
+- **7c — the Cast tile + the repair (Sonnet).** `species` in `LOOK_TEXT_FIELDS` (CastStep.jsx ~626) as a select over
+  `universes.universe_of(story)["species"]` + free text (`patch_entity` already merges look keys). The repair of
+  e7412a3efcc6 by three PATCHes (face "<species> head, carved face", `skin_material` fruit skin, `species`) on the
+  human's go; no sheet redrawn; the storyboard NOT refreshed; sh11's verdict re-asked.

@@ -17,6 +17,9 @@
 - **Next action:** merge stage 3 (gate: both envs exit 0, the two goldens unmodified, the real-data sanity shows 10
   keyframes made) → stage 4a/4b → stage 5 → stage 6 + one deploy at 0 jobs. Follow-ups logged: the species classifier
   (named_character on Rida/Victor), shots.prop_handles' broken prop names.
+- **Stage 7 added (the human: 'in a fruit world head must be fruits'):** 7a the `look.species` field + its readers
+  (Opus, worktree plan26-s7a, in parallel with stage 3 — disjoint files), 7b the K1/D2 species block, 7c the Cast tile
+  select + the Dragon Fruit repair (MJ pear, Chloe pear, Sam avocado; keyframes left made). See the plan file's Stage 7.
 - **Open questions:** none blocking (Q4 action style gets the master too, Q5 `prompt_override` sent as written, Q6 a
   512-token window for local Wan: defaulted, to record as A-170…A-172).
 
