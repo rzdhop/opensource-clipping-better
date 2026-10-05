@@ -428,7 +428,7 @@ def _images_refusal(story) -> str | None:
             "profile's Images: manual) to upload them.")
 
 
-def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guard=None) -> dict:
+def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guard=None, variant_id=None) -> dict:
     """The user's own image of an entity -- a character's ``portrait``,
     ``turnaround`` or ``expressions`` sheet, a place's plate (``slot`` its
     time variant: ``day`` is the master plate), a prop's ``image`` -- on a
@@ -436,7 +436,15 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guar
     and re-encoded clean (the uploads module's decoder), checked against
     the least size its role takes, stored where the app keeps a made one
     (``refs/<slot>.png``) and recorded as one, ``source: manual/upload``.
-    Returns ``{"kind", "id", "slot", "ref", "size"}``."""
+    Returns ``{"kind", "id", "slot", "ref", "size"}``.
+
+    *variant_id* (plan 23 D5 follow-up, DEC-293): the sheet of that
+    appearance variant of the character instead -- stored as
+    ``refs/<slot>_<vid>.png`` in ``variants[i].refs[slot]`` (an edit of the
+    portrait: ``references``), the variant's ``approved_at`` cleared, the
+    character's own sheets and approval never touched; 404 an unknown
+    variant, 409 a story whose characters carry no variants. An upload is
+    not an edit: nothing is booked."""
     from . import imaging, prompting, refimages
 
     now = now or _utc_now()
@@ -462,6 +470,16 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guar
         stem, role, base = slot, slot, slot == "portrait"
         if base and media_policy.two_view(story):
             role = "sheet_two_view"
+        if variant_id is not None:
+            if not media_policy.variants_enabled(story):
+                raise UploadRefused("This story's characters carry no appearance variants: set its character "
+                                    "sheets mode first.", status=409)
+            if refimages.variant_record(doc, variant_id) is None:
+                raise UploadRefused(f"{doc['name']} has no appearance variant {variant_id!r}.", status=404)
+            # Every variant sheet is an edit of the base portrait, whatever slot it fills.
+            stem, base = f"{slot}_{variant_id}", False
+    elif variant_id is not None:
+        raise UploadRefused("Only a character has appearance variants.")
     elif kind == "places":
         if not isinstance(slot, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,19}", slot or ""):
             raise UploadRefused(f"{slot!r} is not a time variant name (day, night, golden_hour...).")
@@ -491,7 +509,14 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guar
            "seed": None, "created_at": now}
     lock = imaging.read_lock(stories, story_id, error=refimages.RefImageError)
     current = stories.read_entity(story_id, kind, eid)
-    if kind == "characters":
+    if kind == "characters" and variant_id is not None:
+        record = refimages.variant_record(current, variant_id)
+        if record is None:
+            raise UploadRefused(f"{doc['name']}'s variant {variant_id!r} was removed while its {slot} was "
+                                "uploading; upload it again once the variant exists.", status=409)
+        record["refs"][slot] = ref
+        record["approved_at"] = None
+    elif kind == "characters":
         current["refs"][slot] = ref
         if slot == "portrait" and current["descriptor"] and current["signature_items"]:
             current["prompt_block"] = prompting.character_prompt_block(
@@ -507,7 +532,10 @@ def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guar
             current["prompt_block"] = prompting.prop_prompt_block(lock, descriptor=current["descriptor"])
     stories.write_entity(story_id, kind, current, now=now)
     refimages._remove_other_extensions(stories, story_id, kind, eid, stem, name)
-    return {"kind": kind, "id": eid, "slot": slot, "ref": ref, "size": list(size), "name": doc.get("name")}
+    result = {"kind": kind, "id": eid, "slot": slot, "ref": ref, "size": list(size), "name": doc.get("name")}
+    if variant_id is not None:
+        result["variant_id"] = variant_id
+    return result
 
 
 def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_log=None, now=None,

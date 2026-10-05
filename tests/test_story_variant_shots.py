@@ -23,6 +23,7 @@ Stdlib + pytest (DEC-012).
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -479,3 +480,94 @@ def test_the_action_style_says_the_delta_with_the_variant_characters_anchor(stor
     assert "ghost" not in base["prompt"] and base["hash"] != worn["hash"]
     assert shots.worn_anchors(ec.entities["characters"], None) == shots.character_anchors(ec.entities["characters"])
     assert shots.worn_anchors(ec.entities["characters"], {}) == shots.character_anchors(ec.entities["characters"])
+
+
+# ================================================================ the image brief (D5 follow-up)
+
+IMAGE_BRIEF_FIXTURE = Path(__file__).parent / "fixtures" / "aistory_variants" / "image_brief_before_d5follow.json"
+GHOST_ID = "ghost_version"
+
+
+def _image_brief_cases(store_factory) -> dict:
+    """The image brief (its JSON, and its markdown's sha256, with the
+    episode's keyframes; the random story id written ``<story_id>``) of the
+    variant-free native-speech story in each sheet mode: absent (variants
+    off), ``three_sheet`` and ``two_view`` (variants on, none added).
+    *store_factory()* gives a fresh store each."""
+    from clipping.aistory.steps import brief
+
+    out = {}
+    for name, mode in (("absent", None), ("three_sheet", "three_sheet"), ("two_view", "two_view")):
+        store = store_factory()
+        story_id = _speech_story(store, sheet_mode=mode)
+        doc = brief.image_brief(store, store.get(story_id), ec=tas._ec(store, story_id))
+        markdown = brief.render_image_markdown(doc).replace(story_id, "<story_id>")
+        out[name] = {"json": json.loads(json.dumps(doc).replace(story_id, "<story_id>")),
+                     "markdown_sha256": hashlib.sha256(markdown.encode("utf-8")).hexdigest()}
+    return out
+
+
+def test_a_story_without_variants_gets_the_image_brief_byte_for_byte_as_before(tmp_path):
+    """The image brief's record (``image_brief_before_d5follow.json``,
+    captured from ``main`` at cc1d734 before variant sheets entered the
+    brief, never re-recorded): with no variant, every entry, label, prompt,
+    size and upload slot -- and the markdown -- is what it was."""
+    counter = iter(range(10))
+
+    def factory():
+        return eps.StoryStore(tmp_path / f"outputs{next(counter)}", on_log=lambda line: None)
+
+    recorded = json.loads(IMAGE_BRIEF_FIXTURE.read_text(encoding="utf-8"))
+    assert json.loads(json.dumps(_image_brief_cases(factory))) == recorded
+
+
+def test_the_image_brief_lists_each_variant_sheet_with_its_prompt_reference_and_upload_slot(store):
+    """A variant's sheets follow their character's own: ``kind: sheet``
+    with ``variant_id``/``variant_label``, ``id`` ``<cid>:<vid>``, the
+    shot brief's label, the prompt the app would ask (an edit of the base
+    portrait, named as the ``reference``), the variant slot's state and the
+    sheet route's ``&variant=`` upload slot; the base entries are untouched."""
+    from clipping.aistory import imaging, refimages, workflow
+    from clipping.aistory.steps import brief
+
+    story_id = _speech_story(store, sheet_mode="three_sheet")
+    before = brief.image_brief(store, store.get(story_id))
+    workflow.add_variant(store, story_id, eps.KIWILO, GHOST, now=NOW)
+    doc = store.read_entity(story_id, "characters", eps.KIWILO)
+    tsp._plant_image(store, story_id, "characters", eps.KIWILO, f"portrait_{GHOST_ID}.png", data=b"ghost portrait")
+    doc["variants"][0]["refs"]["portrait"] = {"name": f"portrait_{GHOST_ID}.png", "consistency": "references",
+                                              "source": "manual/upload", "seed": None, "created_at": NOW}
+    store.write_entity(story_id, "characters", doc, now=NOW)
+    story = store.get(story_id)
+    after = brief.image_brief(store, story)
+
+    worn = [entry for entry in after["images"] if entry.get("variant_id")]
+    assert [entry["slot"] for entry in worn] == ["portrait", "turnaround", "expressions"]
+    lock = imaging.read_lock(store, story_id, error=refimages.RefImageError)
+    character = store.read_entity(story_id, "characters", eps.KIWILO)
+    names = refimages._entity_names(store, story_id)
+    for entry in worn:
+        which = entry["slot"]
+        assert (entry["kind"], entry["entity"], entry["id"]) == ("sheet", "characters", f"{eps.KIWILO}:{GHOST_ID}")
+        assert entry["variant_label"] == "Ghost version"
+        assert entry["label"] == f"Kiwilo (Ghost version) — character sheet ({which})"
+        assert entry["prompt"] == refimages.variant_prompt(story, character, character["variants"][0], which,
+                                                           env={}, lock=lock, names=names)
+        assert entry["reference"]["path"] == KIWI_BASE
+        assert entry["upload_slot"] == (f"/api/stories/{story_id}/cast/{eps.KIWILO}/sheet?which={which}"
+                                        f"&variant={GHOST_ID}")
+        assert entry["state"] == ("uploaded" if which == "portrait" else "missing")
+    # Right after the kiwi's own sheets; take them away and the brief is what it was.
+    kiwi = [index for index, entry in enumerate(after["images"]) if entry["id"].startswith(eps.KIWILO)]
+    assert kiwi == list(range(kiwi[0], kiwi[0] + 6)) and all(after["images"][i].get("variant_id") for i in kiwi[3:])
+    assert [entry for entry in after["images"] if not entry.get("variant_id")] == before["images"]
+    assert after["counts"] == {"total": before["counts"]["total"] + 3,
+                               "uploaded": before["counts"]["uploaded"] + 1,
+                               "missing": before["counts"]["missing"] + 2}
+    markdown = brief.render_image_markdown(after)
+    assert "Kiwilo (Ghost version) — character sheet (turnaround) — missing" in markdown
+    assert f"`{KIWI_BASE}`" in markdown
+    # Variants switched off (no sheet mode): the variant record stays, the brief does not list it.
+    store.update(story_id, lambda d: d["generation_profile"].pop("sheet_mode"), now=NOW)
+    off = brief.image_brief(store, store.get(story_id))
+    assert not [entry for entry in off["images"] if entry.get("variant_id")]

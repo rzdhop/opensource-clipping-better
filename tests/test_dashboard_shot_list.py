@@ -108,3 +108,21 @@ def test_the_tiles_upload_to_the_paths_the_api_serves():
     for step in ("CastStep.jsx", "PlacesStep.jsx"):
         text = _read(STORY / "steps" / step)
         assert "imagesManual(story) && (" in text and "<EntityImageSlots" in text
+
+
+def test_a_variant_tile_uploads_to_the_variant_slot_the_api_serves():
+    """Plan 23 D5 follow-up: on a manual-images story each variant row has
+    an upload tile per sheet slot (the base tiles' component), on the sheet
+    route with ``&variant=<vid>`` -- the image brief's own ``upload_slot``."""
+    from clipping.aistory.steps import brief as brief_mod
+
+    slot = _read(SLOT)
+    assert "export function entityImageSlot(storyId, kind, eid, slot, variantId = null)" in slot
+    assert "`&variant=${encodeURIComponent(variantId)}`" in slot
+    assert brief_mod.entity_image_slot("S", "characters", "E", "portrait", variant_id="ghost") == \
+        "/api/stories/S/cast/E/sheet?which=portrait&variant=ghost"
+    cast = _read(STORY / "steps" / "CastStep.jsx")
+    assert "entityImageSlot(storyId, 'characters', character.char_id, slot, variant.variant_id)" in cast
+    assert "manualImages={imagesManual(story)}" in cast
+    row = re.search(r"function VariantRow\(\{(.*?)\n\}\n", cast, re.DOTALL).group(1)
+    assert "manualImages && (" in row and "<ManualUploadSlot" in row

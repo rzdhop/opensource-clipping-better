@@ -10,9 +10,13 @@ import { ArrowDownToLine } from '../../ui/icons'
 // and by the cast, places and props tiles when the story's images are the
 // user's own (`generation_profile.images: "manual"`).
 
-/** The API path an entity's own image is uploaded to (the image brief's `upload_slot`). */
-export function entityImageSlot(storyId, kind, eid, slot) {
-  if (kind === 'characters') return `/api/stories/${storyId}/cast/${eid}/sheet?which=${encodeURIComponent(slot)}`
+/** The API path an entity's own image is uploaded to (the image brief's `upload_slot`); `variantId`:
+ * the sheet of a character's appearance variant (plan 23 D5 follow-up). */
+export function entityImageSlot(storyId, kind, eid, slot, variantId = null) {
+  if (kind === 'characters') {
+    const sheet = `/api/stories/${storyId}/cast/${eid}/sheet?which=${encodeURIComponent(slot)}`
+    return variantId ? sheet + `&variant=${encodeURIComponent(variantId)}` : sheet
+  }
   if (kind === 'places') return `/api/stories/${storyId}/places/${eid}/plate?variant=${encodeURIComponent(slot)}`
   return `/api/stories/${storyId}/props/${eid}/image`
 }

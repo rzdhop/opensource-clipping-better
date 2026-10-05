@@ -3031,7 +3031,7 @@ async def _accept_image_upload(request, folder, call) -> dict:
             pass
 
 
-async def _entity_image_upload(story_id, kind, eid, slot, request) -> dict:
+async def _entity_image_upload(story_id, kind, eid, slot, request, *, variant_id=None) -> dict:
     stories = _stories()
     story = _load(stories, story_id)
     _entity(stories, story_id, kind, eid)
@@ -3047,19 +3047,24 @@ async def _entity_image_upload(story_id, kind, eid, slot, request) -> dict:
                                    "away and upload again.") from None
     return await _accept_image_upload(request, folder, functools.partial(
         lambda received: manual_uploads.accept_image(stories, story_id, kind, eid, slot, received, now=_now(),
-                                                     guard=_busy_guard(story_id, image_busy))))
+                                                     guard=_busy_guard(story_id, image_busy),
+                                                     variant_id=variant_id)))
 
 
 @router.post("/{story_id}/cast/{char_id}/sheet", status_code=201)
-async def upload_character_sheet(story_id: str, char_id: str, request: Request, which: str = "portrait") -> dict:
+async def upload_character_sheet(story_id: str, char_id: str, request: Request, which: str = "portrait",
+                                 variant: Optional[str] = None) -> dict:
     """The user's own character sheet (``which``: portrait, turnaround or
     expressions) on a story whose images are manual (plan 22 stage 5):
     multipart field ``file``, decoded and re-encoded clean, at least half
     the app's size, stored as ``refs/<which>.png`` with ``source:
-    manual/upload``. 404 unknown story or character; 400 a story whose
-    images are the app's, a bad slot, an image too small; 415 not an image;
-    409 while a step runs."""
-    return await _entity_image_upload(story_id, CHARACTERS, char_id, which, request)
+    manual/upload``. ``variant``: the sheet of that appearance variant
+    instead (plan 23 D5 follow-up), stored as ``refs/<which>_<variant>.png``
+    in the variant's slot, its approval cleared, the base sheets untouched.
+    404 unknown story, character or variant; 400 a story whose images are
+    the app's, a bad slot, an image too small; 415 not an image; 409 while
+    a step runs, or a variant on a story whose characters carry none."""
+    return await _entity_image_upload(story_id, CHARACTERS, char_id, which, request, variant_id=variant)
 
 
 @router.post("/{story_id}/places/{place_id}/plate", status_code=201)

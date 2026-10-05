@@ -603,9 +603,12 @@ def image_min_size(role, aspect="9:16") -> tuple:
     return (FRAME_IMAGE_MIN_SIZES.get(aspect) or {}).get(role) or IMAGE_MIN_SIZES[role]
 
 
-def entity_image_slot(story_id, kind, eid, slot) -> str:
-    """The API path an entity's own image is uploaded to."""
+def entity_image_slot(story_id, kind, eid, slot, *, variant_id=None) -> str:
+    """The API path an entity's own image is uploaded to (*variant_id*: a
+    character's appearance variant's sheet, plan 23 D5 follow-up)."""
     if kind == "characters":
+        if variant_id is not None:
+            return f"/api/stories/{story_id}/cast/{eid}/sheet?which={slot}&variant={variant_id}"
         return f"/api/stories/{story_id}/cast/{eid}/sheet?which={slot}"
     if kind == "places":
         return f"/api/stories/{story_id}/places/{eid}/plate?variant={slot}"
@@ -635,6 +638,8 @@ def _entity_entries(stories, story, *, env):
                 "prompt": refimages.character_prompt(story, character, which, env=env, lock=lock),
                 "state": "uploaded" if entry else "missing",
                 "upload_slot": entity_image_slot(story_id, "characters", character["char_id"], which)})
+        if character.get("variants") and media_policy.variants_enabled(story):
+            entries += _variant_entries(stories, story, character, env=env, lock=lock)
     for place in stories.list_entities(story_id, "places"):
         if not place.get("descriptor"):
             continue
@@ -655,6 +660,51 @@ def _entity_entries(stories, story, *, env):
             "prompt": refimages.prop_prompt(story, prop, env=env, lock=lock),
             "state": "uploaded" if prop.get("image") else "missing",
             "upload_slot": entity_image_slot(story_id, "props", prop["prop_id"], "image")})
+    return entries
+
+
+def _variant_entries(stories, story, character, *, env, lock):
+    """The image brief's entries for *character*'s appearance variants
+    (plan 23 D5 follow-up): one per variant per sheet the story's sheet
+    mode draws, labelled as the shot brief labels a variant's sheet, asked
+    the prompt :func:`refimages.variant_image` would send -- an edit of the
+    base portrait, named in ``reference`` (None while it is not on disk) --
+    and uploaded on the sheet route with ``&variant=<vid>``. None without a
+    look (a variant is drawn from it)."""
+    from .. import refimages
+
+    if not character.get("look"):
+        return []
+    story_id, char_id = story["story_id"], character["char_id"]
+    names = refimages._entity_names(stories, story_id)
+    portrait = character["refs"].get("portrait")
+    reference = None
+    if portrait:
+        try:
+            stories.media_path(story_id, "characters", char_id, portrait["name"])
+        except KeyError:
+            pass
+        else:
+            front = "front and back" if media_policy.two_view(story) else "portrait"
+            reference = {"kind": "sheet", "label": f"{character['name']} — character sheet ({front})",
+                         "path": f"characters/{char_id}/refs/{portrait['name']}", "name": portrait["name"],
+                         "url": f"/api/stories/{story_id}/media/characters/{char_id}/{portrait['name']}"}
+    entries = []
+    for variant in character["variants"]:
+        for which in refimages.character_images(story):
+            two_view = which == "portrait" and media_policy.two_view(story)
+            sheet = "front and back" if two_view else which
+            entries.append({
+                "kind": "sheet", "entity": "characters", "id": f"{char_id}:{variant['variant_id']}", "slot": which,
+                "variant_id": variant["variant_id"], "variant_label": variant["label"],
+                "label": f"{character['name']} ({variant['label']}) — character sheet ({sheet})",
+                "role": "sheet_two_view" if two_view else which,
+                "prompt": refimages.variant_prompt(story, character, variant, which, env=env, lock=lock,
+                                                   names=names),
+                "reference": reference,
+                "state": "uploaded" if (variant.get("refs") or {}).get(which) else "missing",
+                "upload_slot": entity_image_slot(story_id, "characters", char_id, which,
+                                                 variant_id=variant["variant_id"])})
     return entries
 
 
@@ -728,5 +778,11 @@ def render_image_markdown(brief) -> str:
             lines += ["**Reference images:**", ""]
             lines += [f"{ref['number']}. `{ref['file']}` — {ref['label']}" for ref in entry["references"]]
             lines.append("")
+        if "reference" in entry:
+            # A variant's sheet (plan 23 D5 follow-up): an edit of the character's base portrait.
+            ref = entry["reference"]
+            lines += [f"**Reference image:** `{ref['path']}` — {ref['label']} (edit it into this look)"
+                      if ref else "**Reference image:** the character's portrait -- upload it first, "
+                                  "every variant sheet is an edit of it.", ""]
         lines += [f"Upload to: `{entry['upload_slot']}`", ""]
     return "\n".join(lines).rstrip() + "\n"

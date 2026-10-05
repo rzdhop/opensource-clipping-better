@@ -710,8 +710,13 @@ next-episode proposals may bring a twist as a variant: accepting it creates
 the record and queues its sheets behind the usual estimate. Adding or
 approving a variant marks the storyboards that have the character as
 outdated; their prompts refresh, and a shot without a variant is byte for
-byte what it was. The image brief for manual uploads does not list variant
-sheets yet.
+byte what it was. On a story whose images are your own, the image brief
+lists each variant's sheets after the character's own ("Kiwilo (Ghost
+version) — character sheet (portrait)"), with the prompt the app would send,
+the base portrait to edit as the reference, and the upload slot (the sheet
+route with `&variant=<id>`); the variant's row in the cast step has an upload
+tile per sheet. Uploading a variant sheet clears that variant's approval and
+never touches the character's own sheets.
 
 **Frame (16:9 and 1:1).** The generation profile's **Frame** select picks
 the story's output frame: Vertical 9:16 (the default, and every story made

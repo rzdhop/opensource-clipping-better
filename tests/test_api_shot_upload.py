@@ -320,6 +320,42 @@ def test_an_image_upload_is_refused_with_its_reason(api):
     assert refused.status_code == 400 and "made by the app" in refused.json()["detail"]["message"]
 
 
+def test_a_variant_sheet_upload_fills_the_variant_slot_and_never_the_base(api):
+    """Plan 23 D5 follow-up: ``?variant=<vid>`` on the sheet route stores
+    ``refs/<which>_<vid>.png`` in that variant's slot (an edit of the
+    portrait: ``references``), clears the variant's approval and leaves the
+    character's own sheets alone; an unknown variant is one plain sentence."""
+    from clipping.aistory import workflow
+
+    story_id = _manual_images(api.store)
+    api.store.update(story_id, lambda doc: doc["generation_profile"].update(sheet_mode="three_sheet"), now=tas.NOW)
+    workflow.add_variant(api.store, story_id, "char_kiwilo",
+                         {"label": "Ghost version", "delta_text": "a translucent pale-blue glowing ghost"}, now=tas.NOW)
+    doc = api.store.read_entity(story_id, "characters", "char_kiwilo")
+    doc["variants"][0]["approved_at"] = tas.NOW
+    api.store.write_entity(story_id, "characters", doc, now=tas.NOW)
+    base_refs = doc["refs"]
+
+    url = f"/api/stories/{story_id}/cast/char_kiwilo/sheet?which=portrait&variant=ghost_version"
+    done = _post_image(api, _png(api.tmp_path, "ghost.png", (720, 1280)), url)
+    assert done.status_code == 201, done.text
+    assert done.json()["ref"] == {"name": "portrait_ghost_version.png", "consistency": "references",
+                                  "source": "manual/upload", "seed": None,
+                                  "created_at": done.json()["ref"]["created_at"]}
+    assert done.json()["variant_id"] == "ghost_version"
+    after = api.store.read_entity(story_id, "characters", "char_kiwilo")
+    variant = after["variants"][0]
+    assert variant["refs"]["portrait"]["name"] == "portrait_ghost_version.png" and variant["approved_at"] is None
+    assert after["refs"] == base_refs
+    assert os.path.isfile(api.store.media_path(story_id, "characters", "char_kiwilo", "portrait_ghost_version.png"))
+
+    unknown = _post_image(api, _png(api.tmp_path, "nope.png", (720, 1280)),
+                          f"/api/stories/{story_id}/cast/char_kiwilo/sheet?which=portrait&variant=nope")
+    assert unknown.status_code == 404
+    assert unknown.json()["detail"]["message"] == "Kiwilo has no appearance variant 'nope'."
+    assert api.store.read_entity(story_id, "characters", "char_kiwilo") == after
+
+
 def test_a_step_started_while_the_clip_arrives_refuses_it_and_writes_nothing(api, monkeypatch):
     """The in-flight check runs again once the body is in, right before the
     first write: a step queued meanwhile (Continue, or a parallel upload

@@ -9,7 +9,7 @@ import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
-import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
+import ManualUploadSlot, { EntityImageSlots, entityImageSlot, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import VoiceReferenceSlot from './VoiceReferenceSlot'
 import { Mic } from '../../../ui/icons'
@@ -288,7 +288,7 @@ function VariantThumb({ storyId, character, slot, refDoc }) {
   )
 }
 
-function VariantRow({ storyId, character, variant, disabled, onChange }) {
+function VariantRow({ storyId, character, variant, disabled, manualImages, onChange }) {
   const target = `character:${character.char_id}:variant:${variant.variant_id}`
   const [estimate, setEstimate] = useState(null)
   const [error, setError] = useState('')
@@ -328,6 +328,23 @@ function VariantRow({ storyId, character, variant, disabled, onChange }) {
           <VariantThumb key={slot} storyId={storyId} character={character} slot={slot} refDoc={variant.refs[slot]} />
         ))}
       </div>
+      {manualImages && (
+        // Plan 23 D5 follow-up: the story's images are the user's own -- an upload slot per variant sheet.
+        <div className="manual-upload-slots">
+          <p className="form-hint">Your own images: make each sheet from the image brief (an edit of the
+            portrait), then upload it here.</p>
+          {slots.map((slot) => (
+            <ManualUploadSlot
+              key={slot}
+              slot={entityImageSlot(storyId, 'characters', character.char_id, slot, variant.variant_id)}
+              label={`Upload ${variant.label} ${SLOT_LABELS[slot]}`}
+              accept="image/png,image/jpeg,image/webp"
+              disabled={disabled || working}
+              onDone={onChange}
+            />
+          ))}
+        </div>
+      )}
       <div className="story-step-actions">
         <button type="button" className="btn btn-secondary btn-sm" disabled={disabled || working}
           onClick={() => run(() => regenerateStory(storyId, { target }))}>
@@ -345,7 +362,7 @@ function VariantRow({ storyId, character, variant, disabled, onChange }) {
   )
 }
 
-function VariantsSection({ storyId, character, disabled, onChange }) {
+function VariantsSection({ storyId, character, disabled, manualImages, onChange }) {
   const variants = character.variants || []
   const [label, setLabel] = useState('')
   const [delta, setDelta] = useState('')
@@ -379,7 +396,7 @@ function VariantsSection({ storyId, character, disabled, onChange }) {
       )}
       {variants.map((variant) => (
         <VariantRow key={variant.variant_id} storyId={storyId} character={character} variant={variant}
-          disabled={disabled} onChange={onChange} />
+          disabled={disabled} manualImages={manualImages} onChange={onChange} />
       ))}
       {variants.length < VARIANTS_MAX && (
         <form className="story-variant-add" onSubmit={add}>
@@ -696,7 +713,7 @@ function DossierSection({ storyId, character, castNames, disabled, onChange }) {
 // -------------------------------------------------------------- one character
 
 function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onChange, consistencyMode, isV2, castNames,
-  withVariants }) {
+  withVariants, manualImages }) {
   const confirm = useConfirm()
   const [approveError, setApproveError] = useState('')
   const [approveErrors, setApproveErrors] = useState(null)
@@ -862,7 +879,8 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
           {withVariants && (
             <details className="story-profile" open={(character.variants || []).length > 0}>
               <summary>Variants — the same character in another look ({(character.variants || []).length}/3)</summary>
-              <VariantsSection storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
+              <VariantsSection storyId={storyId} character={character} disabled={cardBusy}
+                manualImages={manualImages} onChange={onChange} />
             </details>
           )}
         </>
@@ -1113,6 +1131,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange }) {
               isV2={isV2}
               castNames={castNames}
               withVariants={variantsEnabled(story)}
+              manualImages={imagesManual(story)}
             />
             </>
           )
