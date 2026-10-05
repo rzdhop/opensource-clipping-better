@@ -225,7 +225,10 @@ shorter looks and place, then the layout and prop sentences the sent images
 already show. A clip prompt (≤ 80 words) says what moves, the camera, and
 that the set and the looks stay as in the first frame. Entity names never
 reach a prompt; a name that is only the thing's noun ("Monocle" for a golden
-monocle) is kept so its description is never garbled.
+monocle) is kept so its description is never garbled. These are the
+prompt's *core*, the part that is hashed; a v2 story sends the series, the
+style, the cast, the place and the props in front of it (see "The master
+prompt and the templates").
 
 **Voices and subtitles.** The narrator is on with its own voice, distinct
 from the cast's; voices are proposed in the story's locale (fr-FR, en-US);
@@ -374,16 +377,20 @@ is bought twice. To turn it off for one story, patch its profile:
 limit is known (`prompt-limits` lists them with their source) and a prompt
 over it is refused before anything is sent — the chain moves on to its next
 link. The free key check also reads the limit fal publishes for each video
-model and keeps it. Within those limits every v2 prompt fills its own
+model and keeps it. Within those limits every v2 prompt's core fills its own
 link's budget (a keyframe up to 320 words on the quality links, a clip up to
-160, 220 with its ambience brief; sheets 200, plates 220, props 120) with
-the story's richest context, dropped least valuable first when room runs
-out: the beat's mood and who is mid-sentence (never the words), what
-changed since the previous shot of the scene, the character's bearing and
-distinctive marks (the look's new `bearing` field, written by the Cast
-step), the time of day; a clip adds the emotion, micro-actions and the
-camera's intent. A shot whose prompt cannot fit its link is refused when the
-storyboard is written, naming the shot and the link, never sent trimmed.
+160, 220 with its ambience brief; sheets 200; plates, props and two-view
+sheets take their link's own) with the story's richest context, dropped
+least valuable first when room runs out: the beat's mood and who is
+mid-sentence (never the words), what changed since the previous shot of the
+scene, the character's bearing and distinctive marks (the look's new
+`bearing` field, written by the Cast step), the time of day; a clip adds the
+emotion, micro-actions and the camera's intent. These numbers bound the
+core, the hashed part of the prompt. What is sent is the core with the
+master prompt and the scene in front of it, and that whole text is bounded
+only by its link's own limit; see "The master prompt and the templates". A
+shot whose core cannot fit its link is refused when the storyboard is
+written, naming the shot and the link, never sent trimmed.
 When a prompt is asked with a note at its tail — the keyframe check's
 correction on a redraw, your own on a regenerate — and the two together run
 over the link's budget, the prompt is resolved again to the room the note
@@ -529,6 +536,16 @@ Plan 25 fixed these together: human casts are named in prompts, each shot
 has its own mode, one document carries every prompt, and the Handoff screen
 and the tile drawers show it. The Shot list is gone.
 
+Plan 26 then fixed two more things the same walk showed. The Copy buttons
+did nothing on a phone reaching the app over plain `http` (the browser has
+no clipboard API there, and the fallback only selected a hidden box at the
+bottom of the card). And the pasted clip prompt was thin: about 200 words
+of action and dialogue with one style line, nothing about the series, the
+palette, what the characters look like or what the place looks like, so
+Gemini drew Rida as a plain man in a photoreal office. Every prompt now
+carries the story's records in front of it; see "The master prompt and the
+templates".
+
 ### How clips and images are made: Auto or My own
 
 Two plain choices decide what the app bills, and they sit at the top of the
@@ -649,6 +666,14 @@ a step is running, the save is refused (409) and the choice holds on this
 screen only. Under the chips: the credits line ("20 Flow credits a clip on AI
 Pro…"), an "Open Flow" link and a **How to paste** note.
 
+**The master prompt card.** On a v2 story a collapsed card, "Master prompt ·
+2348 words", sits above the cards. Open, it shows a chip per part with its
+word count, a **Copy master prompt** button and the hint "paste it alone in
+a chat that keeps context". Every shot prompt below already carries this
+block; pasting it alone first, in a chat that keeps context (Gemini, not
+Flow), is for a tool where you want the model to hold the series before the
+first shot. A v1 story has no card.
+
 **The cards.** Three sections, **Clips**, **Keyframes** and **Sheets, plates
 & props**, with one card per item. A card is collapsed to its head (the
 shot's number and id, Speaks/Silent, its length or its size, a state chip, a
@@ -667,8 +692,11 @@ then, under **My own**:
   Video);
 - for a speaking clip, the **line** in the story's language with the
   speaker's name and the voice direction;
-- a big **Copy prompt**, with **Copy line** and **Copy negative** next to
-  it, and the prompt itself under "Show the prompt";
+- a big **Copy prompt · N words**, with **Copy line** and **Copy negative**
+  next to it, and the prompt itself under "Show the prompt"; under it, the
+  fit line when the prompt had to be shortened for the link and, when the
+  story's records are thin, the "Short prompt" warning (both explained in
+  "The master prompt and the templates");
 - the **references** as thumbnails (the keyframe, the speaker's and
   listener's sheets, the place's plate), each with its own Download, and
   **Download all for this shot** (a zip);
@@ -686,14 +714,15 @@ once it exists), which queues that one shot's regeneration.
 
 A **sheet, plate or prop card** has the image's label, its size, its state
 and a mode chip that follows the story's images choice. Open, it has **Copy
-prompt**, **Copy negative**, the prompt folded away, the reference (a
+prompt · N words**, **Copy negative**, the prompt folded away, the reference (a
 variant sheet's card shows the base portrait, "Edit this reference into the
 look …", and says "Upload the character's portrait first: every variant
 sheet is an edit of it." until it exists) and the upload.
 
-**Copy** uses the clipboard; on a plain-`http` address (the dashboard served
-on the LAN), where a browser has no clipboard API, the text appears selected
-in a box for Ctrl+C or Cmd+C.
+**Copy** works over plain `http` and on a phone. It uses the clipboard API
+where the browser offers it (a secure address) and otherwise copies from a
+temporary box inside the tap; when the browser refuses that too, the text is
+shown selected, so long-press and copy (Ctrl+C or Cmd+C on a computer).
 
 **The Export menu** keeps the files for those who want them: **The brief
 (markdown)**, **The clip brief (zip)** (the `.md`, the `.json` and every
@@ -712,7 +741,120 @@ reference to start from with a Download (a variant sheet's is labeled "Edit
 this image": the base portrait), and the upload ("Upload", or "Replace"
 once it is there). A character's variants have their own drawers, one per
 sheet. The brief is read once per step page and again after every upload or
-edit; a story whose images the app draws shows the tiles as before.
+edit; a story whose images the app draws shows the tiles as before. A
+drawer's prompt carries the series, the style and that one character's,
+place's or prop's full paragraph in front of the sheet prompt, with the same
+word count and fit line as a shot's.
+
+### The master prompt and the templates
+
+A generator can only draw what its prompt says. Until plan 26 the prompt of
+a clip or a keyframe was its *core*: the action, the quoted line, the Audio
+sentence and a closing line. Now, on a v2 story, every prompt that goes to a
+generator (a keyframe, a clip, a character sheet, a place plate, a prop) is
+a **template** in front of that core, built from the story's records, and
+the core stays last and unchanged. A v1 story keeps sending the core alone.
+
+**What the template carries.** First the **master block**, six labelled
+parts, each one paragraph:
+
+- **SERIES**: the title, logline, tone and genre, the world (setting, time
+  period, the rules and motifs as a "series lore" paragraph of their own),
+  the universe, the dialogue language. An image prompt leaves out the title
+  and anything that could be drawn as lettering.
+- **ART STYLE**: the style lock as written: the rendering line, the design
+  rules for characters and environments, the palette line and the forbidden
+  colours, with the palette's hex codes and the camera, lighting and motion
+  rules as parts of their own.
+- **CHARACTER**: one paragraph for each character of the episode: what the
+  head is (the species, or "a human"), build, silhouette, face, hair, skin,
+  height, the wardrobe in use, signature items, bearing and colours, the
+  speaker's voice direction; the ones in the shot are marked. Their
+  personalities and relationships follow as paragraphs of their own.
+- **PLACE**: the descriptor, layout, scale, the light of the scene's time of
+  day and the props there.
+- **PROP**: the descriptor, material, colour, size and owner (a prop's own
+  reference image leaves out the size and the owner).
+- **AVOID**: the style's negative list and the shot's, as one sentence.
+
+A shot then adds the **SCENE block**: a summary of the scene, then the
+scene's number, function, mood and time, the framing, who stands where and
+facing which way, the camera's motion and, for a clip, how the speaker
+delivers the line (never the words). A sheet, plate or prop prompt carries
+the series, the style and that one entity's own paragraph instead. The
+**core comes last**: the action, the quoted line, the Audio sentence and the
+closing, exactly as before.
+
+**It is rebuilt from the records at every request.** Nothing in the template
+is stored or hashed. Edit a character's face, a place's lighting or the
+style's palette and the next prompt, pasted or sent, has the change; nothing
+already made turns stale, because what makes a clip or a keyframe current
+is the core's hash and that did not move. The master is the same for a
+manual paste, an API call and a local run: the app composes it where a
+request is sent and where the Handoff is built, so all three read the same
+text.
+
+**The Master prompt card.** The Handoff's collapsed card holds the master
+block alone (with the story's cast, places and props, without a shot), for
+the chat that keeps context. The **Export → The brief (markdown)** leads
+with it. On Dragon Fruit's real records the master is 2,348 words and a
+shot's whole prompt runs 1,500 to 1,800 words before it is fitted.
+
+**Word counts and the fit line.** Every **Copy prompt** says its size
+("Copy prompt · 1793 words"). A link with a limit can refuse a prompt that
+long, so a prompt over it is *fitted*, and the card says what that did:
+
+> Fitted to 630 words for this link: 1793 → 612, dropped avoid, Chloe, Sam,
+> series lore
+
+(the job log gets the same line when the app sends the prompt itself, as
+"Veo accepts 630 words: …"). The fit drops parts, never words in the
+middle of one, least valuable first: the AVOID sentence; the characters not
+in the shot, then the places, then the props not in the shot; the series
+lore; the palette's hex codes; the personalities; the relationships; the
+scene summary; then the camera and light, the series line, the props that
+are in the shot, the place's layout and the characters' secondary details.
+The style's longer design rules are one of those late rungs, so even a
+small-cap link such as Seedream keeps the rendering line. It never drops
+the style's rendering line, the looks of who is in the shot
+(what they are made of, face, hair, skin, outfit), the place and its light,
+the staging, or the core. A link too small even for those gets the core
+alone, as it did before, so the template never adds a refusal that did not
+exist. A link with room drops nothing and the card shows no fit line.
+
+**The "Short prompt" warning.** Under 500 words, before any fit, the prompt
+carries a warning ("Short prompt: 412 words — the template expects at least
+500; the cast and place records are thin."). It is a check, never padding:
+the app does not stretch a prompt to reach the floor. The cause is a record
+with little in it (a character with no hair, skin or wardrobe, a place with
+no lighting); fill it on its tile and the next prompt grows. A shot kept
+still or cut from stock has no prompt to warn about.
+
+**The AVOID sentence.** The style's negative list also goes in the negative
+field of a provider that has one. Veo lite and Seedream have none, so the
+sentence in the text is how they read it; on a link that does have the
+field it is the first part dropped when room runs short.
+
+**One paragraph.** The prompt in the Handoff is pasted as one paragraph:
+the platform's formatting collapses every line break, and the labels (SERIES, ART STYLE, CHARACTER, SCENE)
+are what mark the parts. The text holds no double quote, because Veo
+speaks what is quoted: the only quoted words are the line in the core.
+
+**Where the limit comes from.** The core's ceilings (see "Prompt size
+limits" under Limits) no longer bound the prompt. What bounds the whole
+template is the link's own published limit: the table `prompt-limits` shows
+plus the limit fal publishes live for a video model (Veo about 630 words,
+Seedream 461, Kling 384, Seedance 230, nano-banana 5041); or the text
+encoder's window where there is one (FLUX reads 512 tokens, local Wan 512,
+about 315 words); or nothing, on a manual link and on a local run with no
+window. A role chain with several links is fitted to its smallest, so a
+smaller fallback never refuses the prompt. On a 230-word link (Seedance) the template cannot fit, so
+what is sent is the core alone. The app does not know Flow's own paste
+limit; if Flow or Gemini cuts a very long prompt, the fit line cannot say
+so, so check the first paste.
+
+A prompt you wrote yourself (a keyframe's prompt override) is sent as you
+wrote it, with no template in front.
 
 ### Making a shot by hand
 
@@ -779,7 +921,7 @@ design).
 
 | Route | What it does | Refusals |
 |---|---|---|
-| `GET /api/stories/{id}/episodes/{ep}/handoff?platform=&model=` | The handoff document (`handoff_v1`): the platform and its models, `counts`, `missing` and `next_missing`, per shot `{image, clip}` blocks (mode, state, prompt, negative prompt, size, references and a per-shot zip, upload slot, and for Auto the link, the estimate and the gate's verdict), the entities (sheets, plates, props, variants) and the export links. With no query it reads what `PATCH …/handoff` remembered. Calls nothing. | 404 unknown story or episode; 400 unknown platform or model; 409 no storyboard, or a frame the platform cannot make |
+| `GET /api/stories/{id}/episodes/{ep}/handoff?platform=&model=` | The handoff document (`handoff_v1`): the platform and its models, `counts`, `missing` and `next_missing`, the `master_prompt` of a v2 story (`{text, words, sections}`), per shot `{image, clip}` blocks (mode, state, prompt, its `fit` and, when the records are thin, its `prompt_warning`, negative prompt, size, references and a per-shot zip, upload slot, and for Auto the link, the estimate and the gate's verdict), the entities (sheets, plates, props, variants) and the export links. With no query it reads what `PATCH …/handoff` remembered. Calls nothing. | 404 unknown story or episode; 400 unknown platform or model; 409 no storyboard, or a frame the platform cannot make |
 | `PATCH /api/stories/{id}/episodes/{ep}/handoff` | `{"platform": "flow"\|"higgsfield", "model"?}` into `assets.json`'s `handoff`; answers `{handoff, platform, model}`. | 404; 400 no platform, an unknown one or a model it does not list; 409 while a step is queued or running |
 | `PATCH /api/stories/{id}/episodes/{ep}/shots/{shot_id}/mode` | `{"clip"?, "image"?}`: `"auto"`, `"manual"` or `null`; answers the modes, what became stale and the gate's verdict for an Auto kind (see above). | 404 unknown story, episode or shot; 400 bad value or a mode the story cannot take; 409 while a step runs, or no storyboard |
 | `GET /api/stories/{id}/episodes/{ep}/shots/{shot_id}/references.zip?kind=clip\|image&platform=&model=` | One shot's reference files under `references/` (a clip's, cut to what the platform's model takes; `kind=image` for the keyframe's own). A file not on disk is left out. | 404 unknown story, episode or shot, or a shot kept still (no clip to brief); 400 bad platform, model or kind |
@@ -797,7 +939,10 @@ mention in a prompt is "Marie-Jeanne, a woman in her thirties in a charcoal
 blazer", later ones and every listener are just "Marie-Jeanne", and the
 speech look is a short phrase rather than the build dump. The Audio
 sentence names the voice. A creature cast (a fruit, a bottle, a gadget) is
-byte for byte what it was.
+byte for byte what it was. A human in a fruit world is a
+different case, covered in "Species in a fruit world": a character whose
+head is a fruit says so ("Marie-Jeanne, a woman in her thirties with a pear
+head, in a charcoal blazer").
 
 An existing story keeps the prompts it already has. To pick this up,
 refresh its storyboard's prompts: `PATCH /api/stories/{id}/episodes/{ep}/storyboard`
@@ -1235,6 +1380,55 @@ described before the text is written". The description folds into what K1
 writes — a conflicting reference (say, a real photo) is bent toward the
 story's own style, never copied. **Design references for stylised
 characters. Imitating real people is not supported.**
+
+#### Species in a fruit world
+
+In a world whose cast is made of fruit, vegetables or creatures (a Fruit
+Drama story, or any story whose universe is fruits, vegetables or creatures), **every
+character's head is one whole fruit or vegetable of one species**, and
+nobody has a human head. Marie-Jeanne is a pear, Chloe is a pear, Sam an
+avocado; a human face on one of them is a continuity error, not a style.
+
+**Where the species lives.** On the character's look, as `look.species`, at
+most 4 words ("pear", "dragon fruit", "whole avocado"). Before plan 26 it
+was never a field: a cast written as humans said "fair human skin", the
+sheet model picked its own fruit, and the keyframe check then flagged the
+pear against the "human" in the record.
+
+**The Species (head) field.** Each character card's look has a **Species
+(head)** field with a select over the story's species pool (the universe the
+story chose, else its style's default) and **Other…** for a species of your
+own (4 words at most); a story with no pool gets a plain text box. Pick or
+type, then **Save**; no job runs. It cannot be cleared: once a character has a
+species you change it to another, you do not remove it.
+
+**What the writers do.** K1 and D2, the two steps that write a character,
+are given a species block in a fruit world: the pool, the species the rest
+of the cast already has (so each character gets a different one), and the
+rule "every head is one whole fruit, never a human head". D2 must name a
+species, and refuses a human face or human skin. A species outside the pool
+is kept (and logged), since a pool is advice; the species the concept gave a
+character is kept too.
+
+**What the readers say.** A set species is said wherever the character is
+described: the anchor and the speech look ("with a pear head"), the look the
+keyframes render ("pear head" first, never shortened away), the sheet
+prompts as one sentence, the master prompt's CHARACTER paragraph, and the
+keyframe check's brief ("Head: pear"), which no longer compares the picture
+against a human skin line. A character with no species reads exactly as it
+did.
+
+**Repairing an older story.** A story written before this has human-written
+characters. Open each such character's card and set its **Species (head)**;
+that is the whole repair. The sheets already drawn with a fruit head need no
+redraw. Do **not** refresh the storyboard's prompts unless you accept
+redrawing the keyframes: the species changes those characters' stored
+prompts, so a refresh marks their keyframes and clips out of date (see
+"Human casts"). A record whose face already says the head ("a dragon fruit
+head, carved face") would say it twice with the species set, so set the
+species on the human-written ones only. The new prompts, the Handoff and the
+master prompt pick the species up straight away, since they are built from
+the record.
 
 #### Your own voice (chatterbox)
 
@@ -3258,6 +3452,23 @@ your own Flow or Higgsfield subscription from the brief's prompts, and
 upload each on its shot (see "Your own clips (the manual mode)" above). The
 job frees the worker and survives a restart while it waits; the upload that
 leaves nothing missing starts it again by itself.
+
+**"Short prompt: N words — the template expects at least 500; the cast and
+place records are thin."** — the prompt for that shot has little context to
+carry: a character, place or prop in it has few fields filled. Nothing is
+padded and nothing is blocked. Fill the record on its tile (look, wardrobe,
+lighting, props) and the next prompt grows. See "The master prompt and the
+templates".
+
+**"Fitted to 630 words for this link: 1793 → 612, dropped …"** — not an
+error: the prompt was longer than its link takes, so the parts named were
+left out, least valuable first. To keep more, use a link with more room, or
+paste on a manual link (no limit). On Seedance (230 words) the prompt is the
+core alone.
+
+**A Copy button shows the text selected instead of "Copied"** — the browser
+refused every automatic copy (some phone browsers do over plain `http`).
+Long-press the selected text and choose Copy.
 
 **An upload refused** (a shot's clip, a keyframe, a cast sheet, a place
 plate or a prop image on a manual-mode story) — the reason is always named,
