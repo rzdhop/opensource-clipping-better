@@ -1,9 +1,18 @@
 ## CURRENT STATE — plan 28 (the one-click episode: fits every time, ≤ $2, strict consistency, no TTS voices, Approve all, generated concepts, writer prompts upgraded) — phase CLARIFY, plan DRAFT awaiting answers + "Go" (2026-10-05, late local session)
 
-- **In-progress header:** phase = IMPLEMENT (plan 28 APPROVED, DEC-305, the human's "1) me + gen button 2) remove, Go").
-  Checkpoint commit = main (this commit, clean tree; `FETCH_HEAD` untracked). Live unchanged: e2c8b46 code, health
-  200, 0 running jobs. Tier-1 baseline: CI green on e2c8b46 (DEC-278). Stages in flight: A1 (wt plan28-a1, Sonnet),
-  B1 (wt plan28-b1, Opus), A5 (wt plan28-a5, Sonnet). Next: A4+S1, A2, A3, B2, C, D, E, F, S2/S3, G.
+- **In-progress header:** phase = IMPLEMENT (plan 28 APPROVED, DEC-305). Checkpoint commit = main (this commit;
+  `FETCH_HEAD` untracked). Live is STILL e2c8b46 (nothing deployed yet; 0 running jobs); deploy only at the end at
+  0 jobs after the 3.11 compile (`rm -sfv` + rebuild: the bundle changed). CI runs on every push (DEC-278).
+  **Merged on main (all pushed):** A5 fc64d1c (dead-link breaker, chain order) · D1 6091510 (generated concepts
+  only) · A1 b37dd00 (feasibility refusal before spend) · B1 3751d1a (no voices, no narrator on new stories) ·
+  C 760ffb4 (Approve all) · E 853e6e0 (+ the cast wiring) (set-up prompts on the plan-26 standard) · A2 511f015
+  (the planner always fits; formats re-slotted; the fit matrix) · F4 3cc4078 + F5 f97a64c (speaker/scene rules, prop
+  phrases, one image link per story) · F1/F2 dcd101d + ee13a10 (the keyframe judge hard; uploads warned) ·
+  A4/S1 1de92f0 (four-choice new story; the format oracle at create and PATCH). **In flight (worktrees):** B2
+  plan28-b2 (edge out, Sonnet) · A3+A6 plan28-a3 (one clock + remedy loop; honest price + Generate button, Opus) ·
+  F3/F6/F7 plan28-f3 (sheet judge; variants + wardrobe; the Handoff gate, Opus). **Left after them:** S2 (plain
+  words everywhere), S3 (one button per step), the fruit_drama environment_rules fix, the SPEND_PATH test fixture,
+  G (docs: docs/AI_STORY.md, VISION, DEC-306 close-out, ASSUMPTIONS, memory), the deploy, the human's Tier 2.
 - **Trigger:** job 13bbb11a5896 (story d71852710962 "Cœurs Sous Clé", agent mode, native_speech on Veo fast,
   narrator on, serial_60s_v2) failed at the storyboard: 84 s vs 55–75. Root causes, the four context maps and the
   staged plan: `.claude/plans/ai-story/28-one-click-reliability-plan.md` §1 and §3.
