@@ -324,15 +324,39 @@ function AutoBody({ storyId, ep, shot, which, block, onChanged }) {
   )
 }
 
+/**
+ * An exchange shot's lines in order (plan 27): `block.lines` when it holds two
+ * or more, else null (a one-line row keeps `block.speaker` / `block.line`).
+ */
+export function exchangeLines(block) {
+  return Array.isArray(block.lines) && block.lines.length >= 2 ? block.lines : null
+}
+
+/** What "Copy line" copies: an exchange's lines, one "Speaker: text" per line, else the one line. */
+export function lineToCopy(block) {
+  const lines = exchangeLines(block)
+  return lines ? lines.map((line) => `${line.speaker}: ${line.text}`).join('\n') : block.line
+}
+
 /** Under My own: how, the copy buttons, the prompt, references, checks, the upload and the take. */
 function ManualBody({ shot, which, block, platformInfo, onUploaded, copy }) {
   const clip = which === 'clip'
   const how = clip ? (block.how || platformInfo.where_to_paste)
     : `Make it at ${sizeLabel(block.size)} (at least ${sizeLabel(block.min_size)}) in your image tool.`
+  const exchange = clip ? exchangeLines(block) : null
   return (
     <div className="handoff-manual">
       <p className="handoff-how">{how}</p>
-      {clip && block.line && (
+      {exchange ? (
+        <ol className="handoff-lines">
+          {exchange.map((line, index) => (
+            <li key={line.line_id || index} className="handoff-line">
+              <strong>{line.speaker}:</strong> “{line.text}”
+              {line.voice_line && <span className="form-hint"> — {line.voice_line}</span>}
+            </li>
+          ))}
+        </ol>
+      ) : clip && block.line && (
         <p className="handoff-line">
           <strong>{block.speaker}:</strong> “{block.line}”
           {block.voice_line && <span className="form-hint"> — {block.voice_line}</span>}
@@ -343,7 +367,7 @@ function ManualBody({ shot, which, block, platformInfo, onUploaded, copy }) {
           {copyLabel('Copy prompt', block.fit)}
         </Button>
         {clip && block.line && (
-          <Button size="sm" icon={Copy} onClick={() => copy(block.line, 'line')}>Copy line</Button>
+          <Button size="sm" icon={Copy} onClick={() => copy(lineToCopy(block), exchange ? 'lines' : 'line')}>Copy line</Button>
         )}
         {block.negative_prompt && (
           <Button size="sm" icon={Copy} onClick={() => copy(block.negative_prompt, 'negative')}>Copy negative</Button>

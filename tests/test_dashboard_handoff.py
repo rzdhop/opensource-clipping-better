@@ -116,7 +116,9 @@ def test_the_page_reads_only_what_the_handoff_writes(store):
     assert read("shot") <= set().union(*map(set, shots)), read("shot") - set().union(*map(set, shots))
     # Plan 26: ``fit`` and ``prompt_warning`` are written on a v2 story only (stage 4 adds them to
     # the image block and the entity rows too): the page reads them when present.
-    optional = {"fit", "prompt_warning"}
+    # Plan 27: an exchange shot's clip also carries ``lines`` / ``speakers`` / ``line_ids`` (a
+    # one-line row has none of them).
+    optional = {"fit", "prompt_warning", "lines", "speakers", "line_ids"}
     block_keys = set().union(*map(set, blocks)) | optional
     assert read("block") and read("block") <= block_keys, read("block") - block_keys
     entity_keys = set().union(*map(set, doc["entities"])) | {"variant_id", "variant_label", "reference"} | optional
@@ -125,6 +127,22 @@ def test_the_page_reads_only_what_the_handoff_writes(store):
     assert read("gate") <= {"link", "est_usd", "allowed", "reason"}
     assert read("take") <= {"state", "matched", "heard", "start_s", "end_s", "reason"}
     assert read("counts") <= {"clips", "keyframes", "entities"} | {"total", "done", "missing"}
+
+
+def test_the_card_lists_an_exchanges_lines_and_copies_them_all():
+    """(plan 27) A clip block with two or more ``lines`` renders them one per
+    line in order as "speaker: text" (``voice_line`` as a hint) and "Copy line"
+    copies them joined by newlines; a one-line row renders and copies as before."""
+    card = _read(CARD)
+    assert "block.lines.length >= 2" in card and "block.lines" in card
+    assert 'className="handoff-lines"' in card and "exchange.map((line, index)" in card
+    assert "<strong>{line.speaker}:</strong> “{line.text}”" in card and "line.voice_line" in card
+    assert "lines.map((line) => `${line.speaker}: ${line.text}`).join('\\n')" in card
+    assert "copy(lineToCopy(block), exchange ? 'lines' : 'line')" in card
+    # The one-line row is untouched.
+    assert "<strong>{block.speaker}:</strong> “{block.line}”" in card
+    assert "return lines ? " in card and ": block.line" in card
+    assert ".handoff-lines" in _read(SRC / "index.css")
 
 
 def test_the_shot_list_pane_is_retired():
