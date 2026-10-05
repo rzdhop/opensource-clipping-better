@@ -603,6 +603,26 @@
 - **A-168** — (plan 25) The Handoff makes a shot on Flow in fewer taps than the Shot list did (copy, download the
   references, upload) and nothing the human needs is missing from a card (plan 22 stage 8's question). UNCONFIRMED
   until the human's Flow walk of 3 shots.
+- **A-169** — (plan 26) The human reaches the dashboard over plain http (the tailnet), where `navigator.clipboard`
+  is absent; `document.execCommand('copy')` from a tap copies there and on iOS. UNCONFIRMED until the phone tap.
+- **A-170** — (plan 26, H1) Adding the master + scene template at the send layer only, with every hash on the core,
+  keeps every made or uploaded asset "made" (the human's answer: keep them) and still gives the providers the
+  whole context; a record edit changes only the next request. UNCONFIRMED until the deploy shows e7412a3efcc6's
+  10 keyframes made and a generated shot carries the master.
+- **A-171** — (plan 26) Gemini / Flow accept a 1,600–1,800-word pasted prompt without truncating it (the manual link
+  is unbounded; Veo's API takes ≈ 630 words). UNCONFIRMED until the sh11 paste; if Flow cuts it, bound the manual
+  link to Veo's 630 with the fit ladder.
+- **A-172** — (plan 26) Image and video providers price per output, not per prompt word: the longer prompts cost
+  nothing more. UNCONFIRMED (the ledgers after the first generated shot).
+- **A-173** — (plan 26, Q4–Q6 defaulted) The action-style clip prompts get the master too; a keyframe
+  `prompt_override` is sent as written (no master); local Wan templates read 512 tokens (≈ 315 words) so the shot
+  block is never cut. UNCONFIRMED.
+- **A-174** — (plan 26 stage 7) In a species world every character has a `look.species`; the K1/D2 species block
+  makes the writer assign one per character, distinct from the ones taken; the judge brief's "Head: <species>" line
+  ends the pear-vs-human flip-flop. UNCONFIRMED until a new fruit_drama cast is written and sh11's verdict re-asked.
+- **A-175** — (plan 26 stage 7c) Dragon Fruit's repair by three PATCHes (Marie-Jeanne pear, Chloe pear, Sam avocado,
+  as drawn) needs no sheet redrawn and, with the storyboard NOT refreshed, keeps the 8 pear-headed keyframes made
+  (the human's answers). UNCONFIRMED until the PATCHes land after the deploy.
 
 ## Confirmed
 - **A-167** — (plan 24) A reply written inside its per-line caps never raises a `scene_over` flag. CONFIRMED
