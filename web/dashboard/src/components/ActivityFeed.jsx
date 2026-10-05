@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJob, createSSEConnection } from '../api'
 import { parseTime, formatDuration, formatClock, useSecondsTicker, jobClocks } from '../time'
 import { IconButton, useToast } from '../ui'
+import { copyText } from '../lib/clipboard'
 import {
   AlertTriangle, ArrowDownToLine, Ban, BookOpen, Bot, Brain, Calendar, ChevronRight, CircleCheck, CircleDollarSign,
   CircleX, Clapperboard, Copy, Dot, Eye, FastForward, FileText, Film, Flag, ImageIcon, Info, KeyRound, Lightbulb,
@@ -386,10 +387,9 @@ export function LiveActivity({ job, events, streamState }) {
   const toast = useToast()
   const copyLog = async () => {
     const text = events.map(e => `${formatClock(e.ts)}  ${e.message}`).join('\n')
-    try {
-      await navigator.clipboard.writeText(text)
+    if (await copyText(text)) {
       toast.success(`Copied ${events.length} line${events.length === 1 ? '' : 's'} of the log.`)
-    } catch {
+    } else {
       toast.error('The browser refused the clipboard: select the lines and copy them instead.')
     }
   }

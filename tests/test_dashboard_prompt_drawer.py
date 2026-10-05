@@ -32,8 +32,8 @@ def test_the_drawer_copies_the_prompt_and_sits_next_to_the_upload():
     ``ManualUploadSlot`` on the entry's ``upload_slot``."""
     src = _read(DRAWER)
     assert "Copy prompt" in src and "Copy negative" in src and "Copied" in src
-    assert "navigator.clipboard" in src and "isSecureContext" in src
-    assert "<textarea" in src and "area.select()" in src
+    assert "import { copyText" in src and "revealForManualCopy" in src
+    assert "<textarea" in src and "Copy failed here" in src
     assert "entry.size" in src and "entry.min_size" in src and "at least" in src
     assert "<details" in src and "entry.prompt" in src
     assert "<ManualUploadSlot" in src and "entry.upload_slot" in src

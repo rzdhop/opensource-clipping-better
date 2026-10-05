@@ -14,6 +14,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { RegenerateControl, StepError } from '../fields'
 import SubtitleStyleEditor from '../SubtitleStyleEditor'
+import { copyText, revealForManualCopy } from '../../../lib/clipboard'
 import { formatUsd } from '../../../lib/format'
 import { Badge, Card, CardBody, CardHeader } from '../../../ui'
 
@@ -46,34 +47,25 @@ const PLATFORM_LABELS = { tiktok: 'TikTok', shorts: 'YouTube Shorts', reels: 'In
 // ------------------------------------------------------------------ copy
 
 /**
- * A copy-to-clipboard button for one metadata field. `navigator.clipboard`
- * needs a secure context (https, or localhost); over plain http (the
- * keyless throwaway backend this stage is checked against, DEC-092) it is
- * undefined or its call rejects, so the fallback selects the text in a
- * hidden textarea for a manual Ctrl+C / Cmd+C instead of failing silently.
+ * A copy-to-clipboard button for one metadata field, through ``lib/clipboard.js``
+ * (the Clipboard API, else ``execCommand('copy')``, which works over plain http).
+ * When both fail the text is shown in a textarea, selected, for a manual copy.
  */
 function CopyButton({ text, label }) {
   const [status, setStatus] = useState('idle') // idle | copied | selected
   const areaRef = useRef(null)
 
+  // React un-hides the textarea first; selecting needs it laid out.
+  useEffect(() => {
+    if (status === 'selected') revealForManualCopy(areaRef.current, text)
+  }, [status, text])
+
   const copy = async () => {
-    if (navigator.clipboard && window.isSecureContext) {
-      try {
-        await navigator.clipboard.writeText(text)
-        setStatus('copied')
-        setTimeout(() => setStatus('idle'), 1500)
-        return
-      } catch {
-        // Denied or unavailable even in a secure context: fall through to
-        // the manual-select fallback below rather than doing nothing.
-      }
+    if (await copyText(text)) {
+      setStatus('copied')
+      setTimeout(() => setStatus('idle'), 1500)
+      return
     }
-    const area = areaRef.current
-    if (!area) return
-    area.value = text
-    area.hidden = false
-    area.focus()
-    area.select()
     setStatus('selected')
   }
 
@@ -83,9 +75,10 @@ function CopyButton({ text, label }) {
         {status === 'copied' ? 'Copied ✓' : `Copy${label ? ` ${label}` : ''}`}
       </button>
       {status === 'selected' && (
-        <span className="form-hint">Selected — press Ctrl+C / Cmd+C to copy.</span>
+        <span className="form-hint">Copy failed here — long-press the selected text and copy it.</span>
       )}
-      <textarea ref={areaRef} className="story-copy-fallback" readOnly hidden aria-hidden="true" tabIndex={-1} />
+      <textarea ref={areaRef} className="story-copy-fallback" readOnly hidden={status !== 'selected'}
+        aria-label="Text to copy" value={status === 'selected' ? text : ''} onChange={() => {}} />
     </span>
   )
 }

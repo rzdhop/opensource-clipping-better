@@ -801,9 +801,9 @@ def test_media_on_error_recovers_by_refetching_the_episode_page():
 def test_copy_button_uses_the_clipboard_api_with_a_manual_select_fallback():
     src = PREVIEW_PANE.read_text(encoding="utf-8")
     body = src.split("function CopyButton", 1)[1].split("function RenderHeader", 1)[0]
-    assert "navigator.clipboard.writeText(text)" in body
-    assert "window.isSecureContext" in body
-    assert "area.select()" in body
+    assert "import { copyText" in src
+    assert "await copyText(text)" in body and "revealForManualCopy" in body
+    assert "navigator.clipboard" not in body
 
 
 # --------------------------------------------------------------- EpisodeStudio wiring

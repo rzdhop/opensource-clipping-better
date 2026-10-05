@@ -79,8 +79,8 @@ def test_the_card_copies_downloads_uploads_and_switches_the_mode():
     on the entry's own ``upload_slot``, Next missing and the Missing-only filter."""
     src = _handoff_sources()
     assert "Copy prompt" in src and "Copy line" in src and "Copy negative" in src
-    assert "navigator.clipboard.writeText(text)" in src and "window.isSecureContext" in src
-    assert "<textarea" in src and "area.select()" in src
+    assert "import { copyText" in src and "revealForManualCopy" in src
+    assert "<textarea" in src and "Copy failed here" in src
     assert "Download all for this shot" in src and "zipUrl={block.zip_url}" in src
     assert "downloadApiFile(zipUrl, zipName)" in src
     assert "Next missing" in src and "doc.next_missing" in src and "Missing only" in src
@@ -145,3 +145,34 @@ def test_the_studio_the_stepper_and_the_agent_card_lead_to_the_handoff():
     agent = _read(AGENT)
     assert "`/story/${storyId}/episodes/${EPISODE}/handoff`" in agent and "Open the Handoff →" in agent
     assert "#shots" not in agent
+
+
+def test_one_copy_helper_works_over_plain_http():
+    """(plan 26 stage 1) Every Copy button goes through ``lib/clipboard.js``: the
+    async Clipboard API where it exists (https / localhost), else a user-gesture
+    ``document.execCommand('copy')`` on an off-screen textarea (plain http, a phone
+    on the tailnet), else a visible selected textarea. No other file touches
+    ``navigator.clipboard``."""
+    helper = _read(SRC / "lib" / "clipboard.js")
+    for needle in (
+        "export async function copyText",
+        "export function revealForManualCopy",
+        "document.execCommand('copy')",
+        "setSelectionRange",
+        "navigator.clipboard.writeText",
+        "isSecureContext",
+    ):
+        assert needle in helper, needle
+    for rel in (
+        "pages/story/episode/HandoffCard.jsx",
+        "pages/story/steps/PromptDrawer.jsx",
+        "pages/story/episode/PreviewPane.jsx",
+        "components/ActivityFeed.jsx",
+    ):
+        assert "import { copyText" in _read(SRC / rel), rel
+    offenders = [
+        str(path.relative_to(SRC))
+        for path in SRC.rglob("*.js*")
+        if path != SRC / "lib" / "clipboard.js" and "navigator.clipboard" in _read(path)
+    ]
+    assert offenders == [], offenders

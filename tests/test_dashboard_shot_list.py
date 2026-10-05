@@ -49,7 +49,7 @@ def test_the_shot_list_s_choices_are_the_presets_and_the_states():
     src = _read(PANE)
     states = re.search(r"export const CLIP_STATES = \{(.*?)\n\}", src, re.DOTALL).group(1)
     assert set(re.findall(r"^\s*([a-z_]+):", states, re.MULTILINE)) == set(brief_mod.STATES)
-    assert "slot={block.upload_slot}" in src and "navigator.clipboard.writeText(text)" in src
+    assert "slot={block.upload_slot}" in src and "import { copyText" in src
     page = _read(STORY / "episode" / "HandoffPage.jsx")
     assert "platformInfo.choices" in page and "doc.export.brief_zip" in page
     api = _read(API)

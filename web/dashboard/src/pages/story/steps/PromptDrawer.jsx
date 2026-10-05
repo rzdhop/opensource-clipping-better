@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchImageBrief, fetchStoryMediaUrl } from '../../../api'
 import { Badge, Button, useToast } from '../../../ui'
 import { ArrowDownToLine, Copy } from '../../../ui/icons'
+import { copyText, revealForManualCopy } from '../../../lib/clipboard'
 import { useStoryMediaUrl } from '../EntityGallery'
 import ManualUploadSlot from '../ManualUploadSlot'
 import './PromptDrawer.css'
@@ -67,32 +68,27 @@ export function sizeLine(entry) {
 }
 
 /**
- * A copy button. `navigator.clipboard` needs a secure context; over plain http it is missing or
- * rejects, so the fallback shows the text in a textarea, selected, for a manual Ctrl+C / Cmd+C.
+ * A copy button (``lib/clipboard.js``: the Clipboard API, else ``execCommand('copy')``, which
+ * works over plain http). When both fail the text is shown in a textarea, selected, for a manual copy.
  */
 function CopyText({ text, children, primary = false }) {
   const toast = useToast()
   const areaRef = useRef(null)
   const [selecting, setSelecting] = useState(false)
 
+  // React un-hides the textarea first; selecting needs it laid out.
+  useEffect(() => {
+    if (selecting) revealForManualCopy(areaRef.current, text)
+  }, [selecting, text])
+
   const copy = async () => {
-    if (navigator.clipboard && window.isSecureContext) {
-      try {
-        await navigator.clipboard.writeText(text)
-        toast.success('Copied')
-        return
-      } catch {
-        // Denied: fall through to the manual-select fallback.
-      }
+    if (await copyText(text)) {
+      setSelecting(false)
+      toast.success('Copied')
+      return
     }
+    toast.info('Copy failed here — long-press the selected text and copy it.')
     setSelecting(true)
-    const area = areaRef.current
-    if (!area) return
-    area.value = text
-    area.hidden = false
-    area.focus()
-    area.select()
-    toast.info('Select the text and copy it by hand.')
   }
 
   return (
@@ -101,8 +97,9 @@ function CopyText({ text, children, primary = false }) {
         className={primary ? 'prompt-drawer-copy' : ''}>
         {children}
       </Button>
-      <textarea ref={areaRef} hidden readOnly aria-label="The text to copy" className="prompt-drawer-area"
-        rows={4} data-selecting={selecting ? 'true' : undefined} />
+      <textarea ref={areaRef} hidden={!selecting} readOnly aria-label="The text to copy" className="prompt-drawer-area"
+        rows={4} value={selecting ? text : ''} onChange={() => {}} data-selecting={selecting ? 'true' : undefined} />
+      {selecting && <p className="form-hint">Selected: long-press it and choose Copy.</p>}
     </>
   )
 }

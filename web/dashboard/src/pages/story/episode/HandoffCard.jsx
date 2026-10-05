@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { downloadApiFile, fetchApiObjectUrl, patchShotMode, regenerateStory } from '../../../api'
 import { Badge, Button, useToast } from '../../../ui'
 import { AlertTriangle, ArrowDownToLine, ChevronDown, Copy, Sparkles } from '../../../ui/icons'
+import { copyText, revealForManualCopy } from '../../../lib/clipboard'
 import { formatUsd } from '../../../lib/format'
 import BudgetRefusal, { isBudgetRefusal } from '../BudgetRefusal'
 import ManualUploadSlot from '../ManualUploadSlot'
@@ -56,42 +57,38 @@ export function lengthLabel(length, planned) {
 }
 
 /**
- * Copy text to the clipboard, falling back to a selected textarea for a
- * manual Ctrl+C / Cmd+C: `navigator.clipboard` needs a secure context (https
- * or localhost) and the dashboard is also served over plain http on the
- * LAN, where it is undefined or rejects (as PreviewPane's CopyButton).
+ * Copy text to the clipboard (``lib/clipboard.js``: the Clipboard API, else a
+ * user-gesture ``execCommand('copy')``, which also works over plain http on a
+ * phone). When every automatic route fails the text is shown, selected and
+ * scrolled into view, for a long-press copy.
  * Returns `{copy, fallback}`: render `fallback` once in the card.
  */
 export function useCopy() {
   const toast = useToast()
   const areaRef = useRef(null)
-  const [manual, setManual] = useState(false)
+  const [manual, setManual] = useState(null) // {text} while the manual textarea is shown
+
+  // The textarea is un-hidden by React first; selecting needs it laid out.
+  useEffect(() => {
+    if (manual) revealForManualCopy(areaRef.current, manual.text)
+  }, [manual])
 
   const copy = async (text, what) => {
     if (!text) return
-    if (navigator.clipboard && window.isSecureContext) {
-      try {
-        await navigator.clipboard.writeText(text)
-        setManual(false)
-        toast.success(`Copied${what ? ` — ${what}` : ''}`)
-        return
-      } catch {
-        // Denied even in a secure context: select it for a manual copy below.
-      }
+    if (await copyText(text)) {
+      setManual(null)
+      toast.success(`Copied${what ? ` — ${what}` : ''}`)
+      return
     }
-    const area = areaRef.current
-    if (!area) return
-    area.value = text
-    area.hidden = false
-    area.focus()
-    area.select()
-    setManual(true)
+    toast.info('Copy failed here — long-press the selected text and copy it.')
+    setManual({ text })
   }
 
   const fallback = (
     <div className="handoff-copy-fallback">
-      <textarea ref={areaRef} hidden readOnly rows={4} aria-label="Text to copy" />
-      {manual && <p className="form-hint">Selected: press Ctrl+C (Cmd+C on a Mac) to copy it.</p>}
+      <textarea ref={areaRef} hidden={!manual} readOnly rows={4} aria-label="Text to copy"
+        value={manual ? manual.text : ''} onChange={() => {}} />
+      {manual && <p className="form-hint">Selected: long-press it and choose Copy (Ctrl+C, or Cmd+C on a Mac).</p>}
     </div>
   )
   return { copy, fallback }

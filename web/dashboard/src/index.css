@@ -3759,15 +3759,17 @@ button.activity-group-head:focus-visible {
   flex-wrap: wrap;
 }
 
-/* Off-screen rather than display:none while shown -- select()/focus() need
-   layout to work in every browser -- and hidden the rest of the time via the
-   `hidden` attribute the component toggles. */
+/* The manual-copy textarea: shown (selected, scrolled into view) only when
+   every automatic copy route failed; React toggles the `hidden` attribute. */
 .story-copy-fallback {
-  position: absolute;
-  left: -9999px;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
+  display: block;
+  width: 100%;
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.story-copy-fallback[hidden] {
+  display: none;
 }
 
 .story-ledger-rows {
