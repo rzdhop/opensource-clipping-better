@@ -18,20 +18,19 @@
   GPU now (Pinokio documented for the later GPU box); Anthropic provider Sonnet 5.5 default / Opus 5.5 by name / server-side
   fallbacks ON (booked at the served model); universes (all ten, audience notes), two-view sheets at 1080×1920, variants,
   action prompts; NO doctrine prompt; nano-banana-2-lite on sheets; chatterbox before Fish Audio.
-- **Merged on main (all pushed; CI = baseline), 17 stages:** A1–A7 (the cap track but A8/A9), B1, B2, B3, B5, B6, C1, D1,
-  D2, D4. **Deployed 23:37 UTC** (image from 658eb5f; the bind-mounted Python is newer: B2, D2, A7 are live as Python only):
-  health 200, bundle index-C7PPNeAD.js, anthropic 1.11.0 in the image, `GET /api/budget/today` live. **Tier 2 (a) done on the
-  live app:** the cast of e7412a3efcc6 answers 409 `budget_daily_cap` with the three numbers and `needed_usd` 4.99. Pending
-  for the next rebuild: B2's compose mount + card, D2's wizard select, A7's tzdata + Settings field (then the deploy check
-  `docker exec rzc-backend python -c "from zoneinfo import ZoneInfo; ZoneInfo('Europe/Paris')"`), and the zone itself is
-  NOT set (the human sets Europe/Paris in Settings when they want). CI's x86_64 golden keys (B6) still to add.
-- **Running now:** D6 (Sonnet, action prompts), A8 (Sonnet, nano-banana-2-lite on sheets + DEC-280), D5 (Opus, variants —
-  riskiest of track D). On each report: code-review skill, rebase, the Tier-1 selection in both envs, ff-merge with the exit
-  code checked, action-log line, push.
-- **Next action:** A9 (gemini-first) after A8; B7 (Opus, aspect through generation) after D6 → B8 (stock cutaways); C2 only
-  on the human's go ($0.54); then D7 (the A/B on the human's go, ≈ $1.60) and the docs stage (docs/AI_STORY.md, DEC entries
-  per stage, the Pinokio/GPU runbook); a second rebuild at 0 jobs when the dashboard stages land. Add CI's x86_64 golden
-  keys when the annotation appears.
+- **Merged on main (all pushed; CI = baseline), 24 stages + docs 1:** A1–A9 (track A complete), B1–B6, C1, C3, D1, D2,
+  D4, D5, D6, and docs stage 1 (docs/AI_STORY.md, docs/api.md, README, VISION, DEC-281…DEC-293). Two hotfixes on main: the
+  four refusal-message pins A8 missed, and `tzdata==2026.5` in pyproject (A7). **Deployed 2026-10-04 23:37 UTC** from
+  658eb5f (the bind-mounted Python is far newer); the served bundle lacks every dashboard change since A6 → **a second
+  rebuild at 0 jobs is due** once B7 lands (then: `docker exec rzc-backend python -c "from zoneinfo import ZoneInfo;
+  ZoneInfo('Europe/Paris')"`, health 200, the wizard shows Universe / Character sheets / Bodies / Clip prompts / Image
+  provider / Frame, Settings shows the Day time zone and the B-roll card). CI's x86_64 golden keys (B6) still to add.
+- **Running now:** B7 (Opus, `feat/plan23-b7`, the story-level aspect 16:9 / 1:1), D7-tool (Sonnet, `feat/plan23-d7`, the
+  writer A/B bench — the RUN waits for the human's go, ≈ $1.60). On each report: code-review skill, rebase, the Tier-1
+  selection in both envs, ff-merge with the exit code checked, action-log line, push.
+- **Next action:** B8 (stock cutaways, Sonnet) after B7; the second rebuild; the final docs pass (B4, B7, B8, D7); then the
+  human's calls: C2 the LTX FR probe ($0.54) → C4/C5 only if it passes; D7's A/B run (≈ $1.60); the phone walk of the cap
+  panel, the two-view cast, the action brief on Flow. Add CI's x86_64 golden keys when the annotation appears.
 - **Open questions:** none blocking. One reading to confirm with the human when they look: "No doctrine" was read as
   dropping only the doctrine prompt, keeping all ten universes (A-157).
 
