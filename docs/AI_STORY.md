@@ -105,8 +105,18 @@ character can speak with, cloned locally by chatterbox ("5. Cast"); the story's
 frame, 16:9 and 1:1 as well as 9:16 ("1. New story"); stock cutaways that fill
 establishing shots for free ("Stock cutaways (AI Story)"); and an A/B bench of
 the writing models ("Benchmarks"). What is left is yours: the one-clip French
-probe for LTX-2.5, the writer A/B, the rebuild with `INSTALL_LOCAL_TTS=1` if you
-want cloned voices, and your own walk of each.
+probe for LTX-2.5 (the tool exists, `tools/probe_speech_link.py`; its one paid
+attempt was refused by fal for an exhausted balance and bought nothing), the
+writer A/B, the rebuild with `INSTALL_LOCAL_TTS=1` if you want cloned voices,
+and your own walk of each.
+
+**Plan 24 made the script obey its slots.** A v3 script is now written to a
+plan: each scene's slot is split into one slot per line, the writer is told
+the seconds and a hard word cap for every line, a reply over a cap is refused,
+a trim pass rewrites only the lines still over, and a scene that stays over
+fails the Script step with one plain sentence. One speech clock serves the
+estimate, the budget and the storyboard, and every timing warning has a Trim
+button ("The timing harness (plan 24)").
 
 ## The quality pipeline (v2)
 
@@ -447,8 +457,26 @@ $5.46 of clips against about $4.60 on Veo Fast, at $0.09 a second. And
 nobody has heard it speak French. Before it becomes a speaking model, a
 one-clip probe (about $0.54, run only on your go) has to show that at least
 80 % of the line's words come back in the take and that it sounds right to
-you; that probe has not been run. Its value would be a second speaking
-provider that is not Google, and clips of 10 s for a long line.
+you; that probe has not produced a result yet. Its value would be a second
+speaking provider that is not Google, and clips of 10 s for a long line.
+
+The probe is `tools/probe_speech_link.py` (plan 23 C2). It buys one 6 s,
+720p, 9:16 clip on one link (`fal/ltx-2.5-fast` by default) from a reference
+image, with the prompt a story would send and a French line of 12 words, then
+transcribes the clip's own sound and aligns it against the line: the words
+matched, what was heard, the speech window, the speaking rate against 2.4
+words/s. It passes at 80 % matched and your ear (the `ear` field of the JSON
+stays empty until you listen). `--dry-run` sends and books nothing and writes
+nothing: it prints the prompt, the estimate, today's spend against the daily
+cap and whether the gates would refuse. For a paid link the gates, in order,
+are `allow_paid` on in Settings, `--allow-paid` on the command, `--max-usd`
+given and above the estimate, then the real budget gate; a refusal exits 2
+with nothing sent. The one paid attempt so far (2026-10-05) was refused by fal
+itself for an exhausted balance and booked nothing; the same command runs
+again once the balance is topped up.
+
+    python tools/probe_speech_link.py --image portrait.png --dry-run
+    python tools/probe_speech_link.py --image portrait.png --allow-paid --max-usd 0.60
 
 **Why it is refused, and how to allow it.** Caps are global Settings →
 Budget numbers (per-episode / daily / per-story); this host's are set to
@@ -771,8 +799,9 @@ v2 default), `serial_90s_v2` (the same shape at 80–100 s, target 90) and
 drama is told by one narrator in a telenovela tone: its template carries the
 narrator's share of the words (60–85 %) and 2–4 short character lines an
 episode — the only lines in frame, so the only ones lip-synced — and, with
-the story's narrator on, the beat sheet and each body scene's dialogue are
-asked for exactly that. A style only suggests a format; the story keeps its
+the story's narrator on, the beat sheet says which body scenes carry a
+character line and each body scene's dialogue is held to that plan ("The
+timing harness (plan 24)"). A style only suggests a format; the story keeps its
 own, and an episode keeps the one it was written against.
 
 **Writing v3 and the confrontation format.** Every story created since
@@ -784,7 +813,8 @@ why. Each body scene's dialogue is written with the whole episode's lines so
 far in view, and every spoken line is one or two complete sentences that do
 one job (a demand, an accusation, a fact, a refusal, a threat, a reveal),
 with the reason inside the line; a fragment, a lone name or a repeat is
-refused and rewritten. The first-watch judge checks the same things (a line
+refused and rewritten, and so is a line, or a whole scene, longer than the
+words its slot holds ("The timing harness (plan 24)"). The first-watch judge checks the same things (a line
 that adds nothing, an incomplete sentence, scenes that do not tell the
 logline), and the script pane shows the spine as "What happens" above the
 scenes. The sixth template, `confrontation_50s_v2`, is a continuous,
@@ -1177,13 +1207,20 @@ call at a time — a beat sheet (E1), one call per body scene (E2), the
 hook/cliffhanger/teaser (E3), then a consistency check (E4) — saving to disk
 as each lands, so a run that stops partway (the free tier's latency, a
 30-minute step budget) resumes with "Continue writing" rather than starting
-over; a finished run ends **awaiting approval**.
+over; a finished run ends **awaiting approval**. On a v3 story a scene that
+comes back over its word caps is asked again, then trimmed line by line, and
+only then fails the step; the estimate chip does not count those trim calls
+(at most 4 an episode, the section "The timing harness (plan 24)" below).
 
 **The duration bar** sits above the scene list: the template's window with
 its target and tighten marks, one segment per scene (coloured by that
 scene's own timing state), a running total labelled `estimated`, `measured`
 or `partly measured`, and, below it, any flags — a scene over its slot, a
-line to trim — each linking straight to the scene or line it names.
+line to trim — each linking straight to the scene or line it names, with a
+**Trim** button beside it. The total is on the one speech clock, so a line
+read by a Gemini voice is estimated about a third longer (×1.35) than the
+same line on Edge; a script written before plan 24 shows that only once one of
+its lines is rewritten or edited.
 
 Under the hood, every scene and shot is timed to the nearest whole frame (at
 30 fps) rather than to a fraction of a second — the number shown is rounded
@@ -1247,6 +1284,145 @@ off on a body scene — the consistency check then verifies the payoff really
 lands, alongside its other checks. If you picked an audience direction on
 the previous episode's feedback (step 13), E1 also sees it as a steer, never
 an instruction it must follow literally.
+
+### The timing harness (plan 24)
+
+**Why.** On 2026-10-05 the first episode of a French, native-speech story
+written by gemini-3.8-flash came back with 10 timing warnings: every body
+scene was over its slot (the worst by 2.1 s and 1.9 s, the total 67.1 s). The
+log showed no rejection and no retry; every reply was accepted first time.
+Four things caused it. Nothing enforced the word budget: the validator
+accepted anything up to 1.5 times it, and a second reply was taken whatever
+its length. Two clocks disagreed: the warning counted characters at 0.070 s,
+the budget counted 2.4 words a second at 5.7 characters a word, while written
+French runs 6.6, so a reply that obeyed the budget still ran 12 to 17 % long.
+The budget forgot the pauses between lines and the tail kept for a dissolve,
+which made the 6 s hook's word budget impossible to meet. And the writer was
+told words, never seconds. A v3 script is now written to a plan it cannot
+leave. Scripts written before it, and v1/v2 stories, are untouched.
+
+**One clock.** `timing.seconds_for` is the only estimate of how long a line
+lasts: its characters times the language's rate (0.070 s for French, 0.065 s
+for English) times the speaking voice's overrun (1.35 for Gemini voices, 1.0
+for Edge and the others). The warning, the word budget, the line plan and the
+storyboard all read it. To turn seconds into words the plan uses 6.6
+characters a word for French (5.5 for English), measured on the scripts that
+failed; the older 5.7 stays for v1/v2 budgets. The Script step's duration bar
+therefore reads a Gemini-voiced line about a third longer than before, which
+is the truer number. A script already on disk keeps its old estimate until one
+of its lines is rewritten or edited, then the line's estimate carries its
+voice's factor.
+
+**The line plan.** Before a scene is written, `timing.scene_plan` splits the
+high end of its slot into one slot per line. It pays every pause first (the
+pre-roll, 0.25 s between lines, and the tail floor, raised to the longest
+dissolve the neighbouring scenes may give it), keeps 5 % of what is left as a
+margin, and turns each line's seconds into a hard word cap on the one clock.
+
+- On a native-speech story a character line is planned first, at a 6 s clip
+  (12 words); the narrator takes the seconds left, over one silent clip. A
+  13 s body scene with a narrator and one character line is the narrator at 6 s
+  and 11 words plus the character at 6 s and 12 words, 23 words in all. The
+  clips always sum to no more than the slot.
+- The narrated format says which body scenes carry a character line (below).
+  A scene without one is one narrator line taking the whole allowed speech: a
+  13 s scene is 25 words off native speech, 15 words on native speech (one
+  8 s clip; a line never spans two clips, and the reaction shot fills the
+  rest of the slot).
+- On the narrated format the hook, the cliffhanger and the recap are one
+  line each, always the narrator's. The 6 s hook holds 11 words.
+
+The plan is stored on the scene as `slot_s` (the slot's low and high end) and
+`line_plan` (each line's kind, speaker, seconds, clip length on native speech
+and word cap). The storyboard reads it: each line's shot is the clip the plan
+gave it (`shots.planned_line_entries` pairs plan entries with the written
+lines by kind and speaker), so the writer's plan and the shots cannot disagree.
+If the written lines no longer match the plan (a line added or removed, a
+speaker swapped) the plan is ignored for that scene, with one note, and each
+line is planned by its own words as before. Reaction shots (one silent 4 s at
+most a scene) are not part of the plan: they sit on top of its clips.
+
+**What the writer is told, and what is refused.** The prompt for a body scene
+carries the plan in seconds and words:
+
+> This scene lasts at most 13 s. Line 1 (narrator): at most 11 words, heard
+> over one 6 s shot. Line 2 (Rida): at most 12 words, spoken in one 6 s shot.
+> Hard limits: 23 words in total; a longer line is refused.
+
+The hook, cliffhanger and recap call gets the same for each part: "The hook
+lasts at most 6 s: at most 11 words." (the part's name and its own seconds
+and cap). Validation is hard. A line over its cap, a scene over its total, or
+a character line in a scene planned without one is refused, and the error
+names the line, its words, its cap and its seconds, for example `$.lines[1].text:
+15 words, at most 12 (a 6 s shot)` or `$.lines: 30 words in total, at most 23
+(a 13 s scene)` or `$.lines[1]: one character line too many: this scene's
+plan holds 0 character lines`. Over-cap errors come first in the retry, so the
+writer is told the overshoot whole. The lower bound is unchanged (half the
+planned words, a line of at least a few words); the fill pass still handles a
+scene that comes back short, and a short reply is still accepted on the second
+attempt. A reply over the cap never is.
+
+**Retry, trim, then failure.** A refused reply is asked again once with the
+errors. If it is still over its caps, a trim pass makes one more call that
+sends the reply back and rewrites only the lines named ("Line 2 (Rida): 15
+words, at most 12 (a 6 s shot): rewrite it in at most 12 words, same meaning,
+same speaker"); the prompt asks for every other line unchanged, and the same
+schema and validator judge the result. A trim pass is a single request, and
+an episode has at most 4 of them (`TRIM_CALLS_MAX`, shared by the body scenes
+and the framing). The feed says "Scene s02: trimmed line l04 to 12
+words (12 cap)". If the scene is still over, or the 4 calls are spent, the
+Script step stops with one sentence and nothing is accepted over the cap:
+
+> Scene s02 is still over its caps after the retry and the trim: line 2 (Rida)
+> has 15 words, at most 12 (a 6 s shot). Regenerate the scene with a shorter
+> line or widen its slot.
+
+The framing scenes get the same sentence, naming the part (hook, cliffhanger,
+recap) and its scene. What you do then: **regenerate that scene with a note**
+("shorter, one idea in the character's line"), or edit the line yourself, or
+press **Trim** below once a script exists. Scenes already written stay as
+they are.
+
+**The format's rhythm.** The narrated format (`narrated_drama_60s_v2`) asks
+for 2 to 4 character lines an episode and 60–85 % of the words from the
+narrator. The beat sheet now plans that: each scene carries a `character_line`
+flag (true: one character line, a character among its characters; false: the
+narrator tells it alone; always false on the hook, the recap and the
+cliffhanger), and the validator refuses a count outside the format, for
+example `$.scenes: 6 scenes carry a character line, the format allows 2 to
+4`. The body scene's prompt is then told either "in this scene there is no
+character line: the narrator carries it" or "here one character line (Rida)".
+The narrator's resulting share of the planned words is stored as
+`timing.narrator_share` and shown, never refused: with four character scenes
+on native speech it comes out near 59 %, just under the format's 60 %, and
+with two off native speech near 88 %. A format without `character_lines` (the
+confrontation) has none of this.
+
+**Trim.** Every timing warning on the duration bar has a **Trim** button: each
+"Trim this line" flag, and each "Scene is over its slot" flag whose scene has
+no line to trim of its own. It regenerates that scene (the same call as
+"Regenerating a scene") with a note built from the plan, for example "Trim to
+the slot: scene s02 lasts at most 13 s, line 1 (narrator) at most 11 words;
+keep the meaning and the speaker, cut words." The note names the flagged
+line's cap, or every planned line's when the flag names none, and only the
+slot for a scene with no plan. The button shows "Trimming…" while it runs and
+an error appears under it if the job is refused. No new route is involved.
+
+**What this does not do.**
+
+- It does not speed up or cut audio at render. DEC-250 stands: a voice is
+  never accelerated to fit, and the render-side last resort stays as it was (a
+  clip slowed to a shot's length, at most 1.25×, "Every shot is a clip"). A
+  script inside its caps simply never needs it.
+- It does not feed measured voice rates back into the plan. The plan uses the
+  provider's overrun (1.35 for Gemini) until a later change reads the rate each
+  voice actually measured.
+- The trim calls are outside the Script step's cost estimate (up to 4 more
+  calls on the writing chain an episode).
+- Reaction shots are not in the plan: a scene's clips can still add one silent
+  shot on top of what the plan counted.
+- It does not fix a script already on disk. Regenerate its scenes (or press
+  Trim) to bring them inside a plan.
 
 ### 9. Storyboard
 
@@ -2457,8 +2633,8 @@ not shipped yet:
 - **16:9 and 1:1 beyond what "1. New story" lists.** The character sheets,
   the style preview, local ComfyUI clips, Clips mode and stories that already
   exist stay 9:16.
-- **LTX-2.5 as a speaking model.** It waits for a one-clip French probe that
-  has not been run ("Native speech (API route)").
+- **LTX-2.5 as a speaking model.** It waits for a one-clip French probe whose
+  tool exists but has not produced a result yet ("Native speech (API route)").
 - **Per-character LoRA training** — teaching a model's own weights a
   character's look, instead of leaning on a keyframe and a prompt for every
   shot — isn't here. It's a deliberate future extension, flagged but not
@@ -2592,7 +2768,8 @@ outputs/
       refs/image.png
     episodes/ep<NN>/                  # NN = 01..99, one per written episode
       script.json                    # scenes, lines, timing (whole frames), hook/cliffhanger/teaser, pays_off,
-                                      #   consistency report
+                                      #   consistency report; a v3 scene also slot_s and line_plan, and
+                                      #   timing.narrator_share (plan 24)
       storyboard.json                # shots, transitions, per-scene planning source, whole_frames flag
       assets.json                    # word sources, SFX/BGM picks, each line's take/note/pending, the assets
                                       #   grid's own approval
@@ -2777,7 +2954,7 @@ auto-approval refuses a script outside the template's length window, "over"
 or "under" alike. A short one — a run of one-line, single-speaker scenes,
 say — can land under it. The fast track stops there: lengthen the short
 scenes (edit them, or regenerate a scene with a note asking for more
-back-and-forth — a regenerate's own word budget caps how much longer that
+back-and-forth — a regenerate's own word caps limit how much longer that
 can make it) and run the fast track again, or approve the script yourself
 from the Script tab despite the warning.
 
@@ -2816,10 +2993,19 @@ most)"** — on a native-speech story (API or manual), a character line longer
 than the longest sold clip's capacity (17 words at 2.4 words/s, the figure
 until the probe measures it for real) cannot become one speaking shot, and
 the storyboard refuses it naming the line and the fix: shorten it, or split
-it into two lines, in the script. This gate runs for every speech story
-today — a format built to keep every line under it (the confrontation
-format, plan 22 stage 3) is not merged yet; until then, keep an eye on line
-length yourself when you write for native speech.
+it into two lines, in the script. This gate runs for every speech story. A
+v3 script is written inside it (a character line is capped at its planned
+clip, 12 words at 6 s), so it meets this mostly after a hand edit or on a
+script written before plan 22; keep an eye on line length when you edit.
+
+**"Scene s02 is still over its caps after the retry and the trim: line 2
+(Rida) has 15 words, at most 12 (a 6 s shot). Regenerate the scene with a
+shorter line or widen its slot."** — the writer was refused twice and the one
+trim call for the scene did not bring it inside its caps (or the episode's 4
+trim calls were already spent: the sentence then says so). Nothing is
+accepted over the cap. Regenerate that scene with a note asking for the
+shorter line, or press **Trim** on the scene once it has a script; the scenes
+already written stay. See "The timing harness (plan 24)".
 
 **"estimated $X.XX over the per-episode cap $Y.YY; raise
 PER_EPISODE_CAP_USD or use your own clips"** — a native-speech episode on
