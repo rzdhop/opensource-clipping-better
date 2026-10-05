@@ -232,9 +232,17 @@ def test_a_v2_story_plans_its_shots_with_t1_v2_one_beat_shot_a_scene(store):
 
         found = re.search(r"- shot \d+ <- replace this one: ([a-z_]+) / ([a-z_]+), lines (\[[0-9, ]*\])",
                           call["user"])
+        # Plan 28 F4 (DEC-305): the speaker of every line the shot carries must be among its subjects --
+        # the fixture reads the carried lines' speakers off the ask (names -> tags via the character block).
+        tag_of = {name: tag for tag, name in re.findall(r"^- (@char_[a-z0-9_]+) — .*? — (.+)$", call["user"], re.M)}
+        spoken = {}
+        for number, name in re.findall(r"^(\d+)\. ([^:]+): ", call["user"], re.M):
+            spoken[int(number)] = tag_of.get(name)
+        subjects = ["@char_kiwilo"] + sorted({spoken[n] for n in json.loads(found.group(3))
+                                             if spoken.get(n) and spoken[n] != "@char_kiwilo"})
         return {"shot": {"framing": found.group(1), "camera_motion": found.group(2), "modifiers": [],
                          "action": "@char_kiwilo turns the vote around in one sentence.",
-                         "motion": "@char_kiwilo slams a hand on the table", "subjects": ["@char_kiwilo"],
+                         "motion": "@char_kiwilo slams a hand on the table", "subjects": subjects,
                          "staging": [{"subject": "@char_kiwilo", "position": "centre", "facing": "the camera",
                                       "expression": "defiant"}],
                          "lines": json.loads(found.group(3))}}
