@@ -422,7 +422,10 @@ def test_v2_cast_runs_k1_d1_d2_then_the_sheets_and_a_legacy_story_makes_no_d1_or
     portrait, turnaround, expressions = image.requests[:3]
     assert portrait.prompt.startswith("SERIES:")
     assert portrait.prompt.split("\n\n")[-1].startswith("Full-body character reference sheet, head to toe")
-    assert "wearing white linen shirt, gold chain" in portrait.prompt and "Kiwilo" not in portrait.prompt
+    # Plan 28 F4 (DEC-305), re-pinned on purpose: a cast with a `look.species` is a NAMED cast now
+    # (shots.named_character reads the species first), so the sheet prompt names Kiwilo and says the
+    # outfit in the character paragraph's words; the outfit itself is still there.
+    assert "white linen shirt, gold chain" in portrait.prompt
     assert turnaround.prompt.split("\n\n")[-1].startswith("Image 1 is this character's reference")
     assert expressions.prompt.split("\n\n")[-1].startswith("Image 1 is this character's reference")
     assert turnaround.kind == "image_edit" and len(turnaround.references) == 1
