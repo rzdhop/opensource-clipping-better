@@ -62,7 +62,8 @@ def test_the_template_validates_with_the_plans_values():
 
 
 @pytest.mark.parametrize("change, message", [
-    ({"line_words": [5, 18]}, "$.line_words: [5, 18] must lie within [1, 17]"),
+    # Plan 27 stage 2: the most one shot can speak is a 10 s shot's 22 words (was 8 s, 17).
+    ({"line_words": [5, 23]}, "$.line_words: [5, 23] must lie within [1, 22]"),
     ({"line_words": [9, 5]}, "$.line_words: [9, 5] must satisfy 0 <= lo <= hi"),
     ({"episode_words": [130, 125]}, "$.episode_words: [130, 125] must satisfy 0 <= lo <= hi"),
     ({"narrator_slots": ["recap", "recap"]}, "$.narrator_slots: each slot at most once"),

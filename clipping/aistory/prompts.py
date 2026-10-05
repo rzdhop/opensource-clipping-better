@@ -503,7 +503,11 @@ def anthropic_effort(prompt_id):
 # Plan 24 stage 5 (2026-10-05), re-measured on purpose: a narrated format's E1v3
 # asks each body scene for its ``character_line`` and the episode for its
 # 2-4 character lines (+74 tokens on the worst case): E1v3 2,807 -> 2,881, 3,230 -> 3,320.
-WRITING_V3_INPUT_BUDGET = {"E1v3": 3320, "E2v3": 3120, "E3v3": 4020, "J1v3": 4700}
+# Plan 27 stage 2 (2026-10-05), re-measured on purpose: each planned line is
+# told its range and each shot's exchange its sentence (two on the worst
+# scene): E2v3 2,706 -> 2,774, 3,120 -> 3,200; E3v3 3,488 -> 3,493 (the
+# framing parts' "between lo and hi words"), its budget unchanged.
+WRITING_V3_INPUT_BUDGET = {"E1v3": 3320, "E2v3": 3200, "E3v3": 4020, "J1v3": 4700}
 # Plan 23 stage D5: N1v2's input -- N1's French worst case with the variant
 # block at its caps (eight characters, each with two 40-character variants
 # and room for a third, and the ask) measures 3,613; + 15 %, rounded up to ten
@@ -5098,18 +5102,28 @@ def narration_e2_planned_line_v3(narration, plan, names) -> str:
 # sentence below is said only when the caller hands in a plan; without one
 # the v3 prompts and validators are what they were.
 PLAN_SCENE_SECONDS_V3 = "This scene lasts at most {seconds} s."
-PLAN_LINE_V3 = "Line {i} ({who}): at most {words} words{shot}."
+# Plan 27 stage 2: each line its range -- a floor as well as a cap.
+PLAN_LINE_V3 = "Line {i} ({who}): between {lo} and {hi} words{shot}."
 PLAN_CHARACTER_SHOT_V3 = ", spoken in one {clip} s shot"
 PLAN_NARRATOR_SHOT_V3 = ", heard over one {clip} s shot"
+# Plan 27 stage 2 (the exchange): the lines of one shot, said once after its last line.
+PLAN_EXCHANGE_V3 = ("Lines {ids} are ONE continuous exchange in one shot of {clip} seconds: they answer each other "
+                    "without a pause, the last line ends the shot; together they fill {lo}–{hi} words.")
 PLAN_HARD_LIMITS_V3 = "Hard limits: {words} words in total; a longer line is refused."
+PLAN_HARD_LIMITS_RANGE_V3 = ("Hard limits: {words} words in total; a line shorter or longer than its range is "
+                             "refused.")
 PLAN_TOTAL_V3 = "Write at least {lo} and at most {hi} words of dialogue in total."
-PLAN_FRAMING_V3 = "The {part} lasts at most {seconds} s: at most {words} words."
+PLAN_FRAMING_V3 = "The {part} lasts at most {seconds} s: between {lo} and {words} words."
 NATIVE_LINE_PLAN_V3 = "Each line is spoken on camera by its speaker in one shot, as long as its line below says."
 NATIVE_LINE_PLAN_NARRATOR_V3 = ("Each character line is spoken on camera by its speaker in one shot, as long as its "
                                 "line below says; the narrator is heard over the picture.")
-# A word-cap error (a line or a whole scene/part over its plan): what the
-# script step's over-cap rule and the retry's first errors read.
-WORD_CAP_ERROR_RE = re.compile(r"^\$\.[^:]*: \d+ words(?: in total)?, at most \d+ \(")
+NATIVE_EXCHANGE_PLAN_V3 = ("Each line is spoken on camera by its speaker; one shot carries a whole exchange of "
+                           "several lines, as the plan below says.")
+# A word-cap error (a line, a shot's exchange or a whole scene/part over its
+# plan -- plan 27 stage 2: or a line or part under its planned floor): what
+# the script step's over-cap rule and the retry's first errors read.
+WORD_CAP_ERROR_RE = re.compile(
+    r"^\$\.[^:]*: \d+ words?(?: in total)?, (?:at most \d+|the plan asks for \d+–\d+) \(")
 
 
 def is_word_cap_error(error) -> bool:
@@ -5124,19 +5138,58 @@ def plan_seconds(value) -> str:
 
 def plan_line_caps(plan, *, line_hi=None) -> list:
     """Each planned line of *plan* (``timing.scene_plan`` or a stored
-    ``line_plan``) as ``{"kind", "speaker", "cap", "seconds", "clip_s"}``:
-    a narrator line's cap at most :data:`NARRATOR_LINE_MAX_WORDS`, a
-    character line's at most *line_hi* (the template's line words) when
-    given; ``clip_s`` None off native speech."""
+    ``line_plan``) as ``{"kind", "speaker", "cap", "lo", "seconds",
+    "clip_s", "shot"}``: a narrator line's cap at most
+    :data:`NARRATOR_LINE_MAX_WORDS`, a character line's at most *line_hi*
+    (the template's line words) when given; ``clip_s`` None off native
+    speech. Plan 27 stage 2: ``lo`` the line's planned floor (None on a plan
+    without one), ``shot`` the index of the plan's shot that speaks it (None
+    without ``shots``)."""
+    shot_of = {}
+    position = 0
+    for k, shot in enumerate(plan.get("shots") or ()):
+        for _line_id in shot["line_ids"]:
+            shot_of[position] = k
+            position += 1
     out = []
-    for line in plan["lines"]:
+    for i, line in enumerate(plan["lines"]):
         cap = int(line["max_words"])
         if line["kind"] == "narrator":
             cap = min(NARRATOR_LINE_MAX_WORDS, cap)
         elif line_hi is not None:
             cap = min(int(line_hi), cap)
-        out.append({"kind": line["kind"], "speaker": line["speaker"], "cap": max(1, cap),
-                    "seconds": float(line["seconds"]), "clip_s": line.get("clip_s")})
+        cap = max(1, cap)
+        lo = min(int(line["min_words"]), cap) if "min_words" in line else None
+        out.append({"kind": line["kind"], "speaker": line["speaker"], "cap": cap, "lo": lo,
+                    "seconds": float(line["seconds"]), "clip_s": line.get("clip_s"), "shot": shot_of.get(i)})
+    return out
+
+
+def plan_ceiling(plan, caps) -> int:
+    """A planned scene's hard total: its lines' caps (*caps*,
+    :func:`plan_line_caps`) -- on a plan with shots (plan 27 stage 2) never
+    past its shots' words, the plan's ``max_words``."""
+    total = sum(entry["cap"] for entry in caps)
+    return min(total, int(plan["max_words"])) if plan.get("shots") else total
+
+
+def _numbers(numbers) -> str:
+    """``1``, ``1 and 2``, ``1, 2 and 3``."""
+    numbers = [str(n) for n in numbers]
+    return numbers[0] if len(numbers) == 1 else ", ".join(numbers[:-1]) + " and " + numbers[-1]
+
+
+def exchange_shots(plan) -> list:
+    """The shots of *plan* that carry an exchange of several lines (plan 27
+    stage 2), each as ``{"clip_s", "words_min", "words_max", "lines": [0-based
+    indices into plan["lines"]]}``, in order; [] without ``shots``."""
+    out, position = [], 0
+    for shot in plan.get("shots") or ():
+        indices = list(range(position, position + len(shot["line_ids"])))
+        position += len(indices)
+        if len(indices) > 1:
+            out.append({"clip_s": int(shot["clip_s"]), "words_min": int(shot["words_min"]),
+                        "words_max": int(shot["words_max"]), "lines": indices})
     return out
 
 
@@ -5147,21 +5200,41 @@ def _plan_why(entry) -> str:
     return f"about {plan_seconds(entry['seconds'])} s"
 
 
-def plan_block_v3(plan, names, *, line_hi=None) -> str:
+def line_range(entry, *, line_lo=LINE_FLOOR_WORDS) -> tuple:
+    """A planned line's ``(lo, hi)`` words (plan 27 stage 2): its planned
+    floor, else -- a plan without floors -- :data:`LINE_FLOOR_WORDS` for the
+    narrator and *line_lo* (the template's) for a character, never above its
+    cap."""
+    if entry["lo"] is not None:
+        return entry["lo"], entry["cap"]
+    floor = LINE_FLOOR_WORDS if entry["kind"] == "narrator" else int(line_lo)
+    return min(floor, entry["cap"]), entry["cap"]
+
+
+def plan_block_v3(plan, names, *, line_hi=None, line_lo=LINE_FLOOR_WORDS) -> str:
     """E2v3's plan sentences (D-3): the scene's seconds, one sentence per
-    planned line (its cap; on native speech its shot), the hard total and
-    the band."""
+    planned line (its range -- plan 27 stage 2: a floor and a cap; on native
+    speech its shot), the hard total and the band. Plan 27 stage 2: the lines
+    of a shot that carries an exchange are told so after its last line
+    (:data:`PLAN_EXCHANGE_V3`), each of them without a shot of its own."""
     caps = plan_line_caps(plan, line_hi=line_hi)
+    exchanges = {shot["lines"][-1]: shot for shot in exchange_shots(plan)}
+    in_exchange = {i for shot in exchanges.values() for i in shot["lines"]}
     out = [PLAN_SCENE_SECONDS_V3.format(seconds=plan_seconds(plan["slot_s"][1]))]
-    for i, entry in enumerate(caps, start=1):
+    for i, entry in enumerate(caps):
         narrator = entry["kind"] == "narrator"
         shot = ""
-        if entry["clip_s"]:
+        if entry["clip_s"] and i not in in_exchange:
             shot = (PLAN_NARRATOR_SHOT_V3 if narrator else PLAN_CHARACTER_SHOT_V3).format(clip=int(entry["clip_s"]))
         who = "narrator" if narrator else names.get(entry["speaker"], entry["speaker"])
-        out.append(PLAN_LINE_V3.format(i=i, who=who, words=entry["cap"], shot=shot))
-    total = sum(entry["cap"] for entry in caps)
-    out.append(PLAN_HARD_LIMITS_V3.format(words=total))
+        lo, hi = line_range(entry, line_lo=line_lo)
+        out.append(PLAN_LINE_V3.format(i=i + 1, who=who, lo=lo, hi=hi, shot=shot))
+        if i in exchanges:
+            ex = exchanges[i]
+            out.append(PLAN_EXCHANGE_V3.format(ids=_numbers(k + 1 for k in ex["lines"]), clip=ex["clip_s"],
+                                               lo=ex["words_min"], hi=ex["words_max"]))
+    total = plan_ceiling(plan, caps)
+    out.append((PLAN_HARD_LIMITS_RANGE_V3 if plan.get("shots") else PLAN_HARD_LIMITS_V3).format(words=total))
     out.append(PLAN_TOTAL_V3.format(lo=min(int(plan["min_words"]), total), hi=total))
     return "\n".join(out)
 
@@ -5494,9 +5567,11 @@ def e2_v3_schema(speakers, sfx_cue_names, *, lines=(1, E2_V3_LINES_MAX), line_wo
     return schema
 
 
-def _native_line(native, speakers, hi, *, planned=False) -> str:
+def _native_line(native, speakers, hi, *, planned=False, exchange=False) -> str:
     if not native:
         return ""
+    if planned and exchange:  # plan 27 stage 2: a shot carries an exchange, said after its lines
+        return NATIVE_EXCHANGE_PLAN_V3 + "\n\n"
     if planned:  # plan 24 stage 2: each line's shot is said with its cap
         return (NATIVE_LINE_PLAN_NARRATOR_V3 if "narrator" in speakers else NATIVE_LINE_PLAN_V3) + "\n\n"
     template = NATIVE_LINE_NARRATOR_V3 if "narrator" in speakers else NATIVE_LINE_V3
@@ -5556,12 +5631,13 @@ def build_e2_v3(pack, *, scene, outline, next_scene, so_far, spine, budget, cast
     else:
         # Plan 24 stage 5: a narrator-only scene's plan holds one line ("1 line", not "1 lines").
         n_text = _count_range(n_lo, n_hi) + (" line" if n_hi == 1 else " lines")
-        total_line = plan_block_v3(plan, names, line_hi=w_hi)
+        total_line = plan_block_v3(plan, names, line_hi=w_hi, line_lo=w_lo)
     user += _E2_V3_ASK_TEMPLATE.format(
         n_text=n_text, speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS),
         voice_direction=voice_direction, language=pack.language_name, w_lo=w_lo, w_hi=w_hi,
         sfx_cues=", ".join(sfx_cue_names) if sfx_cue_names else "none available for this story",
-        line_rule=LINE_RULE_V3, native_line=_native_line(native, speakers, w_hi, planned=plan is not None),
+        line_rule=LINE_RULE_V3, native_line=_native_line(native, speakers, w_hi, planned=plan is not None,
+                                                         exchange=bool(plan is not None and exchange_shots(plan))),
         total_line=total_line,
         v3_lines="\n".join(lines) + "\n\n" + narration_e2_planned_line_v3(narration, plan, names),
         french_line=_french_block(pack),
@@ -5596,17 +5672,33 @@ def _v3_line_errors(errors, path, line, *, line_words, floor) -> None:
                       "or two complete sentences a person would say, never a fragment")
 
 
-def _plan_line_errors(errors, lines, caps, *, floor, path="$.lines") -> None:
+def _plan_line_errors(errors, lines, caps, *, floor, path="$.lines", plan=None) -> None:
     """Plan 24 stage 2 (D-4): each reply line against its planned line, by
     kind in order (the first narrator line against the first planned
     narrator line, ...): over its cap -> ``"<path>[i].text: N words, at most
     C (<its seconds>)"``; under the floor (a character line: *floor*, a
     narrator line: :data:`LINE_FLOOR_WORDS`; never above its cap) the
     fragment error; a line of a kind the plan has no more room for, one
-    error naming the count."""
+    error naming the count.
+
+    Plan 27 stage 2: a character line planned with a floor (``lo``) is held
+    to its range -- under it, ``"<path>[i].text: N words, the plan asks for
+    lo–hi (<its shot>)"``, a word-cap error the retry and the trim pass
+    handle as an over-cap one; with *plan*'s exchanges
+    (:func:`exchange_shots`), each exchange's lines over its words in total
+    -> ``"<path>[a-b]: N words in total, at most C (one L s shot)"``, and a
+    reply with fewer lines than the plan holds is refused (each exchange is
+    one shot of the storyboard)."""
     planned = {"narrator": [c for c in caps if c["kind"] == "narrator"],
                "character": [c for c in caps if c["kind"] == "character"]}
     seen = {"narrator": 0, "character": 0}
+    reply_of = {}  # planned line index -> reply line index
+    plan_index = {"narrator": [k for k, c in enumerate(caps) if c["kind"] == "narrator"],
+                  "character": [k for k, c in enumerate(caps) if c["kind"] == "character"]}
+    exchanges = exchange_shots(plan) if plan is not None else []
+    if exchanges and len(lines) < len(caps):
+        errors.append(f"{path}: {len(lines)} line{'s' if len(lines) != 1 else ''}, this scene's plan holds "
+                      f"{len(caps)}: write every planned line, each exchange whole")
     for i, line in enumerate(lines):
         text = line.get("text") if isinstance(line, dict) else None
         if not (isinstance(text, str) and text.strip()):
@@ -5622,13 +5714,27 @@ def _plan_line_errors(errors, lines, caps, *, floor, path="$.lines") -> None:
                           f"line{'s' if count != 1 else ''}{none}")
             continue
         entry = planned[kind][k]
+        reply_of[plan_index[kind][k]] = i
         count = _word_count(text)
-        lo = min(LINE_FLOOR_WORDS if kind == "narrator" else floor, entry["cap"])
         if count > entry["cap"]:
             errors.append(f"{path}[{i}].text: {count} words, at most {entry['cap']} ({_plan_why(entry)})")
-        elif count < lo:
-            errors.append(f"{path}[{i}].text: {count} word{'s' if count != 1 else ''}, expected at least {lo}: a "
-                          "line is one or two complete sentences a person would say, never a fragment")
+        elif kind == "character" and entry["lo"] is not None:
+            if count < entry["lo"]:
+                errors.append(f"{path}[{i}].text: {count} word{'s' if count != 1 else ''}, the plan asks for "
+                              f"{entry['lo']}–{entry['cap']} ({_plan_why(entry)})")
+        else:
+            lo = min(LINE_FLOOR_WORDS if kind == "narrator" else floor, entry["cap"])
+            if count < lo:
+                errors.append(f"{path}[{i}].text: {count} word{'s' if count != 1 else ''}, expected at least {lo}: "
+                              "a line is one or two complete sentences a person would say, never a fragment")
+    for shot in exchanges:
+        indices = [reply_of.get(k) for k in shot["lines"]]
+        if None in indices:
+            continue
+        total = sum(_word_count(lines[i]["text"]) for i in indices)
+        if total > shot["words_max"]:
+            errors.append(f"{path}[{min(indices)}-{max(indices)}]: {total} words in total, at most "
+                          f"{shot['words_max']} (one {shot['clip_s']} s shot)")
 
 
 def _cap_errors_first(errors) -> list:
@@ -5668,7 +5774,7 @@ def validate_e2_v3(reply, *, scene, narrator_enabled, sfx_cues, budget, floor, e
             _v3_line_errors(errors, path, line, line_words=budget["line_words"], floor=floor)
         _text_errors(errors, f"{path}.delivery", line["delivery"], max_words=12)
     if caps is not None:
-        _plan_line_errors(errors, lines, caps, floor=floor)
+        _plan_line_errors(errors, lines, caps, floor=floor, plan=plan)
     n = len(lines)
     for i, cue in enumerate(reply["sfx_cues"]):
         at = cue["at"]
@@ -5677,14 +5783,15 @@ def validate_e2_v3(reply, *, scene, narrator_enabled, sfx_cues, budget, floor, e
     _nullable_text_errors(errors, "$.on_screen_text", reply["on_screen_text"], 6)
     total_words = sum(_word_count(line["text"]) for line in lines)
     if caps is not None:
-        ceiling = sum(entry["cap"] for entry in caps)
+        ceiling = plan_ceiling(plan, caps)
         floor_total = min(int(plan["min_words"]), ceiling)
         if total_words > ceiling:
             errors.append(f"$.lines: {total_words} words in total, at most {ceiling} (a "
                           f"{plan_seconds(plan['slot_s'][1])} s scene)")
         elif total_words < floor_total:
-            errors.append(f"{E2_WORD_FLOOR_PREFIX}: {total_words} in total, expected at least {floor_total} (half of "
-                          f"the {ceiling}-word plan)")
+            why = (f"the floors of the {ceiling}-word plan" if plan.get("shots") else
+                   f"half of the {ceiling}-word plan")
+            errors.append(f"{E2_WORD_FLOOR_PREFIX}: {total_words} in total, expected at least {floor_total} ({why})")
         _duplicate_line_errors(errors, "$.lines", [line["text"] for line in lines], episode_lines or ())
         return _cap_errors_first(errors)
     word_budget = budget["words"][1]
@@ -5773,7 +5880,8 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
         plan = plans.get(key)
         if plan is None:
             return None
-        return PLAN_FRAMING_V3.format(part=key, seconds=plan_seconds(plan["slot_s"][1]), words=plan["max_words"])
+        return PLAN_FRAMING_V3.format(part=key, seconds=plan_seconds(plan["slot_s"][1]), lo=framing_floor(plan),
+                                      words=plan["max_words"])
 
     speakers = [c["char_id"] for c in cast] + (["narrator"] if narrator_enabled else [])
     word_budgets = word_budgets or {}
@@ -5818,12 +5926,23 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
     asked_words = line_words
     if planned:
         top = max(planned)
-        asked_words = (min(int(line_words[0]), top), min(int(line_words[1]), top))
+        # Plan 27 stage 2: a planned native shot's words, not the template's 17, are the line's ceiling.
+        shot_planned = any(plans[key].get("shots") for key in line_keys if plans.get(key) is not None)
+        asked_words = (min(int(line_words[0]), top), top if shot_planned else min(int(line_words[1]), top))
     user += _e3_v3_ask(keys, speakers, language=pack.language_name, line_words=asked_words,
                        hook_words=hook_text_max_words(episode_defaults), act=single_place, native=native,
                        narrator_note=narrator_note,
                        french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "")
     return _system(pack), user, e3_schema(part, ep, speakers)
+
+
+def framing_floor(plan) -> int:
+    """The fewest words a planned framing part is asked for (plan 27 stage
+    2): its lines' planned floors, else -- a plan without them -- its
+    ``min_words``; never past its ``max_words``."""
+    floors = [int(line["min_words"]) for line in plan["lines"] if "min_words" in line]
+    low = sum(floors) if floors and len(floors) == len(plan["lines"]) else int(plan["min_words"])
+    return min(low, int(plan["max_words"]))
 
 
 def validate_e3_v3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, narrator_enabled,
@@ -5845,15 +5964,23 @@ def validate_e3_v3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scen
         if key not in keys or not isinstance(reply, dict) or not isinstance(reply.get(key), dict):
             continue
         part_lines = reply[key].get("lines") or []
-        for i, line in enumerate(part_lines):
-            _v3_line_errors(extra, f"$.{key}.lines[{i}]", line, line_words=line_words, floor=floor)
         plan = plans.get(key)
+        # Plan 27 stage 2: a part planned on native shots holds a line to its shot's words (22 on a 10 s
+        # shot), its total the one refusal a trim can fix.
+        part_words = ((line_words[0], max(int(line_words[1]), int(plan["max_words"])))
+                      if plan is not None and plan.get("shots") else line_words)
+        for i, line in enumerate(part_lines):
+            _v3_line_errors(extra, f"$.{key}.lines[{i}]", line, line_words=part_words, floor=floor)
         texts = [line.get("text") for line in part_lines if isinstance(line, dict)]
         if plan is not None and all(isinstance(text, str) for text in texts):
             total = sum(_word_count(text) for text in texts)
+            why = f"a {plan_seconds(plan['slot_s'][1])} s {key}"
+            low = framing_floor(plan)
             if total > int(plan["max_words"]):
-                extra.append(f"$.{key}.lines: {total} words in total, at most {int(plan['max_words'])} (a "
-                             f"{plan_seconds(plan['slot_s'][1])} s {key})")
+                extra.append(f"$.{key}.lines: {total} words in total, at most {int(plan['max_words'])} ({why})")
+            elif texts and plan.get("shots") and total < low:
+                extra.append(f"$.{key}.lines: {total} word{'s' if total != 1 else ''} in total, the plan asks for "
+                             f"{low}–{int(plan['max_words'])} ({why})")
     if single_place and "cliffhanger" in keys and isinstance(reply, dict) and isinstance(reply.get("cliffhanger"),
                                                                                           dict):
         if len(reply["cliffhanger"].get("lines") or []) != 1:
@@ -5869,12 +5996,21 @@ def validate_e3_v3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scen
 # retry is not failed at once -- one call rewrites ONLY the lines the
 # word-cap errors name, the rest of the reply kept as it was. The same
 # schema, the same validator and the same hard caps judge that reply.
+# Plan 27 stage 2: a line or a part UNDER its planned floor ("the plan asks
+# for lo–hi") is lengthened by the same pass, and an exchange over its shot's
+# words (``$.lines[a-b]``) trimmed as one.
 TRIM_ERROR_RE = re.compile(
-    r"^\$\.(?:(hook|cliffhanger|recap)\.)?lines(?:\[(\d+)\]\.text)?: (\d+) words(?: in total)?, "
-    r"at most (\d+) \(([^)]*)\)")
+    r"^\$\.(?:(hook|cliffhanger|recap)\.)?lines(?:\[(\d+)\]\.text|\[(\d+)-(\d+)\])?: (\d+) words?(?: in total)?, "
+    r"(?:at most (\d+)|the plan asks for (\d+)–(\d+)) \(([^)]*)\)")
 TRIM_LINE_ASK = "rewrite it in at most {cap} words, same meaning, same speaker, one or two complete sentences"
 TRIM_TOTAL_ASK = ("rewrite the lines so they total at most {cap} words, same meaning, same speakers, each one or two "
                   "complete sentences")
+LENGTHEN_LINE_ASK = ("rewrite it in {lo} to {cap} words, same meaning, same speaker, one or two complete sentences: "
+                     "say more of what the line needs (its reason, its demand)")
+LENGTHEN_TOTAL_ASK = ("rewrite the lines so they total {lo} to {cap} words, same meaning, same speakers, each one or "
+                      "two complete sentences")
+TRIM_EXCHANGE_ASK = ("rewrite these lines so they total at most {cap} words, same meaning, same speakers, each one or "
+                     "two complete sentences, still one exchange")
 TRIM_KEEP = ("Answer with the same JSON, whole: every line not named above byte-identical (speaker, text, emotion, "
              "delivery), the same number of lines in the same order, the same sfx_cues and on_screen_text. Write the "
              "new text in {language}.")
@@ -5882,16 +6018,21 @@ TRIM_KEEP = ("Answer with the same JSON, whole: every line not named above byte-
 
 def parse_word_cap_error(error):
     """A word-cap error (:func:`is_word_cap_error`) as ``{"part", "index",
-    "words", "cap", "why"}``: *part* ``hook``/``cliffhanger``/``recap`` for
-    an E3v3 part (None for a body scene), *index* the line's 0-based place
-    (None for a total), the count, its cap and the seconds it is held to.
-    None for any other error."""
+    "words", "cap", "why", "lo", "span"}``: *part* ``hook``/``cliffhanger``/
+    ``recap`` for an E3v3 part (None for a body scene), *index* the line's
+    0-based place (None for a total), the count, its cap and the seconds it
+    is held to; *lo* the planned floor of an under-floor error (plan 27 stage
+    2), *span* an exchange's first and last line. None for any other error."""
     match = TRIM_ERROR_RE.match(str(error))
     if match is None:
         return None
-    part, index, words, cap, why = match.groups()
-    return {"part": part, "index": None if index is None else int(index), "words": int(words), "cap": int(cap),
-            "why": why}
+    part, index, first, last, words, cap, lo, hi, why = match.groups()
+    return {"part": part, "index": None if index is None else int(index), "words": int(words),
+            "cap": int(cap if cap is not None else hi), "why": why,
+            # Plan 27 stage 2: ``lo`` (the planned floor) on an under-floor error, else None;
+            # ``span`` (first, last) 0-based on an exchange over its shot's words, else None.
+            "lo": None if lo is None else int(lo),
+            "span": None if first is None else (int(first), int(last))}
 
 
 def trim_speaker_label(names, speaker) -> str:
@@ -5911,22 +6052,33 @@ def trim_lines_prompt(pack, *, scene, reply, errors, names, plan=None):
     an E3v3 reply (``$.hook.lines``: the part's lines in total). *names* is
     ``{char_id: name}``; *plan* (a scene's line plan, optional) adds the
     scene's seconds. The schema and the call's id are the writer's own
-    (``E2v3``/``E3v3``): only the prompt differs."""
+    (``E2v3``/``E3v3``): only the prompt differs. Plan 27 stage 2: a line or
+    part under its planned floor is asked to be LENGTHENED to its range, an
+    exchange over its shot's words trimmed as one."""
     import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
     parsed = [item for item in (parse_word_cap_error(error) for error in errors) if item]
     framing = isinstance(scene, dict)
     asks = []
     totals = []
     for item in parsed:
+        short = item["lo"] is not None
+        said = (f"the plan asks for {item['lo']}–{item['cap']}" if short else f"at most {item['cap']}")
         if item["index"] is not None:
             lines = reply.get("lines") or []
             speaker = lines[item["index"]]["speaker"] if item["index"] < len(lines) else None
-            asks.append(f"- Line {item['index'] + 1} ({trim_speaker_label(names, speaker)}): {item['words']} words, "
-                        f"at most {item['cap']} ({item['why']}) -- " + TRIM_LINE_ASK.format(cap=item["cap"]) + ".")
+            ask = (LENGTHEN_LINE_ASK.format(lo=item["lo"], cap=item["cap"]) if short else
+                   TRIM_LINE_ASK.format(cap=item["cap"]))
+            asks.append(f"- Line {item['index'] + 1} ({trim_speaker_label(names, speaker)}): {item['words']} "
+                        f"word{'s' if item['words'] != 1 else ''}, {said} ({item['why']}) -- " + ask + ".")
+        elif item["span"] is not None:
+            first, last = item["span"]
+            asks.append(f"- Lines {first + 1}–{last + 1} (one exchange): {item['words']} words in total, {said} "
+                        f"({item['why']}) -- " + TRIM_EXCHANGE_ASK.format(cap=item["cap"]) + ".")
         elif item["part"]:
+            ask = (LENGTHEN_TOTAL_ASK.format(lo=item["lo"], cap=item["cap"]) if short else
+                   TRIM_TOTAL_ASK.format(cap=item["cap"]))
             asks.append(f"- The {item['part']} (scene {scene.get(item['part'], '?')}): {item['words']} words in "
-                        f"total, at most {item['cap']} ({item['why']}) -- " + TRIM_TOTAL_ASK.format(cap=item["cap"])
-                        + ".")
+                        f"total, {said} ({item['why']}) -- " + ask + ".")
         else:
             totals.append(item)
     for item in totals:
@@ -5935,10 +6087,13 @@ def trim_lines_prompt(pack, *, scene, reply, errors, names, plan=None):
                 "speakers, each one or two complete sentences")
         asks.append(f"- The scene's lines total {item['words']} words, at most {item['cap']} ({item['why']}) -- "
                     f"{tail}.")
+    ranged = any(item["lo"] is not None for item in parsed)  # plan 27 stage 2: a floor missed too
     if framing:
-        head = ("Trim pass for the framing scenes: your reply was refused because a part is over its word cap.")
+        head = ("Trim pass for the framing scenes: your reply was refused because a part is "
+                + ("outside its word range." if ranged else "over its word cap."))
     else:
-        head = f"Trim pass for scene {scene}: your reply was refused because a line is over its word cap."
+        head = (f"Trim pass for scene {scene}: your reply was refused because a line is "
+                + ("outside its word range." if ranged else "over its word cap."))
         if plan is not None:
             head += f" The scene lasts at most {plan_seconds(plan['slot_s'][1])} s."
     user = (head + "\n\nYour reply:\n" + json.dumps(reply, ensure_ascii=False) + "\n\nRewrite only this:\n"

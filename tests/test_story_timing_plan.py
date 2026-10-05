@@ -64,39 +64,46 @@ def _written(scene, plan, providers):
 
 # ------------------------------------------------- (a) every pause is paid
 
+# Plan 27 stage 1 (2026-10-05) moved the narrated body slot to 10-16 s and the
+# hook to 5-8 s; stage 2 re-pinned these tests on those slots (the invariant
+# is the same: a scene written at its caps never runs over its slot).
+
 @pytest.mark.parametrize("native", [False, True])
-def test_a_13s_body_scene_at_its_caps_pays_every_pause_and_never_flags(native):
+def test_a_16s_body_scene_at_its_caps_pays_every_pause_and_never_flags(native):
     scene = _scene("setup")
     floor = timing.plan_tail_floor(NARRATED)
     providers = {"narrator": "edge", "char_rida": "gemini"}
     plan = timing.scene_plan(NARRATED, scene, lang=FR, native=native, narrator_provider="edge",
                              speakers={"char_rida": "gemini"}, tail_floor=floor)
-    assert plan["slot_s"] == [9.0, 13.0]
+    assert plan["slot_s"] == [10.0, 16.0]
     assert [line["kind"] for line in plan["lines"]] == ["narrator", "character"]
     pauses = NARRATED["pauses_s"]
     # On a native story the character line is spoken by its clip: no TTS overrun.
     spoken_by = {"narrator": "edge", "char_rida": None if native else "gemini"}
     speech = sum(timing.seconds_for(_text_at(line["max_words"]), FR, provider=spoken_by[line["speaker"]])
                  for line in plan["lines"])
-    assert pauses["before_first_line"] + pauses["between_lines"] + speech + floor <= 13.0
+    assert pauses["before_first_line"] + pauses["between_lines"] + speech + floor <= 16.0
     written = _written(scene, plan, {"narrator": "edge", "char_rida": None if native else providers["char_rida"]})
     timed = timing.scene_timing(written, NARRATED, FR, tail_floor=floor)
-    assert timed["state"] != "over" and timed["duration_s"] <= 13.0
+    assert timed["state"] != "over" and timed["duration_s"] <= 16.0
     assert plan["max_words"] == sum(line["max_words"] for line in plan["lines"])
-    assert plan["min_words"] == plan["max_words"] // 2
     if native:
-        assert sum(line["clip_s"] for line in plan["lines"]) <= 13
+        # Plan 27 stage 2: each line its own shot here, the scene's floor at least the lines' floors.
+        assert sum(shot["clip_s"] for shot in plan["shots"]) <= 16
+        assert plan["min_words"] == max(plan["max_words"] // 2, sum(line["min_words"] for line in plan["lines"]))
+    else:
+        assert plan["min_words"] == plan["max_words"] // 2
 
 
 # ------------------------------------------------- (b) the hook is feasible
 
 @pytest.mark.parametrize("native", [False, True])
-def test_the_6s_hook_holds_at_most_11_words_in_french_with_an_edge_narrator(native):
+def test_the_8s_hook_holds_at_most_14_words_in_french_with_an_edge_narrator(native):
     plan = timing.scene_plan(NARRATED, _scene("hook", scene_id="s01"), lang=FR, native=native,
                              narrator_provider="edge", speakers={"char_rida": "edge"})
-    assert plan["slot_s"] == [3.0, 6.0]
+    assert plan["slot_s"] == [5.0, 8.0]
     assert [line["speaker"] for line in plan["lines"]] == ["narrator"]
-    assert plan["max_words"] <= 11
+    assert plan["max_words"] <= 14
 
 
 # ------------------------------------------------- (c) native snapping
@@ -120,24 +127,44 @@ def test_a_native_character_line_of_6_4_s_snaps_to_a_6s_clip_of_12_words():
 # narrator takes the seconds left; off native, the narrator gets the LOW end
 # of the template's share (0.6), not its middle.
 
-def test_a_native_13s_body_scene_plans_the_characters_6s_clip_first_and_the_narrator_the_rest():
+# Plan 27 stage 2 (2026-10-05), moved on purpose: the character's default shot
+# is 8 s (17 words, PLAN_CHARACTER_CLIP_S), stepped down while the slot cannot
+# hold it beside the narrator's shortest clip; the plan carries one shot a line
+# and each line its floor (a character line 0.75 of its clip, the narrator 3).
+
+def test_a_native_16s_body_scene_plans_the_characters_8s_clip_first_and_the_narrator_the_rest():
     plan = timing.scene_plan(NARRATED, _scene("setup"), lang=FR, native=True, narrator_provider="edge",
                              speakers={"char_rida": "gemini"}, tail_floor=timing.plan_tail_floor(NARRATED))
     narrator, character = plan["lines"]
-    assert (character["kind"], character["clip_s"], character["max_words"]) == ("character", 6, 12)
-    # 11.4 s allowed - 6 s = 5.4 s, but the clips must sum inside 13 s: the narrator's
-    # clip is 6 s (not the 8 s 5.4 + 0.7 snaps up to), so it speaks 5.3 s: 11 words at Edge.
+    assert (character["kind"], character["clip_s"], character["min_words"], character["max_words"]) == (
+        "character", 8, 13, 17)
+    # 14.25 s allowed - 8 s = 6.25 s of narration in an 8 s clip: 13 words at Edge.
     assert (narrator["kind"], narrator["clip_s"], narrator["seconds"], narrator["max_words"]) == (
-        "narrator", 6, 5.3, 11)
-    assert plan["max_words"] == 23 and plan["min_words"] == 11
+        "narrator", 8, 6.25, 13)
+    assert plan["max_words"] == 30 and plan["min_words"] == 16
+    assert [(shot["clip_s"], shot["line_ids"], shot["speaks"]) for shot in plan["shots"]] == [
+        (8, ["l08"], False), (8, ["l09"], True)]
     assert narrator["clip_s"] + character["clip_s"] <= plan["slot_s"][1]
+
+
+def test_a_native_13s_body_scene_steps_the_character_down_to_6s_beside_the_narrator():
+    template = copy.deepcopy(NARRATED)
+    template["slots"]["body"]["duration_s"] = [9.0, 13.0]
+    plan = timing.scene_plan(template, _scene("setup"), lang=FR, native=True, narrator_provider="edge",
+                             speakers={"char_rida": "gemini"}, tail_floor=timing.plan_tail_floor(template))
+    narrator, character = plan["lines"]
+    # 8 + 6 > 13: the character steps down to 6 s (12 words, floor 9); the narrator speaks 5.3 s of its 6 s clip.
+    assert (character["clip_s"], character["min_words"], character["max_words"]) == (6, 9, 12)
+    assert (narrator["clip_s"], narrator["seconds"], narrator["max_words"]) == (6, 5.3, 11)
+    assert plan["max_words"] == 23 and plan["min_words"] == 12
 
 
 def test_a_native_9s_body_scene_steps_the_character_clip_down_to_4s():
     template = copy.deepcopy(NARRATED)
     template["slots"]["body"]["duration_s"] = [6.0, 9.0]
     plan = timing.scene_plan(template, _scene("setup"), lang=FR, native=True, narrator_provider="edge",
-                             speakers={"char_rida": None}, tail_floor=timing.plan_tail_floor(template))
+                             speakers={"char_rida": None}, tail_floor=timing.plan_tail_floor(template),
+                             speech_lengths=(4, 6, 8))  # a table with 4 s (plan 27 dropped it from Veo's)
     narrator, character = plan["lines"]
     assert character["clip_s"] == 4 and narrator["clip_s"] == 4  # 6 + 4 > 9: the character steps down
     assert sum(line["clip_s"] for line in plan["lines"]) <= 9
@@ -157,14 +184,21 @@ def test_off_native_the_narrator_gets_the_low_end_of_the_share():
 ])
 def test_native_clips_sum_inside_the_slot(template, function, narrator):
     scene = _scene(function, characters=("char_rida", "char_marie"))
-    for hi in (9.0, 11.0, 13.0, 16.0):
+    # Plan 27 stage 2: a shot's clip counted once (an exchange's lines share it); the 6/8 s
+    # table from 12 s up (two clips of 6 s at least), a table with 4 s below.
+    for hi, lengths in ((9.0, (4, 6, 8)), (11.0, (4, 6, 8)), (12.0, (6, 8)), (13.0, (6, 8)), (16.0, (6, 8)),
+                        (16.0, (8,)), (16.0, (5, 10))):
         tight = copy.deepcopy(template)
         slot = timing.slot_name(function, tight)
         tight["slots"][slot]["duration_s"] = [3.0, hi]
         plan = timing.scene_plan(tight, scene, lang=FR, native=True, narrator=narrator,
                                  narrator_provider="edge" if narrator else None,
-                                 speakers={"char_rida": None, "char_marie": None})
-        assert sum(line["clip_s"] for line in plan["lines"]) <= hi, (function, hi, plan)
+                                 speakers={"char_rida": None, "char_marie": None}, speech_lengths=lengths,
+                                 silent_lengths=lengths)
+        assert sum(shot["clip_s"] for shot in plan["shots"]) <= hi, (function, hi, plan)
+        for shot in plan["shots"]:
+            if shot["speaks"]:
+                assert shot["words_max"] <= timing._clip_capacity(shot["clip_s"])
         for line in plan["lines"]:
             if line["kind"] == "character":
                 assert line["max_words"] <= timing._clip_capacity(line["clip_s"])
@@ -241,6 +275,11 @@ def test_a_scene_validates_with_and_without_its_plan():
                                          for key in ("allowed_speech_s", "lines", "max_words", "min_words")}
     planned["scenes"][1]["lines"][0]["timing"] = timing.estimated_timing("Hello there.", "en", provider="gemini")
     assert schemas.episode_script_errors(planned) == []
+    # Plan 27 stage 2: the shots and each line's floor are optional keys of the stored plan.
+    planned["scenes"][1]["line_plan"]["shots"] = plan["shots"]
+    assert "min_words" in plan["lines"][0] and schemas.episode_script_errors(planned) == []
+    planned["scenes"][1]["line_plan"]["shots"] = [dict(plan["shots"][0], line_ids=["8"])]
+    assert schemas.episode_script_errors(planned) != []
 
 
 def test_episode_pass_of_an_edge_voiced_script_is_unchanged():
@@ -266,7 +305,8 @@ def test_store_line_plans_writes_a_valid_plan_on_every_scene(monkeypatch):
     for scene in scenes:
         assert scene["slot_s"] == list(timing.slot_range(scene, NARRATED))
         assert schemas.validate(scene["line_plan"], schemas._EPISODE_SCRIPT_LINE_PLAN_SCHEMA) == []
-    assert scenes[0]["line_plan"]["max_words"] <= 11
+    assert scenes[0]["line_plan"]["max_words"] <= 14  # plan 27: the 5-8 s hook
+    assert all("shots" in scene["line_plan"] for scene in scenes)  # plan 27 stage 2: stored with the plan
     assert timing.plan_budget(scenes[1]["line_plan"], line_lo=5)["words"][1] == scenes[1]["line_plan"]["max_words"]
 
 
@@ -288,10 +328,10 @@ def _plan_of(scene, *, native, template=NARRATED, narrator=True):
 def test_a_narrator_only_body_scene_plans_one_narrator_line_taking_the_whole_allowed_speech():
     plan = _plan_of(_assigned("setup", False), native=False)
     (narrator,) = plan["lines"]
-    assert narrator["kind"] == "narrator" and narrator["seconds"] == plan["allowed_speech_s"] == 11.637
-    # The whole allowed speech at Edge French: 25 words where the two-line split held 14 + 7.
-    assert narrator["max_words"] == timing.words_for_seconds(plan["allowed_speech_s"], FR, provider="edge") == 25
-    assert plan["max_words"] == 25 and plan["min_words"] == 12
+    # Plan 27 stage 1's 10-16 s body slot: 14.487 s, 31 words at Edge French.
+    assert narrator["kind"] == "narrator" and narrator["seconds"] == plan["allowed_speech_s"] == 14.487
+    assert narrator["max_words"] == timing.words_for_seconds(plan["allowed_speech_s"], FR, provider="edge") == 31
+    assert plan["max_words"] == 31 and plan["min_words"] == 15
 
 
 def test_a_native_narrator_only_scene_snaps_its_clip_up_within_the_slot():
@@ -304,7 +344,7 @@ def test_a_native_narrator_only_scene_snaps_its_clip_up_within_the_slot():
     # The two-line plan of the same scene is unchanged: the character's clip first, the narrator the rest.
     both = _plan_of(_assigned("setup", True), native=True)
     assert [(line["kind"], line["clip_s"], line["max_words"]) for line in both["lines"]] == [
-        ("narrator", 6, 11), ("character", 6, 12)]
+        ("narrator", 8, 13), ("character", 8, 17)]
     assert both == _plan_of(_assigned("setup", None), native=True)  # no assignment: as stage 2 planned it
 
 
@@ -313,7 +353,9 @@ def test_the_assignment_only_moves_a_body_scene_with_the_narrator_on():
     assert hook == _plan_of(_assigned("hook", None, scene_id="s01"), native=True)
     # The narrator off: the exchange is the characters' whatever the key says (a stale key is ignored).
     off = _plan_of(_assigned("setup", False), native=True, narrator=False)
-    assert [line["kind"] for line in off["lines"]] == ["character", "character"]
+    # Plan 27 stage 2: one character, two exchanges of at most two of its lines each.
+    assert [line["kind"] for line in off["lines"]] == ["character"] * 4
+    assert [len(shot["line_ids"]) for shot in off["shots"]] == [2, 2]
     # The confrontation never carries the key; a stray one changes nothing there (no narrator slot in the body).
     conf = _plan_of(_assigned("rising", False), native=True, template=CONFRONTATION, narrator=False)
     assert conf == _plan_of(_assigned("rising", None), native=True, template=CONFRONTATION, narrator=False)
@@ -358,3 +400,112 @@ def test_retime_stores_the_planned_narrator_share_for_a_narrated_script_only():
     bare = {"scenes": [_written(_scene("setup"), plan, {"narrator": "edge"})],
             "cliffhanger": {"scene_id": None, "reveal": None, "cut_to_black": True}, "timing": None}
     assert "narrator_share" not in episode_common.retime(bare, ec)["timing"]
+
+
+# ------------------------------------------------- plan 27 stage 2: exchanges sized to the shot
+#
+# The human (2026-10-05): "I don't want only one dialogue line per clip -- more
+# story, more lines per shot; see how many fit in 5 s or 10 s". A native-speech
+# scene with no narrator groups its character lines into shots of the link's
+# lengths, each holding [ceil(0.75 x words(L)), words(L)] words (words(L) =
+# floor((L - 0.7) x 2.4): 6 s 12, 8 s 17, 10 s 22) over 1-4 lines in turn.
+
+def _two(function="rising", template=CONFRONTATION, *, characters=("char_rida", "char_marie"), lengths=(6, 8),
+         hi=None):
+    if hi is not None:
+        template = copy.deepcopy(template)
+        template["slots"][timing.slot_name(function, template)]["duration_s"] = [3.0, hi]
+    return timing.scene_plan(template, _scene(function, characters=characters), lang=FR, native=True,
+                             narrator=False, speakers={cid: None for cid in characters},
+                             tail_floor=timing.plan_tail_floor(template), speech_lengths=lengths)
+
+
+def _shape(plan):
+    return [(shot["clip_s"], len(shot["line_ids"]), shot["words_min"], shot["words_max"]) for shot in plan["shots"]]
+
+
+def test_a_two_speaker_body_scene_on_veo_plans_two_exchanges_the_speakers_in_turn():
+    plan = _two()
+    assert plan["slot_s"] == [10.0, 16.0]
+    # 8 s first (17 words), then the longest the slot and the estimate still pay: 6 s (12). Four
+    # lines at most a scene: two each, never a shot of one line where two fit.
+    assert _shape(plan) == [(8, 2, 13, 17), (6, 2, 9, 12)]
+    assert [shot["line_ids"] for shot in plan["shots"]] == [["l08", "l09"], ["l10", "l11"]]
+    assert [line["speaker"] for line in plan["lines"]] == ["char_rida", "char_marie", "char_rida", "char_marie"]
+    assert [(line["min_words"], line["max_words"]) for line in plan["lines"]] == [(6, 10), (7, 11), (4, 7), (5, 8)]
+    assert [line["clip_s"] for line in plan["lines"]] == [8, 8, 6, 6]
+    for shot, lines in ((plan["shots"][0], plan["lines"][:2]), (plan["shots"][1], plan["lines"][2:])):
+        assert sum(line["min_words"] for line in lines) == shot["words_min"]  # the floor split, last the longest
+        assert all(line["min_words"] >= timing.PLAN_LINE_MIN_WORDS for line in lines)
+        assert sum(line["seconds"] for line in lines) == pytest.approx(shot["clip_s"], abs=0.002)
+    assert plan["max_words"] == 29 and plan["min_words"] == 22
+    assert sum(shot["clip_s"] for shot in plan["shots"]) <= 16
+    # Plan 24's rule kept: written at its caps the scene never runs over its slot on the Script step's clock.
+    # Each exchange written at its shot's words (8 + 9, 6 + 6):
+    at_caps = [dict(line, max_words=words) for line, words in zip(plan["lines"], (8, 9, 6, 6))]
+    written = _written(_scene("rising", characters=("char_rida", "char_marie")), dict(plan, lines=at_caps), {})
+    timed = timing.scene_timing(written, CONFRONTATION, FR, tail_floor=timing.plan_tail_floor(CONFRONTATION))
+    assert timed["state"] != "over" and timed["duration_s"] <= 16.0
+
+
+def test_a_12s_slot_holds_one_8s_exchange_of_three_lines_and_flow_one_of_three():
+    assert _shape(_two(hi=12.0)) == [(8, 3, 13, 17)]
+    assert [(line["min_words"], line["max_words"]) for line in _two(hi=12.0)["lines"]] == [(4, 8), (4, 8), (5, 9)]
+    # Flow sells 8 s only: the 16 s slot cannot pay a second 17-word exchange on the estimate.
+    assert _shape(_two(lengths=(8,))) == [(8, 3, 13, 17)]
+
+
+def test_a_one_speaker_scene_has_at_most_two_lines_a_shot():
+    plan = _two(characters=("char_rida",))
+    assert all(len(shot["line_ids"]) <= timing.PLAN_ONE_SPEAKER_LINES for shot in plan["shots"])
+    assert {line["speaker"] for line in plan["lines"]} == {"char_rida"}
+    assert _shape(_two(characters=("char_rida",), hi=12.0)) == [(8, 2, 13, 17)]
+
+
+def test_a_10s_link_plans_a_22_word_shot_of_four_lines():
+    plan = _two(lengths=(5, 10))
+    assert _shape(plan) == [(10, 4, 17, 22)]
+    assert [(line["min_words"], line["max_words"]) for line in plan["lines"]] == [(4, 9), (4, 9), (4, 9), (5, 10)]
+    assert [line["speaker"] for line in plan["lines"]] == ["char_rida", "char_marie"] * 2
+
+
+def test_the_framing_scenes_keep_their_one_line_sized_to_the_shot():
+    # The 8 s hook: the estimate pays 15 of the clip's 17 words -- still more than a 6 s clip's 12.
+    hook = _two("hook")
+    assert hook["slot_s"] == [5.0, 8.0] and _shape(hook) == [(8, 1, 13, 15)]
+    cliff = _two("cliffhanger")
+    assert _shape(cliff) == [(8, 1, 13, 17)] and cliff["lines"][0]["min_words"] == 13
+    # A 10 s link: the estimate pays 19 of the 10 s clip's 22 -- a 10 s shot, not a 5 s one of 10.
+    assert _shape(_two("cliffhanger", lengths=(5, 10))) == [(10, 1, 17, 19)]
+    # An 8 s clip the estimate pays only its floor of is no shot (no play left): 8 s then 6 s, never 8 + 8.
+    assert _shape(_two()) == [(8, 2, 13, 17), (6, 2, 9, 12)]
+
+
+def test_exchange_lines_and_the_split_follow_the_capacity_table():
+    assert [timing.exchange_line_count(timing._fill_floor(w), w) for w in (10, 12, 17, 22)] == [2, 2, 3, 4]
+    assert timing.exchange_line_count(13, 17, one_speaker=True) == 2
+    assert timing.split_exchange(13, 17, 3) == [(4, 8), (4, 8), (5, 9)]
+    assert timing.split_exchange(9, 12, 2) == [(4, 7), (5, 8)]
+    assert timing.split_exchange(13, 17, 1) == [(13, 17)]
+
+
+# The plans a TTS story got before plan 27 stage 2 (computed on 62bdd31's timing.py, stage 1's slots).
+TTS_BEFORE = {
+    "narrated": {"slot_s": [10.0, 16.0], "allowed_speech_s": 14.25, "lines": [
+        {"kind": "narrator", "speaker": "narrator", "seconds": 8.55, "max_words": 18},
+        {"kind": "character", "speaker": "char_rida", "seconds": 5.7, "max_words": 9}],
+        "max_words": 27, "min_words": 13},
+    "confrontation": {"slot_s": [10.0, 16.0], "allowed_speech_s": 14.345, "lines": [
+        {"kind": "character", "speaker": "char_rida", "seconds": 7.172, "max_words": 11},
+        {"kind": "character", "speaker": "char_marie", "seconds": 7.172, "max_words": 15}],
+        "max_words": 26, "min_words": 13},
+}
+
+
+def test_a_tts_story_plans_exactly_as_before():
+    scene = _scene("setup", characters=("char_rida", "char_marie"))
+    narrated = timing.scene_plan(NARRATED, scene, lang=FR, native=False, narrator_provider="edge",
+                                 speakers={"char_rida": "gemini", "char_marie": "edge"})
+    confrontation = timing.scene_plan(CONFRONTATION, dict(scene, function="rising"), lang=FR, native=False,
+                                      narrator=False, speakers={"char_rida": "gemini", "char_marie": None})
+    assert {"narrated": narrated, "confrontation": confrontation} == TTS_BEFORE

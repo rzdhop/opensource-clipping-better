@@ -133,10 +133,18 @@ def _j1v3(**extra):
 # seconds and caps). The prompts built without a plan (any caller that hands
 # none in) keep their former bytes, pinned under "-unplanned" with the shas
 # E2v3/E3v3 had before this stage.
+#
+# Plan 27 (2026-10-05), re-pinned on purpose: E1v3 moves with stage 1's slots
+# (the confrontation's recap 5-6 s and hook 5-8 s reach its slot lines); E2v3
+# with stage 2's exchanges (the fixture's 16 s body scene: an 8 s exchange of
+# two lines and a 6 s one, each line "between lo and hi words", the exchange
+# sentence after each); E3v3 with the framing parts' "between lo and hi
+# words" (the 8 s hook: 13-15 on an 8 s shot, the cliffhanger 13-17). The
+# unplanned prompts keep their bytes.
 GOLDENS = {
-    "E1v3": "0579bd35879fad084e44d23dfc2b0a54d405fb2bbd26be515393f16eb50a6c8a",
-    "E2v3": "213cdce7bff6e0b6f2cdb91015b05222b141e3375d64edd505a09fd2fe27e0a6",
-    "E3v3": "5c63d51131b3b9c0293308dca082d1818dd38ab57e29ff05682240a3b0098f05",
+    "E1v3": "a0a951ea281f10a6bc6742498b5f5cab3434b88719c0f9489f5f7ddfe271c583",
+    "E2v3": "650c12da696d03ab59932b2048ca138615ad01f1f297e577404882fc45dc537d",
+    "E3v3": "d4e9734b6d0ee73a789635ca7caff56a02652d6b984cafff6b8f90d1b3fe561c",
     "J1v3": "59b7355c21d68a8dab52178333b4fdc1fc210551918b3be5f1335412a2e23eaf",
     "E2v3-unplanned": "bf903d5c575481093415141036757c13e93fafcf1fee0e7a3aae7bb84ab8c3a9",
     "E3v3-unplanned": "6b066de95e1c58626c88e3261741b5a070291b6af0457d60184c3d00334426cb",
@@ -448,20 +456,24 @@ def _words(n, tag):
     return " ".join(f"{tag}{k}" for k in range(n))
 
 
-def test_the_e2v3_prompt_of_a_13s_native_scene_names_its_seconds_each_lines_cap_and_the_total():
+# Plan 27 stage 1 (2026-10-05): the narrated body slot is 10-16 s; stage 2: each
+# line is told its range (a floor and a cap), the character's shot 8 s.
+
+def test_the_e2v3_prompt_of_a_16s_native_scene_names_its_seconds_each_lines_range_and_the_total():
     plan = _s02_plan()
-    assert [line["max_words"] for line in plan["lines"]] == [11, 12] and plan["max_words"] == 23
+    assert [line["max_words"] for line in plan["lines"]] == [13, 17] and plan["max_words"] == 30
     _s, user, schema = _e2v3(scene=S02, plan=plan, budget=timing.plan_budget(plan, line_lo=5),
                              cast=PERSONALITIES[:1], narrator_enabled=True)
-    block = ("This scene lasts at most 13 s.\n"
-             "Line 1 (narrator): at most 11 words, heard over one 6 s shot.\n"
-             "Line 2 (Rouge): at most 12 words, spoken in one 6 s shot.\n"
-             "Hard limits: 23 words in total; a longer line is refused.\n"
-             "Write at least 11 and at most 23 words of dialogue in total.")
+    block = ("This scene lasts at most 16 s.\n"
+             "Line 1 (narrator): between 3 and 13 words, heard over one 8 s shot.\n"
+             "Line 2 (Rouge): between 13 and 17 words, spoken in one 8 s shot.\n"
+             "Hard limits: 30 words in total; a line shorter or longer than its range is refused.\n"
+             "Write at least 16 and at most 30 words of dialogue in total.")
     assert block in user
     assert "not fewer than" not in user and "one shot of at most 8 seconds" not in user
+    assert "ONE continuous exchange" not in user  # one line a shot here: no exchange to tell
     assert "- lines: 2 lines, each with speaker (one of char_rouge, narrator)" in user
-    assert "Each text is one or two complete sentences in French, 5 to 12 words" in user
+    assert "Each text is one or two complete sentences in French, 5 to 17 words" in user
     assert prompts.LINE_RULE_V3 in user
 
 
@@ -472,30 +484,36 @@ def _check_planned(*lines, plan=None):
 
 
 def test_validate_e2v3_refuses_a_line_or_a_scene_over_its_plan_and_takes_one_exactly_at_its_caps():
-    assert _check_planned(_line("narrator", _words(11, "n")), _line("char_rouge", _words(12, "c"))) == []
-    errors = _check_planned(_line("narrator", _words(11, "n")), _line("char_rouge", _words(15, "c")))
-    assert errors[0] == "$.lines[1].text: 15 words, at most 12 (a 6 s shot)"
-    errors = _check_planned(_line("narrator", _words(18, "n")), _line("char_rouge", _words(12, "c")))
-    assert errors[:2] == ["$.lines[0].text: 18 words, at most 11 (a 6 s shot)",
-                          "$.lines: 30 words in total, at most 23 (a 13 s scene)"]
+    assert _check_planned(_line("narrator", _words(13, "n")), _line("char_rouge", _words(17, "c"))) == []
+    assert _check_planned(_line("narrator", _words(3, "n")), _line("char_rouge", _words(13, "c"))) == []
+    errors = _check_planned(_line("narrator", _words(11, "n")), _line("char_rouge", _words(18, "c")))
+    assert errors[0] == "$.lines[1].text: 18 words, at most 17 (a 8 s shot)"
+    errors = _check_planned(_line("narrator", _words(20, "n")), _line("char_rouge", _words(17, "c")))
+    assert errors[:2] == ["$.lines[0].text: 20 words, at most 13 (a 8 s shot)",
+                          "$.lines: 37 words in total, at most 30 (a 16 s scene)"]
     # A line the plan has no room for is refused, naming the count.
-    errors = _check_planned(_line("narrator", _words(5, "n")), _line("char_rouge", _words(5, "c")),
+    errors = _check_planned(_line("narrator", _words(5, "n")), _line("char_rouge", _words(13, "c")),
                             _line("char_rouge", _words(5, "d")))
     assert "$.lines[2]: one character line too many: this scene's plan holds 1 character line" in errors
-    # Under: the floor error keeps its prefix (the script step's under-only leniency reads it).
+    # Plan 27 stage 2: a character line under its planned floor is a word-cap error naming its range,
+    # first; the scene's floor error keeps its prefix (the script step's under-only leniency reads it).
     errors = _check_planned(_line("char_rouge", _words(6, "c")))
-    assert errors == [f"{prompts.E2_WORD_FLOOR_PREFIX}: 6 in total, expected at least 11 (half of the 23-word plan)"]
+    assert errors == ["$.lines[0].text: 6 words, the plan asks for 13–17 (a 8 s shot)",
+                      f"{prompts.E2_WORD_FLOOR_PREFIX}: 6 in total, expected at least 16 (the floors of the 30-word "
+                      "plan)"]
+    assert _check_planned(_line("char_rouge", _words(14, "c"))) == [
+        f"{prompts.E2_WORD_FLOOR_PREFIX}: 14 in total, expected at least 16 (the floors of the 30-word plan)"]
     # Without a plan the validator keeps its band (a legacy caller).
     assert _check_e2(_e2_reply(_line("char_rouge", GOOD_A), _line("char_rouge", GOOD_B))) == []
 
 
 def test_e3v3_names_the_hooks_seconds_and_refuses_a_hook_over_its_cap():
-    plan = _hook_plan()
-    assert plan["max_words"] == 10 and plan["slot_s"][1] == 6.0
+    plan = _hook_plan()  # plan 27 stage 1: the 5-8 s hook
+    assert plan["max_words"] == 14 and plan["slot_s"][1] == 8.0
     _s, user, _ = _e3v3(hook_scene=HOOK, narrator_enabled=True, plans={"hook": plan})
-    assert "The hook lasts at most 6 s: at most 10 words." in user
+    assert "The hook lasts at most 8 s: between 3 and 14 words." in user
     assert "Keep the hook's dialogue within" not in user
-    reply = {"hook": {"lines": [_line("narrator", _words(14, "h"))], "on_screen_text": "Elle cache sa couleur"},
+    reply = {"hook": {"lines": [_line("narrator", _words(18, "h"))], "on_screen_text": "Elle cache sa couleur"},
              "cliffhanger": {"reveal": "Rouge arrache le capuchon.",
                              "lines": [_line("char_rouge", "Maintenant, je vais retirer ton capuchon devant toute "
                                                            "l'académie.")]},
@@ -504,20 +522,20 @@ def test_e3v3_names_the_hooks_seconds_and_refuses_a_hook_over_its_cap():
                   narrator_enabled=True, episode_defaults=dict(DEFAULTS, hook_style="text_overlay"),
                   line_words=(5, 17), floor=5, single_place=True, plans={"hook": plan})
     errors = prompts.validate_e3_v3(reply, **kwargs)
-    assert errors[0] == "$.hook.lines: 14 words in total, at most 10 (a 6 s hook)"
-    reply["hook"]["lines"] = [_line("narrator", _words(10, "h"))]
+    assert errors[0] == "$.hook.lines: 18 words in total, at most 14 (a 8 s hook)"
+    reply["hook"]["lines"] = [_line("narrator", _words(14, "h"))]
     assert prompts.validate_e3_v3(reply, **kwargs) == []
 
 
 def test_a_word_cap_error_is_told_whole_and_first_on_the_retry():
     from clipping.aistory.steps import llm_call, script as script_step
 
-    errors = _check_planned(_line("narrator", _words(18, "n")), _line("char_rouge", _words(12, "c")))
+    errors = _check_planned(_line("narrator", _words(20, "n")), _line("char_rouge", _words(17, "c")))
     assert script_step.over_cap_errors(errors) == errors[:2]
     assert script_step.over_cap_errors([f"{prompts.E2_WORD_FLOOR_PREFIX}: 6 in total"]) == []
     retry = llm_call.refused_prompt("USER", errors)
-    assert retry.startswith("USER\n\nYour previous reply was refused: $.lines[0].text: 18 words, at most 11 (a 6 s "
-                            "shot); $.lines: 30 words in total, at most 23 (a 13 s scene)")
+    assert retry.startswith("USER\n\nYour previous reply was refused: $.lines[0].text: 20 words, at most 13 (a 8 s "
+                            "shot); $.lines: 37 words in total, at most 30 (a 16 s scene)")
 
 
 # ================================================================ the script document
@@ -561,7 +579,9 @@ def test_the_spine_is_an_optional_key_of_the_script_and_capped():
 # Plan 24 stage 2 (2026-10-05): E2v3 2,628 -> 2,705 and E3v3 3,475 -> 3,488, planned (_worst_plan below).
 # Plan 24 stage 5 (2026-10-05): E1v3 2,807 -> 2,881 (the narrated format's character_line ask and count
 # sentence) and E2v3 2,705 -> 2,706 (the scene's planned character-line sentence); budgets 3,230 -> 3,320 and 3,120.
-MEASURED_V3 = {"E1v3": 2881, "E2v3": 2706, "E3v3": 3488, "J1v3": 4083}
+# Plan 27 stage 2 (2026-10-05): E2v3 2,706 -> 2,774 (each line's range, the exchange sentences; budget 3,200) and
+# E3v3 3,488 -> 3,493 (the framing parts' ranges; budget unchanged).
+MEASURED_V3 = {"E1v3": 2881, "E2v3": 2774, "E3v3": 3493, "J1v3": 4083}
 MEASURED_V3_REPLY = {"E1v3": 2232.1, "E1v3-payoff": 2770.3, "J1v3": 854.1}
 SPINE_AT_CAPS = {key: budgets._fr(words) for key, words in prompts.SPINE_MAX_WORDS.items()}
 SCENES_V3 = [dict(scene, summary=budgets._fr(prompts.SUMMARY_V3_MAX_WORDS)) for scene in budgets.SCENES]
@@ -596,16 +616,25 @@ def _worst_e1v3(template):
 # character line the longest name at 17 words in an 8 s shot, a 12.5 s scene;
 # the framing parts' seconds and caps in place of "Keep ... within N words".
 
+# Plan 27 stage 2 (2026-10-05), re-measured on purpose: the worst plan carries
+# exchanges -- each line its range ("between lo and hi words"), the most
+# exchange sentences a scene can hold (two exchanges of two 10 s lines without
+# the narrator; the narrator's own shot and one exchange of three with it).
+
 def _worst_plan(narrator, *, words=None, hi=12.5):
     longest = max((c["char_id"] for c in budgets.PERSONALITIES),
                   key=lambda cid: len(next(c["name"] for c in budgets.PERSONALITIES if c["char_id"] == cid)))
-    lines = [{"kind": "narrator", "speaker": "narrator", "seconds": 7.3, "clip_s": 8, "max_words": 22}] if narrator \
-        else []
-    lines += [{"kind": "character", "speaker": longest, "seconds": 8.0, "clip_s": 8, "max_words": 17}
-              for _ in range(4 - len(lines))]
-    total = words or sum(line["max_words"] for line in lines)
+    lines = [{"kind": "narrator", "speaker": "narrator", "seconds": 7.3, "clip_s": 8, "max_words": 22,
+              "min_words": 3}] if narrator else []
+    lines += [{"kind": "character", "speaker": longest, "seconds": 5.0, "clip_s": 10, "max_words": 18,
+               "min_words": 10} for _ in range(4 - len(lines))]
+    shots = [{"clip_s": 8, "line_ids": ["l40"], "words_min": 3, "words_max": 22, "speaks": False}] if narrator else []
+    groups = [[1, 2, 3]] if narrator else [[0, 1], [2, 3]]
+    shots += [{"clip_s": 10, "line_ids": [f"l4{k}" for k in group], "words_min": 17, "words_max": 22,
+               "speaks": True} for group in groups]
+    total = words or sum(shot["words_max"] for shot in shots)
     return {"slot_s": [3.0, hi], "allowed_speech_s": 11.0, "lines": lines, "max_words": total,
-            "min_words": total // 2}
+            "min_words": total // 2, "shots": shots}
 
 
 def _worst_e2v3(narrator, native):
@@ -963,7 +992,7 @@ def test_validate_e2v3_refuses_a_character_line_where_none_is_planned_and_it_is_
     assert script_step.over_cap_errors(errors) == []  # a structure error: no trim pass for it
     # Over its caps as well, the cap errors come first and the structure error rides with them.
     both = check(_line("narrator", _words(8, "n")), _line("char_rouge", _words(8, "c")))
-    assert both[0] == "$.lines: 16 words in total, at most 15 (a 13 s scene)" and errors[0] in both
+    assert both[0] == "$.lines: 16 words in total, at most 15 (a 16 s scene)" and errors[0] in both
     assert script_step.over_cap_errors(both) != both  # a real problem rides along: nothing for a trim to fix alone
 
 
@@ -982,3 +1011,105 @@ def test_the_confrontation_prompts_and_validators_do_not_know_the_character_line
     keyed = _e1v3_reply()
     keyed["scenes"][1]["character_line"] = True
     assert _check_e1(keyed) != []
+
+
+# ================================================================ plan 27 stage 2: the exchange
+#
+# The human (2026-10-05): "more story, more lines per shot". The confrontation
+# fixture's 16 s body scene plans an 8 s exchange of two lines (13-17 words) and
+# a 6 s one (9-12): the writer is told each line's range and each exchange; a
+# line under its floor is a word-cap error the trim pass LENGTHENS.
+
+def _exchange_plan():
+    return _fixture_plan(OUTLINE[1])
+
+
+def _check_exchange(*lines):
+    plan = _exchange_plan()
+    return prompts.validate_e2_v3(_e2_reply(*lines), scene=OUTLINE[1], narrator_enabled=False,
+                                  sfx_cues=["gasp_crowd"], budget=timing.plan_budget(plan, line_lo=5), floor=5,
+                                  plan=plan)
+
+
+def test_the_e2v3_ask_names_each_lines_range_and_each_exchange():
+    _s, user, _ = _planned_e2v3()
+    assert ("Line 1 (Rouge): between 6 and 10 words.\nLine 2 (Nude): between 7 and 11 words.\n"
+            "Lines 1 and 2 are ONE continuous exchange in one shot of 8 seconds: they answer each other without a "
+            "pause, the last line ends the shot; together they fill 13–17 words.\n"
+            "Line 3 (Rouge): between 4 and 7 words.\nLine 4 (Nude): between 5 and 8 words.\n"
+            "Lines 3 and 4 are ONE continuous exchange in one shot of 6 seconds") in user
+    assert "Hard limits: 29 words in total; a line shorter or longer than its range is refused." in user
+    assert prompts.NATIVE_EXCHANGE_PLAN_V3 in user and prompts.NATIVE_LINE_PLAN_V3 not in user
+    assert "- lines: 4 lines" in user and "in French, 4 to 11 words" in user
+    # The framing parts: their range, the hook's 6 s shot, the cliffhanger's 8 s one.
+    _s, user, _ = _planned_e3v3()
+    assert "The hook lasts at most 8 s: between 13 and 15 words." in user
+    assert "The cliffhanger lasts at most 10 s: between 13 and 17 words." in user
+
+
+def test_a_line_under_its_floor_is_a_cap_error_naming_its_range_and_the_trim_lengthens_it():
+    from clipping.aistory.steps import script as script_step
+
+    good = [_line("char_rouge", _words(8, "a")), _line("char_nude", _words(9, "b")),
+            _line("char_rouge", _words(5, "c")), _line("char_nude", _words(6, "d"))]
+    assert _check_exchange(*good) == []
+    errors = _check_exchange(*good[:3], _line("char_nude", "Jamais, Rouge."))
+    assert errors[0] == "$.lines[3].text: 2 words, the plan asks for 5–8 (a 6 s shot)"
+    assert prompts.is_word_cap_error(errors[0]) and script_step.over_cap_errors(errors) == errors[:1]
+    assert prompts.parse_word_cap_error(errors[0]) == {"part": None, "index": 3, "words": 2, "cap": 8, "lo": 5,
+                                                       "span": None, "why": "a 6 s shot"}
+    reply = _e2_reply(*good[:3], _line("char_nude", "Jamais, Rouge."))
+    _system, user = prompts.trim_lines_prompt(_pack(), scene="s02", reply=reply, errors=errors[:1],
+                                              names={"char_rouge": "Rouge", "char_nude": "Nude"},
+                                              plan=_exchange_plan())
+    assert user.startswith("Trim pass for scene s02: your reply was refused because a line is outside its word "
+                           "range. The scene lasts at most 16 s.")
+    assert ("- Line 4 (Nude): 2 words, the plan asks for 5–8 (a 6 s shot) -- rewrite it in 5 to 8 words, same "
+            "meaning, same speaker, one or two complete sentences") in user
+    clause = script_step._cap_clause(errors[:1], reply, {"char_nude": "Nude"})
+    assert clause == "line 4 (Nude) has 2 words, the plan asks for 5–8 (a 6 s shot)"
+    failure = script_step.over_cap_failure("s02", clause, trimmed=True, short=script_step._short_of_range(errors))
+    assert str(failure) == ("Scene s02 is still outside its word ranges after the retry and the trim: line 4 (Nude) has "
+                            "2 words, the plan asks for 5–8 (a 6 s shot). Regenerate the scene so each line fits its "
+                            "range.")
+
+
+def test_an_exchange_over_its_shot_is_refused_as_one_and_a_missing_line_is_not_a_cap_error():
+    from clipping.aistory.steps import script as script_step
+
+    long = [_line("char_rouge", _words(10, "a")), _line("char_nude", _words(10, "b")),
+            _line("char_rouge", _words(4, "c")), _line("char_nude", _words(5, "d"))]
+    errors = _check_exchange(*long)
+    assert errors == ["$.lines[0-1]: 20 words in total, at most 17 (one 8 s shot)"]
+    item = prompts.parse_word_cap_error(errors[0])
+    assert (item["span"], item["cap"], item["index"], item["lo"]) == ((0, 1), 17, None, None)
+    _system, user = prompts.trim_lines_prompt(_pack(), scene="s02", reply=_e2_reply(*long), errors=errors,
+                                              names={}, plan=_exchange_plan())
+    assert ("- Lines 1–2 (one exchange): 20 words in total, at most 17 (one 8 s shot) -- rewrite these lines so they "
+            "total at most 17 words") in user
+    assert "because a line is over its word cap." in user
+    short = _check_exchange(*long[:1], _line("char_nude", _words(7, "b")), long[2])
+    assert "$.lines: 3 lines, this scene's plan holds 4: write every planned line, each exchange whole" in short
+    assert script_step.over_cap_errors(short) != short  # a structure problem rides along: no trim alone
+
+
+def test_e3v3_refuses_a_framing_part_under_its_floor_as_a_cap_error_and_lets_a_10s_line_run_to_22():
+    plan = _fixture_plan(OUTLINE[0])  # the hook: one 8 s shot, 13-15 words (the estimate pays 15)
+    kwargs = dict(ep=1, part=None, hook_scene=OUTLINE[0], cliffhanger_scene=OUTLINE[3], recap_scene=None,
+                  narrator_enabled=False, episode_defaults=dict(DEFAULTS, hook_style="text_overlay"),
+                  line_words=(5, 17), floor=5, single_place=True)
+    cliff = {"reveal": "Rouge arrache le capuchon.", "lines": [_line("char_rouge", _words(14, "c"))]}
+    reply = {"hook": {"lines": [_line("char_rouge", _words(6, "h"))], "on_screen_text": "Elle cache sa couleur"},
+             "cliffhanger": cliff, "teaser": "Demain, toute l'académie saura."}
+    errors = prompts.validate_e3_v3(reply, plans={"hook": plan}, **kwargs)
+    assert errors[0] == "$.hook.lines: 6 words in total, the plan asks for 13–15 (a 8 s hook)"
+    assert prompts.parse_word_cap_error(errors[0])["lo"] == 13
+    # A cliffhanger planned on a 10 s shot takes a 22-word line (the template's 17 no longer caps it).
+    ten = timing.scene_plan(CONFRONTATION, OUTLINE[3], lang="fr", native=True, narrator=False,
+                            speakers={"char_rouge": None}, tail_floor=timing.plan_tail_floor(CONFRONTATION),
+                            speech_lengths=(5, 10))
+    assert (ten["shots"][0]["clip_s"], ten["max_words"]) == (10, 19)
+    reply["hook"]["lines"] = [_line("char_rouge", _words(14, "h"))]
+    reply["cliffhanger"]["lines"] = [_line("char_rouge", _words(ten["max_words"], "c"))]
+    assert prompts.validate_e3_v3(reply, plans={"hook": plan, "cliffhanger": ten}, **kwargs) == []
+    assert schemas.TEMPLATE_LINE_WORDS_MAX == 22

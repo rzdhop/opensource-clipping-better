@@ -509,16 +509,32 @@ PLAN_MARGIN = 0.05
 # the scene has both a narrator and a character line.
 PLAN_NARRATOR_SHARE = 0.5
 # Speech lengths a native-speech clip is planned at when the caller names
-# none (``native_speech.SPEECH_LENGTHS``, Veo's 4/6/8 s; kept as numbers so
-# this module keeps its imports) and the seconds of a clip that are not
-# speech (``native_speech.SPEECH_OVERHEAD_S``).
-PLAN_SPEECH_LENGTHS = (4, 6, 8)
+# none (``native_speech.SPEECH_LENGTHS``: plan 27 stage 1's sold window on
+# Veo, 6/8 s -- 4 s dropped; kept as numbers so this module keeps its
+# imports) and the seconds of a clip that are not speech
+# (``native_speech.SPEECH_OVERHEAD_S``).
+PLAN_SPEECH_LENGTHS = (6, 8)
 PLAN_SPEECH_OVERHEAD_S = 0.7
 # Plan 24 stage 2 (D-2 amended): on a native-speech scene with a narrator, a
 # character line is planned first at this clip (snapped down to the link's
-# lengths) -- 6 s holds 12 words, room for the reason inside the line; the
-# midpoint split left it 4 s / 7 words, too tight for the format.
-PLAN_CHARACTER_CLIP_S = 6
+# lengths, stepped down while the slot cannot hold it beside the narrator).
+# Plan 27 stage 2: 8 s (17 words), the default character shot.
+PLAN_CHARACTER_CLIP_S = 8
+
+# Plan 27 stage 2 (the exchange): a native-speech shot carries an exchange of
+# 1-4 lines filling at least this share of its capacity -- [ceil(0.75 x
+# words(L)), words(L)] -- each line at least PLAN_LINE_MIN_WORDS words, about
+# PLAN_EXCHANGE_LINE_WORDS words a line (10 words: 2 lines, 12: 2, 17: 3,
+# 22: 4), at most PLAN_ONE_SPEAKER_LINES lines of one speaker in a shot.
+PLAN_FILL_SHARE = 0.75
+PLAN_LINE_MIN_WORDS = 4
+PLAN_EXCHANGE_LINE_WORDS = 6
+PLAN_EXCHANGE_LINES_MAX = 4
+PLAN_ONE_SPEAKER_LINES = 2
+# The fewest words between a shot's floor and its ceiling (a 5 s clip's 8-10).
+PLAN_EXCHANGE_PLAY_WORDS = 2
+# A narrator line's planned floor (``prompts.LINE_FLOOR_WORDS``): its silent clip is never short of words.
+PLAN_NARRATOR_MIN_WORDS = 3
 
 
 def seconds_per_word_v3(lang: str, *, provider: str = None, factor: float = None) -> float:
@@ -620,6 +636,80 @@ def _clip_capacity(clip_s: float) -> int:
     return max(0, math.floor((float(clip_s) - PLAN_SPEECH_OVERHEAD_S) * SPEECH_WPS_V3 + 1e-9))
 
 
+def _fill_floor(capacity: int) -> int:
+    """The fewest words a speaking shot of *capacity* words is planned at:
+    :data:`PLAN_FILL_SHARE` of it, rounded up (8 s: 13 of 17; plan 27 stage 2)."""
+    return math.ceil(capacity * PLAN_FILL_SHARE - 1e-9)
+
+
+def exchange_line_count(words_min: int, words_max: int, *, one_speaker: bool = False) -> int:
+    """How many lines an exchange of ``[words_min, words_max]`` words is
+    planned at (plan 27 stage 2): about :data:`PLAN_EXCHANGE_LINE_WORDS`
+    words a line, rounded half up (10 words: 2, 12: 2, 17: 3, 22: 4), within
+    1-:data:`PLAN_EXCHANGE_LINES_MAX`, at most :data:`PLAN_ONE_SPEAKER_LINES`
+    for *one_speaker*, and never more than leave each line
+    :data:`PLAN_LINE_MIN_WORDS` of the floor."""
+    n = math.floor(words_max / PLAN_EXCHANGE_LINE_WORDS + 0.5)
+    n = max(1, min(PLAN_EXCHANGE_LINES_MAX, n))
+    if one_speaker:
+        n = min(n, PLAN_ONE_SPEAKER_LINES)
+    return max(1, min(n, words_min // PLAN_LINE_MIN_WORDS))
+
+
+def split_exchange(words_min: int, words_max: int, n: int) -> list:
+    """The ``[(min_words, max_words), ...]`` of the *n* lines of one exchange
+    of ``[words_min, words_max]`` words (plan 27 stage 2): the floor split
+    evenly, the remainder on the last lines (the last line may be the
+    longest), each at least :data:`PLAN_LINE_MIN_WORDS`; a line's ceiling the
+    room the exchange's ceiling leaves it once the other lines have their
+    floors -- so each line has play while the exchange's own total is held
+    to ``words_max`` (``prompts``' shot check). Never a floor over its
+    ceiling."""
+    n = max(1, int(n))
+    base, extra = divmod(int(words_min), n)
+    mins = [min(int(words_max), max(PLAN_LINE_MIN_WORDS, base + (1 if k >= n - extra else 0))) for k in range(n)]
+    floors = sum(mins)
+    return [(low, max(low, int(words_max) - (floors - low))) for low in mins]
+
+
+def _exchange_shots(*, hi: float, lines_max: int, speech, pauses: dict, floor: float, lang: str) -> list:
+    """The speaking shots of a native-speech scene with no narrator (plan 27
+    stage 2): ``[[clip_s, words_min, words_max], ...]``. Each shot is the
+    length of *speech* that still fits what is left of the slot's high end
+    *hi* and plans the most words -- its capacity, at most what the Script
+    step's own estimate can still pay (:func:`words_for_seconds` of the slot
+    less every pause of *lines_max* lines and the tail floor, less
+    :data:`PLAN_MARGIN`: plan 24's rule, a reply inside its caps never runs
+    over its slot) -- the longer on a tie; its words ``[`` :func:`_fill_floor`
+    ``of its capacity, those words]``, kept only while they leave the writer
+    :data:`PLAN_EXCHANGE_PLAY_WORDS` of play (an 8 s clip the estimate pays
+    13 words of is no shot: 13-13); then the next, while lines are left.
+    When none fits, one shot: the longest the slot holds (never under the
+    shortest), its words what the estimate pays."""
+    silent = pauses["before_first_line"] + pauses["between_lines"] * (lines_max - 1) + floor
+    room = words_for_seconds(max(0.0, (hi - silent) * (1.0 - PLAN_MARGIN)), lang)
+    shots, clip_left = [], float(hi)
+    while len(shots) < lines_max:
+        options = []
+        for length in speech:
+            capacity = _clip_capacity(length)
+            words = min(capacity, room)
+            if length <= clip_left + 1e-9 and words - _fill_floor(capacity) >= PLAN_EXCHANGE_PLAY_WORDS:
+                options.append((words, length, _fill_floor(capacity)))
+        if not options:
+            break
+        words, length, low = max(options)
+        shots.append([int(length), low, words])
+        clip_left -= length
+        room -= words
+    if not shots:
+        length = _snap_down(hi, speech)
+        capacity = _clip_capacity(length)
+        cap = max(1, min(capacity, room))
+        shots = [[int(length), min(_fill_floor(capacity), cap), cap]]
+    return shots
+
+
 def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator_provider: str = None,
                speakers: dict = None, line_count_hint: int = None, narrator: bool = None,
                style_lock: dict = None, tail_floor: float = None, speech_lengths=PLAN_SPEECH_LENGTHS,
@@ -659,6 +749,20 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
     and the narrator takes the seconds left, its clip the longest that still
     fits the slot beside them.
 
+    Plan 27 stage 2 (the exchange): on *native* the plan also carries
+    ``"shots": [{"clip_s", "line_ids", "words_min", "words_max", "speaks"},
+    ...]`` and each line its ``min_words``. A scene whose planned speakers
+    are all characters (no narrator, no *line_count_hint*) groups its lines
+    into exchanges sized to the shot (:func:`_exchange_plan`): the longest
+    clips first, each holding ``[ceil(0.75 x words(L)), words(L)]`` words
+    over 1-4 lines in turn (a body scene up to four lines, any other its one
+    line); each line's ``clip_s`` is its shot's. With the narrator, each
+    line stays its own shot as above, a character line's floor 0.75 of its
+    clip's capacity, the narrator's :data:`PLAN_NARRATOR_MIN_WORDS`. The
+    plan's ``max_words`` is then its shots' words, its ``min_words`` at
+    least the lines' floors. Off native the plan is what it was, byte for
+    byte (no ``shots``, no ``min_words``).
+
     Pure; a line's cap is never below 1 word."""
     _check_language(lang)
     speakers = dict(speakers or {})
@@ -686,7 +790,16 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
         return narrator_provider if who == "narrator" else speakers.get(who)
 
     lines = []
-    if not native:
+    shots = None
+    body = scene["function"] in schemas.BODY_FUNCTIONS
+    if native and n_char and not n_narr and line_count_hint is None:
+        # Plan 27 stage 2: the characters' lines grouped into exchanges sized to the shot.
+        lines, shots = _exchange_plan(scene, planned, body=body, hi=hi, pauses=pauses, floor=floor, lang=lang,
+                                      speech=tuple(speech_lengths or PLAN_SPEECH_LENGTHS))
+        n = len(lines)
+        silent = pauses["before_first_line"] + pauses["between_lines"] * (n - 1) + floor
+        allowed = max(0.0, (hi - silent) * (1.0 - PLAN_MARGIN))
+    elif not native:
         for who, kind in zip(planned, kinds):
             seconds = narr_s if kind == "narrator" else char_s
             cap = max(1, words_for_seconds(seconds, lang, provider=provider_of(who)))
@@ -757,10 +870,59 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
                 cap = max(1, min(_clip_capacity(clip), words_for_seconds(seconds, lang)))
                 lines.append({"kind": kind, "speaker": who, "seconds": round(seconds, 3), "clip_s": int(clip),
                               "max_words": cap})
+        # Plan 27 stage 2: each line its own shot here (the narrator's silent
+        # clip, a narrated scene's one character line), with its floor.
+        shots = []
+        for k, line in enumerate(lines):
+            speaks = line["kind"] == "character"
+            low = _fill_floor(_clip_capacity(line["clip_s"])) if speaks else PLAN_NARRATOR_MIN_WORDS
+            line["min_words"] = min(low, line["max_words"])
+            shots.append({"clip_s": line["clip_s"], "line_ids": [schemas.line_id_for(scene["scene_id"], k)],
+                          "words_min": line["min_words"], "words_max": line["max_words"], "speaks": speaks})
 
-    total = sum(line["max_words"] for line in lines)
+    if shots is None:
+        total = sum(line["max_words"] for line in lines)
+        return {"slot_s": [lo, hi], "allowed_speech_s": round(allowed, 3), "lines": lines, "max_words": total,
+                "min_words": math.floor(0.5 * total + 1e-9)}
+    total = sum(shot["words_max"] for shot in shots)
+    floors = sum(line["min_words"] for line in lines)
     return {"slot_s": [lo, hi], "allowed_speech_s": round(allowed, 3), "lines": lines, "max_words": total,
-            "min_words": math.floor(0.5 * total + 1e-9)}
+            "min_words": min(total, max(math.floor(0.5 * total + 1e-9), floors)), "shots": shots}
+
+
+def _exchange_plan(scene: dict, planned: list, *, body: bool, hi: float, pauses: dict, floor: float, lang: str,
+                   speech) -> tuple:
+    """``(lines, shots)`` of a native-speech scene whose planned speakers are
+    all characters (plan 27 stage 2, :func:`scene_plan`): the shots
+    (:func:`_exchange_shots`; a body scene up to :data:`PLAN_EXCHANGE_LINES_MAX`
+    lines, any other scene its planned line count), each shot's lines
+    (:func:`exchange_line_count`; while the scene holds more lines than it
+    may, the shot with the most loses one, the later first -- so no shot
+    speaks one line where two could), its words split over them
+    (:func:`split_exchange`), the speakers alternating over the whole scene
+    between its first two characters (one character: its lines in turn).
+    A line's ``clip_s`` is its shot's, its ``seconds`` its share of the clip."""
+    voices = list(dict.fromkeys(planned))[:2]
+    lines_max = PLAN_EXCHANGE_LINES_MAX if body else len(planned)
+    specs = _exchange_shots(hi=hi, lines_max=lines_max, speech=speech, pauses=pauses, floor=floor, lang=lang)
+    counts = [exchange_line_count(low, high, one_speaker=len(voices) < 2) for _clip, low, high in specs]
+    while sum(counts) > lines_max:
+        most = max(range(len(counts)), key=lambda k: (counts[k], k))
+        counts[most] -= 1
+    lines, shots, k = [], [], 0
+    for (clip, low, high), count in zip(specs, counts):
+        ranges = split_exchange(low, high, count)
+        weight = sum(a + b for a, b in ranges) or 1
+        ids = []
+        for line_lo, line_hi in ranges:
+            lines.append({"kind": "character", "speaker": voices[k % len(voices)],
+                          "seconds": round(clip * (line_lo + line_hi) / weight, 3), "clip_s": int(clip),
+                          "max_words": int(line_hi), "min_words": int(line_lo)})
+            ids.append(schemas.line_id_for(scene["scene_id"], k))
+            k += 1
+        shots.append({"clip_s": int(clip), "line_ids": ids, "words_min": int(low), "words_max": int(high),
+                      "speaks": True})
+    return lines, shots
 
 
 def plan_narrator_share(script: dict, template: dict):
@@ -774,7 +936,15 @@ def plan_narrator_share(script: dict, template: dict):
         return None
     narrator = total = 0
     for scene in script.get("scenes") or ():
-        for line in (scene.get("line_plan") or {}).get("lines") or ():
+        plan = scene.get("line_plan") or {}
+        if plan.get("shots"):
+            # Plan 27 stage 2: an exchange's lines share their shot's words.
+            for shot in plan["shots"]:
+                total += int(shot["words_max"])
+                if not shot["speaks"]:
+                    narrator += int(shot["words_max"])
+            continue
+        for line in plan.get("lines") or ():
             total += int(line["max_words"])
             if line["kind"] == "narrator":
                 narrator += int(line["max_words"])
@@ -793,8 +963,11 @@ def plan_budget(plan: dict, *, line_lo: int = 1) -> dict:
     hi = int(plan["max_words"])
     largest = max(caps) if caps else hi
     smallest = min(caps) if caps else hi
+    # Plan 27 stage 2: a character line planned with a floor under the template's (an exchange's short line).
+    floors = [int(line["min_words"]) for line in plan["lines"] if line["kind"] == "character" and "min_words" in line]
+    low = min([int(line_lo), smallest] + floors)
     return {"words": [min(int(plan["min_words"]), hi), hi], "lines": [n, n],
-            "line_words": [min(int(line_lo), smallest), largest], "caps": caps}
+            "line_words": [low, largest], "caps": caps}
 
 
 # --------------------------------------------------------------- transitions

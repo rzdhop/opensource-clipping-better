@@ -2802,9 +2802,9 @@ EPISODE_TEMPLATE_SCHEMA = _document({
 })
 
 # The longest line one native-speech shot can speak (``native_speech.capacity``
-# of its longest sold length, 8 s at 2.4 words/s): a template's line_words
-# never asks for more.
-TEMPLATE_LINE_WORDS_MAX = 17
+# of its longest sold length): a template's line_words never asks for more.
+# Plan 27 stage 2: 22 (was 17) -- the 5-10 s window's 10 s shot, at 2.4 words/s.
+TEMPLATE_LINE_WORDS_MAX = 22
 
 
 def _range_pair_errors(errors, path, pair) -> None:
@@ -2857,7 +2857,7 @@ def episode_template_errors(doc) -> list:
         lo, hi = doc["line_words"]
         if lo < 1 or hi > TEMPLATE_LINE_WORDS_MAX:
             errors.append(f"$.line_words: [{lo}, {hi}] must lie within [1, {TEMPLATE_LINE_WORDS_MAX}] (one "
-                          "line, one shot of at most 8 s)")
+                          "line, one shot of at most 10 s)")
         if "episode_words" in doc and doc["episode_words"][1] < lo:
             errors.append(f"$.episode_words: {doc['episode_words']} cannot hold one line of line_words {lo}")
     if len(set(doc.get("narrator_slots") or ())) != len(doc.get("narrator_slots") or ()):
@@ -3053,6 +3053,20 @@ _EPISODE_SCRIPT_LINE_PLAN_LINE_SCHEMA = _document({
 }, optional={
     # A native-speech story's planned clip length for the line.
     "clip_s": {"type": "integer", "minimum": 1},
+    # Plan 27 stage 2: a native-speech line's planned floor (its share of its shot's).
+    "min_words": {"type": "integer", "minimum": 1},
+})
+
+# Plan 27 stage 2: one planned shot of a native-speech scene -- its clip, the
+# lines it speaks in order (one exchange; one line for the narrator's silent
+# clip), the words it is planned at and whether it is a speaking shot.
+_EPISODE_SCRIPT_LINE_PLAN_SHOT_SCHEMA = _document({
+    "clip_s": {"type": "integer", "minimum": 1},
+    "line_ids": {"type": "array", "items": {"type": "string", "pattern": LINE_ID_PATTERN}, "minItems": 1,
+                 "maxItems": 4},
+    "words_min": {"type": "integer", "minimum": 0},
+    "words_max": {"type": "integer", "minimum": 1},
+    "speaks": {"type": "boolean"},
 })
 
 _EPISODE_SCRIPT_LINE_PLAN_SCHEMA = _document({
@@ -3060,6 +3074,10 @@ _EPISODE_SCRIPT_LINE_PLAN_SCHEMA = _document({
     "lines": {"type": "array", "items": _EPISODE_SCRIPT_LINE_PLAN_LINE_SCHEMA, "maxItems": 4},
     "max_words": {"type": "integer", "minimum": 0},
     "min_words": {"type": "integer", "minimum": 0},
+}, optional={
+    # Plan 27 stage 2: a native-speech scene's shots (``timing.scene_plan``);
+    # absent on every plan stored before and on every TTS story's.
+    "shots": {"type": "array", "items": _EPISODE_SCRIPT_LINE_PLAN_SHOT_SCHEMA, "maxItems": 4},
 })
 
 _EPISODE_SCRIPT_SCENE_SCHEMA = _document({

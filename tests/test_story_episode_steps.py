@@ -959,8 +959,8 @@ def test_a_v3_reply_over_its_caps_is_retried_with_the_cap_named_and_the_inside_r
     assert not any("accepting a reply after a retry" in line for line in log)
     # The scene carries the plan it was written to, recomputed at call time.
     assert _scene(script, "s02")["line_plan"]["max_words"] < 44
-    # E3v3 is told each framing part's seconds and hard cap.
-    assert re.search(r"The hook lasts at most [\d.]+ s: at most \d+ words\.", llm.of("E3v3")[0]["user"])
+    # E3v3 is told each framing part's seconds and its range (plan 27 stage 2: a floor and a cap).
+    assert re.search(r"The hook lasts at most [\d.]+ s: between \d+ and \d+ words\.", llm.of("E3v3")[0]["user"])
     # The fill pass asks a v3 scene for words within its caps.
     assert "within its caps" in script_step.FILL_NOTE_V3 and "top of its word budget" not in script_step.FILL_NOTE_V3
 
@@ -2378,15 +2378,16 @@ def _narrated_e1v3(flags):
 
 
 def e2_v3_by_plan(call):
-    """What the plan holds, written inside its caps: the narrator alone (14 words) where the prompt says the
-    narrator carries the scene, else a narrator line (8) and one character line (6)."""
+    """What the plan holds, written inside its caps: the narrator alone (16 words) where the prompt says the
+    narrator carries the scene, else a narrator line (10) and one character line (6) -- plan 27 stage 1's
+    10-16 s body slot plans 22-30 words, half of them the floor."""
     tag, speakers = _v3_tag(call), _speakers(call)
     say = lambda who, n: {"speaker": who, "text": " ".join(f"{who[:2]}{k}{tag}" for k in range(n)),  # noqa: E731
                           "emotion": "tension", "delivery": "quiet"}
     if "no character line: the narrator carries it" in call["user"]:
-        lines = [say("narrator", 14)]
+        lines = [say("narrator", 16)]
     else:
-        lines = [say("narrator", 8), say(next(who for who in speakers if who != "narrator"), 6)]
+        lines = [say("narrator", 10), say(next(who for who in speakers if who != "narrator"), 6)]
     return {"lines": lines, "sfx_cues": [], "on_screen_text": None}
 
 
