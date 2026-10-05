@@ -1,48 +1,31 @@
-## CURRENT STATE — plan 26 (rich prompts on every link + working Copy) APPROVED; phase IMPLEMENT — stages 1–5, 7a–7c merged; 4c and the docs running; the deploy next (2026-10-05, local session)
+## CURRENT STATE — plan 26 (rich prompts on every link + Copy + species in a fruit world) CODE + DOCS COMPLETE and LIVE; close-out pending the human's Tier 2 (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `0b444c3` (stages 1–5 and 7a–7c merged and pushed; running: 4c on
-  feat/plan26-s4c (Sonnet: prop reference text, ART STYLE rules a late rung), docs on docs/plan26-docs (Sonnet)); the deployed code is still a07180c; clean tree (`FETCH_HEAD` untracked, left alone). Tier-1 baseline: CI green on
-  the deployed code a07180c (DEC-278; no local full run). Plan: `.claude/plans/ai-story/26-rich-handoff-prompts-plan.md`
-  (v3 approved; the approved text also at `~/.claude/plans/inherited-baking-lerdorf.md`). Live: a07180c unchanged.
-- **The design in one line (H1):** the master + scene template is prepended at the send layer (`assets.clip_request`,
-  `_Assets.make_image`, the four `refimages.*_image`) and in the brief (`shot_entry`, `_keyframe_entries`,
-  `_entity_entries`, `handoff`); every hash, `*_request_parts`, state function and stored prompt stays byte-identical,
-  so nothing made or uploaded turns stale (the human's answer). The full prompt is bounded only by the link's limit
-  (`prompt_budgets.link_words`, DEC-303 amends DEC-247); the core keeps its ceilings (hash basis). v2 stories only.
-- **Stages:** 1 Copy helper (http) → 2 `prompt_templates.py` + `link_words` (pure additions; 1 ∥ 2) → 3 clips at the
-  send layer + the handoff fields (riskiest) → 4a keyframes, 4b entities (the image-brief fixture re-recorded once) →
-  5 the Handoff screen → 6 docs + DEC-303 + A-169… + one deploy at 0 jobs (rm -sfv + rebuild) + the human's Gemini re-test.
-- **Regression contract at risk:** DEC-292 (brief formatting outside the hash), DEC-294/295, the goldens
-  `studio_prompts.json` and `before_d5.json` byte-identical, RC-M9 no-auth guards, RC-Q1 v1 byte-identical.
-- **Next action:** merge 4c and the docs → DEPLOY at 0 running jobs (health showed 0 running, 371 jobs): compile the
-  tree with the image's Python 3.11, `sudo -n docker compose rm -sfv backend && up -d --build backend`, health 200, the
-  bundle name changes, `GET …/e7412a3efcc6/episodes/1/handoff` has master_prompt + 10 keyframes made → the Dragon Fruit
-  repair (three PATCHes: Marie-Jeanne pear, Chloe pear, Sam avocado; face '<species> head, …', skin fruit; no storyboard
-  refresh) → VISION paragraph + CHECKPOINT close-out → the human's Tier 2 (Copy on the phone, sh11 on Gemini/Flow,
-  the Flow length check, the sh11 verdict re-asked). DEC-303 and A-169…A-175 are written. Follow-ups logged: the species classifier
-  (named_character on Rida/Victor), shots.prop_handles' broken prop names.
-- **Stage 7 added (the human: 'in a fruit world head must be fruits'):** 7a the `look.species` field + its readers
-  (Opus, worktree plan26-s7a, in parallel with stage 3 — disjoint files), 7b the K1/D2 species block, 7c the Cast tile
-  select + the Dragon Fruit repair (MJ pear, Chloe pear, Sam avocado; keyframes left made). See the plan file's Stage 7.
-- **Open questions:** none blocking (Q4 action style gets the master too, Q5 `prompt_override` sent as written, Q6 a
-  512-token window for local Wan: defaulted, to record as A-170…A-172).
-
-## CURRENT STATE — plan 26 (rich handoff prompts + working Copy) PLANNED, awaiting the human's Go (2026-10-05 ~16:30 UTC, local session)
-
-- **In-progress header:** phase = PLAN (approval pending). Checkpoint commit = main `891429b`, clean tree (`FETCH_HEAD`
-  untracked, left alone). Plan: `.claude/plans/ai-story/26-rich-handoff-prompts-plan.md` v2 (6 stages; stage 3 riskiest; every link, not only
-  the handoff; DEC-240's quality ceilings amended on the human's 'the longer the better'; made assets grandfathered).
-  Live: a07180c unchanged. Jobs: not checked this session (nothing deployed yet).
-- **The human's report:** the Handoff Copy buttons do nothing; the prompts lack the personas / universe / art style; a
-  Gemini render of e7412a3efcc6 sh11 came out photoreal with Rida as a plain man. Asked for: templates, a master prompt
-  reused at every generation, ≥ 500 words per handoff prompt.
-- **Root causes (EXPLORE, two agents):** (1) plain http → no clipboard API; the fallback only selects a textarea at the
-  bottom of the card, never `execCommand('copy')`, no toast. (2) the pasted clip prompt is the 200-word hashed builder
-  text + a closing; the style lock's rendering/rules/palette, the characters' looks, the world and the scene context are
-  not in it; the negative sits in a field Flow/Veo ignore.
-- **Next action:** on the Go → stage 1 (copy helper) and stage 2 (`brief.master_prompt`) in parallel worktrees (Sonnet),
-  then 3 → 4 → 5 → 6. Deploy at 0 jobs (rebuild for the dashboard + restart for Python).
-- **Open questions:** Q1–Q3 of the plan (non-blocking, defaulted).
+- **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this commit), clean tree
+  (`FETCH_HEAD` untracked, left alone). **Live:** d306415 deployed (bundle index-D4KzpUle.js), health 200, 371 jobs,
+  0 running. CI: green through 4a0f080; 0b444c3 (stage 4) and the later commits to read on `actions/runs?branch=main`.
+- **Shipped (DEC-303, A-169…A-175; the plan file `.claude/plans/ai-story/26-rich-handoff-prompts-plan.md`):** stages
+  1 Copy over http (lib/clipboard.js) · 2 prompt_templates + link_words · 3 clips at the send layer + handoff
+  master_prompt/fit/prompt_warning · 4a keyframes · 4b entities · 4c prop reference text + the style split · 5 the
+  Handoff Master prompt card, word counts, fit notes · 6 docs/AI_STORY.md · 7a look.species + its readers · 7b the K1/D2
+  species block · 7c the Cast tile "Species (head)" + the Dragon Fruit repair (MJ pear, Chloe pear, Sam avocado; named
+  casts kept; 10 keyframes made; the storyboard not refreshed).
+- **The human's Tier 2 (to record as A-169/A-171/A-174/A-175 verdicts):** (a) on the phone over http: Handoff → sh11
+  → Copy prompt shows "Copied" (A-169); (b) paste sh11 (1795 words) into Gemini/Flow: Rida with dragon-fruit skin and
+  curls, Marie-Jeanne a pear head, the fruit_drama rendering, the palette; if Flow truncates, bound the manual link to
+  630 with the fit ladder (A-171); (c) the Master prompt card copies (2350 words); (d) the sh11 keyframe verdict
+  re-asked on the Assets step (a vision call): the "pear instead of human" issue should clear (A-174); (e) one auto
+  shot on the API path shows the fit line in the job log and no made asset goes stale (A-170/A-172).
+- **Follow-ups logged (not done):** `shots.named_character` reads the descriptor's leading phrase — a species-first
+  descriptor turns a named cast into a creature cast and sweeps its name (the repair had to put the species after the
+  hair phrase); make the classifier read `look.species` first and keep the name. `shots.prop_handles` yields broken
+  prop names in the core ("the pulsing"). `platform_prompt` collapses the template to one paragraph. `_J2_SHEET_ISSUE`
+  compares no head (pinned at 1194 chars). A species cannot be cleared from the tile. At Veo's 630 the series line now
+  drops before motion/voice (4c). 230-word links get the core alone. Older stories' Rida/Victor could get `species` too
+  (their face already says the head: the render look would say it twice).
+- **Rules in force (unchanged):** worktrees off main; DEC-234 selections in both envs per stage; DEC-297 pin files;
+  deploy only at 0 running jobs after the 3.11 compile (`rm -sfv` + rebuild for the dashboard, `restart` for Python);
+  no full local suite (DEC-278); no edits to main's source while a job runs; money only on the human's go.
+- **Open questions:** none.
 
 ## CURRENT STATE — SESSION CLOSED 2026-10-05 ~14:15 UTC: plans 23 (follow-through), 24 (timing harness) and 25 (the handoff) shipped and live; the next session upgrades from here
 
