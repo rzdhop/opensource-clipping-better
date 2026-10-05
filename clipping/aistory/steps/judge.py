@@ -480,6 +480,13 @@ _BRIEF_OUTFIT_CHARS = 90
 _BRIEF_STAGING_CHARS = 60
 _TAG = re.compile(r"[@%#][a-z0-9_]+(?::[a-z][a-z0-9_]*)?")
 _IDENTITY_FIELDS = ("presentation", "build", "face", "hair", "skin_material")
+# Plan 26 stage 7a: a look that names its species (``look.species``) is
+# judged against its head, said first in its own words, inside the identity's
+# own cap (the head and the rest of who it is together stay within
+# _BRIEF_IDENTITY_CHARS, so the worst case above is unchanged); a skin line
+# that still says "human" is not said beside it (the sheet shows a fruit skin).
+_BRIEF_HEAD_CHARS = 90
+_HUMAN_WORD = re.compile(r"\bhuman\b", re.IGNORECASE)
 
 
 class KeyframeContext:
@@ -558,13 +565,22 @@ def _character_look(doc, wardrobe) -> str:
     -- its presentation, build, face, hair and skin -- then what it wears in
     this shot (*wardrobe*, the set ``shots.shot_wardrobe`` dresses it in),
     each capped; without one, the first words of its descriptor, as
-    before."""
+    before. A look that names its species (plan 26 stage 7a) is said with
+    its head first ("Head: pear (a whole fruit/vegetable head, the face
+    carved into it)") and without a skin line that says "human"."""
     look = doc.get("look")
     if not look or wardrobe is None:
         return _clipped(doc.get("descriptor"), _BRIEF_LOOK_CHARS)
-    who = ", ".join(" ".join(str(look[key]).split()).rstrip(".") for key in _IDENTITY_FIELDS if look.get(key))
-    return (f"{_clipped(who, _BRIEF_IDENTITY_CHARS)}; wearing "
-            f"{_clipped(str(wardrobe['items']).rstrip('.'), _BRIEF_OUTFIT_CHARS)}")
+    species = shots.look_species(look)
+    fields = [key for key in _IDENTITY_FIELDS
+              if not (species and key == "skin_material" and _HUMAN_WORD.search(str(look.get(key) or "")))]
+    who = ", ".join(" ".join(str(look[key]).split()).rstrip(".") for key in fields if look.get(key))
+    outfit = _clipped(str(wardrobe['items']).rstrip('.'), _BRIEF_OUTFIT_CHARS)
+    if not species:
+        return f"{_clipped(who, _BRIEF_IDENTITY_CHARS)}; wearing {outfit}"
+    head = _clipped(f"Head: {species} (a whole fruit/vegetable head, the face carved into it)", _BRIEF_HEAD_CHARS)
+    who = _clipped(who, _BRIEF_IDENTITY_CHARS - len(head) - 2)
+    return f"{head}; {who}; wearing {outfit}" if who else f"{head}; wearing {outfit}"
 
 
 def keyframe_brief(ec, shot, *, ledger=None) -> str:

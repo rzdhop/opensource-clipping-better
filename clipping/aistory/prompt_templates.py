@@ -87,6 +87,11 @@ _HEAD_PHRASE = re.compile(r"([a-z][a-z' -]*?)\s+head\b", re.IGNORECASE)
 _HUMAN_WORD = re.compile(r"\bhuman\b(?![-\w])", re.IGNORECASE)
 _HUMAN_TERMS = ("human head", "human face")
 _FRUIT_WORDS = re.compile(r"\b(fruit|vegetable)s?\b", re.IGNORECASE)
+# What a free-text head phrase says after the thing that is the head ("kiwi
+# fruit serving as a human-scale" -> "kiwi fruit"): never spliced into the
+# species sentence (plan 26 stage 7a).
+_HEAD_ROLE = re.compile(r"\s+(?:(?:serving|used|acting|working)\s+as|as)\b.*$", re.IGNORECASE)
+_HEAD_ARTICLE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
 
 
 def _rank(key):
@@ -200,18 +205,33 @@ def _prop_phrase(handle, doc) -> str:
 
 # ------------------------------------------------------------------ species
 
+def _head_thing(phrase) -> str:
+    """The thing a free-text "<phrase> head" says the head is, whole words
+    only: what comes before a role ("dark brown ripe kiwi fruit serving as a
+    human-scale" -> "dark brown ripe kiwi fruit"), without its article; ''
+    when nothing is left or it says human ("human-scale" included)."""
+    thing = _HEAD_ARTICLE.sub("", _HEAD_ROLE.sub("", _ws(phrase))).strip(" ,;:-")
+    return "" if not thing or re.search(r"human", thing, re.IGNORECASE) else thing
+
+
 def _species(doc, style_lock):
     """``(human, sentence)``: whether character *doc* is a human, and what it
     is, in a sentence. A creature is said by the head its look names ("dragon
     fruit head") or the universe species its look says; a cast whose
     descriptor names a species (not ``shots.named_character``) by its
     descriptor; a named cast with neither, or whose look says human, is a
-    human."""
+    human. A look that names its species (plan 26 stage 7a: ``look.species``,
+    ``shots.look_species``) is read first and is never a human, whatever
+    else the look says."""
     look = doc.get("look") or {}
+    named_species = shots.look_species(look)
+    if named_species:
+        return False, (f"is an anthropomorphic character whose head is a whole {named_species}, the face carved "
+                       "into its surface, never a human head")
     texts = [look.get(key) for key in ("face", "hair", "skin_material")] + [doc.get("descriptor")]
     texts = [_ws(text) for text in texts if _ws(text)]
-    heads = [match.group(1).strip() for text in texts for match in _HEAD_PHRASE.finditer(text)]
-    heads = [head for head in heads if not _HUMAN_WORD.search(head)]
+    heads = [_head_thing(match.group(1)) for text in texts for match in _HEAD_PHRASE.finditer(text)]
+    heads = [head for head in heads if head]
     universe = style_lock.get("universe") or {}
     species = next((word for word in universe.get("species") or () for text in texts
                     if re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE)), None)

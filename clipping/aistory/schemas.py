@@ -1641,6 +1641,12 @@ LOOK_PRESENTATION_MAX_WORDS = 8
 # (shots._bearing) and sheet (shots.visual_cues) -- a few words a model
 # keeps from shot to shot.
 LOOK_BEARING_MAX_WORDS = 10
+# Optional (plan 26 stage 7a): the fruit or vegetable the character's head is
+# ("pear", "dragon fruit") -- in a fruit world every head is one. Said by
+# every reader of the look (shots.render_look / named_look / visual_cues,
+# prompt_templates._species, steps/judge._character_look); a look without it
+# reads exactly as before.
+LOOK_SPECIES_MAX_WORDS = 4
 
 _LOOK_TEXT_FIELDS = (
     ("build", LOOK_BUILD_MAX_WORDS),
@@ -1675,6 +1681,8 @@ CHARACTER_LOOK_SCHEMA = _document({
     "presentation": _NON_EMPTY_STRING,
     # Posture and bearing (stage F2); optional for the same reason.
     "bearing": _NON_EMPTY_STRING,
+    # The head's fruit or vegetable (plan 26 stage 7a); optional for the same reason.
+    "species": _NON_EMPTY_STRING,
 })
 
 DOSSIER_BACKSTORY_MAX_WORDS = 60
@@ -1765,6 +1773,8 @@ def character_look_errors(look, path="$.look") -> list:
         _check_text(errors, f"{path}.presentation", look["presentation"], max_words=LOOK_PRESENTATION_MAX_WORDS)
     if "bearing" in look:
         _check_text(errors, f"{path}.bearing", look["bearing"], max_words=LOOK_BEARING_MAX_WORDS)
+    if "species" in look:
+        _check_text(errors, f"{path}.species", look["species"], max_words=LOOK_SPECIES_MAX_WORDS)
     return errors
 
 

@@ -447,11 +447,35 @@ def _lower_first(text) -> str:
     return text
 
 
+def look_species(look) -> str:
+    """The fruit or vegetable a character's head is (plan 26 stage 7a:
+    ``look.species``, "pear", "dragon fruit"), as written, its spaces
+    collapsed; '' when the look does not say one (every reader then reads
+    exactly as before)."""
+    if not isinstance(look, dict) or not isinstance(look.get("species"), str):
+        return ""
+    return _strip_period(_collapse_ws(look["species"]))
+
+
+def _a_or_an(text) -> str:
+    return "an" if text[:1].lower() in "aeiou" else "a"
+
+
+def species_head_sentence(species) -> str:
+    """What a sheet says once of a character with a species (plan 26 stage
+    7a): "The head is a whole pear, the face carved into it, never a human
+    head." '' without one."""
+    return (prompting.as_sentence(f"The head is a whole {species}, the face carved into it, never a human head")
+            if species else "")
+
+
 def render_look(doc, *, wardrobe_set=None, others=(), max_words=LOOK_MAX_WORDS) -> str:
     """A character's look in at most *max_words* words (default
-    :data:`LOOK_MAX_WORDS`; a tighter cap ends on a whole part): its
-    presentation first when the look has one (A3: apparent age and gender --
-    never dropped under budget), then build, its height against *others*
+    :data:`LOOK_MAX_WORDS`; a tighter cap ends on a whole part): its head
+    first when the look names its species (plan 26 stage 7a: "pear head" --
+    never dropped under budget), its presentation next when the look has
+    one (A3: apparent age and gender -- never dropped under budget), then
+    build, its height against *others*
     (other character documents in the same frame, named by their handle),
     silhouette, face, hair, skin or material, "wearing" the wardrobe set's
     items (*wardrobe_set* by id, default the first), "colours" the palette,
@@ -470,7 +494,9 @@ def render_look(doc, *, wardrobe_set=None, others=(), max_words=LOOK_MAX_WORDS) 
 
     extra = [_lower_first(_strip_period(item)) for item in doc.get("signature_items") or ()
              if not _already_worn(item, worn)]
+    species = look_species(look)
     parts = {
+        "species": f"{species} head" if species else "",
         "presentation": _strip_period(look["presentation"]) if look.get("presentation") else "",
         "build": _strip_period(look["build"]),
         "height": _height_part(doc, others),
@@ -689,9 +715,18 @@ def named_look(look) -> str:
     """Who a named character is in a few words (plan 25 stage 0): its
     presentation (:func:`_anchor_presentation`) and "in " + its first outfit
     item (:func:`_anchor_outfit`) -- "a woman in her thirties in a charcoal
-    blazer" --, each left out when the look does not say it; ''."""
+    blazer" --, each left out when the look does not say it; ''.
+
+    A look that names its species (plan 26 stage 7a, :func:`look_species`)
+    says the head after the presentation: "a woman in her thirties with a
+    pear head, in a charcoal blazer"."""
     look = look if isinstance(look, dict) else {}
     outfit = _anchor_outfit(look) if look else ""
+    species = look_species(look)
+    if species:
+        who = " ".join(part for part in (_anchor_presentation(look.get("presentation")),
+                                         f"with {_a_or_an(species)} {species} head") if part)
+        return ", ".join(part for part in (who, f"in {outfit}" if outfit else "") if part)
     return " ".join(part for part in (_anchor_presentation(look.get("presentation")),
                                       f"in {outfit}" if outfit else "") if part)
 
@@ -708,7 +743,11 @@ def character_anchor(doc, handle) -> str:
     A named character (:func:`named_character`, its *handle* its name: plan
     25 stage 0) is "{Name}, {named_look}" -- "Marie-Jeanne, a woman in her
     thirties in a charcoal blazer" --, no colour or species word; its name
-    alone when its look says neither."""
+    alone when its look says neither. A look that names its species (plan 26
+    stage 7a) says the head: "Marie-Jeanne, a woman in her thirties with a
+    pear head, in a charcoal blazer" (:func:`named_look`); an unnamed cast
+    whose handle does not say it already, "with a pear head" after
+    "character"."""
     if isinstance(doc, dict) and handle and handle == _collapse_ws(str(doc.get("name") or "")) and (
             named_character(doc)):
         described = named_look(doc.get("look") or {})
@@ -720,6 +759,9 @@ def character_anchor(doc, handle) -> str:
     parts = [_anchor_colour(look.get("palette"), noun), _anchor_gender(look.get("presentation")), noun,
              "" if noun.lower().endswith("character") else "character"]
     head = "the " + " ".join(part for part in parts if part)
+    species = look_species(look)
+    if species and species.lower() not in noun.lower():
+        head = f"{head} with {_a_or_an(species)} {species} head"
     outfit = _anchor_outfit(look)
     return f"{head} in {outfit}" if outfit else head
 
@@ -1476,7 +1518,9 @@ def visual_cues(doc) -> str:
     :data:`_MARK_WORDS` -- that its look and signature items do not say
     already (:func:`_already_worn`), then its ``look.bearing``: "Distinctive:
     a deep scar through the left eyebrow. Bearing: stands rigidly straight,
-    chin up." '' without a look (the legacy sheets), or with neither."""
+    chin up." '' without a look (the legacy sheets), or with neither. A look
+    that names its species (plan 26 stage 7a) says the head first, once
+    (:func:`species_head_sentence`)."""
     look = doc.get("look")
     if not look:
         return ""
@@ -1491,6 +1535,9 @@ def visual_cues(doc) -> str:
             continue
         marks.append(_lower_first(clause))
     sentences = []
+    head = species_head_sentence(look_species(look))
+    if head:
+        sentences.append(head)
     if marks:
         sentences.append(prompting.as_sentence("Distinctive: " + _cut(", ".join(marks), _MARKS_MAX_WORDS)))
     bearing = (look.get("bearing") or "").strip()
