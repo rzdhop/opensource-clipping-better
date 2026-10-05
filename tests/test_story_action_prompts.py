@@ -616,3 +616,67 @@ def test_the_wizard_and_the_card_offer_the_select_and_send_nothing_for_the_defau
     # the card shows the server's warning as a toast
     assert "saved.warning" in card and "toast.info(" in card
     assert wizard.count("PROMPT_STYLES") >= 2 and card.count("PROMPT_STYLES") >= 2
+
+
+# ================================================================ a human cast is named (plan 25 stage 0, D-5)
+
+def _human_speech():
+    """``(ec, shot, script)`` of one speaking shot of a human cast shaped like e7412a3efcc6's: Marie-Jeanne
+    speaks to Rida, both in frame (their stored ``video_action`` resolved with the names)."""
+    import types
+
+    import test_story_shots as tss
+
+    cast = {cid: dict(tss.HUMANS[cid], voice_hints=dict(nsc.HINTS)) for cid in ("char_marie_jeanne", "char_rida")}
+    place = {"place_id": "place_bullpen", "name": "Bullpen", "descriptor": "A glass-walled open-plan bullpen",
+             "look": {"lighting": {"day": "cold office light"}}}
+    script = {"scenes": [{"scene_id": "s01", "place_id": "place_bullpen", "time_variant": "day", "emotion": "tension",
+                          "function": "setup", "sfx_cues": [],
+                          "lines": [{"line_id": "l1", "speaker": "char_marie_jeanne", "text": "Tu as signé ?",
+                                     "emotion": "angry"}]}]}
+    shot = {"shot_id": "sh01", "scene_id": "s01", "lines": ["l1"], "speaks": True, "camera_motion": "push_in",
+            "subject_tags": ["@char_marie_jeanne", "@char_rida", "#place_bullpen:day"],
+            "action": "@char_marie_jeanne grips the pen tightly while speaking",
+            "clip_motion": "@char_marie_jeanne lifts the pen and speaks; @char_rida turns his head sharply",
+            "video_action": "Marie-Jeanne grips the pen tightly while speaking"}
+    ec = types.SimpleNamespace(entities={"characters": cast, "places": {"place_bullpen": place}, "props": {}},
+                               language="fr", style_lock=defaults_style(), story={})
+    return ec, shot, script
+
+
+def defaults_style():
+    from clipping.aistory import templates
+
+    return templates.load_style("fruit_drama")
+
+
+def test_a_human_cast_s_speech_prompts_name_the_speaker_and_the_listener():
+    from clipping.aistory.steps import clips
+
+    ec, shot, script = _human_speech()
+    action = prompting.speech_clip_prompt_action(**clips.action_inputs(ec, shot, script))
+    studio = prompting.speech_clip_prompt(ec.style_lock, **clips.speech_prompt_inputs(ec, shot, script))
+    for prompt in (action, studio):
+        assert "looks at Rida and says in French" in prompt
+        assert "Rida listens without speaking" in prompt
+        assert "Audio: only Marie-Jeanne's voice" in prompt
+        assert "leather loafers" not in prompt and "the and says" not in prompt and "at the and" not in prompt
+        # the build dump is never said after the name
+        assert "Athletic" not in prompt and "toned frame" not in prompt
+    # the action style: the speaker's anchor once, then the name; never the colour/species words
+    assert action.count("Marie-Jeanne, a woman in her thirties in a charcoal blazer") == 1
+    assert "female" not in action and "character in" not in action
+    assert "Rida, a man in late twenties in a torn black hoodie turns his head sharply" in action
+    # studio: the name, then the short look, then the action without the name again
+    assert ("Slow push-in toward the subject. Marie-Jeanne, a woman in her thirties in a charcoal blazer, grips the "
+            "pen tightly while speaking, looks at Rida") in studio
+
+
+def test_a_species_cast_s_anchor_is_unchanged_beside_a_named_human():
+    import test_story_shots as tss
+
+    strawberry = dict(STRAWBERRY, name="Fraisette")
+    cast = {"char_fraise": strawberry, "char_sam": tss.HUMANS["char_sam"]}
+    anchors = shots.character_anchors(cast)
+    assert anchors["char_fraise"] == "the green-yellow female plump strawberry character in a dirty burlap dress"
+    assert anchors["char_sam"] == "Sam, a man in late twenties in an oversized charcoal hoodie"

@@ -1696,3 +1696,100 @@ def test_v2_storyboard_gives_every_shot_but_a_scene_s_first_the_continuity_refer
     legacy = shots.refresh_prompts(doc, script, entities=ENTITIES, style_lock=FRUIT_DRAMA,
                                    consistency_mode="references")
     assert not any(shots.CONTINUITY_REFERENCE in shot["reference_images"] for shot in legacy["shots"])
+
+
+# ======================================================== human casts are named (plan 25 stage 0, D-5)
+#
+# Shaped like e7412a3efcc6's cast (plan 23 D2's human universe): no species
+# noun in the descriptor, a look with wardrobe sets and a presentation. The
+# descriptor's noun phrase was a wardrobe item ("the leather loafers"), a body
+# word ("the slender frame in ..."), a preposition ("the in a tailored navy
+# suit"), a verb ("the wears oversized hoodies") or nothing at all ("the").
+
+def _human(cid, name, descriptor, presentation, items, palette=("charcoal", "ivory")):
+    doc = _char(cid, descriptor, ["Vintage mechanical watch"], name=name)
+    doc["look"] = {"build": "Athletic, toned frame, narrow waist, broad shoulders",
+                   "silhouette": "Sharp tailored lines", "face": "Sharp cheekbones", "hair": "Light-chestnut curls",
+                   "skin_material": "Fair human skin", "height_cm": 170, "palette": list(palette),
+                   "wardrobe_sets": [{"id": "daily", "context": "Office daily wear", "items": items}],
+                   "season_change": None, "presentation": presentation,
+                   "bearing": "Stands very straight, chin up"}
+    return doc
+
+
+HUMANS = {
+    "char_marie_jeanne": _human(
+        "char_marie_jeanne", "Marie-Jeanne",
+        "Light-chestnut curly hair, vivid green eyes, sharp cheekbones, fair skin, athletic build, tailored "
+        "charcoal blazer, silk ivory blouse, slim black trousers, leather loafers",
+        "Woman in her thirties", "Charcoal blazer, ivory silk blouse, black trousers, leather loafers, gold pen"),
+    "char_rida": _human(
+        "char_rida", "Rida",
+        "Curly dragon-fruit hair, black eyes, sharp jawline, fair skin, athletic build, wearing a torn black hoodie "
+        "and jeans with a backpack slung over one shoulder.",
+        "man in late twenties", "torn black hoodie, faded jeans, fingerless circuit gloves", ("magenta", "green")),
+    "char_chloe": _human(
+        "char_chloe", "Chloe",
+        "Sleek silver bob, piercing hazel eyes, porcelain skin, slender frame in crisp ivory blazer with structured "
+        "shoulders, tailored charcoal trousers", "Woman in early thirties", "Crisp ivory blazer, charcoal trousers"),
+    "char_victor": _human(
+        "char_victor", "Victor",
+        "Shiny purple eggplant head, deep-set dark eyes, sharp features, tall, in a tailored navy suit with a gold "
+        "watch", "man in his forties, authoritative presence", "tailored navy suit, crisp white shirt"),
+    "char_sam": _human(
+        "char_sam", "Sam",
+        "Messy dark curls, olive skin, sharp brown eyes behind rectangular glasses, lean frame, perpetual "
+        "five-o'clock shadow, wears oversized hoodies", "Man in late twenties",
+        "Oversized charcoal hoodie, black joggers, worn sneakers"),
+}
+
+
+def test_a_human_cast_without_a_species_noun_is_called_by_its_names():
+    assert shots.character_handles(HUMANS) == {
+        "char_marie_jeanne": "Marie-Jeanne", "char_rida": "Rida", "char_chloe": "Chloe", "char_victor": "Victor",
+        "char_sam": "Sam"}
+
+
+def test_a_named_character_s_anchor_is_its_name_presentation_and_first_outfit_item():
+    anchors = shots.character_anchors(HUMANS)
+    assert anchors == {
+        "char_marie_jeanne": "Marie-Jeanne, a woman in her thirties in a charcoal blazer",
+        "char_rida": "Rida, a man in late twenties in a torn black hoodie",
+        "char_chloe": "Chloe, a woman in early thirties in a crisp ivory blazer",
+        "char_victor": "Victor, a man in his forties in a tailored navy suit",
+        "char_sam": "Sam, a man in late twenties in an oversized charcoal hoodie"}
+    # no colour or species word: the palette is never said for a named character
+    assert not any(word in anchors["char_rida"] for word in ("magenta", "male", "character"))
+    # what the look does not say is left out
+    bare = copy.deepcopy(HUMANS["char_rida"])
+    bare["look"].pop("presentation")
+    bare["look"]["wardrobe_sets"] = []
+    assert shots.character_anchors({"char_rida": bare}) == {"char_rida": "Rida"}
+
+
+def test_a_variant_on_a_named_character_says_its_delta_after_the_anchor():
+    cast = copy.deepcopy(HUMANS)
+    cast["char_marie_jeanne"]["variants"] = [{"variant_id": "rain", "label": "Soaked",
+                                              "delta_text": "soaked to the skin, hair plastered down."}]
+    anchors = shots.worn_anchors(cast, {"char_marie_jeanne": "rain"})
+    assert anchors["char_marie_jeanne"] == (
+        "Marie-Jeanne, a woman in her thirties in a charcoal blazer (now soaked to the skin, hair plastered down)")
+    assert anchors["char_rida"] == "Rida, a man in late twenties in a torn black hoodie"
+
+
+def test_a_species_cast_keeps_its_handles_and_a_mixed_cast_names_only_its_humans():
+    # the fruit fixture: byte for byte what it was
+    assert shots.character_handles(CHARACTERS) == {CHAR_KIWILO: "the anthropomorphic kiwi",
+                                                   CHAR_MANGELLA: "the anthropomorphic mango",
+                                                   CHAR_BROCCOLIA: "the anthropomorphic broccoli"}
+    mixed = {CHAR_KIWILO: CHARACTERS[CHAR_KIWILO], "char_sam": HUMANS["char_sam"]}
+    assert shots.character_handles(mixed) == {CHAR_KIWILO: "the anthropomorphic kiwi", "char_sam": "Sam"}
+
+
+def test_a_named_character_s_name_survives_the_name_sweep_of_a_resolved_action():
+    entities = {"characters": HUMANS, "places": PLACES, "props": PROPS}
+    plan = {"framing": "medium_two_shot", "subjects": ["@char_marie_jeanne", "@char_rida", f"#{PLACE_PARLOIR}:day"],
+            "action": "@char_marie_jeanne slams the pen down while @char_rida flinches"}
+    resolved = shots.resolve_shot(plan, scene=SCRIPT["scenes"][0], entities=entities, style_lock=FRUIT_DRAMA,
+                                  consistency_mode="references")
+    assert resolved["video_action"] == "Marie-Jeanne slams the pen down while Rida flinches"

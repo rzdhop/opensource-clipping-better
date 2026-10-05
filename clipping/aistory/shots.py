@@ -157,15 +157,85 @@ def _handle_from_descriptor(descriptor: str) -> str:
     return f"the {phrase}".strip()
 
 
+# Plan 25 stage 0 (D-5): a character whose descriptor gives no species noun --
+# a human cast of plan 23 D2's universes ("..., athletic build, tailored
+# charcoal blazer, leather loafers") -- is called by its proper name. Its
+# leading phrase is then empty, opens on one of these words ("in a tailored
+# navy suit", "wears oversized hoodies"), or its head noun (the last word
+# before its first preposition, :data:`_HEAD_CUT`) is a body word ("slender
+# frame") or a garment (the last word of an item of its own wardrobe, or one
+# of :data:`_GARMENT_NOUNS`).
+_NOT_A_NOUN_OPENERS = frozenset({"a", "an", "the", "in", "on", "at", "of", "by", "for", "from", "with", "and", "or",
+                                 "who", "that", "is", "are", "has", "have", "having", "wears", "wear", "wearing",
+                                 "dressed", "sporting", "carrying", "holding", "plus"})
+_BODY_NOUNS = frozenset({"frame", "build", "body", "physique", "silhouette", "stature", "posture", "skin",
+                         "complexion", "eyes", "hair", "curls", "bob", "face", "jawline", "cheekbones", "shoulders",
+                         "legs", "features", "stubble", "beard", "glasses", "shadow"})
+_GARMENT_NOUNS = frozenset({"blazer", "blazers", "suit", "suits", "dress", "dresses", "hoodie", "hoodies", "jacket",
+                            "jackets", "coat", "coats", "shirt", "shirts", "blouse", "blouses", "trousers", "jeans",
+                            "loafers", "shoes", "boots", "sneakers", "heels", "gown", "skirt", "sweater", "sweaters",
+                            "tee", "uniform", "tuxedo", "joggers", "sweatpants", "pants", "slacks", "cardigan",
+                            "overalls", "scrubs"})
+
+
+# The head noun of a leading phrase is the last word before its first preposition
+# ("fuzzy kiwi fruit head on a body" -> "head"; "slender frame in crisp ivory blazer" -> "frame").
+_HEAD_CUT = re.compile(r"\s+(?:in|on|at|of|under|over|behind|beside|from|inside|atop|across|near|into)\s+")
+
+
+def _garment_nouns(look) -> set:
+    """The last word of every item of every wardrobe set of *look*, lower case."""
+    nouns = set()
+    sets = look.get("wardrobe_sets") if isinstance(look, dict) else None
+    for wardrobe_set in sets or ():
+        if not isinstance(wardrobe_set, dict):
+            continue
+        for item in str(wardrobe_set.get("items") or "").split(","):
+            words = re.findall(r"[a-z][a-z'-]*", item.lower())
+            if words:
+                nouns.add(words[-1])
+    return nouns
+
+
+def _species_phrase(phrase, look) -> bool:
+    """Whether *phrase* (:func:`_leading_phrase` of a descriptor) names a
+    species -- a noun a character can be called by ("anthropomorphic
+    kiwi") -- rather than nothing, a preposition or verb, a body word or a
+    garment."""
+    words = phrase.lower().split()
+    if not words or words[0] in _NOT_A_NOUN_OPENERS:
+        return False
+    head = _HEAD_CUT.split(phrase.lower(), maxsplit=1)[0]
+    nouns = re.findall(r"[a-z][a-z'-]*", head)
+    if not nouns:
+        return False
+    noun = nouns[-1]
+    return not (noun in _BODY_NOUNS or noun in _GARMENT_NOUNS or noun in _garment_nouns(look))
+
+
+def named_character(doc) -> bool:
+    """Whether character *doc* is called by its proper name in every prompt
+    (plan 25 stage 0, D-5): it has a name, and its descriptor's leading
+    phrase names no species (:func:`_species_phrase`). A creature or fruit
+    cast never is: its handle stays the descriptor's noun phrase."""
+    if not isinstance(doc, dict) or not _collapse_ws(str(doc.get("name") or "")):
+        return False
+    return not _species_phrase(_leading_phrase(str(doc.get("descriptor") or "")), doc.get("look"))
+
+
 def character_handles(characters: dict) -> dict:
     """``{char_id: handle}``: a short English handle per character, from the
-    leading noun phrase of its own descriptor (never its name -- spec 2.3).
+    leading noun phrase of its own descriptor (never its name -- spec 2.3),
+    except a character whose descriptor names no species
+    (:func:`named_character`, plan 25 stage 0): its proper name.
     Two characters whose base handle collides both get
-    ``" wearing " + their first signature item`` appended; if that still
-    collides, ``" (n)"`` in cast order (the order *characters* iterates).
-    Deterministic."""
+    ``" wearing " + their first signature item`` appended (two named ones
+    do not); if that still collides, ``" (n)"`` in cast order (the order
+    *characters* iterates). Deterministic."""
     order = list(characters.keys())
-    base = {cid: _handle_from_descriptor(characters[cid]["descriptor"]) for cid in order}
+    named = {cid for cid in order if named_character(characters[cid])}
+    base = {cid: _collapse_ws(characters[cid]["name"]) if cid in named
+            else _handle_from_descriptor(characters[cid]["descriptor"]) for cid in order}
 
     counts = {}
     for cid in order:
@@ -173,7 +243,7 @@ def character_handles(characters: dict) -> dict:
 
     handles = dict(base)
     for cid in order:
-        if counts[base[cid]] > 1:
+        if counts[base[cid]] > 1 and cid not in named:
             items = characters[cid].get("signature_items") or []
             first_item = items[0] if items else ""
             handles[cid] = _collapse_ws(f"{base[cid]} wearing {first_item}")
@@ -489,11 +559,16 @@ def with_variants(characters, variants) -> dict:
 
 def speech_look(doc, *, max_words) -> str:
     """A speaking clip's look of character *doc* (plan 22's speech prompt,
-    at most *max_words*): :func:`render_look`, or -- a variant view -- the
-    variant's delta ("now ..."), which the identity image cannot say: the
+    at most *max_words*): :func:`render_look` -- a named character
+    (:func:`named_character`): :func:`named_look` --, or -- a variant view --
+    the variant's delta ("now ..."), which the identity image cannot say: the
     keyframe already shows the rest."""
     variant = doc.get(VARIANT_KEY)
     if not variant:
+        if named_character(doc):
+            # Plan 25 stage 0: after a name, who the character is in a few words, never the build dump.
+            text = named_look(doc.get("look") or {})
+            return prompting.fit_words(text, max_words) or " ".join(text.split()[:max_words]).rstrip(",;")
         return render_look(doc, max_words=max_words)
     text = f"now {_strip_period(_collapse_ws(variant['delta_text']))}"
     return prompting.fit_words(text, max_words) or " ".join(text.split()[:max_words]).rstrip(",;")
@@ -586,6 +661,41 @@ def _anchor_outfit(look) -> str:
     return _lower_first(text) if plural else f"{'an' if text[0].lower() in 'aeiou' else 'a'} {_lower_first(text)}"
 
 
+_PRESENTATION_MAX_WORDS = 6
+
+
+def _anchor_presentation(presentation) -> str:
+    """A look's presentation as said after a name: its first clause, lower
+    case, with an article ("Woman in her thirties" -> "a woman in her
+    thirties"; "man in his forties, authoritative presence" -> "a man in his
+    forties"), at most :data:`_PRESENTATION_MAX_WORDS` words after it; ''."""
+    text = _collapse_ws(re.split(r"[,;.(]", str(presentation or ""), maxsplit=1)[0])
+    words = text.split()
+    if not words:
+        return ""
+    if words[0].lower() in ("a", "an", "the"):
+        article, words = words[0].lower(), words[1:]
+    else:
+        article = ""
+    words = words[:_PRESENTATION_MAX_WORDS]
+    if not words:
+        return ""
+    body = _lower_first(" ".join(words))
+    article = article or ("an" if body[0].lower() in "aeiou" else "a")
+    return f"{article} {body}"
+
+
+def named_look(look) -> str:
+    """Who a named character is in a few words (plan 25 stage 0): its
+    presentation (:func:`_anchor_presentation`) and "in " + its first outfit
+    item (:func:`_anchor_outfit`) -- "a woman in her thirties in a charcoal
+    blazer" --, each left out when the look does not say it; ''."""
+    look = look if isinstance(look, dict) else {}
+    outfit = _anchor_outfit(look) if look else ""
+    return " ".join(part for part in (_anchor_presentation(look.get("presentation")),
+                                      f"in {outfit}" if outfit else "") if part)
+
+
 def character_anchor(doc, handle) -> str:
     """The colour/species anchor of a character, said at every mention in an
     action prompt in place of its bare *handle*: "the {colour} {gender}
@@ -593,7 +703,16 @@ def character_anchor(doc, handle) -> str:
     the gender from its presentation, the species the handle's own noun
     phrase, the outfit its first wardrobe item. Words a character's look does
     not give are left out; with no look, or a handle already told apart by
-    its outfit or number (:func:`character_handles`), the handle itself."""
+    its outfit or number (:func:`character_handles`), the handle itself.
+
+    A named character (:func:`named_character`, its *handle* its name: plan
+    25 stage 0) is "{Name}, {named_look}" -- "Marie-Jeanne, a woman in her
+    thirties in a charcoal blazer" --, no colour or species word; its name
+    alone when its look says neither."""
+    if isinstance(doc, dict) and handle and handle == _collapse_ws(str(doc.get("name") or "")) and (
+            named_character(doc)):
+        described = named_look(doc.get("look") or {})
+        return f"{handle}, {described}" if described else handle
     look = doc.get("look") if isinstance(doc, dict) else None
     if not look or " wearing " in handle or handle.endswith(")"):
         return handle
@@ -643,7 +762,16 @@ def action_text(shot, entities, anchors) -> str:
         handles = character_handles(characters) if characters else {}
         text = prompting.swap_phrases(shot.get("video_action") or raw, {handles[cid]: anchors[cid] for cid in handles
                                                                          if cid in anchors})
-    return _collapse_ws(names_mod.without_names(text, name_map))
+    text = _collapse_ws(names_mod.without_names(text, name_map))
+    # Plan 25 stage 0: a named character's anchor is said at its first mention, its name after it.
+    for cid, doc in characters.items():
+        anchor, name = anchors.get(cid), _collapse_ws(str((doc or {}).get("name") or ""))
+        if anchor and name and anchor != name and anchor.startswith(name + ",") and named_character(doc):
+            first = text.find(anchor)
+            if first != -1:
+                cut = first + len(anchor)
+                text = text[:cut] + text[cut:].replace(anchor, name)
+    return text
 
 
 def _place_light(look, variant) -> str:
@@ -775,15 +903,28 @@ def _reference_images(subject_tags, *, scene, characters, places, props) -> list
     return refs[:8]
 
 
+def _without_called_names(names, entities) -> dict:
+    """*names* without the name of a character called by it
+    (:func:`named_character`, plan 25 stage 0): that name is its handle, and
+    sweeping it would garble every mention -- even where a place or prop
+    shares it. *names* itself (the same dict) for a cast with none."""
+    called = {_collapse_ws(str(doc["name"])).lower() for doc in (entities.get("characters") or {}).values()
+              if named_character(doc)}
+    if not called:
+        return names
+    return {name: word for name, word in names.items() if _collapse_ws(str(name)).lower() not in called}
+
+
 def _story_name_map(entities) -> dict:
     """``{name: neutral word}`` for every character, place and prop of
     *entities* -- a character's word wins on a name shared with a place or
-    prop (mirrors ``refimages._entity_names``)."""
+    prop (mirrors ``refimages._entity_names``); a character called by its
+    name (:func:`named_character`) keeps it (:func:`_without_called_names`)."""
     names = {}
     for kind in ("characters", "places", "props"):
         for doc in entities.get(kind, {}).values():
             names.setdefault(doc["name"], _NEUTRAL_WORDS[kind])
-    return names
+    return _without_called_names(names, entities)
 
 
 # Words a name may carry beside its noun without being a proper name.
@@ -821,7 +962,7 @@ def _v2_name_map(entities) -> dict:
         for doc in entities.get(kind, {}).values():
             if not _descriptive_name(doc):
                 names.setdefault(doc["name"], _NEUTRAL_WORDS[kind])
-    return names
+    return _without_called_names(names, entities)
 
 
 # ------------------------------------------------- layered shots (phase 7, A8/A9)

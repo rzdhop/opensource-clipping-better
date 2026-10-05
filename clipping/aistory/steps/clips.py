@@ -352,7 +352,8 @@ def speech_line(script, shot):
 def speech_prompt_inputs(ec, shot, script) -> dict:
     """What a speaking clip's prompt says (``prompting.speech_clip_prompt``'s
     keywords but the budget), from the shot, its line, its speaker and
-    listener (by their handles, never their names) and its place."""
+    listener (by their handles, never their names -- but a character called
+    by its name, ``shots.named_character``: plan 25 stage 0) and its place."""
     scene, line = speech_line(script, shot)
     if line is None:
         raise ValueError(f"shot {shot['shot_id']} speaks but holds no line of its scene")
@@ -374,8 +375,12 @@ def speech_prompt_inputs(ec, shot, script) -> dict:
     look = shots_mod.speech_look(speaker, max_words=prompting.SPEECH_LOOK_MAX_WORDS) if speaker.get("look") else ""
     brief = audio_brief(ec, shot, script)
     place = (entities.get("places") or {}).get(scene.get("place_id")) or {}
-    return {"speaker": handles.get(line["speaker"], "the character"), "look": look,
-            "action": shot.get("video_action") or shot.get("action") or "", "listener": listener,
+    action = shot.get("video_action") or shot.get("action") or ""
+    who = handles.get(line["speaker"], "the character")
+    if shots_mod.named_character(speaker) and action.startswith(who + " "):
+        # Plan 25 stage 0: "Marie-Jeanne, a woman in her thirties in a charcoal blazer, grips the pen", said once.
+        action = action[len(who) + 1:]
+    return {"speaker": who, "look": look, "action": action, "listener": listener,
             "language": ec.language, "voice": prompting.voice_line(speaker.get("voice_hints")),
             "line": line["text"], "reaction": shots_mod._reaction(scene, [line]),
             "camera_phrase": prompting.CAMERA_PHRASES[shot["camera_motion"]],
@@ -410,7 +415,10 @@ def action_inputs(ec, shot, script) -> dict:
     ``prompting.speech_clip_prompt_action``'s keywords but the budget and the
     note): :func:`speech_prompt_inputs`' words, with every character named by
     its anchor (``shots.character_anchor``) and the shot's motion
-    (``shots.action_text``) in place of its action layer."""
+    (``shots.action_text``) in place of its action layer. A character called
+    by its name (``shots.named_character``, plan 25 stage 0) is its anchor at
+    its first mention and its name after it: the listener, the Audio sentence
+    (``voice_of``) and the speaker when the action already said its anchor."""
     inputs = speech_prompt_inputs(ec, shot, script)
     scene, line = speech_line(script, shot)
     entities = getattr(ec, "entities", None) or {}
@@ -418,11 +426,17 @@ def action_inputs(ec, shot, script) -> dict:
     # Plan 23 stage D5: a character wearing an appearance variant in this shot says its delta with its anchor.
     anchors = shots_mod.worn_anchors(characters, shot.get("variants")) if characters else {}
     handles = shots_mod.character_handles(characters) if characters else {}
-    swap = {handles[cid]: anchors[cid] for cid in handles}
+    # Plan 25 stage 0: a character called by its name is the listener by that name alone ("looks at Rida").
+    named = {cid for cid in handles if shots_mod.named_character(characters[cid])}
+    swap = {handles[cid]: anchors[cid] for cid in handles if cid not in named}
     parts = _audio_parts(ec, shot, script)
-    return {"speaker": anchors.get(line["speaker"], "the character"),
+    action = shots_mod.action_text(shot, entities, anchors)
+    speaker = anchors.get(line["speaker"], "the character")
+    if line["speaker"] in named and speaker in action:
+        speaker = handles[line["speaker"]]  # its anchor is already said, at its first mention in the action
+    return {"speaker": speaker, "voice_of": handles[line["speaker"]] if line["speaker"] in named else "",
             "listener": prompting.swap_phrases(inputs["listener"], swap),
-            "action": shots_mod.action_text(shot, entities, anchors), "language": inputs["language"], "voice": inputs["voice"], "line": inputs["line"],
+            "action": action, "language": inputs["language"], "voice": inputs["voice"], "line": inputs["line"],
             "reaction": prompting.swap_phrases(inputs["reaction"], swap), "camera_phrase": inputs["camera_phrase"],
             "place": inputs["place"], "sfx": parts["sfx"], "ambience": _ambience_phrase(parts["variant"])}
 

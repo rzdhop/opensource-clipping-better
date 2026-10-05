@@ -1076,7 +1076,9 @@ def speech_clip_prompt(style_lock: dict, *, speaker: str, look: str, action: str
     underneath. No music, no narrator, no other voice. No subtitles, no
     captions, no on-screen text."
 
-    *speaker* and *listener* are handles, never names (spec 2.3); *listener*
+    *speaker* and *listener* are handles, never names (spec 2.3) -- but for a
+    character called by its name (``shots.named_character``, plan 25 stage 0),
+    and then *look* is who it is in a few words (``shots.named_look``); *listener*
     empty: the speaker talks straight ahead. The quoted *line* (in the
     story's *language*), the *voice* phrase (:func:`voice_line`), the Audio
     sentence and the two closing sentences are never cut; over the budget
@@ -1245,7 +1247,7 @@ def _scene_head(place: str, action: str) -> str:
 
 def speech_clip_prompt_action(*, speaker: str, listener: str, action: str, language: str, voice: str, line: str,
                               reaction: str, camera_phrase: str, place: str, sfx=(), ambience: str = "",
-                              budget: int = SPEECH_CLIP_MAX_WORDS, note: str = "") -> str:
+                              budget: int = SPEECH_CLIP_MAX_WORDS, note: str = "", voice_of: str = "") -> str:
     """A speaking clip's prompt in the action style (plan 23 stage D6), at
     most *budget* words (``prompt_budgets.speech_clip_words(link)``):
 
@@ -1262,12 +1264,15 @@ def speech_clip_prompt_action(*, speaker: str, listener: str, action: str, langu
     (:func:`place_anchor`: at most 10 words, said once). The quoted *line*,
     the speaker's sentence and the three closing sentences are never cut; over
     the budget the sounds go first, then the reaction, the place, the
-    listener's sentence, and last the action (shorter, then not at all)."""
+    listener's sentence, and last the action (shorter, then not at all).
+    *voice_of* (plan 25 stage 0: a character called by its name): who the
+    Audio sentence hears, in place of *speaker* ("only Marie-Jeanne's voice")."""
     lang = LANGUAGE_NAMES.get(language, language)
     quoted = _collapse_ws(str(line)).replace('"', "'")
     who = _collapse_ws(speaker) or "the character"
     other = _collapse_ws(listener)
-    heard = f"Audio: only {who}'s voice speaking {lang}, close and clear, lips in sync with the words."
+    voiced = _collapse_ws(voice_of) or who
+    heard = f"Audio: only {voiced}'s voice speaking {lang}, close and clear, lips in sync with the words."
     closing = [heard, SPEECH_NO_OTHER_SOUND, NO_ON_SCREEN_TEXT]
     note_text = as_sentence(note) if note else ""
     where = place_anchor(place)
