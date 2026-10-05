@@ -110,7 +110,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, NamedTuple
 
-from . import defaults, media_policy, schemas, series_memory, subtitle_style, templates
+from . import defaults, format_fit, media_policy, schemas, series_memory, subtitle_style, templates
 from .ledger import CostLedger
 
 STORY_ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
@@ -844,7 +844,11 @@ class StoryStore:
         *episode_template_id* (plan 20 stage 1): the story's own episode
         template, one of ``defaults.EPISODE_TEMPLATE_IDS`` (else
         ``ValueError``); None, the pipeline's default
-        (``defaults.episode_template_for``)."""
+        (``defaults.episode_template_for``). Plan 28 stage A4: on a story
+        that speaks in its own clips, a format no plan of its clips fits is
+        a ``ValueError`` (``format_fit.FORMAT_REFUSAL``), nothing created;
+        named none, the default when it fits, else the first that does
+        (``format_fit.choose_format``)."""
         if not isinstance(language, str) or language not in schemas.LANGUAGES:
             raise ValueError(f"language must be one of {list(schemas.LANGUAGES)}, not {language!r}")
         if seed_text is not None and not isinstance(seed_text, str):
@@ -874,6 +878,11 @@ class StoryStore:
         # voice -- its characters speak in their own clips -- unless the caller named "tts".
         if defaults.speaks_natively(profile):
             profile.setdefault("voices", defaults.VOICES_NONE)
+        # Plan 28 stage A4 (DEC-305): the format is one this story's clips can fit -- checked with the
+        # zero-call oracle (format_fit, timing.plan_floor_preview) on a story that speaks in its own
+        # clips; an impossible pick is refused in one sentence and nothing is created.
+        episode_template_id = format_fit.choose_format(profile, episode_template_id, language=language,
+                                                       style_template_id=style_template_id)
 
         approvals = {key: None for key, _ in _APPROVAL_STEPS}
         doc = {
@@ -897,8 +906,10 @@ class StoryStore:
             "prop_ids": [],
             "style_template_id": style_template_id,
             # The one chosen at creation (plan 20 stage 1), else a v2 story
-            # starts on the v2 template (DEC-227); a legacy one as before.
-            "episode_template_id": defaults.episode_template_for(profile, episode_template_id),
+            # starts on the v2 template (DEC-227); a legacy one as before;
+            # a native-speech one on the confrontation (plan 28 stage A4: one
+            # that fits, format_fit.choose_format).
+            "episode_template_id": episode_template_id,
             "generation_profile": profile,
             # Plan 28 stage B1 (DEC-305): every new story opens with the
             # narrator off, whatever its pipeline (phase 7 stage 6c's "on for

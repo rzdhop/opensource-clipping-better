@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createStory, fetchNewStoryProfile, fetchSettings, fetchStyles, fetchUniverses } from '../../api'
 import { Button } from '../../ui'
-import HowMadeControls from './HowMadeControls'
 import {
   EPISODE_TEMPLATES, pipelineDefaultTemplate, profileSuggestedTemplate, styleSuggestedTemplate,
 } from './episodeTemplates'
 
 // Plan 21 decision 4: the Mode choice's own label, Studio first (the
-// default).
+// default). Plan 28 stage S1: under Advanced, as "How the story runs".
 const MODE_HELP = {
   studio: 'Approve each step yourself.',
   agent: ('One run from the idea to episode 1; the agent approves the style, the cast and the places as soon as '
@@ -17,6 +16,13 @@ const MODE_HELP = {
 
 // The new-story form (`/story/new`). An existing story opens in the story
 // workspace (StoryWorkspace.jsx, dashboard overhaul stage 3, DEC-255).
+//
+// Plan 28 stage S1 (DEC-305 §9, the human: "the UI became too complicated,
+// too much term I do not understand"): the form asks four things -- the
+// idea, the language, the look and who makes the clips -- and the server
+// decides the rest (media_policy.new_story_profile, format_fit.choose_format:
+// a format that always fits). Everything else sits under one collapsed
+// "Advanced" fold; untouched, nothing of it is sent.
 
 // The story defaults (spec 8, 8.1, 8.5): a story that does not name every
 // one of these gets exactly these values. tests/test_story_defaults.py reads
@@ -24,12 +30,16 @@ const MODE_HELP = {
 // clipping.aistory.defaults.default_generation_profile().
 const DEFAULT_GENERATION_PROFILE = { tier: 1, route: 'auto', consistency_mode: 'references', budget_profile: 'free' }
 
+// Plan 28 stage S1: what the form shows before the server's offer arrives -- "Me" picked
+// (defaults.manual_speech_generation_profile); the offer's own profile replaces it.
+const ME_SETUP = { tier: 3, route: 'api', consistency_mode: 'references', budget_profile: 'native_speech_manual', pipeline: 'v2' }
+
 // Plan 22: the native-speech profile's speaking-clip models (its
-// speech_links), cheapest first; the profile's own default is fast.
+// speech_links), cheapest first; "The app" starts on lite (plan 28 stage A4).
 const SPEECH_MODELS = [
-  { id: 'lite', label: 'Lite (Veo 3.1 lite)' },
-  { id: 'fast', label: 'Fast (Veo 3.1 Fast)' },
-  { id: 'premium', label: 'Premium (Veo 3.1)' },
+  { id: 'lite', label: 'Cheapest (Veo 3.1 lite)' },
+  { id: 'fast', label: 'Better (Veo 3.1 Fast)' },
+  { id: 'premium', label: 'Best (Veo 3.1)' },
 ]
 
 // Plan 23 stage D4: how a character's reference sheets are drawn (generation_profile.sheet_mode),
@@ -89,6 +99,26 @@ export function frameRefusal(frame, { pipeline, tier, route, budgetProfile, reas
   return ''
 }
 
+/** A price in whole dollars, rounded up (the writing's few cents included): 0.48 -> "$1", 4.08 -> "$5". */
+export function roughUsd(usd) {
+  return `$${Math.max(1, Math.ceil(usd))}`
+}
+
+// Plan 28 stage S1: "Who makes the clips", in the human's words; `id` is StoryCreateRequest.clips
+// (defaults.CLIP_MAKERS). The price is the offer's (offer.clip_makers[id].episode_usd).
+const CLIP_CHOICES = [
+  { id: 'me', title: 'Me, on Flow or Higgsfield', text: 'the app writes the prompts and checks the clips.',
+    price: (usd) => `About ${roughUsd(usd)} of app cost per episode.`, unpriced: '' },
+  { id: 'app', title: 'The app', text: '',
+    price: (usd) => `about ${roughUsd(usd)} per episode`, unpriced: 'it makes them and pays for them' },
+]
+
+// The budget profile each answer is (plan 25's "How clips are made": My own = native_speech_manual, Auto =
+// native_speech), and back.
+const CLIP_MAKER_SETUPS = { me: 'native_speech_manual', app: 'native_speech' }
+const clipMakerOf = (budgetProfile) => Object.keys(CLIP_MAKER_SETUPS)
+  .find((id) => CLIP_MAKER_SETUPS[id] === budgetProfile) || null
+
 function CreateStoryForm() {
   const navigate = useNavigate()
   // No default: a language a user forgot to pick must never silently become
@@ -98,18 +128,17 @@ function CreateStoryForm() {
   const [seedText, setSeedText] = useState('')
   const [styleTemplateId, setStyleTemplateId] = useState('')
   const [styles, setStyles] = useState([])
-  const [showProfile, setShowProfile] = useState(false)
-  const [tier, setTier] = useState(DEFAULT_GENERATION_PROFILE.tier)
-  const [route, setRoute] = useState(DEFAULT_GENERATION_PROFILE.route)
-  const [consistencyMode, setConsistencyMode] = useState(DEFAULT_GENERATION_PROFILE.consistency_mode)
-  const [budgetProfile, setBudgetProfile] = useState(DEFAULT_GENERATION_PROFILE.budget_profile)
-  const [pipeline, setPipeline] = useState('')
+  // Plan 28 stage S1: one fold for every other choice, closed until the human opens it.
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [tier, setTier] = useState(ME_SETUP.tier)
+  const [route, setRoute] = useState(ME_SETUP.route)
+  const [consistencyMode, setConsistencyMode] = useState(ME_SETUP.consistency_mode)
+  const [budgetProfile, setBudgetProfile] = useState(ME_SETUP.budget_profile)
+  const [pipeline, setPipeline] = useState(ME_SETUP.pipeline)
   const [speechModel, setSpeechModel] = useState('fast')
-  // Plan 22 stage 5: the sheets, plates, props and keyframes may be your own uploads (plan 25 stage 5: the
-  // "How images are made" control; only a v2 story has manual images).
+  // Plan 22 stage 5: the sheets, plates, props and keyframes may be your own uploads (plan 25 stage 5;
+  // only a v2 story has manual images). Plan 28 stage S1: under Advanced, "Images".
   const [imagesOwn, setImagesOwn] = useState(false)
-  // Plan 25 stage 5: the profile the form had before "My own" clips, what "Auto" goes back to.
-  const [profileBeforeManual, setProfileBeforeManual] = useState('')
   // Plan 23 stage D4: the characters' sheets and bodies; the defaults send nothing.
   const [sheetMode, setSheetMode] = useState('three_sheet')
   const [bodyRule, setBodyRule] = useState('')
@@ -121,18 +150,27 @@ function CreateStoryForm() {
   const [universeCatalogue, setUniverseCatalogue] = useState({ universes: [], by_style: {} })
   const [promptStyle, setPromptStyle] = useState('studio')
   const [frame, setFrame] = useState('9:16')
-  // The episode format the user picked; '' until they pick one, so the
-  // select follows the style's suggestion, else the pipeline's default.
+  // The episode format the user picked under Advanced; '' -- the app chooses one that fits.
   const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
-  // What the server gives a story created now (GET /api/stories/new-profile):
-  // the quality preset -- v2, every shot animated -- when FAL_KEY is set.
+  // What the server gives a story created now (GET /api/stories/new-profile): each answer to "Who makes the
+  // clips" with its profile and price, and the formats each one fits (plan 28 stage A4).
   const [offer, setOffer] = useState(null)
-  // False until the user changes a profile field: an untouched form sends no
+  // False until the user changes a choice under Advanced: an untouched form sends no
   // profile, so the server's choice applies (it used to send a v1, free,
   // tier-1 profile over it, and a dashboard story could never animate).
   const [profileChosen, setProfileChosen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+
+  // The form's state follows a profile the server made (the offer's, for an answer to "Who makes the clips").
+  const applySetup = (profile) => {
+    setTier(profile.tier ?? DEFAULT_GENERATION_PROFILE.tier)
+    setRoute(profile.route || DEFAULT_GENERATION_PROFILE.route)
+    setConsistencyMode(profile.consistency_mode || DEFAULT_GENERATION_PROFILE.consistency_mode)
+    setBudgetProfile(profile.budget_profile || DEFAULT_GENERATION_PROFILE.budget_profile)
+    setPipeline(profile.pipeline || '')
+    setSpeechModel(profile.speech_model || 'fast')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -142,12 +180,8 @@ function CreateStoryForm() {
     fetchNewStoryProfile().then((data) => {
       if (cancelled) return
       setOffer(data)
-      const profile = data.profile || {}
-      setTier(profile.tier ?? DEFAULT_GENERATION_PROFILE.tier)
-      setRoute(profile.route || DEFAULT_GENERATION_PROFILE.route)
-      setConsistencyMode(profile.consistency_mode || DEFAULT_GENERATION_PROFILE.consistency_mode)
-      setBudgetProfile(profile.budget_profile || DEFAULT_GENERATION_PROFILE.budget_profile)
-      setPipeline(profile.pipeline || '')
+      const makers = data.clip_makers || {}
+      applySetup((makers.me && makers.me.profile) || data.profile || ME_SETUP)
     }).catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -161,7 +195,7 @@ function CreateStoryForm() {
     if (value === 'v2') setConsistencyMode('references')
   }
   // Plan 22: the native-speech profile is a v2 story at tier 3 -- each character line spoken by its own clip.
-  // Stage 5: its manual twin (every clip your own upload, from the shot brief) is the default with the keys set.
+  // Stage 5: its manual twin (every clip your own upload, from the shot brief) is "Me" (plan 28 stage S1).
   const manualClips = budgetProfile === 'native_speech_manual'
   const nativeSpeech = budgetProfile === 'native_speech' || manualClips
   const handleBudgetProfile = (value) => {
@@ -173,21 +207,22 @@ function CreateStoryForm() {
       setConsistencyMode('references')
     }
   }
-  const imagesManual = pipeline === 'v2' && imagesOwn
-  // Plan 25 stage 5: "How clips are made". My own is the native_speech_manual profile; Auto goes back to the
-  // profile the form had, else native_speech (native speech is on), else the server's own default.
-  const handleClipsOwn = (own) => {
-    if (own === manualClips) return
-    if (own) {
-      setProfileBeforeManual(budgetProfile)
-      handleBudgetProfile('native_speech_manual')
+  // Plan 28 stage S1: "Who makes the clips" -- the answer the form shows is read back from the budget profile
+  // (null when Advanced set another one); a card sets the server's profile for it, not a choice of the human's.
+  const clipMaker = clipMakerOf(budgetProfile)
+  const handleClipMaker = (id) => {
+    if (id === clipMaker) return
+    const made = offer && offer.clip_makers && offer.clip_makers[id]
+    if (made && made.profile) {
+      applySetup(made.profile)
       return
     }
-    const serverDefault = offer && offer.profile && offer.profile.budget_profile
-    handleBudgetProfile(profileBeforeManual
-      || (nativeSpeech ? 'native_speech' : (serverDefault && serverDefault !== 'native_speech_manual' ? serverDefault : 'free')))
+    applySetup({ ...ME_SETUP, budget_profile: CLIP_MAKER_SETUPS[id], ...(id === 'app' ? { speech_model: 'lite' } : {}) })
   }
+  const makerOffer = (id) => (offer && offer.clip_makers ? offer.clip_makers[id] : null)
+  const chosenMaker = clipMaker ? makerOffer(clipMaker) : null
   const handleImagesOwn = (own) => { setProfileChosen(true); setImagesOwn(own) }
+  const imagesManual = pipeline === 'v2' && imagesOwn
   const fullyAnimated = pipeline === 'v2' && (budgetProfile === 'quality' || nativeSpeech) && tier >= 2
   // What the native-speech profile costs per speaking-clip model, and the keys it still needs.
   const speech = offer && (manualClips ? offer.native_speech_manual : offer.native_speech)
@@ -201,18 +236,31 @@ function CreateStoryForm() {
     pipeline, tier, route, budgetProfile, reasons: offer && offer.aspect_reasons,
   })
   const shownFrame = frameReason(frame) ? '9:16' : frame
-  // Plan 20 stage 1: a style suggests an episode format
-  // (episode_defaults.episode_template_id -- Fruit Drama the narrated drama)
-  // when it fits the pipeline; the story keeps whichever is sent. Plan 22
-  // stage 3: a native-speech profile suggests the confrontation format first
-  // (one shot per spoken line; defaults.episode_template_for), still a choice.
+  // Plan 28 stage A4: the Advanced format select lists only the formats the server's oracle says this story's
+  // clips fit in its language (offer.formats_that_fit; no language yet: those that fit both), each other one
+  // named with its reason (offer.formats_hidden). A story whose lines are voiced keeps every format. A pick
+  // that stopped fitting (another language, other clips) goes back to the app's choice.
+  const fitLists = nativeSpeech && clipMaker && offer && offer.formats_that_fit ? offer.formats_that_fit[clipMaker] : null
+  const hiddenLists = nativeSpeech && clipMaker && offer && offer.formats_hidden ? offer.formats_hidden[clipMaker] : null
+  const fitIds = fitLists
+    ? (language ? fitLists[language] : fitLists.fr.filter((id) => fitLists.en.includes(id)))
+    : EPISODE_TEMPLATES.filter((tpl) => !nativeSpeech || tpl.pipeline === 'v2').map((tpl) => tpl.id)
+  const hiddenReasons = hiddenLists ? (language ? hiddenLists[language] : { ...hiddenLists.en, ...hiddenLists.fr }) : {}
+  const formatOptions = EPISODE_TEMPLATES.filter((tpl) => fitIds.includes(tpl.id))
+  const formatChoice = fitIds.includes(episodeTemplateChoice) ? episodeTemplateChoice : ''
+  // Plan 20 stage 1: on a story whose lines are voiced, a style suggests an episode format
+  // (episode_defaults.episode_template_id -- Fruit Drama the narrated drama) when it fits the pipeline. A story
+  // whose characters speak in their own clips sends none: the server picks one that fits (the confrontation,
+  // defaults.episode_template_for; plan 28 stage A4).
   const chosenStyle = styles.find((style) => style.template_id === styleTemplateId)
-  const profileSuggestion = profileSuggestedTemplate(budgetProfile)
-  const suggestedTemplate = profileSuggestion || styleSuggestedTemplate(chosenStyle, pipeline)
-  const episodeTemplateId = episodeTemplateChoice || suggestedTemplate || pipelineDefaultTemplate(pipeline)
-  const episodeFormat = EPISODE_TEMPLATES.find((tpl) => tpl.id === episodeTemplateId)
+  const suggestedTemplate = nativeSpeech ? null : styleSuggestedTemplate(chosenStyle, pipeline)
+  const appFormat = EPISODE_TEMPLATES.find((tpl) => tpl.id === (
+    profileSuggestedTemplate(budgetProfile) || suggestedTemplate || pipelineDefaultTemplate(pipeline)))
+  const episodeFormat = EPISODE_TEMPLATES.find((tpl) => tpl.id === formatChoice) || appFormat
   // Plan 23 stage D2: the Universe select lists what the chosen style takes (hidden when it lists none);
-  // a pick the style does not list is dropped, the style's default shows instead.
+  // a pick the style does not list is dropped, the style's default shows instead. Plan 28 stage S1: the
+  // universe is part of the look -- the style's default, said under the style cards; the select is under
+  // Advanced and only a pick is sent (absent: the style's default, media_policy.universe).
   const styleUniverses = universeCatalogue.by_style[styleTemplateId]
   const universeOptions = styleUniverses
     ? styleUniverses.universes
@@ -223,13 +271,11 @@ function CreateStoryForm() {
   const shownUniverse = universeId || (styleUniverses ? styleUniverses.default : '') || ''
   const shownUniverseEntry = universeOptions.find((universe) => universe.id === shownUniverse)
   const universeLabel = (universe) => universe.label[language || 'en']
-  // The select always shows a universe (the pick, else the style's default), so the story is created with
-  // it: its profile is sent as the form shows it (the form starts from the server's own offer).
-  useEffect(() => { if (shownUniverse) setProfileChosen(true) }, [shownUniverse])
+  const ready = Boolean(language) && seedText.trim() !== ''
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!language) return
+    if (!ready) return
     setCreating(true)
     setError('')
     try {
@@ -240,13 +286,16 @@ function CreateStoryForm() {
         language,
         seed_text: seedText.trim() ? seedText : null,
         style_template_id: styleTemplateId || null,
-        // Picked or suggested by the style; else null: the server starts the
-        // story on its pipeline's format (defaults.episode_template_for).
-        episode_template_id: episodeTemplateChoice || suggestedTemplate || null,
-        // Plan 21 stage 3: the Mode choice below -- studio (every step waits
-        // for your approval, the default) or agent (one story-fast-track job
-        // approves by rule).
+        // Picked under Advanced, or suggested by the style on a voiced story; else null: the server picks one
+        // that fits (format_fit.choose_format).
+        episode_template_id: formatChoice || suggestedTemplate || null,
+        // Plan 21 stage 3: "How the story runs" under Advanced -- studio (every
+        // step waits for your approval, the default) or agent (one
+        // story-fast-track job approves by rule).
         mode,
+        // Plan 28 stage S1: "Who makes the clips" -- the server makes the profile from it
+        // (media_policy.new_story_profile) unless Advanced sent one.
+        clips: clipMaker,
         // Untouched, null: the server picks (media_policy.new_story_profile).
         generation_profile: profileChosen ? {
           tier,
@@ -259,7 +308,7 @@ function CreateStoryForm() {
           ...(pipeline === 'v2' && sheetMode !== 'three_sheet' ? { sheet_mode: sheetMode } : {}),
           ...(bodyRule ? { body_rule: bodyRule } : {}),
           ...(pipeline === 'v2' && !imagesManual && imagePreference ? { image_preference: imagePreference } : {}),
-          ...(shownUniverse ? { universe: shownUniverse } : {}),
+          ...(universeId ? { universe: universeId } : {}),
           ...(pipeline === 'v2' && promptStyle !== 'studio' ? { prompt_style: promptStyle } : {}),
           ...(shownFrame !== '9:16' ? { aspect: shownFrame } : {}),
         } : null,
@@ -278,12 +327,29 @@ function CreateStoryForm() {
       <div className="page-header">
         <div>
           <h2>New story</h2>
-          <p>A persistent workspace: world, style lock and a season arc.</p>
+          <p>Four questions; the app decides the rest.</p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit}>
         <div className="card" style={{ marginBottom: '16px' }}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="new-story-idea">Your idea</label>
+            <textarea
+              id="new-story-idea"
+              className="form-input"
+              rows={4}
+              maxLength={2000}
+              required
+              placeholder="Two lemons share a stall at the market; one of them is lying about the price."
+              value={seedText}
+              onChange={(e) => setSeedText(e.target.value)}
+            />
+            <p className="form-hint">
+              A sentence or two: who, where, and what goes wrong. The app writes the rest. {seedText.length} / 2000
+            </p>
+          </div>
+
           <div className="form-group">
             <label className="form-label">Language</label>
             <div className="story-segmented">
@@ -302,56 +368,11 @@ function CreateStoryForm() {
                 English
               </button>
             </div>
-            <p className="form-hint">Required — nothing is picked for you.</p>
+            <p className="form-hint">The language the characters speak. Nothing is picked for you.</p>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Mode</label>
-            <div className="story-segmented" role="group" aria-label="Mode">
-              <Button
-                type="button"
-                variant={mode === 'studio' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setMode('studio')}
-              >
-                Studio
-              </Button>
-              <Button
-                type="button"
-                variant={mode === 'agent' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => setMode('agent')}
-              >
-                Agent
-              </Button>
-            </div>
-            <p className="form-hint">{MODE_HELP[mode]}</p>
-          </div>
-
-          <HowMadeControls
-            clipsOwn={manualClips}
-            imagesOwn={imagesManual}
-            imagesDisabled={pipeline !== 'v2'}
-            imagesNote="Your own images need the v2 pipeline (Generation profile → Pipeline)."
-            onClips={handleClipsOwn}
-            onImages={handleImagesOwn}
-          />
-
-          <div className="form-group">
-            <label className="form-label">Seed text (optional)</label>
-            <textarea
-              className="form-input"
-              rows={4}
-              maxLength={2000}
-              placeholder="A rough idea, a scene, a vibe — anything to seed the concepts."
-              value={seedText}
-              onChange={(e) => setSeedText(e.target.value)}
-            />
-            <p className="form-hint">{seedText.length} / 2000</p>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Style (optional)</label>
+            <label className="form-label">The look</label>
             <div className="story-style-grid">
               <button
                 type="button"
@@ -376,150 +397,149 @@ function CreateStoryForm() {
                 </button>
               ))}
             </div>
-          </div>
-
-          {universeOptions.length > 0 && (
-            <div className="form-group">
-              <label className="form-label" htmlFor="new-story-universe">Universe</label>
-              <select id="new-story-universe" className="form-select" value={shownUniverse}
-                onChange={(e) => choose(setUniverseChoice)(e.target.value)}>
-                {universeOptions.map((universe) => (
-                  <option key={universe.id} value={universe.id}>{universeLabel(universe)}</option>
-                ))}
-              </select>
-              <p className="form-hint">What the characters are made of: each concept leads with another species of it.</p>
-              {shownUniverseEntry && shownUniverseEntry.audience_note && (
-                <p className="form-hint">{shownUniverseEntry.audience_note[language || 'en']}</p>
-              )}
-            </div>
-          )}
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="new-story-episode-format">Episode format</label>
-            <select
-              id="new-story-episode-format"
-              className="form-select"
-              value={episodeTemplateId}
-              onChange={(e) => setEpisodeTemplateChoice(e.target.value)}
-            >
-              {EPISODE_TEMPLATES.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.label}</option>)}
-            </select>
-            <p className="form-hint">
-              {episodeFormat ? episodeFormat.help : ''}
-              {!episodeTemplateChoice && suggestedTemplate
-                ? (profileSuggestion ? ' Suggested for native speech: one shot per line.' : ' Suggested by the style.')
-                : ''}
-            </p>
-          </div>
-
-          <div className="form-group">
-            <p className="form-hint">
-              <strong>Clips: {manualClips ? 'my own' : 'auto'} · Images: {imagesManual ? 'my own' : 'auto'}</strong>
-            </p>
-            {manualClips ? (
-              <p className="chip chip-wrap">
-                Native speech — your own clips: each character line is spoken on camera by its own clip, which you
-                make on Google Flow or Higgsfield from the app's shot brief and upload; the app writes, draws the
-                keyframes, times the subtitles and renders{speech ? `: ${speech.summary}.` : '.'}
-              </p>
-            ) : nativeSpeech ? (
-              <p className="chip chip-wrap">
-                Native speech (Veo): each character line is spoken on camera by its own clip, lips and voice one
-                take; no narrator and no generated voice{speech ? `: ${speech.summary}.` : '.'}
-              </p>
-            ) : fullyAnimated ? (
-              <p className="chip chip-wrap">
-                Fully animated: every shot is a video clip, with quality images (Quality — billed APIs)
-                {estimate ? `: ${estimate.summary}.` : '.'}
-              </p>
-            ) : (
-              <p className="chip chip-warn chip-wrap">
-                Not fully animated: {tier < 2 ? 'tier 1 is stills with motion' : budgetProfile !== 'quality'
-                  ? `the ${budgetProfile} budget profile does not animate every shot`
-                  : 'the legacy pipeline keeps the old shot layout and image links'}.
-                {offer && !offer.quality && offer.missing_keys && offer.missing_keys.length > 0
-                  ? ` Add ${offer.missing_keys.join(', ')} in Settings to start stories fully animated`
-                    + (estimate ? `: ${estimate.summary}.` : '.') : ''}
-              </p>
-            )}
-            {nativeSpeech && speech && (
-              <>
-                <p className="form-hint">{speech.assumptions}</p>
-                {(speech.missing_keys.length > 0 || speech.stt_missing_keys.length > 0) && (
-                  <p className="form-hint">
-                    Missing in Settings: {[...speech.missing_keys,
-                      ...(speech.stt_missing_keys.length > 0
-                        ? [`${speech.stt_missing_keys.join(' or ')} (the speech check)`] : [])].join(', ')}.
-                  </p>
-                )}
-              </>
-            )}
-            {!nativeSpeech && estimate && (fullyAnimated || (offer && !offer.quality)) && (
-              <p className="form-hint">{estimate.assumptions}</p>
-            )}
-            {fullyAnimated && offer && !offer.allow_paid && (
+            {shownUniverseEntry && (
               <p className="form-hint">
-                Paid calls are off (Settings → allow paid): no image or clip is bought until you turn them on.
+                The characters are {universeLabel(shownUniverseEntry).toLowerCase()}. Pick others under Advanced.
               </p>
             )}
           </div>
 
-          <details className="story-profile" open={showProfile} onToggle={(e) => setShowProfile(e.target.open)}>
-            <summary>Generation profile</summary>
+          <div className="form-group">
+            <label className="form-label">Who makes the clips</label>
+            <div className="story-style-grid" role="group" aria-label="Who makes the clips">
+              {CLIP_CHOICES.map((choice) => {
+                const made = makerOffer(choice.id)
+                const words = [choice.text, made ? choice.price(made.episode_usd) : choice.unpriced]
+                  .filter(Boolean).join(' ')
+                return (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    className={`story-style-pick${clipMaker === choice.id ? ' active' : ''}`}
+                    aria-pressed={clipMaker === choice.id}
+                    data-choice={`clips-${choice.id}`}
+                    onClick={() => handleClipMaker(choice.id)}
+                  >
+                    <span className="story-style-pick-name">{choice.title} — {words}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {!clipMaker && <p className="form-hint">Your choices under Advanced decide how the clips are made.</p>}
+            {chosenMaker && chosenMaker.missing_keys.length > 0 && (
+              <p className="form-hint">Add {chosenMaker.missing_keys.join(' and ')} in Settings first.</p>
+            )}
+            {chosenMaker && chosenMaker.stt_missing_keys.length > 0 && (
+              <p className="form-hint">To check the clips, add {chosenMaker.stt_missing_keys.join(' or ')} in Settings.</p>
+            )}
+            {clipMaker === 'app' && offer && !offer.allow_paid && (
+              <p className="form-hint">Paid calls are off in Settings (allow paid): nothing is bought until you turn them on.</p>
+            )}
+          </div>
+
+          <details className="story-profile" open={showAdvanced} onToggle={(e) => setShowAdvanced(e.target.open)}>
+            <summary>Advanced</summary>
             <div className="story-profile-grid">
               <div className="form-group">
-                <label className="form-label">Pipeline</label>
-                <select className="form-select" value={pipeline} onChange={(e) => handlePipeline(e.target.value)}>
-                  <option value="v2">v2 — quality (6–10 shots, each a clip)</option>
-                  <option value="">Legacy (v1)</option>
+                <label className="form-label" htmlFor="new-story-episode-format">Episode format</label>
+                <select
+                  id="new-story-episode-format"
+                  className="form-select"
+                  value={formatChoice}
+                  onChange={(e) => setEpisodeTemplateChoice(e.target.value)}
+                >
+                  <option value="">Let the app choose (recommended)</option>
+                  {formatOptions.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.label}</option>)}
                 </select>
+                <p className="form-hint">
+                  {formatChoice ? '' : `The app will use: ${appFormat ? appFormat.label : ''}. `}
+                  {episodeFormat ? episodeFormat.help : ''}
+                </p>
+                {EPISODE_TEMPLATES.filter((tpl) => hiddenReasons[tpl.id]).map((tpl) => (
+                  <p key={tpl.id} className="form-hint">Not offered: {tpl.label}, {hiddenReasons[tpl.id]}</p>
+                ))}
               </div>
+
               <div className="form-group">
-                <label className="form-label">Tier</label>
-                <select className="form-select" value={tier} onChange={(e) => choose(setTier)(Number(e.target.value))}>
-                  <option value={1}>1 — stills + motion (slideshow)</option>
-                  <option value={2}>2 — animated (image-to-video)</option>
-                  <option value={3}>3 — animated + model sound</option>
+                <label className="form-label" htmlFor="new-story-frame">Frame</label>
+                <select id="new-story-frame" className="form-select" value={shownFrame}
+                  onChange={(e) => choose(setFrame)(e.target.value)}>
+                  {FRAMES.map((option) => {
+                    const reason = frameReason(option.id)
+                    return (
+                      <option key={option.id} value={option.id} disabled={Boolean(reason)} title={reason}>
+                        {option.label}{reason ? ` — unavailable: ${reason}` : ''}
+                      </option>
+                    )
+                  })}
                 </select>
+                <p className="form-hint">{FRAME_HINT}</p>
               </div>
+
+              {universeOptions.length > 0 && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="new-story-universe">Characters made of</label>
+                  <select id="new-story-universe" className="form-select" value={shownUniverse}
+                    onChange={(e) => choose(setUniverseChoice)(e.target.value)}>
+                    {universeOptions.map((universe) => (
+                      <option key={universe.id} value={universe.id}>{universeLabel(universe)}</option>
+                    ))}
+                  </select>
+                  <p className="form-hint">What the characters are made of: each concept leads with another species of it.</p>
+                  {shownUniverseEntry && shownUniverseEntry.audience_note && (
+                    <p className="form-hint">{shownUniverseEntry.audience_note[language || 'en']}</p>
+                  )}
+                </div>
+              )}
+
               <div className="form-group">
-                <label className="form-label">Route</label>
-                <select className="form-select" value={route} onChange={(e) => choose(setRoute)(e.target.value)}>
-                  <option value="auto">Auto</option>
-                  <option value="local">Local</option>
-                  <option value="api">API</option>
-                </select>
+                <label className="form-label">Images</label>
+                <div className="story-segmented" role="group" aria-label="Images">
+                  <Button type="button" size="sm" variant={imagesManual ? 'secondary' : 'primary'}
+                    aria-pressed={!imagesManual} onClick={() => handleImagesOwn(false)} data-choice="images-auto">
+                    Made by the app
+                  </Button>
+                  <Button type="button" size="sm" variant={imagesManual ? 'primary' : 'secondary'}
+                    disabled={pipeline !== 'v2'} aria-pressed={imagesManual} onClick={() => handleImagesOwn(true)}
+                    data-choice="images-own">
+                    My own uploads
+                  </Button>
+                </div>
+                <p className="form-hint">
+                  {imagesManual
+                    ? 'You paste the prompts into your provider and upload the images; nothing is billed.'
+                    : 'The app draws the characters, places and keyframes on its paid image services.'}
+                </p>
               </div>
-              <div className="form-group">
-                <label className="form-label">Consistency mode</label>
-                <select className="form-select" value={consistencyMode}
-                  onChange={(e) => choose(setConsistencyMode)(e.target.value)}>
-                  <option value="references">References</option>
-                  <option value="prompt_only" disabled={pipeline === 'v2'}>Prompt only</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Budget profile</label>
-                <select className="form-select" value={budgetProfile}
-                  onChange={(e) => handleBudgetProfile(e.target.value)}>
-                  <option value="free">Free (no clip bought)</option>
-                  <option value="one_dollar">$1 / episode (key shots)</option>
-                  <option value="quality">Quality (billed APIs) — every shot animated</option>
-                  <option value="native_speech">Native speech (Veo) — characters speak in their clips</option>
-                  <option value="native_speech_manual">Native speech — your own clips (Flow / Higgsfield)</option>
-                </select>
-              </div>
+
+              {budgetProfile === 'native_speech' && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="new-story-speech-model">Clip quality</label>
+                  <select id="new-story-speech-model" className="form-select" value={speechModel}
+                    onChange={(e) => choose(setSpeechModel)(e.target.value)}>
+                    {SPEECH_MODELS.map((model) => {
+                      const usd = speech && speech.by_model ? speech.by_model[model.id] : null
+                      return (
+                        <option key={model.id} value={model.id}>
+                          {model.label}{usd != null ? ` — ≈ $${usd.toFixed(2)} an episode` : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+              )}
+
               {pipeline === 'v2' && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-sheet-mode">Character sheets</label>
                   <select id="new-story-sheet-mode" className="form-select" value={sheetMode}
                     onChange={(e) => choose(setSheetMode)(e.target.value)}>
-                    {SHEET_MODES.map((mode) => {
+                    {SHEET_MODES.map((option) => {
                       const usd = estimate && estimate.story && estimate.story.sheet_usd_by_mode
-                        ? estimate.story.sheet_usd_by_mode[mode.id] : null
+                        ? estimate.story.sheet_usd_by_mode[option.id] : null
                       return (
-                        <option key={mode.id} value={mode.id}>
-                          {mode.label}{usd != null ? ` — ≈ $${usd.toFixed(2)} a character` : ''}
+                        <option key={option.id} value={option.id}>
+                          {option.label}{usd != null ? ` — ≈ $${usd.toFixed(2)} a character` : ''}
                         </option>
                       )
                     })}
@@ -528,19 +548,6 @@ function CreateStoryForm() {
                     <p className="form-hint">
                       One 9:16 image per character: the front on the left half, the back on the right.
                     </p>
-                  )}
-                </div>
-              )}
-              {pipeline === 'v2' && !imagesManual && (
-                <div className="form-group">
-                  <label className="form-label" htmlFor="new-story-image-preference">Image provider</label>
-                  <select id="new-story-image-preference" className="form-select" value={imagePreference}
-                    disabled={!geminiKeySet && imagePreference === ''}
-                    onChange={(e) => choose(setImagePreference)(e.target.value)}>
-                    {IMAGE_PREFERENCES.map((pref) => <option key={pref.id} value={pref.id}>{pref.label}</option>)}
-                  </select>
-                  {!geminiKeySet && (
-                    <p className="form-hint">Add GEMINI_PAID_API_KEY in Settings to draw the images on Gemini first.</p>
                   )}
                 </div>
               )}
@@ -557,6 +564,19 @@ function CreateStoryForm() {
                   </p>
                 )}
               </div>
+              {pipeline === 'v2' && !imagesManual && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="new-story-image-preference">Image provider</label>
+                  <select id="new-story-image-preference" className="form-select" value={imagePreference}
+                    disabled={!geminiKeySet && imagePreference === ''}
+                    onChange={(e) => choose(setImagePreference)(e.target.value)}>
+                    {IMAGE_PREFERENCES.map((pref) => <option key={pref.id} value={pref.id}>{pref.label}</option>)}
+                  </select>
+                  {!geminiKeySet && (
+                    <p className="form-hint">Add GEMINI_PAID_API_KEY in Settings to draw the images on Gemini first.</p>
+                  )}
+                </div>
+              )}
               {pipeline === 'v2' && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-prompt-style">Clip prompts</label>
@@ -572,36 +592,126 @@ function CreateStoryForm() {
                   )}
                 </div>
               )}
+
               <div className="form-group">
-                <label className="form-label" htmlFor="new-story-frame">Frame</label>
-                <select id="new-story-frame" className="form-select" value={shownFrame}
-                  onChange={(e) => choose(setFrame)(e.target.value)}>
-                  {FRAMES.map((option) => {
-                    const reason = frameReason(option.id)
-                    return (
-                      <option key={option.id} value={option.id} disabled={Boolean(reason)} title={reason}>
-                        {option.label}{reason ? ` — unavailable: ${reason}` : ''}
-                      </option>
-                    )
-                  })}
-                </select>
-                <p className="form-hint">{FRAME_HINT}</p>
-              </div>
-              {nativeSpeech && !manualClips && (
-                <div className="form-group">
-                  <label className="form-label" htmlFor="new-story-speech-model">Speaking clips</label>
-                  <select id="new-story-speech-model" className="form-select" value={speechModel}
-                    onChange={(e) => choose(setSpeechModel)(e.target.value)}>
-                    {SPEECH_MODELS.map((model) => {
-                      const usd = speech && speech.by_model ? speech.by_model[model.id] : null
-                      return (
-                        <option key={model.id} value={model.id}>
-                          {model.label}{usd != null ? ` — ≈ $${usd.toFixed(2)} an episode` : ''}
-                        </option>
-                      )
-                    })}
-                  </select>
+                <label className="form-label">How the story runs</label>
+                <div className="story-segmented" role="group" aria-label="How the story runs">
+                  <Button
+                    type="button"
+                    variant={mode === 'studio' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => setMode('studio')}
+                  >
+                    Step by step
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={mode === 'agent' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => setMode('agent')}
+                  >
+                    In one run
+                  </Button>
                 </div>
+                <p className="form-hint">{MODE_HELP[mode]}</p>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Narrator</label>
+                <p className="form-hint">
+                  Off. When the characters speak in their own clips there is no narrator and no generated voice; a
+                  story whose lines are voiced can turn its narrator on later, in the story's settings.
+                </p>
+              </div>
+            </div>
+
+            <h4 className="form-label" style={{ marginTop: '14px' }}>The app's setup</h4>
+            <div className="story-profile-grid">
+              <div className="form-group">
+                <label className="form-label">Story engine</label>
+                <select className="form-select" value={pipeline} onChange={(e) => handlePipeline(e.target.value)}>
+                  <option value="v2">Current — 6–10 shots, each a clip</option>
+                  <option value="">Old — stills and short scenes</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Movement</label>
+                <select className="form-select" value={tier} onChange={(e) => choose(setTier)(Number(e.target.value))}>
+                  <option value={1}>Still pictures that pan and zoom</option>
+                  <option value={2}>Animated</option>
+                  <option value={3}>Animated, with the clips' own sound</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Where the app makes things</label>
+                <select className="form-select" value={route} onChange={(e) => choose(setRoute)(e.target.value)}>
+                  <option value="auto">Let the app decide</option>
+                  <option value="local">On this computer</option>
+                  <option value="api">On online services</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Keeping characters the same</label>
+                <select className="form-select" value={consistencyMode}
+                  onChange={(e) => choose(setConsistencyMode)(e.target.value)}>
+                  <option value="references">From their reference pictures</option>
+                  <option value="prompt_only" disabled={pipeline === 'v2'}>From the words only</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Spending plan</label>
+                <select className="form-select" value={budgetProfile}
+                  onChange={(e) => handleBudgetProfile(e.target.value)}>
+                  <option value="free">Free (no clip bought)</option>
+                  <option value="one_dollar">$1 an episode (key shots)</option>
+                  <option value="quality">Paid services — every shot animated, voices added</option>
+                  <option value="native_speech">The app makes clips that speak (Veo)</option>
+                  <option value="native_speech_manual">You make the clips that speak (Flow / Higgsfield)</option>
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              {manualClips ? (
+                <p className="chip chip-wrap">
+                  You make each clip on Google Flow or Higgsfield from the app's prompt and upload it; the app writes,
+                  draws the keyframes, checks the clips, times the subtitles and renders{speech ? `: ${speech.summary}.` : '.'}
+                </p>
+              ) : nativeSpeech ? (
+                <p className="chip chip-wrap">
+                  The app makes each clip on Veo, the character speaking its line in it; no narrator and no generated
+                  voice{speech ? `: ${speech.summary}.` : '.'}
+                </p>
+              ) : fullyAnimated ? (
+                <p className="chip chip-wrap">
+                  Every shot is a clip, with paid images and voices{estimate ? `: ${estimate.summary}.` : '.'}
+                </p>
+              ) : (
+                <p className="chip chip-warn chip-wrap">
+                  Not every shot moves with this setup.
+                  {offer && !offer.quality && offer.missing_keys && offer.missing_keys.length > 0
+                    ? ` Add ${offer.missing_keys.join(', ')} in Settings to animate every shot`
+                      + (estimate ? `: ${estimate.summary}.` : '.') : ''}
+                </p>
+              )}
+              {nativeSpeech && speech && (
+                <>
+                  <p className="form-hint">{speech.assumptions}</p>
+                  {(speech.missing_keys.length > 0 || speech.stt_missing_keys.length > 0) && (
+                    <p className="form-hint">
+                      Missing in Settings: {[...speech.missing_keys,
+                        ...(speech.stt_missing_keys.length > 0
+                          ? [`${speech.stt_missing_keys.join(' or ')} (the speech check)`] : [])].join(', ')}.
+                    </p>
+                  )}
+                </>
+              )}
+              {!nativeSpeech && estimate && (fullyAnimated || (offer && !offer.quality)) && (
+                <p className="form-hint">{estimate.assumptions}</p>
+              )}
+              {fullyAnimated && offer && !offer.allow_paid && (
+                <p className="form-hint">
+                  Paid calls are off (Settings → allow paid): no image or clip is bought until you turn them on.
+                </p>
               )}
             </div>
           </details>
@@ -609,9 +719,10 @@ function CreateStoryForm() {
 
         {error && <p className="story-error">{error}</p>}
 
-        <button type="submit" className="btn btn-primary" disabled={!language || creating}>
-          {creating ? <><span className="spinner"></span> Creating…</> : 'Create story'}
+        <button type="submit" className="btn btn-primary" disabled={!ready || creating}>
+          {creating ? <><span className="spinner"></span> Creating…</> : 'Create the story'}
         </button>
+        {!ready && <p className="form-hint">Write your idea and pick a language first.</p>}
       </form>
     </div>
   )

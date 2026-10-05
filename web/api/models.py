@@ -723,6 +723,11 @@ class StoryCreateRequest(BaseModel):
     # default) or agent mode (one story-fast-track job approves by rule),
     # stored as ``generation_profile.mode`` -- an agent story only.
     mode: Literal["studio", "agent"] = "studio"
+    # Plan 28 stage A4 (DEC-305 §9): the form's "Who makes the clips" -- "me" (on Flow or Higgsfield,
+    # from the app's prompts) or "app"; with no generation_profile sent, the profile the server makes
+    # from it (media_policy.new_story_profile). Left out: as before (the keys decide). A sent
+    # generation_profile is honoured as sent, this ignored.
+    clips: Optional[Literal["me", "app"]] = None
 
 
 class StoryPatchRequest(BaseModel):

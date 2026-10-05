@@ -708,17 +708,65 @@ def quality_keys_present(merged) -> bool:
     return all((merged.get(name) or "").strip() for name in QUALITY_KEYS)
 
 
-def new_story_profile(settings_env):
-    """The ``generation_profile`` a story created without one gets: when the
-    Settings values *settings_env*, over the process environment, hold every
+def new_story_profile(settings_env, clips=None):
+    """The ``generation_profile`` a story created without one gets.
+
+    *clips* (plan 28 stage A4, the new-story form's "Who makes the clips"):
+    ``"me"`` -- the manual native-speech profile
+    (``defaults.manual_speech_generation_profile``: v2, tier 3, the api
+    route, references, every clip the human's own upload, the keyframes,
+    sheets, plates and props on the quality image links); ``"app"`` -- the
+    native-speech profile on its cheapest speaking link
+    (:func:`native_speech_profile` with ``speech_model`` lite). Either way
+    nothing else is set: the store stamps no generated voice and no narrator
+    (plan 28 stage B1) and the writing version; the universe is the style's
+    default, the frame 9:16, the image provider order, sheets, bodies and
+    clip prompts their defaults (``media_policy``'s absent-key rules). The
+    keys still missing are the offer's to say, not a reason to pick another.
+
+    No *clips* (an API or CLI caller): when the Settings values
+    *settings_env*, over the process environment, hold every
     :data:`QUALITY_KEYS` value (FAL_KEY alone, stage 2c, DEC-235), the
-    manual native-speech profile (plan 22 stage 5: the manual mode is the
-    default -- v2, tier 3, the keyframes made by the app, every clip the
-    human's own upload; ``defaults.manual_speech_generation_profile``); else
-    None -- the store's own default."""
+    manual native-speech profile (plan 22 stage 5); else None -- the store's
+    own default."""
+    if clips == defaults.CLIPS_ME:
+        return defaults.manual_speech_generation_profile()
+    if clips == defaults.CLIPS_APP:
+        return dict(native_speech_profile(), speech_model=defaults.APP_CLIPS_SPEECH_MODEL)
     if quality_keys_present(gating.merged_env(settings_env)):
         return defaults.manual_speech_generation_profile()
     return None
+
+
+def clip_makers_offer(merged) -> dict:
+    """``{"me" | "app": {"profile", "episode_usd", "story_usd", "missing_keys",
+    "stt_missing_keys", "summary"}}`` -- what each answer to "Who makes the clips" makes a story
+    on and costs (plan 28 stage A4; :func:`native_speech_estimate` on that
+    profile, *merged* the Settings values). Calls nothing."""
+    offer = {}
+    for maker in defaults.CLIP_MAKERS:
+        profile = new_story_profile(merged, clips=maker)
+        estimate = native_speech_estimate(merged, story={"generation_profile": profile})
+        offer[maker] = {"profile": profile, "episode_usd": estimate["episode_usd"],
+                        "story_usd": estimate["story_usd"],
+                        "missing_keys": estimate["missing_keys"], "stt_missing_keys": estimate["stt_missing_keys"],
+                        "summary": estimate["summary"]}
+    return offer
+
+
+def formats_offer(profiles) -> tuple:
+    """``({maker: {lang: [ids]}}, {maker: {lang: {id: reason}}})``: the
+    episode formats a story on each of *profiles* (``{maker: profile}``) can
+    fit in French and English, whatever look is chosen, and why each other
+    one is hidden (plan 28 stage A4, ``format_fit.formats_that_fit``)."""
+    from . import format_fit
+
+    fit, hidden = {}, {}
+    for maker, profile in profiles.items():
+        fit[maker], hidden[maker] = {}, {}
+        for language in ("fr", "en"):
+            fit[maker][language], hidden[maker][language] = format_fit.formats_that_fit(profile, language=language)
+    return fit, hidden
 
 
 def new_story_offer(settings_env) -> dict:
@@ -726,7 +774,14 @@ def new_story_offer(settings_env) -> dict:
 
         {"profile", "quality": bool, "missing_keys": [name, ...], "sound_missing_keys": [name, ...],
          "allow_paid": bool, "estimate": <preset_estimate>, "native_speech", "native_speech_manual",
-         "aspect_reasons": {rule: sentence}}
+         "aspect_reasons": {rule: sentence}, "clip_makers": {"me" | "app": {...}},
+         "formats_that_fit": {"me" | "app": {"fr" | "en": [id, ...]}},
+         "formats_hidden": {"me" | "app": {"fr" | "en": {id: reason}}}}
+
+    ``clip_makers``, ``formats_that_fit`` and ``formats_hidden`` (plan 28
+    stage A4): the two answers to "Who makes the clips"
+    (:func:`clip_makers_offer`) and the formats each fits in each language
+    (:func:`formats_offer`) -- the new-story form's Advanced format select.
 
     ``sound_missing_keys`` (stage E): the keys the preset's clips still need
     for their own sound (GEMINI_PAID_API_KEY for Veo) -- the preset runs
@@ -747,6 +802,8 @@ def new_story_offer(settings_env) -> dict:
         allow_paid = False
     profile = new_story_profile(settings_env)
     estimate = preset_estimate(merged)
+    makers = clip_makers_offer(merged)
+    formats_fit, formats_hidden = formats_offer({maker: row["profile"] for maker, row in makers.items()})
     return {
         "profile": profile if profile is not None else defaults.default_generation_profile(),
         "quality": profile is not None,
@@ -764,6 +821,10 @@ def new_story_offer(settings_env) -> dict:
             merged, story={"generation_profile": native_speech_manual_profile()}),
         # Plan 23 stage B7: why a frame cannot be picked, by rule (the form disables it with the sentence).
         "aspect_reasons": aspect_reasons(),
+        # Plan 28 stage A4: what "Who makes the clips" makes and costs, and the formats each one fits.
+        "clip_makers": makers,
+        "formats_that_fit": formats_fit,
+        "formats_hidden": formats_hidden,
     }
 
 

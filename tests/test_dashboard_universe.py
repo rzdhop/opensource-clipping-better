@@ -34,7 +34,8 @@ def test_the_wizard_filters_the_select_by_the_chosen_style_and_hides_it_when_the
     assert "const styleUniverses = universeCatalogue.by_style[styleTemplateId]" in src
     assert "styleUniverses.universes" in src and ".filter(Boolean)" in src
     assert "{universeOptions.length > 0 && (" in src                       # hidden when there is nothing to pick
-    assert '<label className="form-label" htmlFor="new-story-universe">Universe</label>' in src
+    # Re-pinned on purpose (plan 28 stage S1): under Advanced, in plain words.
+    assert '<label className="form-label" htmlFor="new-story-universe">Characters made of</label>' in src
     select = src.split('id="new-story-universe"', 1)[1].split("</select>", 1)[0]
     assert "value={shownUniverse}" in select
     assert "onChange={(e) => choose(setUniverseChoice)(e.target.value)}" in select
@@ -55,9 +56,12 @@ def test_the_labels_are_in_the_story_language_and_the_audience_note_sits_under_t
 def test_the_wizard_sends_the_universe_in_the_generation_profile_and_the_api_model_has_the_field():
     src = _read(WIZARD)
     create = re.search(r"const createFields = \{(.*?)\n      \}", src, re.DOTALL).group(1)
-    assert "          ...(shownUniverse ? { universe: shownUniverse } : {})," in create
-    # The select always shows one, so the profile it belongs to is sent as the form shows it.
-    assert "useEffect(() => { if (shownUniverse) setProfileChosen(true) }, [shownUniverse])" in src
+    # Re-pinned on purpose (plan 28 stage S1): the universe is part of the look -- the style's default, said
+    # under the style cards, never sent (absent: media_policy.universe reads the style's default); a pick
+    # under Advanced is sent, and only then is the profile the form's own.
+    assert "          ...(universeId ? { universe: universeId } : {})," in create
+    assert "setProfileChosen(true) }, [shownUniverse]" not in src
+    assert "The characters are {universeLabel(shownUniverseEntry).toLowerCase()}." in src
     assert "fruits" in defaults.UNIVERSES
 
 

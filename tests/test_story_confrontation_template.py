@@ -204,10 +204,11 @@ def test_the_store_and_the_wizard_follow_the_same_rule(tmp_path):
     assert ("return NATIVE_SPEECH_PROFILES.includes(budgetProfile) ? 'confrontation_50s_v2' : null"
             in formats)
     wizard = (STORY_SRC / "NewStoryWizard.jsx").read_text(encoding="utf-8")
-    assert "const profileSuggestion = profileSuggestedTemplate(budgetProfile)" in wizard
-    assert "const suggestedTemplate = profileSuggestion || styleSuggestedTemplate(chosenStyle, pipeline)" in wizard
-    # Preselected, still a choice: the user's pick wins, and the pick or the suggestion is sent.
-    assert ("const episodeTemplateId = episodeTemplateChoice || suggestedTemplate || "
-            "pipelineDefaultTemplate(pipeline)") in wizard
-    assert "episode_template_id: episodeTemplateChoice || suggestedTemplate || null," in wizard
-    assert "' Suggested for native speech: one shot per line.'" in wizard
+    # Re-pinned on purpose (plan 28 stage A4/S1): a native-speech story sends no format unless one is picked
+    # under Advanced -- the server starts it on the confrontation when it fits (format_fit.choose_format), and
+    # the fold says which one the app will use.
+    assert "const suggestedTemplate = nativeSpeech ? null : styleSuggestedTemplate(chosenStyle, pipeline)" in wizard
+    assert ("profileSuggestedTemplate(budgetProfile) || suggestedTemplate || pipelineDefaultTemplate(pipeline)))"
+            in wizard)
+    assert "episode_template_id: formatChoice || suggestedTemplate || null," in wizard
+    assert "`The app will use: ${appFormat ? appFormat.label : ''}. `" in wizard

@@ -188,6 +188,17 @@ VOICES_TTS = "tts"
 VOICES_NONE = "none"
 VOICES_MODES = (VOICES_TTS, VOICES_NONE)
 
+# Plan 28 stage A4 (DEC-305 §9): the new-story form's "Who makes the clips",
+# sent as ``StoryCreateRequest.clips`` -- "me": the human, on Flow or
+# Higgsfield, from the app's prompts (``native_speech_manual``); "app": the
+# app, on the native-speech profile's cheapest speaking link
+# (:data:`APP_CLIPS_SPEECH_MODEL`). ``media_policy.new_story_profile`` turns
+# the answer into a profile; everything else keeps its quality default.
+CLIPS_ME = "me"
+CLIPS_APP = "app"
+CLIP_MAKERS = (CLIPS_ME, CLIPS_APP)
+APP_CLIPS_SPEECH_MODEL = "lite"
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

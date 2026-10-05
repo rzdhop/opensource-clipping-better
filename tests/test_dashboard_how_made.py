@@ -4,7 +4,10 @@ controls, "How clips are made" (Auto / My own) and "How images are made"
 (Auto / My own), sit under the Studio / Agent "Mode" and above the collapsed
 Generation profile; they drive the same state as the Budget profile select
 (My own clips = native_speech_manual, My own images = images: 'manual') and
-add no payload key."""
+add no payload key. Plan 28 stage S1: the new-story form asks "Who makes the
+clips" as two plain cards instead (the same mapping: "Me" is
+native_speech_manual, "The app" native_speech), its images choice under the
+Advanced fold; the profile card keeps the two controls."""
 
 from __future__ import annotations
 
@@ -31,29 +34,30 @@ def test_the_two_controls_hold_the_plan_labels_options_and_explanations():
 
 
 def test_the_wizard_places_the_controls_under_mode_and_above_the_details_and_maps_them():
+    # Re-pinned on purpose (plan 28 stage S1, DEC-305 §9): the new-story form asks "Who makes the clips" as two
+    # plain cards above the one collapsed Advanced fold, in place of the two segmented controls (still the
+    # profile card's). The semantics are plan 25's: "Me" is the native_speech_manual profile, "The app" the
+    # native_speech one; images your own -> images: 'manual' (under Advanced), only on v2.
     src = _read(WIZARD)
-    assert "<HowMadeControls" in src and "from './HowMadeControls'" in src
-    mode = src.index('aria-label="Mode"')
-    controls = src.index("<HowMadeControls")
-    details = src.index('<summary>Generation profile</summary>')
-    assert mode < controls < details
-    # clips My own -> the manual profile; Auto -> the profile it had, else native_speech
-    assert "handleBudgetProfile('native_speech_manual')" in src
-    assert "profileBeforeManual" in src and "'native_speech'" in src
-    # images My own -> images: 'manual', only on v2; the select in the details stays consistent
+    assert "<HowMadeControls" not in src and "from './HowMadeControls'" not in src
+    clips = src.index('aria-label="Who makes the clips"')
+    details = src.index("<summary>Advanced</summary>")
+    assert clips < details
+    assert "const CLIP_MAKER_SETUPS = { me: 'native_speech_manual', app: 'native_speech' }" in src
+    assert "const clipMaker = clipMakerOf(budgetProfile)" in src
     assert "...(imagesManual ? { images: 'manual' } : {})" in src
     assert "const imagesManual = pipeline === 'v2' && imagesOwn" in src
-    # the summary chip names the choice
-    assert "Clips: {manualClips ? 'my own' : 'auto'}" in src
-    assert "Images: {imagesManual ? 'my own' : 'auto'}" in src
-    # the Budget profile select stays, with its five options, and the old checkbox is gone
-    assert 'Budget profile</label>' in src and '<option value="native_speech_manual">' in src
+    assert 'data-choice="images-own"' in src and "onClick={() => handleImagesOwn(true)}" in src
+    # the Spending plan select (the old Budget profile) stays under Advanced, with its five options
+    assert 'Spending plan</label>' in src and '<option value="native_speech_manual">' in src
     assert "My own images too" not in src
 
 
 def test_the_wizard_keeps_mode_and_drops_image_preference_when_images_are_manual():
     src = _read(WIZARD)
-    assert '<label className="form-label">Mode</label>' in src and ">\n                Studio\n" in src
+    # Re-pinned on purpose (plan 28 stage S1): the Mode choice is "How the story runs" under Advanced.
+    assert '<label className="form-label">How the story runs</label>' in src
+    assert ">\n                    Step by step\n" in src
     assert "...(pipeline === 'v2' && !imagesManual && imagePreference ? { image_preference: imagePreference } : {})" in src
     assert "{pipeline === 'v2' && !imagesManual && (" in src  # the Image provider select is hidden
     for key in ("budget_profile: budgetProfile", "speech_model: speechModel", "image_preference: imagePreference"):

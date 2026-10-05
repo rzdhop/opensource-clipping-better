@@ -84,15 +84,19 @@ def test_the_wizard_renders_the_episode_format_select_and_sends_the_choice():
             "} from './episodeTemplates'") in src
     assert '<label className="form-label" htmlFor="new-story-episode-format">Episode format</label>' in src
     select = src.split('id="new-story-episode-format"', 1)[1].split("</select>", 1)[0]
-    assert "value={episodeTemplateId}" in select
+    # Re-pinned on purpose (plan 28 stage A4/S1): under Advanced, the select lists only the formats the server's
+    # oracle says fit (offer.formats_that_fit), after "Let the app choose"; a hidden one is named with its reason.
+    assert "value={formatChoice}" in select
     assert "onChange={(e) => setEpisodeTemplateChoice(e.target.value)}" in select
-    assert "EPISODE_TEMPLATES.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.label}</option>)" in select
+    assert '<option value="">Let the app choose (recommended)</option>' in select
+    assert "formatOptions.map((tpl) => <option key={tpl.id} value={tpl.id}>{tpl.label}</option>)" in select
+    assert "const formatOptions = EPISODE_TEMPLATES.filter((tpl) => fitIds.includes(tpl.id))" in src
+    assert "const formatChoice = fitIds.includes(episodeTemplateChoice) ? episodeTemplateChoice : ''" in src
+    assert "Not offered: {tpl.label}, {hiddenReasons[tpl.id]}" in src
     assert "{episodeFormat ? episodeFormat.help : ''}" in src
-    # Pre-filled: the user's pick, else the style's suggestion, else the pipeline's default. Re-pinned on
-    # purpose (plan 22 stage 3): a native-speech profile's suggestion comes before the style's.
-    assert "const suggestedTemplate = profileSuggestion || styleSuggestedTemplate(chosenStyle, pipeline)" in src
-    assert ("const episodeTemplateId = episodeTemplateChoice || suggestedTemplate || "
-            "pipelineDefaultTemplate(pipeline)") in src
-    # Sent: the pick or the suggestion; else null, so the server picks by pipeline.
+    # A voiced story keeps the style's suggestion; a story whose characters speak in their own clips sends none
+    # (the server picks one that fits). Re-pinned on purpose (plan 28 stage A4).
+    assert "const suggestedTemplate = nativeSpeech ? null : styleSuggestedTemplate(chosenStyle, pipeline)" in src
+    # Sent: the pick or the suggestion; else null, so the server picks.
     create = re.search(r"const createFields = \{(.*?)\n      \}", src, re.DOTALL).group(1)
-    assert "        episode_template_id: episodeTemplateChoice || suggestedTemplate || null," in create
+    assert "        episode_template_id: formatChoice || suggestedTemplate || null," in create

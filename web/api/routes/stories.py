@@ -953,11 +953,18 @@ async def create_story(req: StoryCreateRequest) -> dict:
     ``mode`` (plan 21 stage 1): ``studio`` (the default: nothing is added)
     or ``agent``, stored as ``generation_profile.mode`` on top of the profile
     above -- the story the ``story-fast-track`` step may run on.
+
+    ``clips`` (plan 28 stage A4): "Who makes the clips", ``me`` or ``app``
+    -- without a ``generation_profile``, the profile made from it
+    (``media_policy.new_story_profile``). On a story that speaks in its own
+    clips a format no plan of its clips fits is a 400 in one sentence
+    (``format_fit.FORMAT_REFUSAL``), nothing created; named none, the
+    server picks one that fits (the confrontation).
     """
     if req.generation_profile is not None:
         profile = req.generation_profile.model_dump()
     else:
-        profile = media_policy.new_story_profile(worker.get_settings_env())
+        profile = media_policy.new_story_profile(worker.get_settings_env(), clips=req.clips)
     if req.mode == defaults.MODE_AGENT:
         profile = dict(profile or {}, mode=defaults.MODE_AGENT)
     try:
@@ -976,7 +983,8 @@ async def create_story(req: StoryCreateRequest) -> dict:
 @router.get("/new-profile")
 async def new_story_profile() -> dict:
     """What a story created now would get (``media_policy.new_story_offer``):
-    ``{"profile", "quality", "missing_keys", "allow_paid"}`` -- the quality
+    ``{"profile", "quality", "missing_keys", "allow_paid", "clip_makers",
+    "formats_that_fit", "formats_hidden", ...}`` -- the quality
     preset (v2, every shot animated) when Settings hold FAL_KEY, else the
     story defaults. The new-story form starts from it. Calls nothing, never
     returns a key. Declared before ``GET /{story_id}`` (as ``/styles``)."""
