@@ -197,7 +197,8 @@ def expand_entry(ctx, store, ep, *, tools, note=None, regenerate=False, announce
     entry = season["arc"][ep - 1]
     cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
 
-    pack = context.build_pack(language=story["language"], story=story, note=note)
+    pack = context.build_pack(language=story["language"], story=story, note=note,
+                              setup=llm_call.setup_block(store, ctx.story_id, story))
     llm_call.announce_trimmed(ctx, pack, announced)
     view, cut = _arc_view(season["arc"], ep)
     if cut and "arc" not in announced:
@@ -245,7 +246,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
     ctx.cancel.check()
 
     announced = set()
-    pack = context.build_pack(language=story["language"], story=story)
+    pack = context.build_pack(language=story["language"], story=story,
+                              setup=llm_call.setup_block(store, ctx.story_id, story, episodes=episodes))
     llm_call.announce_trimmed(ctx, pack, announced)
     archetypes = _archetype_pick_list(story["language"]) if media_policy.is_v2(story) else None
     system, user, schema = prompts.build_s1(

@@ -46,7 +46,12 @@ from . import context, prompting, schemas
 # pays_off ask and the audience direction; E3's recap scene the previous
 # recap; E4 the hook payoffs and the hook_payoff kind -- and N1 shows its
 # direction once; episode 1's output is unchanged (RC-M1).
-PROMPT_VERSION = "s6"
+# s7: plan 28 stage E2 (DEC-305 §8) -- a v2 story's set-up writers (C1v2,
+# C1J, B1-B3, K1, D1, D2, P0, P1, R1, D3, R1v2, S1, S2, D4-D6) read the set-up
+# block first (``context.setup_for``); C1v2/C1J carry the stage-D1 review's
+# wording; NATIVE_LINE_V3 says the 5-10 s shot. Every legacy prompt's output
+# is unchanged (no set-up block on a legacy story).
+PROMPT_VERSION = "s7"
 
 # Concepts are the one place the model is asked to be genuinely inventive;
 # everything else in the bible is writing *from* a chosen concept, which
@@ -517,10 +522,40 @@ WRITING_V3_INPUT_BUDGET = {"E1v3": 3320, "E2v3": 3200, "E3v3": 4020, "J1v3": 470
 VARIANTS_INPUT_BUDGET = {"N1v2": 4160}
 
 
-def input_budget(prompt_id) -> int:
+# Plan 28 stage E2 (DEC-305 §8): the set-up writers with the set-up block
+# (``context.setup_for``), each measured on its French worst case with the
+# block at its own worst -- the fruit style's medium and rendering, the
+# confrontation format on native speech with a narrator, the hexes on the look
+# writers, the bible's premise past its cut, the world at B2's caps
+# (tests/test_story_setup_context.py) -- + 15 %, rounded up to ten. A prompt id
+# is the same with and without the block: a prompt that carries it
+# (:func:`carries_setup`) is sent with this row, one without it (a legacy
+# story's) with the id's legacy budget, exactly as before. Measured:
+# C1v2 2,249, C1J 1,908, B1 1,972, B1v3 2,072, B2 2,376, B3 2,636, K1 3,646, P0
+# 2,125, P1 2,582, R1 2,728, S1 3,152, S1v2 3,568, S2 3,221, D1 3,896, D2
+# 3,004, D3 2,775, R1v2 2,100, D4 2,482, D5 4,058, D6 3,610. K1, S1v2, D1, D5 and D6's
+# budgets pass the spec's 4,000 like J1v3 and E3v3 -- nothing is trimmed to fit.
+# Kept beside INPUT_BUDGET for the same reason as the writing-v3 rows (its
+# rows, in order, are pinned by the RC-M1 file).
+SETUP_INPUT_BUDGET = {"C1v2": 2590, "C1J": 2200, "B1": 2270, "B1v3": 2390, "B2": 2740, "B3": 3040,
+                      "K1": 4200, "P0": 2450, "P1": 2970, "R1": 3140, "S1": 3630, "S1v2": 4110, "S2": 3710,
+                      "D1": 4490, "D2": 3460, "D3": 3200, "R1v2": 2420, "D4": 2860, "D5": 4670, "D6": 4160}
+
+
+def carries_setup(user) -> bool:
+    """Whether the user prompt *user* carries the set-up block (plan 28 stage
+    E2): every set-up writer renders it first (``context.SETUP_HEADING``)."""
+    return isinstance(user, str) and user.startswith(context.SETUP_HEADING)
+
+
+def input_budget(prompt_id, *, setup=False) -> int:
     """The input budget *prompt_id* is sent with (``context.check_budget``):
-    its :data:`INPUT_BUDGET` row, else its :data:`WRITING_V3_INPUT_BUDGET`
-    or :data:`VARIANTS_INPUT_BUDGET` row, else the default pack budget."""
+    with *setup* (the prompt carries the set-up block, :func:`carries_setup`)
+    its :data:`SETUP_INPUT_BUDGET` row; else its :data:`INPUT_BUDGET` row,
+    else its :data:`WRITING_V3_INPUT_BUDGET` or :data:`VARIANTS_INPUT_BUDGET`
+    row, else the default pack budget -- a legacy prompt's budget as it was."""
+    if setup and prompt_id in SETUP_INPUT_BUDGET:
+        return SETUP_INPUT_BUDGET[prompt_id]
     if prompt_id in INPUT_BUDGET:
         return INPUT_BUDGET[prompt_id]
     if prompt_id in VARIANTS_INPUT_BUDGET:
@@ -629,10 +664,48 @@ def _data_block(pack, sections) -> str:
             parts.append(f"Character design rule: {value}")
         elif name == "universe":
             parts.append(value)
+        elif name == "performance":
+            parts.append(f"Performance: {value}.")
         else:
             parts.append(value)
     block = "\n\n".join(parts)
     return f"{block}\n\n" if block else ""
+
+
+# ------------------------------------------------- the set-up block (plan 28 stage E2)
+#
+# DEC-305 §8: a v2 story's set-up writers (C1v2, C1J, B1/B1v3/B2/B3, K1, D1, D2,
+# P0, P1, R1, D3, R1v2, S1/S1v2, S2, D4, D5, D6) read ``pack.setup``
+# (``context.setup_for``) first. Each builder names its sections twice: the
+# legacy tuple (unchanged, so a legacy story's prompt is byte-identical) and
+# the set-up one -- the block first, the one-line style dropped (ART STYLE
+# says it; K1 keeps its voice direction, ``performance``), the world added
+# where a writer lacked it. A French set-up prompt whose reply is in the story
+# language ends on the elision sentence (:data:`_FR_ELISION_SENTENCE`).
+
+# S1/S2/D5 in set-up mode: an episode's events sized to its seconds ("{which}": "each episode" for S1's
+# whole arc, "this episode" for S2's entry and D5's beats).
+SETUP_TIMING_SENTENCE = ("Size {which} to the seconds FORMAT AND TIMING gives an episode: no more events than its "
+                         "shots can show.")
+
+
+def _sections(pack, legacy, setup):
+    """*setup* when *pack* carries the set-up block, else *legacy*."""
+    return setup if pack.setup else legacy
+
+
+def _setup_tail(pack, *, timing=None, french=True) -> str:
+    """What a set-up prompt adds after its ask: with *timing* ("each
+    episode", "this episode": S1/S2/D5) the seconds sentence; with *french*
+    on a French story, the elision sentence. Blank without the set-up block."""
+    if not pack.setup:
+        return ""
+    tail = ""
+    if timing:
+        tail += "\n\n" + SETUP_TIMING_SENTENCE.format(which=timing)
+    if french and pack.language_name == "French":
+        tail += "\n\n" + _FR_ELISION_SENTENCE
+    return tail
 
 
 # ------------------------------------------------------------------- C1
@@ -705,12 +778,22 @@ def build_c1_v2(pack, *, style_ids, batch, of, angle):
 
     *pack* carries ``brief`` (not ``seed``) and, when this story already has
     cards, ``avoid`` of this story's own titles only (the caller never sends
-    the library's)."""
+    the library's).
+
+    Plan 28 stage E2 (the stage-D1 review): the set-up block (``pack.setup``)
+    first; the angle may reorder emphasis but never adds what the brief lacks;
+    the cast, world, hook and retention asks are bounded; and with one style
+    id (the story's chosen look) ``style_fit`` is that style, not a choice."""
     style_ids = list(style_ids)
     # Plan 23 stage D2: a story with a universe adds its species block (pack.universe) between the
     # style and the avoid list; without one the block is empty and these bytes are what they were.
-    data_block = _data_block(pack, ("brief", "style", "universe", "avoid"))
-    styles_list = ", ".join(style_ids)
+    data_block = _data_block(pack, _sections(pack, ("brief", "style", "universe", "avoid"),
+                                             ("setup", "brief", "universe", "avoid")))
+    if len(style_ids) == 1:
+        style_fit_line = f"- style_fit: {style_ids[0]}, the story's chosen visual style\n\n"
+    else:
+        style_fit_line = ("- style_fit: the visual style that best fits this concept, one of "
+                          f"{', '.join(style_ids)}\n\n")
 
     user = (
         f"{data_block}"
@@ -723,27 +806,32 @@ def build_c1_v2(pack, *, style_ids, batch, of, angle):
         "replace or drop a named character, never move the story elsewhere, "
         "never change what the conflict is about.\n\n"
         f"This call's angle: {angle}. The angle chooses which side of the "
-        "brief the concept leads with -- never the premise. Where the angle "
+        "brief the concept leads with and what it puts first -- never the "
+        "premise. It never adds an antagonist, a place or a secret the brief "
+        "does not have, unless the brief leaves that open. Where the angle "
         "and the brief disagree, follow the brief.\n\n"
         "Give:\n"
         "- title: at most 8 words\n"
         "- logline: one complete sentence, at most 30 words: who wants "
         "what, who stands in the way, and what is at stake -- the brief's "
         "own conflict\n"
-        "- world: the setting and premise as the brief gives them, at most "
-        "60 words\n"
+        "- world: the setting and premise as the brief gives them; if it "
+        "gives none, invent one; at most 60 words\n"
         "- cast_sketch: 3 to 5 characters; every character the brief names "
-        "comes first, with the brief's name and role; each with a role "
-        "(one of lead, support, recurring, guest) and a one-line "
-        "description, at most 25 words\n"
-        "- hook_formula: what makes someone stop scrolling on episode 1\n"
+        "comes first, with the brief's name and role; if the brief names "
+        "more than 5, keep the 5 who carry the conflict and name the others "
+        "in the world; each with a role (one of lead, support, recurring, "
+        "guest) and a one-line description, at most 25 words\n"
+        "- hook_formula: at most 25 words: what makes someone stop "
+        "scrolling in the first seconds of episode 1\n"
         "- value: the real substance this story carries (a dilemma, a "
         "lesson, a truth about people)\n"
-        "- retention_mechanics: why someone comes back for episode 2\n"
-        f"- style_fit: the visual style that best fits this concept, one of "
-        f"{styles_list}\n\n"
+        "- retention_mechanics: at most 25 words: why someone who watched "
+        "episode 1 comes back for episode 2\n"
+        f"{style_fit_line}"
         "Never use real people, brands, studio names or copyrighted "
         "characters."
+        f"{_setup_tail(pack)}"
     )
     return _system(pack), user, schemas.c1_schema(style_ids, species=bool(pack.universe))
 
@@ -805,6 +893,14 @@ _C1J_ASK = (
     "when kept"
 )
 
+# Plan 28 stage E2 (the stage-D1 review): what the judge tolerates, and --
+# with the set-up block -- what it checks beyond the brief.
+C1J_TOLERANCE = ("What the concept adds that contradicts nothing in the brief is not drift: it never makes kept "
+                 "false.")
+C1J_SETUP_CHECK = ("With the series set-up above, kept is also false when the concept breaks it -- a character who "
+                   "is not of its universe (a human in a fruit world, say) or a world its art style cannot show; "
+                   "name that in missing.")
+
 
 def c1j_schema() -> dict:
     return _llm_obj({
@@ -817,20 +913,33 @@ def c1j_schema() -> dict:
     })
 
 
+def _c1j_member(member) -> str:
+    label = f"{member['role']}, {member['species']}" if member.get("species") else member["role"]
+    return f"- {member['name']} ({label}): {member['one_line']}"
+
+
 def _c1j_card_block(card) -> str:
     lines = [f"Title: {card['title']}", f"Logline: {card['logline']}", f"World: {card['world']}", "Cast:"]
-    lines += [f"- {member['name']} ({member['role']}): {member['one_line']}" for member in card["cast_sketch"]]
+    lines += [_c1j_member(member) for member in card["cast_sketch"]]
     return "\n".join(lines)
 
 
-def build_c1j(*, language, brief, card):
+def build_c1j(*, language, brief, card, setup=None):
     """The brief judge of one C1v2 card (plan 22 stage 2): the brief, then
-    the card's title/logline/world/cast, then the verdict ask."""
+    the card's title/logline/world/cast (a member's species when the card
+    has one), then the verdict ask and its tolerance rule.
+
+    *setup* (plan 28 stage E2): the story's set-up block, shared with C1v2,
+    shown first; the judge then also checks the cast against the universe
+    and the world against the art style (:data:`C1J_SETUP_CHECK`)."""
     language_name = context.LANGUAGE_NAMES.get(language, language)
     user = (
-        f"The user's brief -- binding:\n<<<\n{brief}\n>>>\n\n"
+        (f"{setup}\n\n" if setup else "")
+        + f"The user's brief -- binding:\n<<<\n{brief}\n>>>\n\n"
         f"{_c1j_card_block(card)}\n\n"
-        f"{_C1J_ASK}"
+        f"{_C1J_ASK}\n\n"
+        f"{C1J_TOLERANCE}"
+        + (f" {C1J_SETUP_CHECK}" if setup else "")
     )
     return _C1J_SYSTEM.format(language_name=language_name), user, c1j_schema()
 
@@ -891,11 +1000,12 @@ _B3_ASK = (
 
 
 def build_b1(pack, *, regenerate=None):
-    """Logline, premise, tone, genre tags (spec 4.2, row B1)."""
-    user = _data_block(pack, ("concept",))
+    """Logline, premise, tone, genre tags (spec 4.2, row B1). A v2 story's
+    pack (plan 28 stage E2) puts the set-up block first."""
+    user = _data_block(pack, _sections(pack, ("concept",), ("setup", "concept")))
     if regenerate is not None:
         user += _regenerate_block(regenerate)
-    user += _B1_ASK
+    user += _B1_ASK + _setup_tail(pack)
     return _system(pack), user, schemas.B1_SCHEMA
 
 
@@ -911,26 +1021,26 @@ def build_b1_v3(pack):
     ``regenerate``: a bible-field regenerate (``steps/regenerate.py``)
     rewrites one field from its own "current values" block and stays on
     :func:`build_b1`, whether the story is v3 or not."""
-    user = _data_block(pack, ("concept", "brief"))
-    user += _B1_ASK + "\n\n" + _B1_V3_KEEP
+    user = _data_block(pack, _sections(pack, ("concept", "brief"), ("setup", "concept", "brief")))
+    user += _B1_ASK + "\n\n" + _B1_V3_KEEP + _setup_tail(pack)
     return _system(pack), user, schemas.B1_SCHEMA
 
 
 def build_b2(pack, *, regenerate=None):
     """World: setting, rules, time period, motifs (spec 4.2, row B2)."""
-    user = _data_block(pack, ("concept", "bible"))
+    user = _data_block(pack, _sections(pack, ("concept", "bible"), ("setup", "concept", "bible")))
     if regenerate is not None:
         user += _regenerate_block(regenerate)
-    user += _B2_ASK
+    user += _B2_ASK + _setup_tail(pack)
     return _system(pack), user, schemas.B2_SCHEMA
 
 
 def build_b3(pack, *, regenerate=None):
     """Themes/values, audience, why-come-back (spec 4.2, row B3)."""
-    user = _data_block(pack, ("concept", "bible", "world"))
+    user = _data_block(pack, _sections(pack, ("concept", "bible", "world"), ("setup", "concept", "bible", "world")))
     if regenerate is not None:
         user += _regenerate_block(regenerate)
-    user += _B3_ASK
+    user += _B3_ASK + _setup_tail(pack)
     return _system(pack), user, schemas.B3_SCHEMA
 
 
@@ -1010,15 +1120,19 @@ def build_k1(pack, *, character, cast_so_far, upload_notes=None, regenerate=None
     """One character from its cast-sketch entry (spec 4.2, row K1). In a
     species world (plan 26 stage 7b) the pack carries the species block
     (``universes.cast_species_block``), rendered after the design rule; a
-    pack without one gives the prompt it always gave."""
-    user = _data_block(pack, ("bible", "style", "character_design_rules", "universe"))
+    pack without one gives the prompt it always gave. A v2 story's pack
+    (plan 28 stage E2) adds the set-up block (with the palette hexes) and the
+    world; the style line gives way to ART STYLE, its voice direction kept."""
+    user = _data_block(pack, _sections(pack, ("bible", "style", "character_design_rules", "universe"),
+                                       ("setup", "bible", "world", "performance", "character_design_rules",
+                                        "universe")))
     user += _cast_section(cast_so_far)
     user += _character_sketch_block(character) + "\n\n"
     if upload_notes:
         user += _upload_notes_block(upload_notes) + "\n\n"
     if regenerate is not None:
         user += _regenerate_block(regenerate)
-    user += _K1_ASK
+    user += _K1_ASK + _setup_tail(pack)
     return _system(pack), user, schemas.k1_schema(_cast_names(cast_so_far))
 
 
@@ -1038,9 +1152,9 @@ _P0_ASK = (
 
 def build_p0(pack, *, cast):
     """Propose 2-3 places and 0-3 props (spec plan 1.2, extended for phase 2)."""
-    user = _data_block(pack, ("bible", "world"))
+    user = _data_block(pack, _sections(pack, ("bible", "world"), ("setup", "bible", "world")))
     user += _cast_section(cast)
-    user += _P0_ASK
+    user += _P0_ASK + _setup_tail(pack)
     return _system(pack), user, schemas.p0_schema(_cast_names(cast))
 
 
@@ -1063,7 +1177,7 @@ def _place_sketch_block(place) -> str:
 
 def build_p1(pack, *, place, places_so_far, regenerate=None):
     """One place from its sketch entry (spec 4.2, row P1)."""
-    user = _data_block(pack, ("bible", "world", "style"))
+    user = _data_block(pack, _sections(pack, ("bible", "world", "style"), ("setup", "bible", "world")))
     user += _places_section(places_so_far)
     user += _place_sketch_block(place) + "\n\n"
     if regenerate is not None:
@@ -1090,7 +1204,7 @@ def _prop_sketch_block(prop) -> str:
 
 def build_r1(pack, *, prop, cast, regenerate=None):
     """One prop from its sketch entry (spec 4.2, row R1)."""
-    user = _data_block(pack, ("bible", "style"))
+    user = _data_block(pack, _sections(pack, ("bible", "style"), ("setup", "bible", "world")))
     user += _cast_section(cast)
     user += _prop_sketch_block(prop) + "\n\n"
     if regenerate is not None:
@@ -1163,12 +1277,12 @@ def build_d1(pack, *, character, others, regenerate=None):
     for a character added later, the arc at its caps (12 summaries of 60
     words, ~1,430 tokens) would take the call past the spec's 4,000-token
     ceiling -- its place in the season is the knowledge step's timeline."""
-    user = _data_block(pack, ("bible", "world"))
+    user = _data_block(pack, _sections(pack, ("bible", "world"), ("setup", "bible", "world")))
     user += _others_section(others)
     user += _character_to_know_block(character) + "\n\n"
     if regenerate is not None:
         user += _regenerate_block(regenerate)
-    user += _D1_ASK
+    user += _D1_ASK + _setup_tail(pack)
     names = [other["name"] for other in others][:context._CAST_MAX_MEMBERS - 1]
     return _system(pack), user, schemas.d1_schema(names)
 
@@ -1222,10 +1336,10 @@ def build_d4(pack, *, places, props):
     bible and world, the places (*places*: ``[{name, one_line,
     descriptor?}]``, rendered short as every entity line is) and the props
     (*props*: ``[{name, owner}]``, owner a name or None)."""
-    user = _data_block(pack, ("bible", "world"))
+    user = _data_block(pack, _sections(pack, ("bible", "world"), ("setup", "bible", "world")))
     user += _places_section(places) or "No place yet.\n\n"
     user += _owned_props_section(props)
-    user += _D4_ASK
+    user += _D4_ASK + _setup_tail(pack)
     return _system(pack), user, schemas.d4_schema()
 
 
@@ -1303,14 +1417,15 @@ def build_d5(pack, *, ep, planned, entry, previous, cast, others, places, props,
     exactly today's prompt."""
     cast = list(cast)[:D5_CAST_DETAILED_MAX]
     others = list(others)[:context._CAST_MAX_MEMBERS - len(cast)]
-    user = _arc_entry_block(entry, label=f"Season arc, episode {ep} of {planned}") + "\n\n"
+    user = _data_block(pack, ("setup",))  # plan 28 stage E2: "" on a legacy pack
+    user += _arc_entry_block(entry, label=f"Season arc, episode {ep} of {planned}") + "\n\n"
     if archetype is not None:
         user += f"Plot archetype: {archetype['label']}; this episode's beat: {archetype['beat']}\n\n"
     user += _previous_beats_block(ep, previous)
     user += _d5_cast_block(cast, others)
     user += _knowledge_places_block(places)
     user += _owned_props_section(props)
-    user += _d5_ask(ep)
+    user += _d5_ask(ep) + _setup_tail(pack, timing="this episode")
     names = [member["name"] for member in cast] + [other["name"] for other in others]
     places = list(places)[:context._PLACES_MAX_ITEMS]
     return _system(pack), user, schemas.d5_schema(names, [place["name"] for place in places])
@@ -1353,11 +1468,11 @@ def build_d6(pack, *, objects, props, cast):
     props' possible owners)."""
     props = list(props)[:KNOWLEDGE_PROPS_SHOWN]
     cast = list(cast)[:context._CAST_MAX_MEMBERS]
-    user = _data_block(pack, ("bible",))
+    user = _data_block(pack, _sections(pack, ("bible",), ("setup", "bible")))
     user += _timeline_objects_block(objects)
     user += _owned_props_section(props)
     user += ("Characters: " + ", ".join(cast) + "\n\n") if cast else ""
-    user += _D6_ASK
+    user += _D6_ASK + _setup_tail(pack)
     return _system(pack), user, schemas.d6_schema([prop["name"] for prop in props], cast)
 
 
@@ -1436,9 +1551,14 @@ def build_d2(pack, *, character, others, rendering, regenerate=None, species=Fal
     characters' build and height (*others*: ``[{name, build, height_cm}]``,
     the looks written so far) so the heights share one scale. With *species*
     (a species world, plan 26 stage 7b: the pack carries the species block)
-    the reply also names the head's species, which the schema then requires."""
-    user = _data_block(pack, ("bible", "style", "character_design_rules", "universe"))
-    user += f"Rendering: {rendering}\n\n"
+    the reply also names the head's species, which the schema then requires.
+    A v2 story's pack (plan 28 stage E2) adds the set-up block (with the
+    palette hexes) and the world; its ART STYLE says the rendering, so the
+    raw rendering line is left out."""
+    user = _data_block(pack, _sections(pack, ("bible", "style", "character_design_rules", "universe"),
+                                       ("setup", "bible", "world", "character_design_rules", "universe")))
+    if not pack.setup:
+        user += f"Rendering: {rendering}\n\n"
     user += _heights_section(others)
     user += _character_to_draw_block(character) + "\n\n"
     if regenerate is not None:
@@ -1469,8 +1589,9 @@ def _props_list_section(props) -> str:
 
 def build_d3(pack, *, place, environment_rules, props, regenerate=None):
     """One place's look (phase 7, D3): P1's text, the style's environment
-    rule and the story's props (``[{name, one_line}]``)."""
-    user = _data_block(pack, ("style",))
+    rule and the story's props (``[{name, one_line}]``). A v2 story's pack
+    (plan 28 stage E2): the set-up block (with the hexes) and the world."""
+    user = _data_block(pack, _sections(pack, ("style",), ("setup", "world")))
     user += f"Environment rule: {environment_rules}\n\n"
     user += "\n".join([
         f"Place to lay out: {place['name']}",
@@ -1519,7 +1640,7 @@ def build_r1v2(pack, *, prop, owner, cast, places, regenerate=None):
     matches the cast's scale. *cast* and *places* are names (``where_when``)."""
     cast_names = [doc["name"] for doc in cast][:context._CAST_MAX_MEMBERS]
     place_names = [doc["name"] for doc in places][:context._PLACES_MAX_ITEMS]
-    user = _data_block(pack, ("style",))
+    user = _data_block(pack, _sections(pack, ("style",), ("setup", "world")))  # plan 28 stage E2
     lines = [
         f"Prop to size: {prop['name']}",
         f"One line: {prop['one_line']}",
@@ -1589,16 +1710,20 @@ def build_s1(pack, *, episodes, cast, places, archetypes=None):
     language; the ask then has the writer pick the season's primary and at
     most one secondary, and put every entry on one of them
     (``schemas.s1_archetype_schema``; sent as prompt id ``S1v2``). None (a
-    legacy story) renders exactly today's prompt and schema."""
-    user = _data_block(pack, ("bible", "world"))
+    legacy story) renders exactly today's prompt and schema. A v2 story's
+    pack (plan 28 stage E2) puts the set-up block first and sizes each
+    episode to its seconds (:data:`SETUP_TIMING_SENTENCE`)."""
+    user = _data_block(pack, _sections(pack, ("bible", "world"), ("setup", "bible", "world")))
     user += _cast_section(cast)
     user += _places_section(places)
     functions = ", ".join(schemas.ARC_FUNCTIONS)
     if archetypes is None:
         user += _S1_ASK_TEMPLATE.format(episodes=episodes, functions=functions)
+        user += _setup_tail(pack, timing="each episode")
         return _system(pack), user, schemas.s1_schema(episodes)
     user += _archetype_list_section(archetypes)
     user += _S1_ARCHETYPES_ASK_TEMPLATE.format(episodes=episodes, functions=functions)
+    user += _setup_tail(pack, timing="each episode")
     return _system(pack), user, schemas.s1_archetype_schema(episodes, [item["id"] for item in archetypes])
 
 
@@ -1637,15 +1762,16 @@ def build_s2(pack, *, entry, arc, cast, regenerate=None, archetype=None):
     *archetype* (an entry a v2 story's S1 put on a plot archetype, plan 20
     stage 2): ``{label, beat}``, the archetype and its beat for the entry's
     function, so the entry sits on that beat. None renders exactly today's
-    prompt."""
-    user = _data_block(pack, ("bible",))
+    prompt. A v2 story's pack (plan 28 stage E2) puts the set-up block
+    first and sizes the episode to its seconds."""
+    user = _data_block(pack, _sections(pack, ("bible",), ("setup", "bible")))
     user += _cast_section(cast)
     user += _arc_overview_block(arc, entry["ep"]) + "\n\n"
     if archetype is not None:
         user += _archetype_beat_block(archetype, entry["function"])
     if regenerate is not None:
         user += _regenerate_block(regenerate)
-    user += _S2_ASK
+    user += _S2_ASK + _setup_tail(pack, timing="this episode")
     return _system(pack), user, schemas.s2_schema(_cast_names(cast))
 
 
@@ -5007,9 +5133,10 @@ LINE_RULE_V3 = (
     "accusation in the line itself ('because…', 'since you…', 'the more you…, the more…'). No filler (no lone "
     "'Quoi ?', 'Écoute', a name alone), no line that restates an earlier one, no stage directions in the text."
 )
-NATIVE_LINE_V3 = ("Each line is spoken on camera by its speaker in one shot of at most 8 seconds: at most {hi} "
+# Plan 28 stage E2: a shot is 5-10 s since plan 27 (``native_speech.SHOT_WINDOW_S``), no longer "at most 8".
+NATIVE_LINE_V3 = ("Each line is spoken on camera by its speaker in one shot of 5 to 10 seconds: at most {hi} "
                   "words.")
-NATIVE_LINE_NARRATOR_V3 = ("Each character line is spoken on camera by its speaker in one shot of at most 8 "
+NATIVE_LINE_NARRATOR_V3 = ("Each character line is spoken on camera by its speaker in one shot of 5 to 10 "
                            "seconds: at most {hi} words; the narrator is heard over the picture.")
 NO_REPEAT_SENTENCE_V3 = ("Never repeat or paraphrase a line already spoken in this episode; the lines so far are "
                          "shown so you can continue from them, not echo them.")

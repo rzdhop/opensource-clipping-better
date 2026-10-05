@@ -196,7 +196,8 @@ def write_place_text(ctx, store, place_id, *, tools, note=None, regenerate=False
     written = [{key: doc[key] for key in ("name", "one_line", "descriptor")}
                for doc in store.list_entities(ctx.story_id, PLACES)
                if doc["place_id"] != place_id and doc["descriptor"]]
-    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
+                              setup=llm_call.setup_block(store, ctx.story_id, story, lock=lock))
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = {"field": "text", "current": _place_current(place), "note": pack.note} if regenerate else None
     system, user, schema = prompts.build_p1(pack, place={"name": place["name"], "one_line": place["one_line"]},
@@ -260,7 +261,8 @@ def write_prop_text(ctx, store, prop_id, *, tools, note=None, regenerate=False, 
     lock = entities.read_lock(store, ctx.story_id)
     prop = store.read_entity(ctx.story_id, PROPS, prop_id)
     cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
-    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
+                              setup=llm_call.setup_block(store, ctx.story_id, story, lock=lock))
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = {"field": "text", "current": _prop_current(prop, cast), "note": pack.note} if regenerate else None
     system, user, schema = prompts.build_r1(
@@ -331,7 +333,8 @@ def write_place_look(ctx, store, place_id, *, tools, note=None, regenerate=False
         raise StepFailed(f"{place['name']}: write the place first -- D3 reads its descriptor and layout notes.")
     props = store.list_entities(ctx.story_id, PROPS)
     cast = store.list_entities(ctx.story_id, CHARACTERS)
-    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
+                              setup=llm_call.setup_block(store, ctx.story_id, story, lock=lock, hexes=True))
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = None
     if regenerate and place.get("look"):
@@ -406,7 +409,8 @@ def write_prop_look(ctx, store, prop_id, *, tools, note=None, regenerate=False, 
     if owner_doc is not None:
         look = owner_doc.get("look") or {}
         owner = {"name": owner_doc["name"], "build": look.get("build"), "height_cm": look.get("height_cm")}
-    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
+                              setup=llm_call.setup_block(store, ctx.story_id, story, lock=lock, hexes=True))
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = None
     if regenerate and prop.get("look"):

@@ -263,7 +263,7 @@ def test_c1_instructions_are_english_only_when_the_pack_carries_no_data():
 # --------------------------------------------------------- caps and versions
 
 def test_prompt_version():
-    assert prompts.PROMPT_VERSION == "s6"
+    assert prompts.PROMPT_VERSION == "s7"
 
 
 def test_max_tokens():

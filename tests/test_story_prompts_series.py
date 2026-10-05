@@ -368,7 +368,7 @@ def test_n1_role_enum_is_every_character_role():
 # ============================================================ registry
 
 def test_s3_f1_n1_are_registered_in_the_catalogue():
-    assert prompts.PROMPT_VERSION == "s6"
+    assert prompts.PROMPT_VERSION == "s7"
     assert prompts.SCHEMA_NAMES["S3"] == "series_memory_entry"
     assert prompts.SCHEMA_NAMES["F1"] == "audience_feedback_digest"
     assert prompts.SCHEMA_NAMES["N1"] == "next_episode_proposals"

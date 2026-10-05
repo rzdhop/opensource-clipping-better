@@ -46,8 +46,8 @@ def _story(store, *, universe="fruits", style="fruit_drama"):
                         now=NOW)["story_id"]
 
 
-def _card(species="kiwi", *, title="Le Couloir des Masques", member_species=True):
-    card = brief_tests._card(title=title)
+def _card(species="kiwi", *, title="Le Couloir des Masques", member_species=True, style_fit="fruit_drama"):
+    card = brief_tests._card(title=title, style_fit=style_fit)
     if member_species:
         for i, member in enumerate(card["cast_sketch"]):
             member["species"] = species if i == 0 else f"{species} cousin"
@@ -150,7 +150,10 @@ def test_with_a_universe_the_block_is_the_only_addition_and_the_schema_asks_for_
 def test_the_french_worst_case_input_budget_fits_with_the_species_block(universe):
     """C1v2's own worst case (``test_c1v2_budget_with_a_400_word_brief``: a 400-word French brief, the widest
     style line, 24 avoided titles) plus each universe's block -- the dearest card of the batch -- stays
-    inside the unchanged ``INPUT_BUDGET["C1v2"]`` row."""
+    inside the budget C1v2 is sent with. Plan 28 stage E2: the stage-D1 review's sentences grew the ask past the
+    unchanged ``INPUT_BUDGET["C1v2"]`` row (1,730 on drinks_sodas); C1v2 is now sent with
+    ``SETUP_INPUT_BUDGET["C1v2"]`` (``prompts.input_budget``), measured with the set-up block
+    (test_story_setup_context.py)."""
     import test_story_episode_prompt_budgets as budgets
 
     brief = budgets._filler(400, round(400 * 5.8))
@@ -165,7 +168,8 @@ def test_the_french_worst_case_input_budget_fits_with_the_species_block(universe
         system, user, _schema = prompts.build_c1_v2(pack, style_ids=STYLE_IDS, batch=10, of=10,
                                                     angle=prompts.C1_ANGLES[-1])
         worst = max(worst, estimate_tokens(system, user))
-    assert worst <= prompts.INPUT_BUDGET["C1v2"], (universe["id"], worst)
+    # Every C1v2 story is a writing-v3 story with a brief (context.wants_setup): it is sent with the block.
+    assert worst <= prompts.input_budget("C1v2", setup=True), (universe["id"], worst)
     assert prompts.INPUT_BUDGET["C1v2"] == 1690  # the row is the one DEC-274 measured: no re-pin
 
 
@@ -258,8 +262,10 @@ def test_a_universe_story_sends_the_block_and_records_the_universe_on_the_card(t
     assert "Universe: Fruits -- every character is an anthropomorphic fruit." in user
     assert f"This card's lead species: {lead}." in user
     assert "Species pool: strawberry, banana," in user
-    # One block, between the style line and the (empty here) avoid list; the brief still comes first.
-    assert user.index("The user's brief -- binding") < user.index("Visual style:") < user.index("Universe:")
+    # Plan 28 stage E2: the set-up block first (its ART STYLE replaces the style line), then the brief, then
+    # the species block before the (empty here) avoid list.
+    assert user.index(context.SETUP_HEADING) < user.index("The user's brief -- binding") < user.index("Universe:")
+    assert "Visual style:" not in user
     card = store.read_doc(story_id, "concepts.json")["concepts"][0]
     assert card["universe"] == {"id": "fruits", "lead_species": lead}
     assert [m["species"] for m in card["cast_sketch"]][0] == "strawberry"
@@ -321,8 +327,9 @@ def test_a_brand_in_a_card_is_one_told_why_retry_then_the_clean_card_is_kept(tmp
     story_id = _story(store, universe="drinks_sodas", style="viral_3d")
     ctx, _log = tss._ctx(store, story_id, params={"count": 1}, settings_env=SETTINGS)
     runner = tss.FakeRunner(
-        {"concepts": [_card("cola can", title="La Guerre du Coca")]},     # refused: a brand
-        {"concepts": [_card("cola can", title="La Guerre du Cola")]},     # the retry, told why
+        # Plan 28 stage E2: the story's look (viral_3d) is the only style_fit a card may name.
+        {"concepts": [_card("cola can", title="La Guerre du Coca", style_fit="viral_3d")]},  # refused: a brand
+        {"concepts": [_card("cola can", title="La Guerre du Cola", style_fit="viral_3d")]},  # the retry, told why
         {"kept": True, "missing": []},                                    # C1J
         link=LINK)
     concepts_step.run(ctx, runner=runner)

@@ -356,6 +356,8 @@ def test_an_llm_steps_estimate_is_the_worst_case_only_when_its_first_usable_link
     # may be sent with and the widest reply cap (E1's payoff variant counted).
     pairs = [(prompts.INPUT_BUDGET.get(pid, context.PACK_TOKEN_BUDGET), cap) for pid, cap in prompts.MAX_TOKENS.items()]
     pairs.append((prompts.INPUT_BUDGET["E1"], prompts.E1_PAYOFF_MAX_TOKENS))
+    # Plan 28 stage E2: a set-up writer with the set-up block (D5's 4,670 + 3,330 is now the widest).
+    pairs += [(budget, prompts.MAX_TOKENS[pid]) for pid, budget in prompts.SETUP_INPUT_BUDGET.items()]
     worst = max(_cost(PAID, tokens_in, tokens_out) for tokens_in, tokens_out in pairs)
     assert (body["route_class"], body["link"], body["units"]) == ("paid", describe(PAID), {"llm_calls": 3})
     assert body["est_usd"] == round(3 * llm_spend.ledger_usd(worst), 6)

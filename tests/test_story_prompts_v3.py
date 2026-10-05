@@ -141,13 +141,17 @@ def _j1v3(**extra):
 # sentence after each); E3v3 with the framing parts' "between lo and hi
 # words" (the 8 s hook: 13-15 on an 8 s shot, the cliffhanger 13-17). The
 # unplanned prompts keep their bytes.
+#
+# Plan 28 stage E2 (2026-10-05), re-pinned on purpose: NATIVE_LINE_V3 says the
+# 5-10 s shot of plan 27 ("in one shot of 5 to 10 seconds", was "at most 8
+# seconds") -- E3v3 and both unplanned prompts carry it; nothing else moves.
 GOLDENS = {
     "E1v3": "a0a951ea281f10a6bc6742498b5f5cab3434b88719c0f9489f5f7ddfe271c583",
     "E2v3": "650c12da696d03ab59932b2048ca138615ad01f1f297e577404882fc45dc537d",
-    "E3v3": "d4e9734b6d0ee73a789635ca7caff56a02652d6b984cafff6b8f90d1b3fe561c",
+    "E3v3": "3bf0fd32e3f630e798d14b79d6f751f447529d65577b32deb030e02a51a7315f",
     "J1v3": "59b7355c21d68a8dab52178333b4fdc1fc210551918b3be5f1335412a2e23eaf",
-    "E2v3-unplanned": "bf903d5c575481093415141036757c13e93fafcf1fee0e7a3aae7bb84ab8c3a9",
-    "E3v3-unplanned": "6b066de95e1c58626c88e3261741b5a070291b6af0457d60184c3d00334426cb",
+    "E2v3-unplanned": "fc93e0d7fa877476c9a668c0deb8a11a97bbde0d091d2561bba3552cf17f01cc",
+    "E3v3-unplanned": "c15dc893785dde3da4ea0aed4b0c2264b3f93a14f82ece75b136e098ada6f784",
 }
 
 
@@ -230,13 +234,13 @@ def test_e2v3_reads_every_line_so_far_the_spine_and_the_next_scene():
                    "'the more you…, the more…')",
                    "No filler (no lone 'Quoi ?', 'Écoute', a name alone)", "no stage directions in the text"):
         assert clause in prompts.LINE_RULE_V3
-    assert "Each line is spoken on camera by its speaker in one shot of at most 8 seconds: at most 17 words." in user
+    assert "Each line is spoken on camera by its speaker in one shot of 5 to 10 seconds: at most 17 words." in user
     assert "Write 25-32 words of dialogue in total" in user
     assert "short" not in user.split("Write this scene's dialogue.", 1)[1]
     assert schema["properties"]["lines"]["description"] == "2-3 lines"
     # Not a native-speech story: no one-shot sentence, the default 5-22 words.
     _s, plain, _ = _e2v3(native=False, budget=_budget(native=False))
-    assert "one shot of at most 8 seconds" not in plain and "5 to 17 words" in plain  # the template's own line_words
+    assert "one shot of 5 to 10 seconds" not in plain and "5 to 17 words" in plain  # the template's own line_words
 
 
 def test_the_dialogue_so_far_keeps_the_last_220_words_and_names_the_cut():
@@ -470,7 +474,7 @@ def test_the_e2v3_prompt_of_a_16s_native_scene_names_its_seconds_each_lines_rang
              "Hard limits: 30 words in total; a line shorter or longer than its range is refused.\n"
              "Write at least 16 and at most 30 words of dialogue in total.")
     assert block in user
-    assert "not fewer than" not in user and "one shot of at most 8 seconds" not in user
+    assert "not fewer than" not in user and "one shot of 5 to 10 seconds" not in user
     assert "ONE continuous exchange" not in user  # one line a shot here: no exchange to tell
     assert "- lines: 2 lines, each with speaker (one of char_rouge, narrator)" in user
     assert "Each text is one or two complete sentences in French, 5 to 17 words" in user
@@ -581,7 +585,9 @@ def test_the_spine_is_an_optional_key_of_the_script_and_capped():
 # sentence) and E2v3 2,705 -> 2,706 (the scene's planned character-line sentence); budgets 3,230 -> 3,320 and 3,120.
 # Plan 27 stage 2 (2026-10-05): E2v3 2,706 -> 2,774 (each line's range, the exchange sentences; budget 3,200) and
 # E3v3 3,488 -> 3,493 (the framing parts' ranges; budget unchanged).
-MEASURED_V3 = {"E1v3": 2881, "E2v3": 2774, "E3v3": 3493, "J1v3": 4083}
+# Plan 28 stage E2 (2026-10-05): E3v3 3,493 -> 3,492 (NATIVE_LINE_V3's "5 to 10 seconds" is two characters
+# shorter than "at most 8 seconds"; budget unchanged).
+MEASURED_V3 = {"E1v3": 2881, "E2v3": 2774, "E3v3": 3492, "J1v3": 4083}
 MEASURED_V3_REPLY = {"E1v3": 2232.1, "E1v3-payoff": 2770.3, "J1v3": 854.1}
 SPINE_AT_CAPS = {key: budgets._fr(words) for key, words in prompts.SPINE_MAX_WORDS.items()}
 SCENES_V3 = [dict(scene, summary=budgets._fr(prompts.SUMMARY_V3_MAX_WORDS)) for scene in budgets.SCENES]

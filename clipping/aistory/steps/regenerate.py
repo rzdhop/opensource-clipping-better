@@ -293,7 +293,7 @@ def _regenerate_bible_field(ctx, field, note, *, runner, time_fn) -> dict:
     ctx.cancel.check()
 
     # The pack budgets the note like every other section (and says if it cut it).
-    pack = bible.pack_for(story, note=note)
+    pack = bible.pack_for(story, note=note, setup=llm_call.setup_block(store, ctx.story_id, story))
     llm_call.announce_trimmed(ctx, pack, set())
     system, user, schema = bible.BUILDERS[part](
         pack,

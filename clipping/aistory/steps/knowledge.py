@@ -191,7 +191,8 @@ def apply_d4(reply) -> dict:
 def write_world(ctx, store, story, *, tools, announced) -> dict:
     """D4: the world notes, saved into ``knowledge.json``."""
     known = _Story(store, ctx.story_id)
-    pack = context.build_pack(language=story["language"], story=story)
+    pack = context.build_pack(language=story["language"], story=story,
+                              setup=llm_call.setup_block(store, ctx.story_id, story))
     llm_call.announce_trimmed(ctx, pack, announced)
     system, user, schema = prompts.build_d4(
         pack,
@@ -298,7 +299,8 @@ def write_episode(ctx, store, story, season, ep, *, tools, announced) -> dict:
     before = next((item for item in current.get("timeline") or [] if item["ep"] == ep - 1), None)
     names = _owner_names(known.cast)
     detailed, others = _episode_cast(known.cast, entry)
-    pack = context.build_pack(language=story["language"], story=story)
+    pack = context.build_pack(language=story["language"], story=story,
+                              setup=llm_call.setup_block(store, ctx.story_id, story))
     system, user, schema = prompts.build_d5(
         pack, ep=ep, planned=season["episodes_planned"], entry=entry,
         previous=[beat["what"] for beat in before["beats"]] if before else None,
@@ -403,7 +405,8 @@ def write_registry(ctx, store, story, *, tools) -> tuple:
     known = _Story(store, ctx.story_id)
     current = read_knowledge(store, ctx.story_id) or {}
     shown = known.props[:prompts.KNOWLEDGE_PROPS_SHOWN]
-    pack = context.build_pack(language=story["language"], story=story)
+    pack = context.build_pack(language=story["language"], story=story,
+                              setup=llm_call.setup_block(store, ctx.story_id, story))
     system, user, schema = prompts.build_d6(
         pack, objects=timeline_objects(current, known.props),
         props=_prop_lines(shown, known.cast, one_line=True),

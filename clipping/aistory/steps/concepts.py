@@ -74,6 +74,11 @@ _CARD_FIELDS = (
 )
 
 
+# Plan 28 stage E2: what a written bible adds to the set-up block's SERIES and AUDIENCE, left out of it for
+# the concepts (a re-run after a card was chosen writes from the brief, not from that card).
+_BIBLE_SERIES_FIELDS = ("title", "logline", "tone", "genre_tags", "audience")
+
+
 def _next_number(cards) -> int:
     """One past the highest ``gen_NN`` already used (1 for a fresh file)."""
     highest = 0
@@ -158,10 +163,11 @@ def _judge_usable(ctx) -> bool:
     return not (paid and not any(keys.get(link.provider) for link in chain))
 
 
-def _judge_card(ctx, *, language, brief, card, runner, time_fn):
+def _judge_card(ctx, *, language, brief, card, runner, time_fn, setup=None):
     """One C1J call on *card*; ``StepFailed`` propagates (the caller decides
-    what a failed judge call means)."""
-    system, user, schema = prompts.build_c1j(language=language, brief=brief, card=card)
+    what a failed judge call means). *setup*: the set-up block C1v2 was
+    given (plan 28 stage E2), shared with the judge."""
+    system, user, schema = prompts.build_c1j(language=language, brief=brief, card=card, setup=setup)
     return llm_call.call_json(
         ctx, "C1J", system, user, schema,
         validator=prompts.validate_c1j, runner=runner, time_fn=time_fn,
@@ -169,7 +175,7 @@ def _judge_card(ctx, *, language, brief, card, runner, time_fn):
 
 
 def _apply_brief_judge(ctx, *, language, brief, concept, system, user, prompt_id, schema, validator,
-                       runner, time_fn, judge_state) -> tuple:
+                       runner, time_fn, judge_state, setup=None) -> tuple:
     """``(concept, brief_fit)`` for one accepted v3 card (plan 22 stage 2):
     judged by C1J; not kept, the same C1v2 call asked once more with the
     judge's ``missing`` as the refusal reasons (DEC-259); still not kept,
@@ -189,7 +195,8 @@ def _apply_brief_judge(ctx, *, language, brief, concept, system, user, prompt_id
         return concept, None
 
     try:
-        verdict = _judge_card(ctx, language=language, brief=brief, card=concept, runner=runner, time_fn=time_fn)
+        verdict = _judge_card(ctx, language=language, brief=brief, card=concept, runner=runner, time_fn=time_fn,
+                              setup=setup)
     except StepFailed as exc:
         ctx.on_log(f"⚠️ C1J could not judge this card: {exc.reason}")
         return concept, None
@@ -210,7 +217,8 @@ def _apply_brief_judge(ctx, *, language, brief, concept, system, user, prompt_id
 
     retried = reply["concepts"][0]
     try:
-        verdict2 = _judge_card(ctx, language=language, brief=brief, card=retried, runner=runner, time_fn=time_fn)
+        verdict2 = _judge_card(ctx, language=language, brief=brief, card=retried, runner=runner, time_fn=time_fn,
+                               setup=setup)
     except StepFailed as exc:
         ctx.on_log(f"⚠️ C1J could not re-judge the retried card: {exc.reason}")
         # A known drift must never vanish into an approve-by-rule: keep the first
@@ -251,6 +259,12 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
     use_brief = _writing_gate(story)
     # Plan 23 stage D2: what the cast is made of -- only on the brief-faithful prompt.
     universe = universes.universe_of(story) if use_brief else None
+    # Plan 28 stage E2 (DEC-305 §8): the brief-faithful prompt and its judge read the set-up block --
+    # without the bible a chosen card already wrote (its title, logline, tone, genre and audience would
+    # steer the new cards away from the brief); the story's chosen look is the only style_fit a card may name.
+    unwritten = {key: value for key, value in story.items() if key not in _BIBLE_SERIES_FIELDS}
+    setup = context.setup_for(unwritten, lock=template) if use_brief else None
+    card_style_ids = [template_id] if setup and template_id else style_ids
 
     cards = _existing_cards(store, ctx.story_id)
     number = _next_number(cards)
@@ -279,6 +293,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
                 # with this story's own cards -- left out here.
                 avoid_titles=generated_titles[::-1],
                 universe=species_text,
+                setup=setup,
             )
         else:
             pack = context.build_pack(
@@ -291,11 +306,12 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
 
         if use_brief:
             angle = prompts.C1_ANGLES[(call - 1) % len(prompts.C1_ANGLES)]
-            system, user, schema = prompts.build_c1_v2(pack, style_ids=style_ids, batch=call, of=calls, angle=angle)
+            system, user, schema = prompts.build_c1_v2(pack, style_ids=card_style_ids, batch=call, of=calls,
+                                                       angle=angle)
             prompt_id = "C1v2"
 
             def validator(reply, _brief=pack.brief, _universe=universe is not None):
-                return prompts.c1v2_errors(reply, style_ids=style_ids, brief=_brief, universe=_universe)
+                return prompts.c1v2_errors(reply, style_ids=card_style_ids, brief=_brief, universe=_universe)
         else:
             system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=calls)
             prompt_id = "C1"
@@ -321,7 +337,7 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
                 concept, brief_fit = _apply_brief_judge(
                     ctx, language=language, brief=pack.brief, concept=concept, system=system, user=user,
                     prompt_id=prompt_id, schema=schema, validator=validator, runner=runner, time_fn=time_fn,
-                    judge_state=judge_state,
+                    judge_state=judge_state, setup=setup,
                 )
             card = {
                 "concept_id": _concept_id(number),

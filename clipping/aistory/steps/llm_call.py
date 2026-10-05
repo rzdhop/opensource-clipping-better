@@ -55,7 +55,7 @@ from clipping import cancel as cancel_mod
 from clipping.providers import errors as provider_errors
 from clipping.providers import gating, pacing, registry
 
-from .. import context, prompts
+from .. import context, prompts, schemas
 from ..store import StoryStore
 from . import StepFailed
 
@@ -423,7 +423,7 @@ def call_json(
     ``ChainError`` for a chain that cannot be parsed, or ``ValueError`` for
     a prompt over the pack budget -- a builder bug, never trimmed here.
     """
-    context.check_budget(system, user, budget=prompts.input_budget(prompt_id))
+    context.check_budget(system, user, budget=prompts.input_budget(prompt_id, setup=prompts.carries_setup(user)))
 
     if runner is None:
         from clipping.providers import llm as llm_mod
@@ -633,6 +633,37 @@ def open_story(ctx):
     except KeyError:
         raise StepFailed(f"There is no story {ctx.story_id!r}.") from None
     return store, story
+
+
+# Plan 28 stage E2: the documents the set-up block reads besides the story.
+_SETUP_LOCK_DOC = "style_lock.json"
+_SETUP_SEASON_DOC = "season.json"
+
+
+def _optional_doc(store, story_id, name):
+    try:
+        return store.read_doc(story_id, name)
+    except (schemas.SchemaError, ValueError, OSError):
+        return None
+
+
+def setup_block(store, story_id, story, *, lock=None, hexes=False, episodes=None):
+    """The set-up block of *story* (plan 28 stage E2, DEC-305 §8:
+    ``context.setup_for``), or None on a legacy story. Read from the records:
+    the style lock once the style is built (*lock* when the caller holds it;
+    the style template before), the season's episode count once it exists.
+    A lock or a season that cannot be read only leaves its part out of the
+    block (the template's texts, no count): it words a prompt, it decides
+    nothing. *hexes*: the palette colours too (the look writers); *episodes*:
+    the count when the caller is the one setting it (S1)."""
+    if not context.wants_setup(story):
+        return None
+    if lock is None:
+        lock = _optional_doc(store, story_id, _SETUP_LOCK_DOC)
+    if episodes is None:
+        season = _optional_doc(store, story_id, _SETUP_SEASON_DOC)
+        episodes = season.get("episodes_planned") if isinstance(season, dict) else None
+    return context.setup_for(story, lock=lock, episodes=episodes, hexes=hexes)
 
 
 def require_concept(story) -> None:

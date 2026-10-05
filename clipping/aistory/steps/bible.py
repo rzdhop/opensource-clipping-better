@@ -65,13 +65,15 @@ def _writing_gate(story) -> bool:
     return media_policy.writing_v3(story)
 
 
-def pack_for(story, *, note=None, brief=False):
+def pack_for(story, *, note=None, brief=False, setup=None):
     """The context pack for a bible prompt: the chosen concept plus the bible
     and world written so far -- and, with *brief* (only ever true for this
     step's own full B1v3 run, :func:`_writing_gate`), the story's
     ``seed_text`` too (B1v3 reads it; B2/B3 and a bible-field regenerate
     never do, so they never carry it). ``StepFailed`` when the concept
-    snapshot lacks what the prompt renders (a hand-edited or custom concept)."""
+    snapshot lacks what the prompt renders (a hand-edited or custom concept).
+    *setup*: a v2 story's set-up block (plan 28 stage E2,
+    ``llm_call.setup_block``), None on a legacy story."""
     try:
         return context.build_pack(
             language=story["language"],
@@ -79,6 +81,7 @@ def pack_for(story, *, note=None, brief=False):
             concept=story["concept"],
             note=note,
             brief_text=story.get("seed_text") if brief else None,
+            setup=setup,
         )
     except (KeyError, TypeError) as exc:
         raise StepFailed(f"The chosen concept cannot be read ({type(exc).__name__}: {exc}); choose it again.") from None
@@ -177,7 +180,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, parts=None) -> dict:
         # edit the user made meanwhile.
         story = store.get(ctx.story_id)
         use_brief = part == "B1" and _writing_gate(story)
-        pack = pack_for(story, brief=use_brief)
+        pack = pack_for(story, brief=use_brief, setup=llm_call.setup_block(store, ctx.story_id, story))
         llm_call.announce_trimmed(ctx, pack, announced)
         if use_brief:
             system, user, schema = prompts.build_b1_v3(pack)

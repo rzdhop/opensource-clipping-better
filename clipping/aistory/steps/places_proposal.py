@@ -58,7 +58,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic) -> dict:
         raise StepFailed("Write the cast first: places and props are proposed from it.")
     ctx.cancel.check()
 
-    pack = context.build_pack(language=story["language"], story=story)
+    pack = context.build_pack(language=story["language"], story=story,
+                              setup=llm_call.setup_block(store, ctx.story_id, story))
     llm_call.announce_trimmed(ctx, pack, set())
     lines = [{"name": doc["name"], "signature_items": list(doc["signature_items"])} for doc in cast]
     system, user, schema = prompts.build_p0(pack, cast=lines)
