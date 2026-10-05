@@ -1,12 +1,12 @@
-## CURRENT STATE — plan 24 (the timing harness) stages 1–4 + 6 MERGED and DEPLOYED; stage 5 in a worktree; plan 23 follow-ups ALL DONE (2026-10-05, local session)
+## CURRENT STATE — plan 24 (the timing harness) CODE COMPLETE (stages 1–6) and LIVE (restart from 10defae); stage 7 docs in a worktree; plan 23 follow-ups ALL DONE (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT of plan 24 stage 5 (Sonnet, `feat/plan24-s5`, worktree plan24-s5: E1v3
-  assigns which scenes carry a character line within the template's `character_lines`, narrator-only scenes plan one
-  narrator line, E2v3 refuses an unplanned character line). Then stage 7: docs (`docs/AI_STORY.md`, DEC-300 for the
-  shipped mechanism, A-166/A-167 verdicts), VISION, the close-out, and the Tier-2 walk = the human regenerates episode
-  1 of e7412a3efcc6 (expect 0 timing warnings; a Trim button on any that remain). Checkpoint commit = main `b0d85ee`
-  (+ this docs commit), clean tree. **Deployed 2026-10-05 11:02 UTC** from b0d85ee: health 200, bundle
-  index-DU7H2ro8.js, zone ok, 361 jobs. Stage 5 will need only a restart (Python; routes untouched) — do it at 0 jobs.
+- **In-progress header:** phase = DOCUMENT (plan 24 stage 7): a Sonnet agent writes `docs/AI_STORY.md` in worktree
+  plan24-docs (branch docs/plan24); DEC-300 and the VISION paragraph are written; A-166/A-167 stay UNCONFIRMED until the
+  human's Tier-2 walk (regenerate episode 1 of e7412a3efcc6: expect 0 timing warnings, a Trim button on any left).
+  Checkpoint commit = main `10defae` (+ these docs commits), clean tree. **Live:** deployed 11:02 UTC from b0d85ee
+  (bundle index-DU7H2ro8.js) then restarted at 0 jobs from 10defae (stage 5 + the prompts.py hotfix): health 200, the
+  container imports the trim pass and the character_line flag, 361 jobs. CI: green through 8962c37; red on b0d85ee and
+  26d88c7 (the prompts purity pin, fixed in 5e0e892); the runs on 613b88c/10defae must come back green.
 - **Shipped by plan 24 so far (DEC-298):** one speech clock (`timing.seconds_for`, provider overrun, 6.6 chars/word for
   v3 budgets), a per-line plan on every v3 scene (`slot_s`/`line_plan`; native: character 6 s / 12 words first, the
   narrator the rest; pauses + 5 % margin paid), the writer told seconds and hard caps (E2v3/E3v3), hard validators

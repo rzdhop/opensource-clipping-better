@@ -32,6 +32,14 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-30)
+- **2026-10-05 — plan 24 (the timing harness, DEC-298/300):** the human's screenshot showed every body scene of a new
+  episode over its slot with no retry logged: nothing enforced the word budget, two clocks disagreed, the budget forgot
+  the pauses, and the writer was never told seconds. Now every writing-v3 scene is written to a line plan derived from
+  its slot (one clock, every pause paid, native clips 6 s first), the writer reads the seconds and hard caps, the
+  validators refuse an overshoot by name, a bounded trim pass rewrites the offending line, and a scene that still does
+  not fit fails with one sentence instead of running long. The shots follow the same plan and every timing warning has
+  a Trim button. This serves the product's promise directly: an episode that lands in its format's rhythm without the
+  human trimming lines by hand on the phone.
 - **2026-10-05 — plan 23 (the upgrade ideas of 2026-10-04, DEC-279…293):** a cast refused as "$8.58 of the $4.00 daily
   cap" (it costs $0.60; the rest was other stories' money, on a UTC day) became the first fix: the refusal states three
   numbers, one click allows more for today only (ceiling $25, logged), the day follows `BUDGET_TIMEZONE`, a v2 cast is
