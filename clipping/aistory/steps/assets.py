@@ -1464,6 +1464,35 @@ def moded_assets_doc(ec, doc, shot_id, changes, *, now):
     return new
 
 
+def handed_assets_doc(ec, doc, platform, model, *, now):
+    """*doc* (``assets.json``, or None: a minimal one is started) with the
+    handoff's memory ``{"platform", "model"?}`` (plan 25 stage 2: the
+    platform the human makes the episode's clips on, and the model on it,
+    ``brief.handoff``) -- or None when it is already that. Never in the
+    assets fingerprint: a platform choice approves nothing."""
+    base = doc if doc is not None else _minimal_assets_doc(ec, now)
+    wanted = {"platform": platform}
+    if model:
+        wanted["model"] = model
+    if base.get("handoff") == wanted:
+        return None
+    new = copy.deepcopy(base)
+    new["handoff"] = wanted
+    return new
+
+
+def keyframe_verdict(ec, storyboard, doc, *, env) -> dict:
+    """The image quote of one keyframe on the episode's image link (or its
+    chain's first runnable one), as a mode verdict (plan 25 stage 1; the
+    handoff's gate of an ``auto`` keyframe): ``{link, est_usd, allowed,
+    reason}``, calling nothing."""
+    ledger = _open_ledger(ec)
+    quote = image_quote(ec, 1, env=env, story_spent=float(ledger.totals()["est_usd"]), storyboard=storyboard,
+                        link_info=episode_image_link(ec, storyboard, env=env, doc=doc))
+    return {"link": quote.get("link"), "est_usd": round(float(quote.get("est_usd") or 0.0), 4),
+            "allowed": bool(quote.get("ready")), "reason": quote.get("message")}
+
+
 def shot_mode_verdict(ec, script, storyboard, shot, *, env, adapters=None, ledger=None) -> dict:
     """The gate's dry run on one new clip of *shot* on the link its mode puts
     it on (plan 25 stage 1), calling nothing: ``{"link", "est_usd",
@@ -4236,7 +4265,8 @@ class _Assets(voice_lines.LineMeasurement):
         if links:
             doc["links"] = links
         # The user's per-shot overrides (phase 6 stage 7) and modes (plan 25 stage 1): carried as they are.
-        for key in ("shots", "shot_modes"):
+        # Plan 25 stage 2: and the platform and model the handoff remembers.
+        for key in ("shots", "shot_modes", "handoff"):
             if (previous or {}).get(key):
                 doc[key] = previous[key]
         # A v2 episode's keyframe verdicts and approval (phase 7 stage 6b) and

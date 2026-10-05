@@ -48,6 +48,7 @@ from . import (
     defaults,
     imaging,
     media_policy,
+    platforms,
     prompting,
     prompts,
     refimages,
@@ -5471,15 +5472,46 @@ def patch_shot_mode(stories, story_id, ep, shot_id, fields, *, now, env=None) ->
     }
 
 
+def patch_handoff(stories, story_id, ep, fields, *, now) -> dict:
+    """Remember where the human makes episode *ep*'s clips (plan 25 stage 2,
+    D-2): *fields* ``{"platform": "flow" | "higgsfield", "model"?: <a model
+    of that platform> | None}`` into ``assets.json``'s ``handoff`` (None or
+    no model: the platform's default again), which ``GET .../handoff`` reads
+    when its query names none. Returns ``{"handoff": {"platform", "model"?},
+    "platform", "model"}`` -- the memory and the model it makes (the
+    platform's default when none is saved). The assets approval is untouched
+    (the fingerprint never reads it). Refused: ``invalid`` for no platform,
+    an unknown platform or a model the platform does not list."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    errors = []
+    unknown = sorted(set(fields) - {"platform", "model"})
+    if unknown:
+        errors.append(f"{', '.join(unknown)}: not a handoff setting (send platform and model)")
+    platform, model = fields.get("platform"), fields.get("model")
+    preset = None
+    try:
+        preset = platforms.load(platform) if platform else None
+    except platforms.PresetError as exc:
+        errors.append(f"platform: {exc}")
+    if not platform:
+        errors.append(f"platform: send one of {', '.join(platforms.PLATFORMS)}")
+    elif preset is not None and model is not None and model not in preset["models"]:
+        errors.append(f"model: unknown model {model!r} on {preset['name']} (one of {', '.join(preset['models'])})")
+    if errors:
+        raise _invalid_values("The handoff's platform would not be valid with these values.", errors)
+    ec = _context(stories, story_id, ep)
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    new = assets_step.handed_assets_doc(ec, doc, platform, model, now=now)
+    if new is not None:
+        _write_assets_doc(stories, story_id, ep, new, now=now, what="this handoff setting")
+        doc = new
+    return {"handoff": dict(doc["handoff"]), "platform": platform, "model": model or preset["default_model"]}
+
+
 def _keyframe_verdict(ec, board, doc, *, env) -> dict:
-    """The image quote of one keyframe on the episode's image link (or its
-    chain's first runnable one), as a mode verdict: ``{link, est_usd,
-    allowed, reason}``, calling nothing."""
-    ledger = assets_step._open_ledger(ec)
-    quote = assets_step.image_quote(ec, 1, env=env, story_spent=float(ledger.totals()["est_usd"]), storyboard=board,
-                                    link_info=assets_step.episode_image_link(ec, board, env=env, doc=doc))
-    return {"link": quote.get("link"), "est_usd": round(float(quote.get("est_usd") or 0.0), 4),
-            "allowed": bool(quote.get("ready")), "reason": quote.get("message")}
+    """The image quote of one keyframe as a mode verdict (``assets.keyframe_verdict``)."""
+    return assets_step.keyframe_verdict(ec, board, doc, env=env)
 
 
 def _overridden_assets(stories, story_id, ep, ec, board, changes, paths, errors, *, now):

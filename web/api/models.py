@@ -1087,6 +1087,17 @@ class ShotModeRequest(BaseModel):
     image: Optional[str] = None
 
 
+class HandoffRequest(BaseModel):
+    """PATCH /api/stories/{id}/episodes/{ep}/handoff (plan 25 stage 2): where
+    the human makes the episode's clips -- ``platform`` (``flow`` or
+    ``higgsfield``) and, optionally, the ``model`` on it (null: the
+    platform's default). Plain strings here: ``workflow.patch_handoff``
+    refuses a bad value with a 400 naming it, not a 422. "Sent" is
+    ``model_fields_set``."""
+    platform: Optional[str] = None
+    model: Optional[str] = None
+
+
 # Phase 5 (spec 2.6, 9.1, 9.2, plan 11 stages 4-5): the series steps --
 # ``memory``, ``feedback``, ``propose-next`` -- run through the generic
 # ``POST /steps/{step}`` (``StoryStepRequest``, unchanged) like any other

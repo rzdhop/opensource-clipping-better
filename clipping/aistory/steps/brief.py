@@ -422,9 +422,13 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None) -> dict:
     return entry
 
 
-def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=None) -> dict:
+def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=None, model=None) -> dict:
     """The episode's shot brief for *platform* (``platforms.PLATFORMS``;
-    None: Flow), from its storyboard (module docstring)::
+    None: Flow), from its storyboard (module docstring); *model* (plan 25
+    stage 2: a model of the preset, ``PresetError`` for an unknown one) is
+    the model the shots are made on instead of the preset's default (a
+    speaking shot in a language it does not speak still moves to one that
+    does)::
 
         {"$schema": "shot_brief_v1", "story_id", "ep", "language",
          "platform": {"platform", "name", "url", "where_to_paste", "prompt_notes", "length_note", "credits_note"},
@@ -433,6 +437,11 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
 
     ``StepFailed`` while the episode has no storyboard."""
     preset = platforms.load(platform)
+    if model is not None:
+        if model not in preset["models"]:
+            raise platforms.PresetError(f"Unknown model {model!r} on {preset['name']}. Known: "
+                                        f"{', '.join(preset['models'])}.")
+        preset["default_model"] = model
     frame = aspect_of(ec)
     if frame not in preset["aspects"]:
         # Plan 23 stage B7: a platform that cannot make the story's frame is never briefed.
@@ -795,3 +804,238 @@ def render_image_markdown(brief) -> str:
                                   "every variant sheet is an edit of it.", ""]
         lines += [f"Upload to: `{entry['upload_slot']}`", ""]
     return "\n".join(lines).rstrip() + "\n"
+
+
+# ============================================================== the handoff
+
+HANDOFF_SCHEMA = "handoff_v1"
+HANDOFF_KINDS = ("clip", "image")
+
+
+def _zip_url(story_id, ep, shot_id, **query) -> str:
+    """The per-shot references zip's URL (:func:`shot_references_zip`)."""
+    pairs = "&".join(f"{key}={value}" for key, value in query.items() if value)
+    base = f"/api/stories/{story_id}/episodes/{ep}/shots/{shot_id}/references.zip"
+    return f"{base}?{pairs}" if pairs else base
+
+
+def shot_references_zip(ec, refs) -> bytes:
+    """A zip of *refs*' files alone (the references of one shot, as
+    :func:`shot_entry` or :func:`_keyframe_entries` number them) under
+    ``references/<file>``, the names :func:`brief_zip` gives them; a
+    reference whose file is not on disk is left out."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        seen = set()
+        for ref in refs or ():
+            if ref["file"] in seen:
+                continue
+            path = reference_file(ec, ref)
+            if path is not None:
+                archive.write(path, f"references/{ref['file']}")
+                seen.add(ref["file"])
+    return buffer.getvalue()
+
+
+def keyframe_entry(ec, shot_id):
+    """The image brief's entry for *shot_id*'s keyframe (references
+    numbered and named as :func:`image_brief` does), or None for a shot the
+    storyboard does not have -- without the entities' prompts."""
+    board = episode_common.read_episode(ec, episode_common.STORYBOARD_DOC)
+    if not board or not board.get("shots"):
+        return None
+    doc = episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC)
+    entry = next((item for item in _keyframe_entries(ec, board, doc) if item["id"] == shot_id), None)
+    if entry is not None:
+        for index, ref in enumerate(entry["references"], start=1):
+            ref["number"] = index
+            ref["file"] = f"{entry['id']}_{index}_{ref['name']}"
+    return entry
+
+
+def _refused(call):
+    """*call*'s gate verdict, or -- the link cannot be planned at all -- a
+    refusal carrying the sentence."""
+    from clipping.providers.registry import ChainError
+
+    try:
+        return call()
+    except (episode_common.StepFailed, ChainError, ValueError, KeyError) as exc:
+        return {"link": None, "est_usd": 0.0, "allowed": False, "reason": str(exc)}
+
+
+def _made_by(record, *, manual_link) -> str:
+    """"upload" for a clip or keyframe the human uploaded, "stock" for stock
+    footage, else "generated" (a current one, in *record*'s own words)."""
+    if (record or {}).get("route") == schemas.STOCK_ROUTE:
+        return "stock"
+    return "upload" if manual_link else "generated"
+
+
+def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
+    """The episode's handoff document (plan 25 stage 2, D-2): the shot brief
+    (for *platform* and *model*), the image brief and stage 1's per-shot
+    modes composed into the one JSON the Handoff view reads, calling nothing::
+
+        {"$schema": "handoff_v1", "story_id", "ep", "language", "title",
+         "platform": {"platform", "name", "url", "where_to_paste", "models": [{id, label, lengths,
+                      max_references, speech, languages}], "model", "prompt_notes", "credits",
+                      "choices": [{platform, name, supported}]},
+         "counts": {"clips": {total, done, made, uploaded, missing[, stock]}, "keyframes": {...},
+                    "entities": {total, done, missing}},
+         "missing": [{kind: clip|keyframe|sheet|plate|prop, id, label, upload_slot, ...}],
+         "next_missing": <the first of them> | None,
+         "shots": [{shot_id, order, scene_id, purpose, speaks, keep_still, length_s, clip_s, aspect,
+                    "image": {mode, mode_explicit, mode_editable, state, source, link, est_usd, gate,
+                              prompt, negative_prompt, size, min_size, references, upload_slot, zip_url},
+                    "clip": {mode, mode_explicit, mode_editable, state, source, link, est_usd, gate,
+                             model, model_label, how, prompt, negative_prompt, length_s, line, speaker,
+                             voice_line, checks, references, upload_slot, zip_url, take, stock}
+                            | None for a shot kept still}],
+         "entities": [the image brief's sheet / plate / prop entries, variants included],
+         "export": {"brief_md", "brief_zip", "image_brief_zip"}}
+
+    Nothing is built twice: the prompts, references, checks and slots are
+    the briefs' own, byte for byte; a mode is :func:`assets.image_mode` /
+    :func:`clips.clip_mode`; the gate of an ``auto`` row is
+    :func:`assets.shot_mode_verdict` (a clip) and :func:`assets.keyframe_verdict`
+    (a keyframe), ``None`` for a ``manual`` one. ``missing`` is what is the
+    human's to make: the entities first when the story's images are theirs
+    (everything else uses them), then each shot's keyframe and its clip in
+    storyboard order. The refusals of :func:`shot_brief` and of
+    :func:`image_brief` pass through."""
+    from . import assets as assets_step  # the step imports this module: a cycle at import time
+
+    preset = platforms.load(platform)
+    script = episode_common.read_episode(ec, episode_common.SCRIPT_DOC)
+    board = episode_common.read_episode(ec, episode_common.STORYBOARD_DOC)
+    doc = episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC)
+    clip_brief = shot_brief(ec, platform=platform, model=model, script=script, storyboard=board, assets_doc=doc)
+    images = image_brief(stories, story, env=env, ec=ec)
+    story_doc, frame = ec.story, aspect_of(ec)
+    native, images_manual = media_policy.native_speech(story_doc), media_policy.images_manual(story_doc)
+    clip_entries = {entry["shot_id"]: entry for entry in clip_brief["shots"]}
+    keyframes = {entry["id"]: entry for entry in images["images"] if entry["kind"] == "keyframe"}
+    entities = [entry for entry in images["images"] if entry["kind"] != "keyframe"]
+    clips_todo = {item["shot_id"] for item in missing_clips(ec, script, board, doc)}
+    keyframes_todo = {item["shot_id"] for item in missing_keyframes(ec, board, doc)}
+    link = assets_step.recorded_image_link(doc)
+    selected = model or preset["default_model"]
+    image_gate = []  # the keyframe quote is one number for every auto shot: asked once, when one needs it
+
+    def keyframe_gate():
+        if not image_gate:
+            image_gate.append(_refused(lambda: assets_step.keyframe_verdict(ec, board, doc, env=env)))
+        return dict(image_gate[0])
+
+    shots, counts = [], {"clips": {"made": 0, "uploaded": 0, "missing": 0, "stock": 0},
+                         "keyframes": {"made": 0, "uploaded": 0, "missing": 0, "stock": 0}}
+    missing = []
+    if images_manual:
+        missing += [{"kind": entry["kind"], "id": entry["id"], "slot": entry["slot"], "label": entry["label"],
+                     "upload_slot": entry["upload_slot"]} for entry in entities if entry["state"] == "missing"]
+    for shot in sorted(board["shots"], key=lambda item: item["order"]):
+        shot_id = shot["shot_id"]
+        speaks = bool(shot.get("speaks"))
+        entry, keyframe = clip_entries.get(shot_id), keyframes[shot_id]
+        clip_s = int(shot.get("clip_s") or round(float(shot.get("duration_s") or 0)) or 4)
+
+        image_mode = assets_step.image_mode(story_doc, shot, doc)
+        image_state = assets_step.shot_state(ec, shot, link=link, doc=doc)
+        image_done = image_state in ("current", "locked_stale")
+        image_mine = image_mode == video_plan.MANUAL
+        image_source = (_made_by(shot["assets"], manual_link=gen.is_manual(assets_step.served_link(shot["assets"]) or ""))
+                        if image_done else None)
+        image = {
+            "mode": image_mode, "mode_explicit": video_plan.shot_mode(doc, shot_id, "image") is not None,
+            "mode_editable": media_policy.is_v2(story_doc),
+            "state": ("missing" if not image_done else "uploaded" if image_source == "upload" else "made"),
+            "source": image_source,
+            "link": gen.MANUAL_LINK if image_mine else None, "est_usd": 0.0, "gate": None,
+            "prompt": keyframe["prompt"], "negative_prompt": keyframe["negative_prompt"],
+            "size": keyframe["size"], "min_size": keyframe["min_size"],
+            "references": keyframe["references"], "upload_slot": keyframe["upload_slot"],
+            "zip_url": (_zip_url(ec.story_id, ec.ep, shot_id, kind="image") if keyframe["references"] else None),
+        }
+        if not image_mine:
+            image["gate"] = keyframe_gate()
+            image.update(link=image["gate"]["link"], est_usd=image["gate"]["est_usd"])
+        group = counts["keyframes"]
+        group["missing" if not image_done else "stock" if image_source == "stock"
+              else "uploaded" if image_source == "upload" else "made"] += 1
+        if shot_id in keyframes_todo:
+            missing.append({"kind": "keyframe", "id": shot_id, "shot_id": shot_id, "order": shot["order"],
+                            "label": keyframe["label"], "upload_slot": keyframe["upload_slot"]})
+
+        clip = None
+        if entry is not None:
+            clip_mode = clips.clip_mode(story_doc, shot, doc) or video_plan.AUTO
+            clip_link = clips.class_link(story_doc, shot, doc, None) if native else None
+            clip_record = (shot.get("assets") or {}).get("clip") or {}
+            clip_done = entry["state"] != "missing"
+            clip_source = (_made_by(clip_record, manual_link=clip_record.get("route") == gen.MANUAL
+                                    or gen.is_manual(clip_record.get("link") or "")) if clip_done else None)
+            clip = {
+                "mode": clip_mode, "mode_explicit": video_plan.shot_mode(doc, shot_id, "clip") is not None,
+                "mode_editable": native, "state": entry["state"], "source": clip_source,
+                "link": clip_link, "est_usd": 0.0, "gate": None,
+                "model": entry["model"], "model_label": entry["model_label"], "how": entry["mode"],
+                "prompt": entry["prompt"], "negative_prompt": entry["negative_prompt"],
+                "length_s": entry["length_s"], "line": entry["line"], "speaker": entry["speaker"],
+                "voice_line": entry["voice_line"], "checks": entry["checks"], "references": entry["references"],
+                "upload_slot": entry["upload_slot"], "take": entry["take"], "stock": entry["stock"],
+                "zip_url": (_zip_url(ec.story_id, ec.ep, shot_id, platform=preset["platform"], model=selected)
+                            if entry["references"] else None),
+            }
+            if clip_mode == video_plan.AUTO and native:
+                clip["gate"] = _refused(lambda: assets_step.shot_mode_verdict(ec, script, board, shot, env=env))
+                clip.update(link=clip["gate"]["link"] or clip_link, est_usd=clip["gate"]["est_usd"])
+            group = counts["clips"]
+            group["missing" if not clip_done else "stock" if clip_source == "stock"
+                  else "uploaded" if clip_source == "upload" else "made"] += 1
+            if shot_id in clips_todo:
+                missing.append({"kind": "clip", "id": shot_id, "shot_id": shot_id, "order": shot["order"],
+                                "label": f"Shot {shot_id} — clip", "upload_slot": entry["upload_slot"]})
+        shots.append({
+            "shot_id": shot_id, "order": shot["order"], "scene_id": shot["scene_id"],
+            "purpose": entry["purpose"] if entry is not None else purpose(ec, script, shot),
+            "speaks": speaks, "keep_still": entry is None,
+            "length_s": entry["length_s"] if entry is not None else None, "clip_s": clip_s, "aspect": frame,
+            "image": image, "clip": clip})
+
+    clip_shots = [shot for shot in shots if shot["clip"] is not None]
+    for name, group in counts.items():
+        total = len(clip_shots) if name == "clips" else len(shots)
+        group.update(total=total, done=total - group["missing"])
+        if not group["stock"]:
+            del group["stock"]
+        counts[name] = {key: group[key] for key in ("total", "done", "made", "uploaded", "missing", "stock")
+                        if key in group}
+    entity_missing = sum(1 for entry in entities if entry["state"] == "missing")
+    counts["entities"] = {"total": len(entities), "done": len(entities) - entity_missing, "missing": entity_missing}
+
+    mine = sum(1 for shot in clip_shots if shot["clip"]["mode"] == video_plan.MANUAL)
+    todo = len(clips_todo)
+    return {
+        "$schema": HANDOFF_SCHEMA, "story_id": ec.story_id, "ep": ec.ep, "language": ec.language,
+        "title": (ec.story or {}).get("title") or "",
+        "platform": {
+            "platform": preset["platform"], "name": preset["name"], "url": preset["url"],
+            "where_to_paste": where_to_paste(preset, frame), "model": selected,
+            "models": [{"id": name, "label": item["label"], "lengths": list(item["lengths"]),
+                        "max_references": item["max_references"], "speech": item["speech"],
+                        "languages": item["languages"]} for name, item in preset["models"].items()],
+            "prompt_notes": list(preset["prompt_notes"]),
+            "credits": platforms.credits_line(preset, todo or mine or len(clip_shots)),
+            "choices": [{"platform": name, "name": other["name"], "supported": frame in other["aspects"]}
+                        for name, other in ((name, platforms.load(name)) for name in platforms.PLATFORMS)],
+        },
+        "counts": counts, "missing": missing, "next_missing": missing[0] if missing else None,
+        "shots": shots,
+        "entities": [dict(entry, mode=video_plan.MANUAL if images_manual else video_plan.AUTO)
+                     for entry in entities],
+        "export": {"brief_md": render_markdown(clip_brief),
+                   "brief_zip": f"/api/stories/{ec.story_id}/episodes/{ec.ep}/brief.zip"
+                                f"?platform={preset['platform']}",
+                   "image_brief_zip": f"/api/stories/{ec.story_id}/image-brief.zip?ep={ec.ep}"},
+    }

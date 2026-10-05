@@ -160,6 +160,7 @@ from ..models import (
     ConceptChooseRequest,
     ConceptsGenerateRequest,
     FastTrackStepParams,
+    HandoffRequest,
     JobResponse,
     JobStatus,
     KnowledgePatchRequest,
@@ -2936,6 +2937,131 @@ async def episode_brief_zip(story_id: str, ep: str, platform: Optional[str] = No
                     headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
 
 
+def _handoff_choice(ec, platform, model):
+    """``(platform, model)`` the handoff of *ec*'s episode is asked for: the
+    query's, else what ``assets.json``'s ``handoff`` remembers (the saved
+    model only with its own platform, and only while the platform still
+    lists it); 400 for an unknown platform or model."""
+    saved = (episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC) or {}).get("handoff") or {}
+    platform = platform or saved.get("platform")
+    if model is None and platform is not None and platform == saved.get("platform"):
+        model = saved.get("model")
+        try:
+            if model not in platforms.load(platform)["models"]:
+                model = None
+        except platforms.PresetError:
+            model = None
+    return platform, model
+
+
+def _handoff_of(stories, story, story_id, ep, platform, model):
+    """``(ec, handoff)`` of episode *ep*; 404 / 400 / 409 as the briefs' own
+    refusals say."""
+    try:
+        ec = episode_common.load_context(stories, story_id, ep)
+    except llm_call.StepFailed as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    try:
+        platform, model = _handoff_choice(ec, platform, model)
+        return ec, brief_step.handoff(stories, story, worker.get_settings_env(), ec, platform=platform, model=model)
+    except platforms.PresetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except (llm_call.StepFailed, refimages.RefImageError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.get("/{story_id}/episodes/{ep}/handoff")
+async def episode_handoff(story_id: str, ep: str, platform: Optional[str] = None,
+                          model: Optional[str] = None) -> dict:
+    """The episode's handoff document (``steps.brief.handoff``, plan 25
+    stage 2): the shot brief for *platform* (``flow`` or ``higgsfield``) and
+    *model*, the image brief and each shot's mode composed per shot into
+    ``{image, clip}`` blocks -- mode, state, the prompt, the references with
+    a per-shot zip, the upload slot, and for an ``auto`` row the link, the
+    estimate and the gate's verdict -- with the entities (sheets, plates,
+    props), the counts, what is missing and the next missing. With no query
+    it reads the platform and model ``PATCH .../handoff`` remembered. Calls
+    nothing. 404 for an unknown story or episode, 400 for an unknown
+    platform or model, 409 while the episode has no storyboard (or a frame
+    the platform cannot make)."""
+    stories = _stories()
+    story = _load(stories, story_id)
+    number = _episode_number(ep)
+    _ec, document = await run_in_threadpool(_handoff_of, stories, story, story_id, number, platform, model)
+    return document
+
+
+def _handoff_edit(story_id, ep, sent) -> dict:
+    stories = _stories()
+    story = _load(stories, story_id)
+    with _answering():
+        number = workflow.episode_bounds(stories, story, ep)
+    _refuse_busy(story_id, "change the handoff's platform once that step is done, or cancel it first.")
+    with _answering():
+        return workflow.patch_handoff(stories, story_id, number, sent, now=_now())
+
+
+@router.patch("/{story_id}/episodes/{ep}/handoff")
+async def patch_episode_handoff(story_id: str, ep: str, req: HandoffRequest) -> dict:
+    """Remember where the human makes the episode's clips (plan 25 stage 2):
+    ``{"platform": "flow"|"higgsfield", "model"?: <a model of it>|null}``
+    into ``assets.json``'s ``handoff`` (``workflow.patch_handoff``), what
+    ``GET .../handoff`` reads without a query. 200 with ``{handoff,
+    platform, model}``; 404 for an unknown story or episode; 400 for no
+    platform, an unknown platform or a model it does not list; 409 while a
+    step of the story is queued or running. No auth, as every story route."""
+    return await run_in_threadpool(_handoff_edit, story_id, ep, _sent(req))
+
+
+def _shot_references(stories, story_id, ep, shot_id, platform, model, kind):
+    """``(ec, refs)`` of *shot_id*'s *kind* references (``clip``: the shot
+    brief's, cut to the platform's model; ``image``: the keyframe's own);
+    404 for a shot with none to brief, 400 for a bad platform, model or kind."""
+    if kind not in brief_step.HANDOFF_KINDS:
+        raise HTTPException(status_code=400, detail=f"Unknown kind {kind!r}. Known: clip, image.")
+    try:
+        ec = episode_common.load_context(stories, story_id, ep)
+    except llm_call.StepFailed as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    try:
+        if kind == "image":
+            entry = brief_step.keyframe_entry(ec, shot_id)
+            return ec, (None if entry is None else entry["references"])
+        platform, model = _handoff_choice(ec, platform, model)
+        found = brief_step.shot_brief(ec, platform=platform, model=model)
+    except platforms.PresetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except llm_call.StepFailed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    entry = next((item for item in found["shots"] if item["shot_id"] == shot_id), None)
+    return ec, (None if entry is None else entry["references"])
+
+
+@router.get("/{story_id}/episodes/{ep}/shots/{shot_id}/references.zip")
+async def shot_references_zip(story_id: str, ep: str, shot_id: str, platform: Optional[str] = None,
+                              model: Optional[str] = None, kind: str = "clip"):
+    """One shot's reference files as a zip (plan 25 stage 2): the files of
+    the shot's clip references -- its keyframe, the speaker's and listener's
+    sheets, the place's plate, cut to what *platform*'s *model* takes -- under
+    ``references/<file>``, the names the brief zip gives them; with
+    ``kind=image`` the keyframe's own references (the image brief's). A file
+    not on disk is left out. 404 for an unknown story, episode or shot (or
+    one kept still: it has no clip to brief), 400 for a bad platform, model
+    or kind."""
+    stories = _stories()
+    _load(stories, story_id)
+    number = _episode_number(ep)
+    if _SHOT_ID.fullmatch(shot_id) is None:
+        raise HTTPException(status_code=404, detail=f"There is no shot {shot_id!r}.")
+    ec, refs = await run_in_threadpool(_shot_references, stories, story_id, number, shot_id, platform, model, kind)
+    if refs is None:
+        raise HTTPException(status_code=404, detail=f"There is no {kind} brief for shot {shot_id!r}.")
+    data = await run_in_threadpool(brief_step.shot_references_zip, ec, refs)
+    name = f"references_{shot_id}_{'image' if kind == 'image' else 'clip'}.zip"
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
 def _paused_jobs(story_id, ep) -> list:
     """The story's step jobs awaiting the user's clips for episode *ep*
     (the agent run works on its episode 1), oldest first."""
@@ -3163,6 +3289,22 @@ async def story_image_brief(story_id: str, ep: Optional[str] = None) -> dict:
                                                          env=worker.get_settings_env(), ec=ec))
     except refimages.RefImageError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.get("/{story_id}/image-brief.zip")
+async def story_image_brief_zip(story_id: str, ep: Optional[str] = None):
+    """The image brief as a zip (plan 25 stage 2): ``image_brief.md``,
+    ``image_brief.json`` and every reference image the brief names under
+    ``references/`` -- ``brief_zip(image=True)``. The refusals of ``GET
+    .../image-brief``."""
+    brief = await story_image_brief(story_id, ep)
+    ec = None
+    if ep is not None:
+        ec = episode_common.load_context(_stories(), story_id, _episode_number(ep))
+    data = await run_in_threadpool(brief_step.brief_zip, ec, brief, image=True)
+    name = f"image_brief_ep{int(ep):02d}.zip" if ep is not None else "image_brief.zip"
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
 
 
 @router.get("/{story_id}/episodes/{ep}/voice/{name}")

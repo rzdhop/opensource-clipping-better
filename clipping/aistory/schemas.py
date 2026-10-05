@@ -16,7 +16,7 @@ import math
 import re
 import unicodedata
 
-from . import defaults
+from . import defaults, platforms
 
 # --------------------------------------------------------------- validator
 
@@ -4082,6 +4082,15 @@ SHOT_MODES = ("auto", "manual")
 _EPISODE_ASSETS_SHOT_MODE_SCHEMA = _document({}, optional={
     kind: {"type": "string", "enum": list(SHOT_MODES)} for kind in SHOT_MODE_KINDS})
 
+# Plan 25 stage 2 (D-2): where the human makes the episode's clips -- the
+# platform (``platforms.PLATFORMS``) and, optionally, the model on it -- which
+# ``GET .../handoff`` reads when its query names none. Optional on the
+# document; never part of the assets approval.
+HANDOFF_PLATFORMS = platforms.PLATFORMS
+_EPISODE_ASSETS_HANDOFF_SCHEMA = _document(
+    {"platform": {"type": "string", "enum": list(HANDOFF_PLATFORMS)}},
+    optional={"model": {"type": "string", "minLength": 1, "maxLength": 80}})
+
 # Phase 7 stage 6b (A16, DEC-230): a v2 episode's keyframe judge (J2), one
 # vision verdict per shot, keyed by shot id: does the keyframe show the
 # shot's beat, what it misses, and what changed from the previous shot's
@@ -4187,6 +4196,8 @@ EPISODE_ASSETS_SCHEMA = _document({
     # Plan 25 stage 1: keyed by shot id -> _EPISODE_ASSETS_SHOT_MODE_SCHEMA,
     # checked in episode_assets_errors.
     "shot_modes": {"type": "object"},
+    # Plan 25 stage 2: the handoff's platform and model.
+    "handoff": _EPISODE_ASSETS_HANDOFF_SCHEMA,
 })
 # The maps of assets.json keyed by shot id (above): the ids a storyboard
 # re-plan never gives a new shot (walk follow-up F5), so no override, verdict,
