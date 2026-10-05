@@ -134,6 +134,19 @@ def _universe_ids() -> tuple:
 # accepts only the universes its template lists (``store.create``).
 UNIVERSES = _universe_ids()
 
+# Plan 23 stage D6: the optional ``generation_profile.prompt_style``, how a
+# clip's prompt is written. Absent is "studio", today's prompts byte for byte
+# (layered context, the style's motion suffix); "action" writes one
+# continuous physical action in the present tense, with a colour/species
+# anchor per character repeated at every mention, the place once, the sounds
+# inline and one camera phrase (Flow / Seedance style;
+# ``prompting.clip_prompt_action`` / ``speech_clip_prompt_action``, read
+# through ``media_policy.prompt_style``). A clip's prompt hash is of that
+# prompt, so a story changing style makes its current clips stale.
+PROMPT_STUDIO = "studio"
+PROMPT_ACTION = "action"
+PROMPT_STYLES = (PROMPT_STUDIO, PROMPT_ACTION)
+
 # ------------------------------------------------------------- story (spec 2.1, 6.2)
 
 EPISODE_TEMPLATE_ID = "serial_60s_v1"

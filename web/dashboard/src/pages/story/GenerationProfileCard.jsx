@@ -3,7 +3,7 @@ import { fetchSettings, fetchStoryEstimate, fetchUniverses, patchStory, switchPi
 import RouteChip from '../../components/RouteChip'
 import { StepError } from './fields'
 import { formatUsd } from '../../lib/format'
-import { useConfirm } from '../../ui'
+import { useConfirm, useToast } from '../../ui'
 import { stepLabel } from './storySteps'
 
 // The story's "Visual tier" card (phase 6), moved out of the old wizard shell
@@ -21,9 +21,14 @@ const SHEET_MODES = {
 }
 // Plan 23 stage D4: how the bodies are drawn (generation_profile.body_rule; absent = the style's own rules).
 const BODY_RULES = { '': 'As the style draws them', all_matter: "All skin is the character's matter" }
-
 // Plan 23 stage A9: which provider the images try first (generation_profile.image_preference; absent = fal first).
 const IMAGE_PREFERENCES = { '': 'fal first (default)', gemini_first: 'Gemini first' }
+
+// Plan 23 stage D6: how a clip's prompt is written (generation_profile.prompt_style; absent = studio).
+const PROMPT_STYLES = {
+  studio: 'studio (default)',
+  action: 'one continuous action (Flow / Seedance style)',
+}
 
 /**
  * The episode the Visual tier card prices its video estimate for
@@ -113,6 +118,7 @@ function switchedSummary(result) {
  */
 export default function GenerationProfileCard({ storyId, story, nextEp, onChange }) {
   const confirm = useConfirm()
+  const toast = useToast()
   // What the server holds, as last fetched: the selects start from it, follow
   // it whenever the story is fetched again, and go back to it when a save is
   // refused (they used to keep showing values the server never saved).
@@ -133,6 +139,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   // Plan 23 stage D2: what the cast is made of -- the profile's universe, else the style's default
   // (shown, not edited here: it is chosen when the story is created and frozen with the style).
   const [universeCatalogue, setUniverseCatalogue] = useState(null)
+  // Plan 23 stage D6: how a clip's prompt is written (absent: studio, today's prompts).
+  const [promptStyle, setPromptStyle] = useState(profile.prompt_style || 'studio')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   // A pipeline switch refused over written episodes (PATCH's structured 409):
@@ -159,6 +167,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   useEffect(() => { setSheetMode(profile.sheet_mode || 'three_sheet') }, [profile.sheet_mode])
   useEffect(() => { setBodyRule(profile.body_rule || '') }, [profile.body_rule])
   useEffect(() => { setImagePreference(profile.image_preference || '') }, [profile.image_preference])
+  useEffect(() => { setPromptStyle(profile.prompt_style || 'studio') }, [profile.prompt_style])
 
   const save = async (patch) => {
     setSaving(true)
@@ -166,7 +175,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
     setSwitchOffer(null)
     setSwitched(null)
     try {
-      await patchStory(storyId, { generation_profile: patch })
+      const saved = await patchStory(storyId, { generation_profile: patch })
+      // Plan 23 stage D6: a clip-prompt style change answers with the current clips it makes stale.
+      if (saved && saved.warning) toast.info(saved.warning, { duration: 12000 })
       onChange()
     } catch (err) {
       // Nothing was saved: back to the server's values, and fetch the story again.
@@ -177,6 +188,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       setSheetMode(profile.sheet_mode || 'three_sheet')
       setBodyRule(profile.body_rule || '')
       setImagePreference(profile.image_preference || '')
+      setPromptStyle(profile.prompt_style || 'studio')
       setError(err.message)
       if (err.status === 409 && err.code === PIPELINE_SWITCH_HAS_SCRIPTS && err.detail.episodes) {
         setSwitchOffer({ episodes: err.detail.episodes, patch })
@@ -230,6 +242,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
   const handleSheetMode = (value) => { setSheetMode(value); save({ sheet_mode: value === 'three_sheet' ? null : value }) }
   const handleBodyRule = (value) => { setBodyRule(value); save({ body_rule: value || null }) }
   const handleImagePreference = (value) => { setImagePreference(value); save({ image_preference: value || null }) }
+  const handlePromptStyle = (value) => { setPromptStyle(value); save({ prompt_style: value === 'studio' ? null : value }) }
 
   // Every shot a clip: the quality budget profile (animate all_shots) at tier
   // >= 2 on the api route, on the v2 pipeline (the server sets its template and
@@ -373,6 +386,18 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           {universeEntry.audience_note && (
             <p className="form-hint">{universeEntry.audience_note[story.language] || universeEntry.audience_note.en}</p>
           )}
+        </div>
+      )}
+      {isV2 && (
+        <div className="form-group">
+          <label className="form-label" htmlFor="story-profile-prompt-style">Clip prompts</label>
+          <select id="story-profile-prompt-style" className="form-select" value={promptStyle}
+            onChange={(e) => handlePromptStyle(e.target.value)} disabled={saving}>
+            {Object.entries(PROMPT_STYLES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+          <p className="form-hint">
+            Changing it rewrites every clip prompt: the clips already made (uploads included) go stale.
+          </p>
         </div>
       )}
       {nativeSpeech && !manualClips && (

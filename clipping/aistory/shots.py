@@ -428,6 +428,111 @@ def render_look(doc, *, wardrobe_set=None, others=(), max_words=LOOK_MAX_WORDS) 
     return " ".join(words[:max_words]).rstrip(",;")
 
 
+# ------------------------------------------- the anchors of an action prompt (plan 23 D6)
+#
+# ``generation_profile.prompt_style: "action"`` names a character at every
+# mention by the same colour/species phrase, built from its look and nothing
+# else: "the green-yellow female strawberry character in a dirty burlap
+# dress". Deterministic: the same document always gives the same words, and
+# the handle (:func:`character_handles`, already unique in a cast) is in it
+# whole, so two characters never share an anchor.
+
+_ANCHOR_FEMALE = frozenset({"female", "woman", "girl", "lady"})
+_ANCHOR_MALE = frozenset({"male", "man", "boy", "gentleman"})
+_ANCHOR_ARTICLES = frozenset({"a", "an", "the", "his", "her", "its", "their", "some", "two", "three", "four", "pair"})
+ANCHOR_OUTFIT_MAX_WORDS = 5
+# A handle that already says one of these keeps its own colour (the palette adds none).
+_ANCHOR_COLOUR_WORDS = frozenset({"red", "orange", "yellow", "green", "blue", "purple", "violet", "pink", "brown",
+                                  "black", "white", "grey", "gray", "golden", "gold", "silver", "turquoise", "beige",
+                                  "cream", "crimson", "scarlet", "teal", "magenta", "tan"})
+
+
+def _anchor_gender(presentation) -> str:
+    words = set(re.findall(r"[a-z]+", str(presentation or "").lower()))
+    if words & _ANCHOR_FEMALE:
+        return "female"
+    if words & _ANCHOR_MALE:
+        return "male"
+    return ""
+
+
+def _anchor_colour(palette, noun) -> str:
+    """The palette's first one or two colours as "green-yellow" ("green" when
+    one has more than a word); '' when *noun* already says a colour (a
+    handle that says its colour keeps it)."""
+    said = set(re.findall(r"[a-z]+", noun.lower()))
+    picks = [_strip_period(str(colour)).strip().lower() for colour in (palette or ())[:2] if str(colour).strip()]
+    if not picks or said & (set(picks[0].split()) | _ANCHOR_COLOUR_WORDS):
+        return ""
+    if len(picks) == 2 and all(len(pick.split()) == 1 for pick in picks):
+        return "-".join(picks)
+    return picks[0]
+
+
+def _anchor_outfit(look) -> str:
+    """The first item of the look's first wardrobe set, with its article, in at most
+    :data:`ANCHOR_OUTFIT_MAX_WORDS` words ("a dirty burlap dress"); ''."""
+    sets = look.get("wardrobe_sets") or ()
+    first = _collapse_ws(_strip_period(str(sets[0].get("items") or ""))).split(",")[0] if sets else ""
+    cut = first.lower().find(" with ")
+    if cut > 0:
+        first = first[:cut]
+    words = first.split()[:ANCHOR_OUTFIT_MAX_WORDS]
+    if not words:
+        return ""
+    text = " ".join(words).strip(" ,;")
+    if words[0].lower() in _ANCHOR_ARTICLES:
+        return _lower_first(text)
+    plural = words[-1].lower().endswith("s") and not words[-1].lower().endswith("ss")
+    return _lower_first(text) if plural else f"{'an' if text[0].lower() in 'aeiou' else 'a'} {_lower_first(text)}"
+
+
+def character_anchor(doc, handle) -> str:
+    """The colour/species anchor of a character, said at every mention in an
+    action prompt in place of its bare *handle*: "the {colour} {gender}
+    {species} character in {outfit}" -- the colour from its look's palette,
+    the gender from its presentation, the species the handle's own noun
+    phrase, the outfit its first wardrobe item. Words a character's look does
+    not give are left out; with no look, or a handle already told apart by
+    its outfit or number (:func:`character_handles`), the handle itself."""
+    look = doc.get("look") if isinstance(doc, dict) else None
+    if not look or " wearing " in handle or handle.endswith(")"):
+        return handle
+    noun = handle[4:] if handle.lower().startswith("the ") else handle
+    parts = [_anchor_colour(look.get("palette"), noun), _anchor_gender(look.get("presentation")), noun,
+             "" if noun.lower().endswith("character") else "character"]
+    head = "the " + " ".join(part for part in parts if part)
+    outfit = _anchor_outfit(look)
+    return f"{head} in {outfit}" if outfit else head
+
+
+def character_anchors(characters) -> dict:
+    """``{char_id: anchor}`` for every character (:func:`character_anchor` of its handle)."""
+    handles = character_handles(characters) if characters else {}
+    return {cid: character_anchor(doc, handles[cid]) for cid, doc in characters.items()}
+
+
+def action_text(shot, entities, anchors) -> str:
+    """What *shot* does, for an action prompt: its ``clip_motion`` (T1 v2's: what the
+    characters do during the clip) or its ``action``, every character tag
+    resolved to its anchor (*anchors*, ``{char_id: anchor}``) and every entity
+    name swept; a tag that does not resolve falls back to the stored
+    ``video_action`` with each handle swapped for its anchor."""
+    characters = entities.get("characters") or {}
+    props = entities.get("props") or {}
+    places = entities.get("places") or {}
+    name_map = _v2_name_map(entities)
+    raw = shot.get("clip_motion") or shot.get("action") or ""
+    try:
+        text = resolve_action(raw, char_handles=anchors, prop_handles=prop_handles(props) if props else {},
+                              place_names={pid: doc.get("name") for pid, doc in places.items()})
+    except ValueError:
+        handles = character_handles(characters) if characters else {}
+        text = prompting.swap_phrases(shot.get("video_action") or raw, {handles[cid]: anchors[cid] for cid in handles
+                                                                         if cid in anchors})
+    return _collapse_ws(names_mod.without_names(text, name_map))
+
+
 def _place_light(look, variant) -> str:
     light = (look.get("lighting") or {}).get(variant)
     return _strip_period(light) if light else f"{variant.replace('_', ' ')} light"

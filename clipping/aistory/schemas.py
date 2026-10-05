@@ -775,6 +775,10 @@ _GENERATION_PROFILE_SCHEMA = {
         # Optional (plan 23 stage A9): absent tries the budget profile's order (fal first);
         # "gemini_first" tries the gemini/* image links first (defaults.IMAGE_PREFERENCES).
         "image_preference": {"type": "string", "enum": list(defaults.IMAGE_PREFERENCES)},
+        # Optional (plan 23 stage D6): absent is "studio", today's clip prompts; "action"
+        # writes one continuous action with a colour/species anchor per character
+        # (defaults.PROMPT_STYLES).
+        "prompt_style": {"type": "string", "enum": list(defaults.PROMPT_STYLES)},
     },
     "required": ["tier", "route", "consistency_mode", "budget_profile"],
     "additionalProperties": False,

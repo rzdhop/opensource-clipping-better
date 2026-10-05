@@ -679,6 +679,8 @@ class GenerationProfileModel(BaseModel):
     universe: Optional[str] = None
     # Optional (plan 23 stage A9): left out, the budget profile's image order (fal first).
     image_preference: Optional[Literal["gemini_first"]] = None
+    # Optional (plan 23 stage D6): left out, today's clip prompts (studio).
+    prompt_style: Optional[Literal["studio","action"]] = None
 
     @model_serializer(mode="wrap")
     def _without_unset_pipeline(self, handler):
@@ -690,7 +692,7 @@ class GenerationProfileModel(BaseModel):
             data.pop("speech_model", None)
         if isinstance(data, dict) and data.get("images") is None:
             data.pop("images", None)
-        for key in ("sheet_mode", "body_rule", "universe", "image_preference"):
+        for key in ("sheet_mode", "body_rule", "universe", "image_preference", "prompt_style"):
             if isinstance(data, dict) and data.get(key) is None:
                 data.pop(key, None)
         return data

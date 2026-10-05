@@ -54,6 +54,13 @@ const IMAGE_PREFERENCES = [
   { id: 'gemini_first', label: 'Gemini first' },
 ]
 
+// Plan 23 stage D6: how a clip's prompt is written (generation_profile.prompt_style); the default (studio)
+// sends nothing -- today's prompts.
+const PROMPT_STYLES = [
+  { id: 'studio', label: 'studio (default)' },
+  { id: 'action', label: 'one continuous action (Flow / Seedance style)' },
+]
+
 function CreateStoryForm() {
   const navigate = useNavigate()
   // No default: a language a user forgot to pick must never silently become
@@ -81,6 +88,7 @@ function CreateStoryForm() {
   // Plan 23 stage D2: what the cast is made of; '' sends nothing (the style's default universe).
   const [universeChoice, setUniverseChoice] = useState('')
   const [universeCatalogue, setUniverseCatalogue] = useState({ universes: [], by_style: {} })
+  const [promptStyle, setPromptStyle] = useState('studio')
   // The episode format the user picked; '' until they pick one, so the
   // select follows the style's suggestion, else the pipeline's default.
   const [episodeTemplateChoice, setEpisodeTemplateChoice] = useState('')
@@ -199,6 +207,7 @@ function CreateStoryForm() {
           ...(bodyRule ? { body_rule: bodyRule } : {}),
           ...(pipeline === 'v2' && !(manualClips && imagesOwn) && imagePreference ? { image_preference: imagePreference } : {}),
           ...(shownUniverse ? { universe: shownUniverse } : {}),
+          ...(pipeline === 'v2' && promptStyle !== 'studio' ? { prompt_style: promptStyle } : {}),
         } : null,
       }
       const story = await createStory(createFields)
@@ -489,6 +498,21 @@ function CreateStoryForm() {
                   </p>
                 )}
               </div>
+              {pipeline === 'v2' && (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="new-story-prompt-style">Clip prompts</label>
+                  <select id="new-story-prompt-style" className="form-select" value={promptStyle}
+                    onChange={(e) => choose(setPromptStyle)(e.target.value)}>
+                    {PROMPT_STYLES.map((style) => <option key={style.id} value={style.id}>{style.label}</option>)}
+                  </select>
+                  {promptStyle === 'action' && (
+                    <p className="form-hint">
+                      Each clip prompt is one continuous action in the present tense, every character named by the
+                      same colour and species phrase, with the sounds and a single camera move.
+                    </p>
+                  )}
+                </div>
+              )}
               {nativeSpeech && !manualClips && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="new-story-speech-model">Speaking clips</label>

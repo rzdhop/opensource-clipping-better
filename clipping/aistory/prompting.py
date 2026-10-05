@@ -1051,3 +1051,213 @@ def speech_prompt_sentences(prompt: str) -> dict:
     audio = re.search(r"Audio: [^.]*\.", prompt)
     return {"line": quoted.group(1) if quoted else None, "audio": audio.group(0) if audio else None,
             "no_other_sound": SPEECH_NO_OTHER_SOUND in prompt, "no_on_screen_text": NO_ON_SCREEN_TEXT in prompt}
+
+
+# ============================== plan 23 stage D6 (action-dense clip prompts)
+#
+# ``generation_profile.prompt_style: "action"`` (``media_policy.prompt_style``):
+# the way Flow / Seedance prompts are written by hand -- present tense, ONE
+# continuous physical action, a colour/species anchor per character repeated
+# at every mention (``shots.character_anchor``: never the bare handle), the
+# place named once in a few words, the sounds inline, exactly one camera
+# phrase. No layered context, no style suffix, no identity clause: the
+# anchors and the reference images carry the look. Absent (``studio``) every
+# prompt above is untouched; these two builders are reached only through
+# ``steps/clips.speech_request_parts`` / ``clip_request_parts``.
+
+ACTION_MAX_WORDS = 40
+ACTION_PLACE_MAX_WORDS = 10
+# The action's shorter rung over a tight budget: a whole clause of at most this many words, or none.
+ACTION_SHORT_WORDS = 24
+ACTION_SOUNDS_MAX_WORDS = 16
+# What cuts a place's descriptor down to its head ("a swimming pool surrounded by loungers").
+_PLACE_CUT_MARKERS = (" with ", " surrounded by ", " serving as ", " featuring ", " filled with ", " where ",
+                      " that ", " which ", ";")
+
+
+def _decap(text: str) -> str:
+    """*text* with its first letter lower case when the rest of that word is lower case already."""
+    word = text.split(" ", 1)[0]
+    if word[:1].isupper() and word[1:] == word[1:].lower() and word != "I":
+        return word[0].lower() + text[1:]
+    return text
+
+
+def place_anchor(descriptor, max_words: int = ACTION_PLACE_MAX_WORDS) -> str:
+    """A place in at most *max_words* words, from its descriptor: its first
+    sentence cut at the first ' with ' / ' surrounded by ' / ... and, still
+    over, at a clause boundary ("A dimly lit tropical wooden confession
+    booth with a carved bamboo chair" -> "a dimly lit tropical wooden
+    confession booth"). '' without a descriptor."""
+    text = _collapse_ws(str(descriptor or ""))
+    end = text.find(". ")
+    text = (text[:end] if end != -1 else text).rstrip(". ")
+    cuts = [text.find(marker) for marker in _PLACE_CUT_MARKERS if text.find(marker) > 0]
+    if cuts:
+        text = text[:min(cuts)]
+    if _word_count(text) > max_words:
+        text = _fit(text, max_words) or " ".join(text.split()[:max_words])
+    return _decap(text.strip(" ,;"))
+
+
+def swap_phrases(text: str, mapping: dict) -> str:
+    """*text* with every key of *mapping* replaced by its value, as a whole
+    phrase whatever its case, in one pass (longest key first, so a value
+    holding its own key is never swapped twice); a value takes the capital
+    its key had. The handles of a resolved action become the characters'
+    anchors with it."""
+    keys = sorted((key for key in mapping if key), key=len, reverse=True)
+    if not keys or not text:
+        return text
+    lowered = {key.lower(): value for key, value in mapping.items() if key}
+    pattern = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(key) for key in keys) + r")(?!\w)", re.IGNORECASE)
+
+    def swap(match):
+        value = lowered[match.group(0).lower()]
+        return value[0].upper() + value[1:] if match.group(0)[:1].isupper() and value else value
+
+    return pattern.sub(swap, text)
+
+
+_DANGLING = frozenset({"a", "an", "the", "of", "to", "with", "and", "or", "in", "on", "at", "by", "for", "from",
+                       "into", "onto", "over", "under", "his", "her", "its", "their", "then", "as", "while"})
+
+
+def action_sentence(text, max_words: int = ACTION_MAX_WORDS, *, clauses: bool = False) -> str:
+    """ONE continuous action from *text* (a shot's motion or action): its
+    first sentence, at most *max_words* words, cut at a clause boundary;
+    over *max_words* with no clause that fits, cut at the word and the
+    function words it leaves dangling ("slams the") taken off -- unless
+    *clauses*: then '' (a shorter action is a whole clause or none)."""
+    text = _collapse_ws(str(text or ""))
+    pieces = _pieces(text, ".!?")
+    first = (pieces[0] if pieces else "").rstrip(".!? ")
+    if _word_count(first) > max_words:
+        cut = _fit(first, max_words)
+        if not cut and not clauses:
+            words = first.split()[:max_words]
+            while words and words[-1].lower().strip(",;") in _DANGLING:
+                words.pop()
+            cut = " ".join(words)
+        first = cut
+    return first.strip(" ,;")
+
+
+def _action_sounds(sfx, ambience: str, limit: int = ACTION_SOUNDS_MAX_WORDS) -> str:
+    """"Sounds: a door slam, the night ambience of the setting." (inline
+    sounds of a shot: its effects, then its place's ambience), or ''."""
+    effects = [_collapse_ws(str(cue)) for cue in sfx or () if str(cue).strip()]
+    heard = ", ".join(effects)
+    if ambience:
+        heard = f"{heard}, {ambience}" if heard else ambience
+    heard = _fit(heard, limit) if _word_count(heard) > limit else heard
+    return as_sentence(f"Sounds: {heard}") if heard else ""
+
+
+def _scene_head(place: str, action: str) -> str:
+    """"In a swimming pool, the red lipstick walks ..." (the place named once, then the action)."""
+    place = _collapse_ws(place)
+    action = _collapse_ws(action)
+    if place and action:
+        return as_sentence(f"In {place}, {action}")
+    return as_sentence(action or (f"In {place}" if place else ""))
+
+
+def speech_clip_prompt_action(*, speaker: str, listener: str, action: str, language: str, voice: str, line: str,
+                              reaction: str, camera_phrase: str, place: str, sfx=(), ambience: str = "",
+                              budget: int = SPEECH_CLIP_MAX_WORDS, note: str = "") -> str:
+    """A speaking clip's prompt in the action style (plan 23 stage D6), at
+    most *budget* words (``prompt_budgets.speech_clip_words(link)``):
+
+    "{Camera}. In {place}, {action}. {Speaker} looks at {listener} and says
+    in {language}, in {voice}, "{line}". {Listener} listens without
+    speaking, mouth closed, {reaction}. Sounds: {sfx}, {ambience}. {note}
+    Audio: only {speaker}'s voice speaking {language}, close and clear,
+    lips in sync with the words. No music, no narrator, no other voice. No
+    subtitles, no captions, no on-screen text."
+
+    *speaker* and *listener* are the characters' anchors (``shots.character_anchor``),
+    *action* the shot's motion with every character already named by its
+    anchor (``steps/clips.action_inputs``), *place* a place's descriptor
+    (:func:`place_anchor`: at most 10 words, said once). The quoted *line*,
+    the speaker's sentence and the three closing sentences are never cut; over
+    the budget the sounds go first, then the reaction, the place, the
+    listener's sentence, and last the action (shorter, then not at all)."""
+    lang = LANGUAGE_NAMES.get(language, language)
+    quoted = _collapse_ws(str(line)).replace('"', "'")
+    who = _collapse_ws(speaker) or "the character"
+    other = _collapse_ws(listener)
+    heard = f"Audio: only {who}'s voice speaking {lang}, close and clear, lips in sync with the words."
+    closing = [heard, SPEECH_NO_OTHER_SOUND, NO_ON_SCREEN_TEXT]
+    note_text = as_sentence(note) if note else ""
+    where = place_anchor(place)
+    moving = action_sentence(action)
+    sounds = _action_sounds(sfx, ambience)
+    camera = as_sentence(camera_phrase)
+    react = _strip_trailing_period(_fit(_collapse_ws(reaction), SPEECH_REACTION_MAX_WORDS))
+    end = "" if quoted[-1:] in ".!?…" else "."
+    target = f"looks at {other}" if other else "looks straight ahead"
+    speech = f"{who[0].upper() + who[1:]} {target} and says in {lang}, in {voice}, \"{quoted}\"{end}"
+
+    def build(drop, action_words):
+        scene = _scene_head("" if "place" in drop else where,
+                            action_sentence(moving, action_words, clauses=action_words < ACTION_MAX_WORDS)
+                            if action_words else "")
+        listens = ""
+        if other and "listens" not in drop:
+            listens = f"{other[0].upper() + other[1:]} listens without speaking, mouth closed"
+            listens = as_sentence(f"{listens}, {react}" if react and "reaction" not in drop else listens)
+        parts = ["" if "camera" in drop else camera, scene, speech, listens, "" if "sounds" in drop else sounds,
+                 note_text] + closing
+        return _collapse_ws(" ".join(part for part in parts if part))
+
+    ladder = (((), ACTION_MAX_WORDS), (("sounds",), ACTION_MAX_WORDS), (("sounds", "reaction"), ACTION_MAX_WORDS),
+              (("sounds", "reaction", "place"), ACTION_MAX_WORDS),
+              (("sounds", "reaction", "place", "listens"), ACTION_MAX_WORDS),
+              (("sounds", "reaction", "place", "listens"), ACTION_SHORT_WORDS),
+              (("sounds", "reaction", "place", "listens", "camera"), ACTION_SHORT_WORDS),
+              (("sounds", "reaction", "place", "listens", "camera"), 0))
+    for drop, action_words in ladder:
+        prompt = build(drop, action_words)
+        if _word_count(prompt) <= budget:
+            return prompt
+    return prompt
+
+
+def clip_prompt_action(*, action: str, camera_phrase: str, place: str, sfx=(), ambience: str = "", speakers=(),
+                       sounds: bool = False, note: str = "", budget: int = CLIP_AUDIO_MAX_WORDS) -> str:
+    """A silent shot's clip prompt in the action style (plan 23 stage D6),
+    at most *budget* words:
+
+    "{Camera}. In {place}, {action}. {note}" -- and, when the clip asks for
+    its sound (*sounds*: an ambience story's, ``media_policy.ambience``, or a
+    native-speech story's silent shot), also "Sounds: {sfx}, {ambience}.",
+    "{speakers} speak silently: their words are not heard." (the TTS line
+    plays over the shot: *action* is made silent, :func:`silent_speech`) and
+    :data:`AUDIO_CLOSING`, which are never cut. *action* has every character
+    already named by its anchor (``steps/clips.action_inputs``), *speakers*
+    are anchors. Over the budget the sounds go first, then the place, then
+    the action (shorter, then not at all), then the camera."""
+    moving = action_sentence(silent_speech(action) if sounds else action)
+    where = place_anchor(place)
+    heard = _action_sounds(sfx, ambience) if sounds else ""
+    silent = _silent_speakers(speakers) if sounds else ""
+    camera = as_sentence(camera_phrase)
+    note_text = as_sentence(note) if note else ""
+    closing = AUDIO_CLOSING if sounds else ""
+
+    def build(drop, action_words):
+        scene = _scene_head("" if "place" in drop else where,
+                            action_sentence(moving, action_words, clauses=action_words < ACTION_MAX_WORDS)
+                            if action_words else "")
+        parts = ["" if "camera" in drop else camera, scene, "" if "sounds" in drop else heard, silent, note_text,
+                 closing]
+        return _collapse_ws(" ".join(part for part in parts if part))
+
+    ladder = (((), ACTION_MAX_WORDS), (("sounds",), ACTION_MAX_WORDS), (("sounds", "place"), ACTION_MAX_WORDS),
+              (("sounds", "place"), ACTION_SHORT_WORDS), (("sounds", "place", "camera"), ACTION_SHORT_WORDS), (("sounds", "place", "camera"), 0))
+    for drop, action_words in ladder:
+        prompt = build(drop, action_words)
+        if _word_count(prompt) <= budget:
+            return prompt
+    return prompt

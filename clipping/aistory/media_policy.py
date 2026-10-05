@@ -137,6 +137,23 @@ def sheet_mode(story) -> str:
     return defaults.SHEET_THREE
 
 
+def prompt_style(story) -> str:
+    """How *story*'s clip prompts are written (plan 23 stage D6,
+    ``generation_profile.prompt_style``): ``studio`` (absent, and every story
+    not on the v2 pipeline: today's prompts byte for byte) or ``action`` (one
+    continuous physical action, ``prompting.clip_prompt_action`` /
+    ``speech_clip_prompt_action``)."""
+    chosen = ((story or {}).get("generation_profile") or {}).get("prompt_style")
+    if is_v2(story) and chosen in defaults.PROMPT_STYLES:
+        return chosen
+    return defaults.PROMPT_STUDIO
+
+
+def action_prompts(story) -> bool:
+    """Whether *story* writes its clip prompts as an action (:func:`prompt_style`)."""
+    return prompt_style(story) == defaults.PROMPT_ACTION
+
+
 def two_view(story) -> bool:
     """Whether *story*'s identity image (``refs.portrait``) is a front+back
     sheet (:func:`sheet_mode` is one of the two-view modes)."""

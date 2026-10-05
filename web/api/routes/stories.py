@@ -1157,9 +1157,13 @@ async def patch_story(story_id: str, req: StoryPatchRequest) -> dict:
             detail=_busy_detail(busy[0], "edit the story once it is done, or cancel it first."),
         )
 
+    fields = {name: getattr(req, name) for name in sent}
     with _answering():
-        return workflow.patch_story(
-            stories, story_id, {name: getattr(req, name) for name in sent}, now=_now())
+        # Plan 23 stage D6: a prompt_style change rewrites every clip's prompt -- the answer
+        # carries how many current clips that makes stale (``stale_clips``, ``warning``).
+        change = workflow.prompt_style_change(stories, story_id, fields)
+        patched = workflow.patch_story(stories, story_id, fields, now=_now())
+    return {**patched, **change} if change is not None else patched
 
 
 # The steps that read the subtitle look (the render, a re-render, and the

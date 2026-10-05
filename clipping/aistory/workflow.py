@@ -31,6 +31,7 @@ where fastapi is not installed.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 import json
 import os
@@ -897,6 +898,61 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
             doc["approvals"]["bible"] = None
 
     return update(stories, story_id, mutate, now=now)
+
+
+def prompt_style_change(stories, story_id, fields) -> dict | None:
+    """What a story PATCH *fields* that changes ``generation_profile.prompt_style``
+    does to the clips already made (plan 23 stage D6), asked BEFORE the patch is
+    applied: ``{"stale_clips": N, "warning": sentence | None}``, N the clips that
+    are current now (an uploaded one too: ``clips.clip_state`` compares the
+    prompt's hash) and would be stale under the new style; None when the patch
+    does not change the style (or does not name a valid profile: the patch
+    itself refuses that). Reads only; nothing is written."""
+    story = load(stories, story_id)
+    partial = (fields or {}).get("generation_profile")
+    if not isinstance(partial, dict) or "prompt_style" not in partial:
+        return None
+    try:
+        profile = story_store._merge_generation_profile({**story["generation_profile"], **partial})
+    except ValueError:
+        return None
+    changed = dict(story, generation_profile=profile)
+    before, after = media_policy.prompt_style(story), media_policy.prompt_style(changed)
+    if before == after:
+        return None
+    stale = 0
+    for ep in stories.list_episodes(story_id):
+        board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+        script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+        if board is None or script is None or not board.get("shots"):
+            continue
+        try:
+            ec = _context(stories, story_id, ep)
+        except WorkflowError:
+            continue
+        doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+        tier = clips_step.tier_of(ec)
+        link = (sticky_link.recorded(doc, sticky_link.VIDEO) or {}).get("link")
+        later = dataclasses.replace(ec, story=changed)
+        for shot in board["shots"]:
+            if not (shot["assets"].get("clip") or {}).get("prompt_hash"):
+                continue
+            image = assets_step.shot_image_path(ec, shot)
+            sha = assets_step._sha256_file(image) if image is not None else None
+            kwargs = dict(link=clips_step.class_link(ec.story, shot, doc, link), tier=tier,
+                          flags=clips_step.shot_flags(shot, doc), image_sha=sha)
+            try:
+                if (clips_step.clip_state(ec, shot, script, **kwargs) == "current"
+                        and clips_step.clip_state(later, shot, script, **kwargs) != "current"):
+                    stale += 1
+            except (KeyError, ValueError):
+                continue
+    if not stale:
+        return {"stale_clips": 0, "warning": None}
+    noun = "clip" if stale == 1 else "clips"
+    return {"stale_clips": stale,
+            "warning": (f"Switching the clip prompts to {after} rewrites every clip's prompt: {stale} current {noun} "
+                        f"(uploads included) will be marked stale and must be made again.")}
 
 
 def set_subtitle_style(stories, story_id, style, *, now) -> dict:

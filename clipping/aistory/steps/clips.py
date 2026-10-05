@@ -243,6 +243,20 @@ def audio_brief(ec, shot, script) -> dict:
     :data:`CLIP_SFX_EXCLUDED`. The speakers are the
     shot's lines' characters that are in its frame (``subject_tags``), by
     their handles, never a name (spec 2.3)."""
+    parts = _audio_parts(ec, shot, script)
+    where, when = parts["where"], parts["when"]
+    characters = (getattr(ec, "entities", None) or {}).get("characters") or {}
+    handles = shots_mod.character_handles(characters) if characters else {}
+    speakers = [handles[char_id] for char_id in parts["speakers"]]
+    return {"place": f"{where} ({when})" if when else where, "sfx": list(parts["sfx"]),
+            "speakers": list(dict.fromkeys(speakers))}
+
+
+def _audio_parts(ec, shot, script) -> dict:
+    """What :func:`audio_brief` is made of, before it is said: ``{"where": the place's
+    descriptor, "when": "<time of day>, <its light>" or "", "variant": the time of day
+    (its words), "sfx": [cue, ...], "speakers": [char_id, ...]}`` (the speakers by id,
+    in the order of the shot's lines, once each)."""
     scene = next((item for item in script["scenes"] if item["scene_id"] == shot["scene_id"]), None) or {}
     entities = getattr(ec, "entities", None) or {}
     place = (entities.get("places") or {}).get(scene.get("place_id")) or {}
@@ -263,10 +277,9 @@ def audio_brief(ec, shot, script) -> dict:
         if kind == "char":
             in_frame.add(entity_id)
     characters = entities.get("characters") or {}
-    handles = shots_mod.character_handles(characters) if characters else {}
-    speakers = [handles[line["speaker"]] for line in lines
-                if line["line_id"] in shot["lines"] and line["speaker"] in in_frame and line["speaker"] in handles]
-    return {"place": f"{where} ({when})" if when else where, "sfx": list(dict.fromkeys(sfx)),
+    speakers = [line["speaker"] for line in lines
+                if line["line_id"] in shot["lines"] and line["speaker"] in in_frame and line["speaker"] in characters]
+    return {"where": where, "when": when, "variant": variant.replace("_", " "), "sfx": list(dict.fromkeys(sfx)),
             "speakers": list(dict.fromkeys(speakers))}
 
 
@@ -298,6 +311,10 @@ def clip_request_parts(ec, shot, script, *, tier, flags, note=None, link=None) -
     # Plan 22: a native-speech story's silent shot is an ambience clip.
     ambient = tier == 3 and (media_policy.ambience(story) or speech_story)
     native = tier == 3 and bool(flags.get("keep_native_audio")) and not ambient
+    if media_policy.action_prompts(story) and not native:
+        # Plan 23 stage D6: one continuous action in the present tense (the keep_native_audio opt-in,
+        # a legacy story's, which voices a line, keeps the studio prompt).
+        return _action_clip_parts(ec, shot, script, tier=tier, note=note, link=link, ambient=ambient)
     lines = ()
     if native:
         texts = {line["line_id"]: line["text"] for scene in script["scenes"] for line in scene["lines"]}
@@ -370,14 +387,70 @@ def speech_request_parts(ec, shot, script, *, note=None, link=None) -> dict:
     re-animate's *note* in it; the clip's sound is asked for (it is the
     line); the hash is of that prompt, so a line rewritten makes its clip
     stale. ``over`` as ``clip_request_parts``' (the link's limit)."""
-    inputs = speech_prompt_inputs(ec, shot, script)
     budget = prompt_budgets.speech_clip_words(link)
-    prompt = prompting.speech_clip_prompt(ec.style_lock, budget=budget, note=note or "", **inputs)
+    if media_policy.action_prompts(getattr(ec, "story", None)):
+        # Plan 23 stage D6: the action style (``prompting.speech_clip_prompt_action``).
+        prompt = prompting.speech_clip_prompt_action(budget=budget, note=note or "", **action_inputs(ec, shot, script))
+    else:
+        inputs = speech_prompt_inputs(ec, shot, script)
+        prompt = prompting.speech_clip_prompt(ec.style_lock, budget=budget, note=note or "", **inputs)
     _visual, negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=3)
     resolution = media_policy.video_resolution(getattr(ec, "story", None))
     over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, prompt, budget=budget) if link else None
     return {"prompt": prompt, "negative": negative, "native_audio": True,
             "hash": clip_prompt_hash(prompt, negative, native_audio=True, resolution=resolution), "over": over,
+            "refit": None}
+
+
+def action_inputs(ec, shot, script) -> dict:
+    """What an action-style speaking clip's prompt says (plan 23 stage D6,
+    ``prompting.speech_clip_prompt_action``'s keywords but the budget and the
+    note): :func:`speech_prompt_inputs`' words, with every character named by
+    its anchor (``shots.character_anchor``) and the shot's motion
+    (``shots.action_text``) in place of its action layer."""
+    inputs = speech_prompt_inputs(ec, shot, script)
+    scene, line = speech_line(script, shot)
+    entities = getattr(ec, "entities", None) or {}
+    characters = entities.get("characters") or {}
+    anchors = shots_mod.character_anchors(characters) if characters else {}
+    handles = shots_mod.character_handles(characters) if characters else {}
+    swap = {handles[cid]: anchors[cid] for cid in handles}
+    parts = _audio_parts(ec, shot, script)
+    return {"speaker": anchors.get(line["speaker"], "the character"),
+            "listener": prompting.swap_phrases(inputs["listener"], swap),
+            "action": shots_mod.action_text(shot, entities, anchors), "language": inputs["language"], "voice": inputs["voice"], "line": inputs["line"],
+            "reaction": prompting.swap_phrases(inputs["reaction"], swap), "camera_phrase": inputs["camera_phrase"],
+            "place": inputs["place"], "sfx": parts["sfx"], "ambience": _ambience_phrase(parts["variant"])}
+
+
+def _ambience_phrase(variant) -> str:
+    """"the night ambience of the setting" (the place's natural sound at its time of day)."""
+    return f"the {variant} ambience of the setting" if variant else "the natural ambience of the setting"
+
+
+def _action_clip_parts(ec, shot, script, *, tier, note, link, ambient) -> dict:
+    """``clip_request_parts`` of a silent shot in the action style (plan 23 stage D6,
+    ``prompting.clip_prompt_action``): an ambience clip (*ambient*: it asks for its
+    sound, the speakers silent) or a clip whose sound is discarded."""
+    entities = getattr(ec, "entities", None) or {}
+    characters = entities.get("characters") or {}
+    anchors = shots_mod.character_anchors(characters) if characters else {}
+    camera = shot["camera_motion"]
+    if camera not in prompting.CAMERA_PHRASES:
+        raise ValueError(f"not a Tier-1 camera_motion: {camera!r}")
+    parts = _audio_parts(ec, shot, script)
+    budget = (prompt_budgets.clip_audio_words(link) if link else prompting.CLIP_AUDIO_MAX_WORDS) if ambient else (
+        prompt_budgets.clip_words(link) if link else prompting.CLIP_V2_MAX_WORDS)
+    prompt = prompting.clip_prompt_action(
+        action=shots_mod.action_text(shot, entities, anchors), camera_phrase=prompting.CAMERA_PHRASES[camera],
+        place=parts["where"], sfx=parts["sfx"], ambience=_ambience_phrase(parts["variant"]),
+        speakers=[anchors[cid] for cid in parts["speakers"] if cid in anchors], sounds=ambient, note=note or "",
+        budget=budget)
+    _visual, negative = video_plan.build_video_prompt(shot, ec.style_lock, tier=tier if tier in (2, 3) else 2)
+    resolution = media_policy.video_resolution(getattr(ec, "story", None))
+    over = prompt_budgets.over_sentence("clip", shot["shot_id"], link, prompt, budget=budget) if link else None
+    return {"prompt": prompt, "negative": negative, "native_audio": ambient,
+            "hash": clip_prompt_hash(prompt, negative, native_audio=ambient, resolution=resolution), "over": over,
             "refit": None}
 
 

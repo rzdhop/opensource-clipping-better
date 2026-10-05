@@ -320,9 +320,11 @@ _PROFILE_CHOICES = {
     "universe": defaults.UNIVERSES,
     # Plan 23 stage A9: which provider the image roles try first (absent: fal first).
     "image_preference": defaults.IMAGE_PREFERENCES,
+    # Plan 23 stage D6: how a clip's prompt is written (absent: studio, today's prompts).
+    "prompt_style": defaults.PROMPT_STYLES,
 }
 # Plan 22: the optional keys a partial profile may clear by sending null.
-_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe", "image_preference")
+_PROFILE_CLEARABLE = ("speech_model", "images", "sheet_mode", "body_rule", "universe", "image_preference", "prompt_style")
 
 _INDEX_ENTRY_SCHEMA = {
     "type": "object",
