@@ -30,6 +30,15 @@ dashboard's saved settings (``data/settings.json``), which win, exactly as they
 do for a job. Prints no key material. Read-only: it writes nothing unless
 --json is given.
 
+    python tools/bench_llm.py --episode-ab outputs/stories/<id> --dry-run \\
+        --chains "gemini-paid/gemini-3.8-flash,anthropic/claude-sonnet-5-5" --max-usd 2.50
+
+``--episode-ab <story_dir>`` (plan 23 stage D7) writes one episode with the
+writing-v3 chain once per link and puts the scripts side by side (it writes
+only under ``<story_dir>/bench/<timestamp>/``, plus the ledger rows of a paid
+call); it is the one place this tool may spend, and only under
+``--allow-paid`` and ``--max-usd``. See the "episode A/B" section below.
+
 ``--episode-prompts <story_dir>`` is a different measurement (AI Story phase
 3, stage 12, spec's A-entry "JSON validity rate per provider with the
 E-prompts"): instead of the pass-A clip-finding request above, it sends the
@@ -45,6 +54,7 @@ prompt's own post-validator. See :func:`build_episode_prompt_requests` and
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -653,6 +663,802 @@ def _run_episode_prompt_mode(args) -> int:
     return 0 if rows else 1
 
 
+# ------------------------------------------------------- episode A/B (plan 23 stage D7)
+#
+# ``--episode-ab <story_dir> --chains "<link>,<link>,..."``: the writing-v3
+# chain of ONE episode (E1v3 -> E2v3 per body scene -> E3v3 -> J1v3) run once
+# per link, each link alone (a one-link chain: no fallback to another link),
+# the scripts and the judge's verdicts side by side, so the human can read
+# them and rate the models (complete lines, the hook, the validator pass
+# rate, retries, real cost, latency).
+#
+# It reuses the script step's own methods (``steps/script._Run.beat_sheet`` /
+# ``body`` / ``framing`` / ``first_watch``: the prompts, the validators, the
+# retry-once-then-fail ladder of ``llm_call.call_json``, the meter), and
+# nothing else of the step (no fill pass, no E4, no repair: the A/B reads
+# what each model wrote, not what a repair loop made of it). The step writes
+# its script after every accepted call, so it runs against a throwaway COPY
+# of the story's JSON documents in a temp folder (the story's own episode
+# files are never read for writing and never written; an existing script of
+# the episode is not in the copy: the episode is written afresh, from the
+# season and, from episode 2 on, the memory of the episodes before it). The
+# copy is stamped ``writing: "v3"`` when the story is not (it is in the
+# copy only, and the summary says so).
+#
+# **An explicit exception to the bench's skip-paid rule (DEC-115).** A paid
+# link is called only with ``--allow-paid`` AND ``allow_paid`` on in Settings
+# (the Settings switch wins), under a ``--max-usd`` that is a hard cap for the
+# whole run: before every request -- a validator retry counts -- the meter's
+# own estimate of it is added to what the run has booked, and a request that
+# would cross the cap is refused unsent (after a refusal the rest of that
+# link's calls are refused too: its chain is broken). The same request is also
+# checked against the live caps (``budget.check`` through the meter's gates:
+# the daily cap with ``day_state()``, the story's cap). Every answered request
+# is booked through the normal meter (``llm_spend.Meter``: ``spend.json`` and
+# the story's own ledger, step label ``bench``, the served model on the row),
+# as a story-level row (no episode: an experiment is not part of an
+# episode's production cost, and the per-episode cap -- already spent by a
+# rendered episode -- must not decide an A/B). The bench never spends without
+# the flag: without ``--allow-paid`` the paid links are listed and skipped.
+
+AB_STEP = "bench"
+AB_PROMPT_IDS = ("E1v3", "E2v3", "E3v3", "J1v3")
+AB_RETRY_FACTOR = 2  # the upper bound: every call asked once more
+# Folders of a story that hold images, audio, video or caches: never copied.
+_AB_SKIP_DIRS = frozenset({"cache", "bench", "refs", "assets", "render", "styles"})
+_AB_SKIP_FILES = frozenset({"cost_ledger.json"})
+_AB_FIRST_LINES = 3
+
+
+class AbRefused(Exception):
+    """The A/B cannot start; the message says why and what to do."""
+
+
+def _ab_slug(link) -> str:
+    """A file name for *link*: ``anthropic__claude-opus-5-5-at-xhigh``."""
+    import re
+
+    text = describe(link).replace("/", "__").replace("@", "-at-")
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", text)
+
+
+def _atomic_json(path, value) -> None:
+    import tempfile
+
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    handle, tmp = tempfile.mkstemp(dir=directory, prefix=".bench-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            json.dump(value, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_text(path, text) -> None:
+    import tempfile
+
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    handle, tmp = tempfile.mkstemp(dir=directory, prefix=".bench-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def copy_story_documents(story_dir, ep, dest_outputs) -> str:
+    """Copy *story_dir*'s JSON documents (never an image, a sound, a video or
+    a ledger; never an episode from *ep* on) to ``<dest_outputs>/stories/<id>``
+    -- what the script step reads to write episode *ep* -- and return the
+    copy's story id. Read-only on *story_dir*. ``AbRefused`` when it holds no
+    ``story.json``."""
+    import re
+    import shutil
+
+    story_dir = os.path.normpath(story_dir)
+    story_id = os.path.basename(story_dir)
+    if not os.path.isfile(os.path.join(story_dir, "story.json")):
+        raise AbRefused(f"{story_dir}: no story.json there; give the story's folder (outputs/stories/<id>).")
+    target = os.path.join(dest_outputs, "stories", story_id)
+    for root, dirs, files in os.walk(story_dir):
+        rel = os.path.relpath(root, story_dir)
+        parts = [] if rel == "." else rel.split(os.sep)
+
+        def keep(name, parts=parts):
+            if name in _AB_SKIP_DIRS:
+                return False
+            if parts == ["episodes"]:
+                match = re.fullmatch(r"ep(\d+)", name)
+                if match and int(match.group(1)) >= ep:
+                    return False
+            return True
+
+        dirs[:] = sorted(name for name in dirs if keep(name) and not os.path.islink(os.path.join(root, name)))
+        for name in sorted(files):
+            source = os.path.join(root, name)
+            if not name.endswith(".json") or name in _AB_SKIP_FILES or os.path.islink(source):
+                continue
+            destination = os.path.join(target, *parts, name)
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            shutil.copyfile(source, destination)
+    return story_id
+
+
+def _stamp_writing_v3(outputs_dir, story_id):
+    """Stamp the COPY of the story ``writing: "v3"`` (the bench measures the
+    writing-v3 chain, whatever the story's own stamp says). Returns the stamp
+    the story had (None: none). ``AbRefused`` for a story that is not on the
+    v2 pipeline: v3 writes only there."""
+    path = os.path.join(outputs_dir, "stories", story_id, "story.json")
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    profile = doc.setdefault("generation_profile", {})
+    if profile.get("pipeline") != "v2":
+        raise AbRefused(f"story {story_id}: not on the v2 pipeline; the writing-v3 chain is written only for a v2 story.")
+    before = profile.get("writing")
+    profile["writing"] = "v3"
+    _atomic_json(path, doc)
+    return before
+
+
+def _ab_context(outputs_dir, story_id, ep, settings_env, on_log):
+    """``(ctx, ec)`` of episode *ep* in the copy at *outputs_dir*, past the
+    script step's own preconditions (a ready story, an episode the season
+    plans, the memory of the episode before it, a v2 story's approved
+    knowledge base). ``AbRefused`` with the step's sentence otherwise."""
+    from clipping import cancel as cancel_mod
+    from clipping.aistory import steps
+    from clipping.aistory.steps import episode_common
+    from clipping.aistory.store import StoryStore
+
+    stores = StoryStore(outputs_dir, on_log=lambda line: None)
+    ctx = steps.StepContext(
+        job_id="bench-ab", story_id=story_id, step="script", ep=ep, params={}, cancel=cancel_mod.CancelToken(),
+        settings_env=dict(settings_env), outputs_dir=outputs_dir, on_log=on_log,
+    )
+    try:
+        ec = episode_common.load_context(stores, story_id, ep)
+        episode_common.check_episode_preconditions(ctx, ec, require_knowledge=True)
+    except steps.StepFailed as exc:
+        raise AbRefused(str(exc)) from None
+    return ctx, ec
+
+
+def ab_estimate(link, ec) -> dict:
+    """What one run of the chain on *link* may cost, before anything is sent:
+    one call per prompt of the chain (E1v3, one E2v3 per body scene of the
+    template, E3v3, J1v3; a free link: $0), each at the widest input its prompt may be sent
+    with (``prompts.input_budget``) and its reply cap -- E1v3's payoff
+    variant from episode 2 on -- plus the link's thinking room
+    (``registry.output_headroom``), priced as the meter prices a request
+    (``pricing.llm_estimate_cost``, rounded up to the ledger's four
+    decimals). ``usd`` is one try per call; ``upper_usd`` asks every call
+    once more (the validator's one retry). ``PriceUnknown`` for a link with
+    no price."""
+    from clipping.aistory import prompts, timing
+    from clipping.aistory.steps import llm_call, llm_spend
+    from clipping.providers import pricing, registry
+
+    body = timing.episode_slots(ec.template, ec.ep).count("body")
+    free = llm_call.is_free_link(link)
+    plan = (("E1v3", 1), ("E2v3", body), ("E3v3", 1), ("J1v3", 1))
+    rows, total = [], 0.0
+    for prompt_id, count in plan:
+        cap = prompts.MAX_TOKENS[prompt_id]
+        if prompt_id == "E1v3" and ec.ep >= 2:
+            cap = max(cap, prompts.E1V3_PAYOFF_MAX_TOKENS)
+        cap += registry.output_headroom(link, prompts.anthropic_effort(prompt_id))
+        tokens_in = prompts.input_budget(prompt_id)
+        # A free link costs nothing and has no row in the price table.
+        each = 0.0 if free else llm_spend.ledger_usd(pricing.llm_estimate_cost(link, tokens_in, cap))
+        rows.append({"prompt": prompt_id, "calls": count, "tokens_in": tokens_in, "tokens_out": cap,
+                     "usd_each": each})
+        total += each * count
+    total = round(total, 4)
+    return {"calls": sum(row["calls"] for row in rows), "usd": total,
+            "upper_usd": round(total * AB_RETRY_FACTOR, 4), "prompts": rows}
+
+
+class _AbRun:
+    """What the whole run has booked and been refused: *max_usd* is its hard
+    cap (None: no paid link runs, nothing to cap)."""
+
+    def __init__(self, max_usd):
+        self.max_usd = max_usd
+        self.booked_usd = 0.0
+        self.refusals = []
+
+    def book(self, usd) -> None:
+        self.booked_usd = round(self.booked_usd + float(usd), 6)
+
+    def check(self, trace, usd, link) -> None:
+        """Raise ``BudgetRefused`` for a request of *usd* that would take the
+        run past ``--max-usd`` -- and for every request of a link a refusal
+        already stopped."""
+        from clipping.providers import budget as budget_mod
+
+        if trace.refused:
+            raise budget_mod.BudgetRefused(trace.refused, cap="bench", usd=usd, spent=self.booked_usd,
+                                           cap_usd=self.max_usd or 0.0)
+        if self.max_usd is not None and round(self.booked_usd + usd, 6) > self.max_usd + 1e-9:
+            reason = (f"refused: est ${usd:.4f} on {describe(link)} would bring this bench run to "
+                      f"${self.booked_usd + usd:.4f} of its --max-usd ${self.max_usd:.2f} "
+                      f"(${self.booked_usd:.4f} booked so far)")
+            trace.refused = reason
+            trace.refused_by = "max-usd"
+            self.refusals.append({"link": describe(link), "by": "max-usd", "reason": reason})
+            raise budget_mod.BudgetRefused(reason, cap="bench", usd=usd, spent=self.booked_usd,
+                                           cap_usd=self.max_usd)
+
+
+class _AbTrace:
+    """One link's run: every ``call_json`` it made, in order."""
+
+    def __init__(self, link):
+        self.link = link
+        self.calls = []
+        self.current = None
+        self.refused = None
+        self.refused_by = None
+        self.error = None
+        self.interrupted = False
+        self.last_usage = None
+
+
+def _usage_of(response) -> dict:
+    usage = getattr(response, "usage", None)
+
+    def first(*names):
+        for name in names:
+            value = getattr(usage, name, None)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+        return None
+
+    return {"tokens_in": first("prompt_tokens", "input_tokens"),
+            "tokens_out": first("completion_tokens", "output_tokens")}
+
+
+def _hook_meter(meter, run, trace) -> None:
+    """Put the run's cap in front of *meter*'s gates (every request, and the
+    meter's own pre-check), and have every booking counted against the run,
+    kept on the call's record and tagged on its ledger row. The meter itself
+    -- estimates, the live caps, the booking at the served model -- is
+    ``llm_spend.Meter``'s, untouched."""
+    from clipping.providers import budget as budget_mod
+
+    gates = meter.gates
+    real_check = gates.check
+
+    def check(usd, link):
+        run.check(trace, usd, link)
+        try:
+            real_check(usd, link)
+        except budget_mod.BudgetRefused as exc:
+            trace.refused = str(exc)
+            trace.refused_by = f"live cap ({exc.cap})" if exc.cap else "live cap"
+            run.refusals.append({"link": describe(link), "by": trace.refused_by, "reason": str(exc)})
+            raise
+
+    gates.check = check
+
+    real_reply = meter.book_reply
+
+    def book_reply(link, response, estimate_usd, note=None):
+        trace.last_usage = _usage_of(response)
+        real_reply(link, response, estimate_usd, note=note)
+
+    meter.book_reply = book_reply
+
+    real_book = meter.book
+
+    def book(link, *, qty, usd, note=None):
+        record = trace.current
+        label = f"bench A/B {meter.prompt_id}" + (f" #{record['index']}" if record else "")
+        real_book(link, qty=qty, usd=usd, note=f"{label}; {note}" if note else label)
+        run.book(usd)
+        usage, trace.last_usage = trace.last_usage or {}, None
+        if record is not None:
+            record["books"].append({"model": link.model, "qty": qty, "usd": usd, **usage})
+
+    meter.book = book
+
+
+def _finish_call(record, started, trace, link) -> dict:
+    """Close one call's record: latency, requests (one per booking; the
+    answered replies for a link that is not metered), retries, cost, tokens
+    and the model that served it."""
+    from clipping.providers import registry
+
+    books = record.pop("books")
+    record["latency_s"] = round(time.monotonic() - started, 3)
+    record["requests"] = len(books) or record["validator_replies"]
+    record["retries"] = max(0, record["requests"] - 1)
+    record["usd"] = round(sum(book["usd"] for book in books), 4)
+    tokens_in = [book.get("tokens_in") for book in books if book.get("tokens_in") is not None]
+    tokens_out = [book.get("tokens_out") for book in books if book.get("tokens_out") is not None]
+    record["tokens_in"] = sum(tokens_in) if tokens_in else None
+    record["tokens_out"] = sum(tokens_out) if tokens_out else None
+    served = list(dict.fromkeys(book["model"] for book in books))
+    requested = registry.split_effort(link)[0]
+    record["served_models"] = served
+    record["fallback"] = any(registry.split_effort(link._replace(model=model))[0] != requested for model in served)
+    return record
+
+
+@contextlib.contextmanager
+def _ab_metered(run, trace, *, ledger_outputs_dir):
+    """Run the script step's calls with the A/B's meter hooks in place: the
+    meter a paid call opens books to the REAL story's ledger
+    (*ledger_outputs_dir*, step ``bench``, no episode) while the step writes
+    its script into the throwaway copy, and ``call_json`` is wrapped to
+    record each call. Both are module attributes looked up at call time and
+    put back on exit; nothing of the production code is edited."""
+    import dataclasses
+    from unittest import mock
+
+    from clipping.aistory.steps import llm_call, llm_spend
+
+    real_open = llm_spend.open_meter
+    real_call = llm_call.call_json
+
+    def open_meter(ctx, prompt_id, *, system, user, cap):
+        bench_ctx = dataclasses.replace(ctx, step=AB_STEP, ep=None, outputs_dir=ledger_outputs_dir)
+        meter = real_open(bench_ctx, prompt_id, system=system, user=user, cap=cap)
+        _hook_meter(meter, run, trace)
+        return meter
+
+    def call_json(ctx, prompt_id, system, user, schema, *, validator, **kwargs):
+        record = {"index": len(trace.calls) + 1, "prompt": prompt_id, "validator_replies": 0,
+                  "validator_passes": 0, "rejections": [], "accepted": False, "error": None, "books": []}
+        trace.calls.append(record)
+        trace.current = record
+        started = time.monotonic()
+
+        def counted(value):
+            errors = list(validator(value))
+            record["validator_replies"] += 1
+            if errors:
+                record["rejections"].append([str(error) for error in errors[:2]])
+            else:
+                record["validator_passes"] += 1
+            return errors
+
+        try:
+            value = real_call(ctx, prompt_id, system, user, schema, validator=counted, **kwargs)
+        except BaseException as exc:
+            record["error"] = (getattr(exc, "reason", None) or str(exc) or type(exc).__name__)[:400]
+            raise
+        else:
+            record["accepted"] = True
+            return value
+        finally:
+            _finish_call(record, started, trace, trace.link)
+            trace.current = None
+
+    with mock.patch.object(llm_spend, "open_meter", open_meter), mock.patch.object(llm_call, "call_json", call_json):
+        yield
+
+
+def _speaker_name(ec, speaker) -> str:
+    if speaker in (None, "narrator"):
+        return "Narrator"
+    return ec.names.get(speaker, str(speaker))
+
+
+def _script_excerpt(ec, script) -> dict:
+    """The hook line and the first spoken lines of *script*, as the human
+    reads them: ``{"hook": "Name: text" | None, "on_screen_text": ..., "first_lines": [...]}``."""
+    hook = next((scene for scene in script["scenes"] if scene["function"] == "hook"), None)
+    hook_line = None
+    if hook is not None and hook["lines"]:
+        first = hook["lines"][0]
+        hook_line = f"{_speaker_name(ec, first['speaker'])}: {first['text']}"
+    lines = []
+    for scene in script["scenes"]:
+        if scene["function"] == "hook":
+            continue
+        for line in scene["lines"]:
+            if len(lines) < _AB_FIRST_LINES:
+                lines.append(f"{_speaker_name(ec, line['speaker'])}: {line['text']}")
+    return {"hook": hook_line, "on_screen_text": (script.get("hook") or {}).get("on_screen_text"),
+            "first_lines": lines}
+
+
+def _verdict(script) -> str:
+    from clipping.aistory.steps import judge
+
+    report = (script or {}).get(judge.FIRST_WATCH)
+    if report is None:
+        return "not judged"
+    if report.get("passed"):
+        return "pass"
+    count = len(judge.blocking_issues(report))
+    return f"fail ({count} blocking)"
+
+
+def _run_ab_link(link, estimate, *, snapshot, ep, story_id, settings_env, run, ledger_outputs_dir, work_dir,
+                 runner, on_log, time_fn) -> tuple:
+    """One link's chain, alone. Returns ``(row, document)``: the summary row
+    and the full record the link's JSON file holds."""
+    import shutil
+
+    from clipping.aistory.steps import episode_common, llm_call
+    from clipping.aistory.steps import script as script_step
+    from clipping.aistory.steps import StepFailed
+
+    label = describe(link)
+    outputs_dir = os.path.join(work_dir, _ab_slug(link))
+    shutil.copytree(snapshot, outputs_dir)
+    # One link, the same one for every prompt: no other link to fall back to.
+    link_env = dict(settings_env, STORY_LLM_CHAIN=label, STORY_LLM_PREMIUM_CHAIN=label)
+    ctx, ec = _ab_context(outputs_dir, story_id, ep, link_env, on_log)
+    trace = _AbTrace(link)
+    step = script_step._Run(ctx, ec, runner=runner, time_fn=time_fn)
+    step.script = script_step.skeleton(ec, now=llm_call.utc_now())
+    started = time.monotonic()
+    with _ab_metered(run, trace, ledger_outputs_dir=ledger_outputs_dir):
+        try:
+            for phase in (step.beat_sheet, step.body, step.framing, step.first_watch):
+                phase()
+                if trace.refused:
+                    break
+        except StepFailed as exc:
+            trace.error = exc.reason or str(exc)
+        except KeyboardInterrupt:
+            trace.interrupted = True
+    wall = round(time.monotonic() - started, 3)
+    script = step.script
+    complete = (script_step.is_complete(script, ec.ep) and not step.failed
+                and (script.get("first_watch") is not None))
+    if trace.interrupted:
+        status = "interrupted"
+    elif trace.refused:
+        status = "refused"
+    elif complete:
+        status = "complete"
+    elif trace.error or step.failed:
+        status = "failed"
+    else:
+        status = "incomplete"
+    reason = trace.refused or trace.error or step.failures() or None
+    replies = sum(call["validator_replies"] for call in trace.calls)
+    passes = sum(call["validator_passes"] for call in trace.calls)
+    served = list(dict.fromkeys(model for call in trace.calls for model in call["served_models"]))
+    excerpt = _script_excerpt(ec, script)
+    real = round(sum(call["usd"] for call in trace.calls), 4)
+    latency = round(sum(call["latency_s"] for call in trace.calls), 3)
+    totals = {
+        "calls": len(trace.calls), "requests": sum(call["requests"] for call in trace.calls),
+        "retries": sum(call["retries"] for call in trace.calls), "validator_replies": replies,
+        "validator_passes": passes, "validator_pass_rate": round(passes / replies, 3) if replies else None,
+        "real_usd": real, "latency_s": latency, "wall_s": wall, "served_models": served,
+        "fallback": any(call["fallback"] for call in trace.calls),
+    }
+    row = {
+        "link": label, "status": status, "reason": reason, "est_usd": estimate["usd"],
+        "upper_usd": estimate["upper_usd"], "real_usd": real, "latency_s": latency,
+        "validator_pass_rate": totals["validator_pass_rate"], "validator_replies": replies,
+        "validator_passes": passes, "retries": totals["retries"], "calls": len(trace.calls),
+        "verdict": _verdict(script), "served_models": served, **excerpt, "file": f"{_ab_slug(link)}.json",
+    }
+    document = {
+        "link": label, "status": status, "reason": reason, "story_id": story_id, "episode": ep,
+        "estimate": estimate, "totals": totals, "calls": trace.calls,
+        "failed": [{"what": what, "target": target, "reason": why} for what, target, why in step.failed],
+        "first_watch": script.get("first_watch"), "excerpt": excerpt, "script": script,
+    }
+    return row, document
+
+
+def _pct(row) -> str:
+    rate = row.get("validator_pass_rate")
+    if rate is None:
+        return "-"
+    return f"{round(rate * 100)}% ({row['validator_passes']}/{row['validator_replies']})"
+
+
+def _ab_table(rows) -> list:
+    """The console table: one line per link."""
+    width = max([len("link")] + [len(row["link"]) for row in rows])
+    head = (f"{'link':<{width}} {'status':<12} {'est $':>8} {'real $':>8} {'latency':>9} {'validator':>14} "
+            f"{'retries':>7}  J1")
+    lines = [head, "-" * len(head)]
+    for row in rows:
+        skipped = row["status"] == "skipped"
+        lines.append(
+            f"{row['link']:<{width}} {row['status']:<12} {row['est_usd']:>8.4f} "
+            f"{'-' if skipped else format(row['real_usd'], '.4f'):>8} "
+            f"{'-' if skipped else format(row['latency_s'], '.1f') + 's':>9} "
+            f"{'-' if skipped else _pct(row):>14} {'-' if skipped else row['retries']!s:>7}  "
+            f"{row['reason'] if skipped else row['verdict']}")
+    return lines
+
+
+def _ab_markdown(summary) -> str:
+    out = [f"# Episode A/B: story {summary['story_id']}, episode {summary['episode']}", ""]
+    out.append(f"Started {summary['started']}; "
+               + ("INTERRUPTED, this is a partial summary. " if summary["interrupted"] else "")
+               + f"booked ${summary['booked_usd']:.4f} of --max-usd "
+               + (f"${summary['max_usd']:.2f}" if summary["max_usd"] is not None else "(none: no paid link ran)")
+               + ".")
+    if summary.get("writing_stamp_was") != "v3":
+        out.append(f"The story's own writing stamp is {summary.get('writing_stamp_was')!r}: the run used the "
+                   "writing-v3 prompts on a throwaway copy; the story itself is unchanged.")
+    out += ["", "| link | status | est $ | real $ | latency | validator pass | retries | J1 verdict |",
+            "|---|---|---:|---:|---:|---:|---:|---|"]
+    for row in summary["rows"]:
+        skipped = row["status"] == "skipped"
+        out.append(f"| {row['link']} | {row['status']} | {row['est_usd']:.4f} | "
+                   f"{'-' if skipped else format(row['real_usd'], '.4f')} | "
+                   f"{'-' if skipped else format(row['latency_s'], '.1f') + ' s'} | "
+                   f"{'-' if skipped else _pct(row)} | {'-' if skipped else row['retries']} | "
+                   f"{row['reason'] if skipped else row['verdict']} |")
+    if summary["refusals"]:
+        out += ["", "## Refused", ""]
+        out += [f"- {item['link']} ({item['by']}): {item['reason']}" for item in summary["refusals"]]
+    for row in summary["rows"]:
+        if row["status"] == "skipped":
+            continue
+        out += ["", f"## {row['link']}", "", f"Status: {row['status']}"
+                + (f" ({row['reason']})" if row.get("reason") else "")
+                + (f"; served by {', '.join(row['served_models'])}" if row.get("served_models") else "")
+                + f"; full record: {row['file']}", ""]
+        out.append(f"- Hook: {row['hook'] or '(none)'}"
+                   + (f"  [on screen: {row['on_screen_text']}]" if row.get("on_screen_text") else ""))
+        out.append("- First spoken lines:")
+        out += [f"  {number}. {line}" for number, line in enumerate(row["first_lines"], 1)] or ["  (none)"]
+    out.append("")
+    return "\n".join(out)
+
+
+def _write_ab_outputs(out_dir, summary, documents) -> None:
+    """Write whatever exists now: each finished link's JSON, ``summary.json``,
+    ``summary.md`` -- called after every link and once more at the end, so a
+    run cut short leaves its partial summary."""
+    for name, document in documents.items():
+        _atomic_json(os.path.join(out_dir, name), document)
+    _atomic_json(os.path.join(out_dir, "summary.json"), summary)
+    _atomic_text(os.path.join(out_dir, "summary.md"), _ab_markdown(summary))
+
+
+def _print_today(out, label) -> None:
+    from clipping.providers import budget as budget_mod
+
+    state = budget_mod.day_state()
+    out(f"{label} ({state.zone} {state.day}): paid spend today ${state.spent:.4f}"
+        + (f", +${state.extra:.2f} allowed on top of the daily cap" if state.extra else ""))
+
+
+def run_episode_ab(
+    story_dir, chains, *, ep=1, allow_paid=False, max_usd=None, dry_run=False, settings_env=None,
+    runner=None, out=print, on_log=None, now=None, time_fn=time.monotonic,
+) -> dict:
+    """The A/B (module section above). *chains*: ``"<link>,<link>"`` (or a
+    list of ``Link``). Returns the summary dict (``summary.json``'s content;
+    ``rows`` has one row per link, ``summary_dir`` where the files are, None
+    for a dry run). *runner* is ``llm.run_chain`` unless a test hands in a
+    stand-in (a stand-in answers by itself: nothing is metered, capped or
+    booked); *out* prints the console lines, *on_log* the chain's own.
+
+    ``AbRefused`` before any request: ``--allow-paid`` given while Settings
+    has ``allow_paid`` off (the Settings switch wins), a paid link to run
+    without ``--max-usd``, an unreadable story or episode, or a chain that
+    cannot be parsed."""
+    import tempfile
+    from datetime import datetime, timezone
+
+    from clipping.aistory.steps import llm_call
+    from clipping.providers import budget as budget_mod
+    from clipping.providers import gating, pricing, registry
+
+    settings_env = _load_settings_env() if settings_env is None else settings_env
+    try:
+        links = list(dict.fromkeys(
+            registry.parse_chain(chains) if isinstance(chains, str) else list(chains)))
+    except registry.ChainError as exc:
+        raise AbRefused(f"--chains: {exc}") from None
+    if max_usd is not None and not (max_usd > 0 and max_usd == max_usd and max_usd != float("inf")):
+        raise AbRefused(f"--max-usd is an amount above zero, not {max_usd!r}.")
+    try:
+        budget = gating.budget_of(gating.merged_env(settings_env))
+    except ValueError as exc:
+        raise AbRefused(f"The budget settings cannot be used: {exc}") from None
+    keys = llm_call.resolve_keys(settings_env)
+
+    paid_links = [link for link in links if not llm_call.is_free_link(link)]
+    if paid_links and allow_paid and not budget.allow_paid:
+        raise AbRefused("--allow-paid was given but allow_paid is off in Settings (ALLOW_PAID): the Settings "
+                        "switch wins. Turn it on in Settings first, or run without --allow-paid to bench the "
+                        "free links only.")
+    if paid_links and allow_paid and not dry_run and max_usd is None:
+        raise AbRefused("A paid link runs only under a hard cap: give --max-usd (e.g. --max-usd 2.50).")
+
+    story_dir = os.path.normpath(story_dir)
+    stamp = datetime.now(timezone.utc) if now is None else now
+    out_dir = os.path.join(story_dir, "bench", stamp.strftime("%Y%m%dT%H%M%SZ"))
+
+    with tempfile.TemporaryDirectory(prefix="bench-ab-") as work_dir:
+        snapshot = os.path.join(work_dir, "snapshot")
+        story_id = copy_story_documents(story_dir, ep, snapshot)
+        stamp_was = _stamp_writing_v3(snapshot, story_id)
+        _ctx, ec = _ab_context(snapshot, story_id, ep, settings_env, on_log or (lambda line: None))
+        out_dir_ledger = os.path.dirname(os.path.dirname(story_dir))
+
+        plan, skipped = [], []
+        for link in links:
+            label = describe(link)
+            estimate = None
+            reason = None
+            try:
+                estimate = ab_estimate(link, ec)
+            except pricing.PriceUnknown as exc:
+                reason = f"no price: {exc}"
+            if reason is None and not llm_call.is_free_link(link) and not allow_paid:
+                reason = "paid link: --allow-paid not given (DEC-115)"
+            elif reason is None and not keys.get(link.provider):
+                reason = f"no key set ({registry.env_key_for(link)})"
+            if reason is None:
+                plan.append((link, estimate))
+            else:
+                skipped.append({"link": label, "status": "skipped", "reason": reason,
+                                "est_usd": (estimate or {}).get("usd", 0.0),
+                                "upper_usd": (estimate or {}).get("upper_usd", 0.0), "real_usd": 0.0,
+                                "latency_s": 0.0, "validator_pass_rate": None, "validator_replies": 0,
+                                "validator_passes": 0, "retries": 0, "calls": 0, "verdict": "-",
+                                "served_models": [], "hook": None, "on_screen_text": None, "first_lines": [],
+                                "file": None})
+
+        out(f"Episode A/B: story {story_id} ({(ec.story.get('title') or '')!r}), episode {ep}, "
+            f"template {ec.template['template_id']}, writing v3 (the story's own stamp: {stamp_was!r}).")
+        _print_today(out, "Today")
+        cap_text = f"--max-usd ${max_usd:.2f}" if max_usd is not None else "no --max-usd"
+        out(f"Daily cap ${budget.daily_cap_usd:.2f}, story cap ${budget.per_story_cap_usd:.2f}; {cap_text}; "
+            f"allow_paid in Settings: {'on' if budget.allow_paid else 'off'}; --allow-paid: "
+            f"{'given' if allow_paid else 'not given'}.")
+
+        estimates = {describe(link): estimate for link, estimate in plan}
+        listing = []
+        for link, estimate in plan:
+            listing.append({"link": describe(link), "status": "to run", "reason": "", "est_usd": estimate["usd"],
+                            "upper_usd": estimate["upper_usd"], "real_usd": 0.0, "latency_s": 0.0,
+                            "validator_pass_rate": None, "verdict": "-", "retries": 0})
+        listing += [dict(row, status="skipped") for row in skipped]
+        out("")
+        width = max([len("run total (keyless links counted)")] + [len(row["link"]) for row in listing])
+        out(f"{'link':<{width}} {'status':<9} {'calls':>5} {'est $ (one try)':>16} "
+            f"{'upper $ (each retried once)':>28}  note")
+        for row in listing:
+            calls = (estimates.get(row["link"]) or {}).get("calls")
+            if calls is None:
+                calls = "-"
+            out(f"{row['link']:<{width}} {row['status']:<9} {calls!s:>5} {row['est_usd']:>16.4f} "
+                f"{row['upper_usd']:>28.4f}  {row['reason']}")
+        counted = [item["usd"] for item in estimates.values()]
+        counted_upper = [item["upper_usd"] for item in estimates.values()]
+        if dry_run:
+            # A dry run also counts the links left out only for want of a key: what the run costs once it is set.
+            keyless = [row for row in skipped if row["reason"].startswith("no key set")]
+            counted += [row["est_usd"] for row in keyless]
+            counted_upper += [row["upper_usd"] for row in keyless]
+        run_total = round(sum(counted), 4)
+        run_upper = round(sum(counted_upper), 4)
+        total_label = "run total" + (" (keyless links counted)" if dry_run and len(counted) > len(estimates) else "")
+        out(f"{total_label:<{width}} {'':<9} {'':>5} {run_total:>16.4f} {run_upper:>28.4f}")
+        if max_usd is not None and run_upper > max_usd:
+            out(f"Note: the upper bound ${run_upper:.2f} is above --max-usd ${max_usd:.2f}: a call that would "
+                "cross the cap is refused unsent, and the rest of that link is not run.")
+
+        summary = {
+            "story_id": story_id, "episode": ep, "started": stamp.isoformat(), "interrupted": False,
+            "max_usd": max_usd, "allow_paid": bool(allow_paid), "dry_run": bool(dry_run),
+            "writing_stamp_was": stamp_was, "estimate_usd": run_total, "estimate_upper_usd": run_upper,
+            "booked_usd": 0.0, "rows": list(skipped), "refusals": [], "summary_dir": None,
+        }
+        if dry_run:
+            out("\nDry run: nothing was sent, booked or written.")
+            summary["rows"] = [dict(row) for row in listing]
+            return summary
+        if not plan:
+            out("\nNo link to run: " + ("every link was skipped (see the table)." if skipped else "none given."))
+            return summary
+
+        summary["summary_dir"] = out_dir
+        out(f"\nOutputs: {out_dir}\n")
+        _print_today(out, "Before the first call")
+        run = _AbRun(max_usd)
+        documents = {}
+        rows = []
+
+        def snapshot_summary():
+            summary["rows"] = rows + list(skipped)
+            summary["booked_usd"] = round(run.booked_usd, 4)
+            summary["refusals"] = list(run.refusals)
+            _write_ab_outputs(out_dir, summary, documents)
+
+        log = on_log or (lambda line: out(f"    {line}"))
+        try:
+            for link, estimate in plan:
+                out(f"== {describe(link)} (est ${estimate['usd']:.4f}, upper ${estimate['upper_usd']:.4f})")
+                row, document = _run_ab_link(
+                    link, estimate, snapshot=snapshot, ep=ep, story_id=story_id, settings_env=settings_env,
+                    run=run, ledger_outputs_dir=out_dir_ledger, work_dir=work_dir, runner=runner, on_log=log,
+                    time_fn=time_fn)
+                rows.append(row)
+                documents[row["file"]] = document
+                snapshot_summary()
+                if row["status"] == "interrupted":
+                    summary["interrupted"] = True
+                    break
+        except KeyboardInterrupt:
+            summary["interrupted"] = True
+        finally:
+            snapshot_summary()
+
+    out("")
+    for line in _ab_table(summary["rows"]):
+        out(line)
+    for row in summary["rows"]:
+        if row["status"] == "skipped":
+            continue
+        out(f"\n{row['link']}:")
+        out(f"  hook: {row['hook'] or '(none)'}")
+        for number, line in enumerate(row["first_lines"], 1):
+            out(f"  {number}. {line}")
+        if row.get("reason") and row["status"] != "complete":
+            out(f"  {row['status']}: {row['reason']}")
+    out("")
+    _print_today(out, "After")
+    out(f"Booked this run: ${summary['booked_usd']:.4f}"
+        + (f" of --max-usd ${max_usd:.2f}" if max_usd is not None else "")
+        + f". Summary: {os.path.join(out_dir, 'summary.md')}"
+        + ("  (INTERRUPTED: partial)" if summary["interrupted"] else ""))
+    return summary
+
+
+def _run_episode_ab_mode(args) -> int:
+    """``--episode-ab``: never falls through to the pass-A path."""
+    from clipping.providers import budget as budget_mod
+
+    if not args.chains:
+        print("--episode-ab needs --chains \"<provider>/<model>,...\": the links to compare (nothing is chosen "
+              "for you: a default could spend).")
+        return 2
+    if args.episode_prompts:
+        print("--episode-ab and --episode-prompts are different measurements; give one.")
+        return 2
+    settings_env = _load_settings_env(args.settings_file)
+    budget_mod.set_settings_reader(lambda: settings_env)
+    try:
+        summary = run_episode_ab(
+            args.episode_ab, args.chains, ep=args.episode, allow_paid=args.allow_paid, max_usd=args.max_usd,
+            dry_run=args.dry_run, settings_env=settings_env, on_log=(lambda line: print(f"    {line}"))
+            if args.verbose else (lambda line: None))
+    except AbRefused as exc:
+        print(f"Refused: {exc}")
+        return 2
+    if args.dry_run:
+        return 0
+    if summary["interrupted"]:
+        return 130
+    ran = [row for row in summary["rows"] if row["status"] != "skipped"]
+    return 0 if ran and all(row["status"] == "complete" for row in ran) else 1
+
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -693,8 +1499,31 @@ def main(argv=None):
     )
     parser.add_argument("--ep", type=int, default=1,
                         help="With --episode-prompts: which episode to build requests from (default 1).")
+    parser.add_argument(
+        "--episode-ab", metavar="STORY_DIR",
+        help="Plan 23 stage D7: write one episode of this story folder with the writing-v3 chain (E1v3, E2v3, "
+             "E3v3, J1v3) once per link of --chains, each link alone (no fallback), and put the scripts and "
+             "the judge's verdicts side by side under STORY_DIR/bench/<timestamp>/. Reads the story, writes "
+             "nothing into its episode files. A paid link runs only with --allow-paid under --max-usd "
+             "(DEC-115's explicit exception); see the module section.",
+    )
+    parser.add_argument("--chains", metavar="LINKS",
+                        help="With --episode-ab: the comma-separated <provider>/<model> links to compare "
+                             "(an Anthropic link may end in @effort).")
+    parser.add_argument("--episode", type=int, default=1,
+                        help="With --episode-ab: which episode to write (default 1).")
+    parser.add_argument("--allow-paid", action="store_true",
+                        help="With --episode-ab: let the paid links run (Settings' allow_paid must be on too); "
+                             "without it they are listed and skipped.")
+    parser.add_argument("--max-usd", type=float, default=None, metavar="X",
+                        help="With --episode-ab: a hard cap on what the whole run may book; a request whose "
+                             "estimate would cross it is refused unsent. Required with a paid link.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="With --episode-ab: print the per-link estimate and exit without calling anything.")
     args = parser.parse_args(argv)
 
+    if args.episode_ab:
+        return _run_episode_ab_mode(args)
     if args.episode_prompts:
         return _run_episode_prompt_mode(args)
 
