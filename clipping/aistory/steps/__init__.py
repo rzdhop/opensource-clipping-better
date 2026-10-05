@@ -45,7 +45,7 @@ Stdlib only: importable in the pytest-only CI environment (DEC-012).
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 
@@ -70,6 +70,14 @@ class StepContext:
     # which one it is on; the worker records it as the job's ``sub_step``.
     # None (the default, and every other caller): nobody is told.
     on_sub_step: Optional[Callable[[Optional[str]], None]] = None
+    # Plan 28 stage A5: the circuit breaker's memory, one per job. Maps a
+    # link's label (``"nvidia/nvidia/nemotron-3-ultra-550b-a55b"``) to what
+    # ``llm_call.call_json`` recorded when that link failed a whole retry
+    # ladder on an outage; a link in it is left out of every later call of
+    # the job. A sub-context made with ``dataclasses.replace`` (the fast
+    # track) shares this dict, so the whole job shares one memory; a new job
+    # builds a new context and starts empty.
+    link_health: dict = field(default_factory=dict)
 
 
 class UnknownStep(KeyError):

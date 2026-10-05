@@ -269,7 +269,8 @@ def test_generate_ten_makes_ten_c1_calls_of_one_valid_card_each(story_store):
         assert call["chain"] == [LINK]
         assert call["keys"] == {"gemini": "test-gemini-key"}
         assert call["cancel"] is ctx.cancel
-        assert call["on_log"] is ctx.on_log
+        # Plan 28 stage A5: the runner gets a watcher that forwards every line to the job's log.
+        assert call["on_log"]._on_log is ctx.on_log
         assert f"(call {k} of 10)" in call["user"]
         assert "Invent exactly 1 original concept " in call["user"]
         assert "Visual style: Fruit Drama" in call["user"]

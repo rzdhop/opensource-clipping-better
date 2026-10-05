@@ -47,6 +47,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -296,6 +297,86 @@ def _provider_reason(exc) -> str:
     return f"every provider in the chain failed ({len(failures)} tried): {detail}"
 
 
+# --------------------------------------------------------------- the breaker
+
+# Plan 28 stage A5. A link that failed a whole retry ladder on an outage
+# (HTTP 5xx or 408, a timeout, a dropped connection) is not asked again for
+# the rest of the job: tonight's nemotron-3-ultra answered 500/503 three times
+# in a row for eight scenes in a row, 19 s each. The memory is
+# ``StepContext.link_health``; the llm.py ladder is not touched, so the
+# ``attempt n/3`` lines ``web/api/signals.py`` reads are unchanged -- what
+# failed is read from the two lines ``run_chain`` already prints for it, and
+# from ``ProviderError.failures``.
+_ATTEMPT_FAILED = re.compile(r"^\s*⚠️\s+(\S+) attempt (\d+) failed \|")
+_LINK_FAILED = re.compile(r"^\s*⚠️\s+(\S+) failed \| (.*)$")
+_OUTAGE_EXC_NAMES = frozenset({
+    "APIConnectionError", "APITimeoutError", "InternalServerError",
+    "TimeoutError", "ReadTimeout", "ConnectTimeout", "ConnectError", "ConnectionError",
+})
+_OUTAGE_STATUS = re.compile(r"(?:Error code:|HTTP|status[ =:]+)\s*(5\d\d|408)\b", re.IGNORECASE)
+# The ladder's attempts per link when only the final reason is known.
+_DEFAULT_FAILED_ATTEMPTS = 3
+
+
+def is_outage_reason(reason) -> bool:
+    """Whether a link's recorded failure (``"TypeName: message"``, as
+    ``run_chain`` writes it) is an outage of the provider: an HTTP 5xx or 408,
+    a timeout, a dropped connection. Everything else -- a 429, a 4xx, a reply
+    that came but did not parse, a missing key, a time budget too short --
+    says nothing about the link being down and never opens the breaker."""
+    text = " ".join(str(reason).split())
+    name = text.split(":", 1)[0].strip() if ":" in text else ""
+    if name == "RateLimitError" or "Error code: 429" in text:
+        return False
+    return name in _OUTAGE_EXC_NAMES or bool(_OUTAGE_STATUS.search(text))
+
+
+class _FailureWatch:
+    """Wraps a call's ``on_log``: every line goes through unchanged, and the
+    lines that say a link failed are remembered -- the whole-ladder failure
+    (``⚠️ <label> failed | <reason>``) and each failed attempt, to say how
+    many times the link was asked."""
+
+    def __init__(self, on_log):
+        self._on_log = on_log
+        self.attempts = {}   # label -> failed attempts seen
+        self.failed = {}     # label -> reason of the whole-ladder failure
+
+    def __call__(self, line):
+        text = str(line)
+        match = _ATTEMPT_FAILED.match(text)
+        if match:
+            self.attempts[match.group(1)] = max(self.attempts.get(match.group(1), 0),
+                                                int(match.group(2)))
+        else:
+            match = _LINK_FAILED.match(text)
+            if match:
+                self.failed[match.group(1)] = match.group(2)
+        self._on_log(line)
+
+
+def _open_links(ctx, watch, exc, prompt_id):
+    """Record in ``ctx.link_health`` every link that failed its whole ladder
+    in the call that just ended -- seen in *watch*'s log lines or in the
+    ``ProviderError`` *exc* -- on an outage (:func:`is_outage_reason`), and
+    print one plain line for each newly recorded."""
+    health = getattr(ctx, "link_health", None)
+    if health is None:
+        return
+    failed = dict(watch.failed)
+    for label, reason in list(getattr(exc, "failures", None) or []):
+        failed.setdefault(str(label), str(reason))
+    for label, reason in failed.items():
+        if label in health or not is_outage_reason(reason):
+            continue
+        times = watch.attempts.get(label) or _DEFAULT_FAILED_ATTEMPTS
+        health[label] = {"reason": " ".join(str(reason).split())[:200], "times": times,
+                         "on": prompt_id}
+        short = label.rsplit("/", 1)[-1]
+        ctx.on_log(f"   ⏭ {short}: failed {times} {'time' if times == 1 else 'times'} on "
+                   f"{prompt_id}, skipped for the rest of this job")
+
+
 # --------------------------------------------------------------- the call
 
 class ReplyRejected(StepFailed):
@@ -372,6 +453,13 @@ def call_json(
         keyed = [link for link in paid if keys.get(link.provider)] or paid
         reason = paid_off_message(keyed, chain)
         raise StepFailed(f"{prompt_id}: {reason}", reason=reason)
+    # Plan 28 stage A5: a link that failed a whole ladder on an outage earlier
+    # in this job is left out -- unless that would leave nothing to call, when
+    # the chain is tried as it is (a dead link is better than no call).
+    health = getattr(ctx, "link_health", None) or {}
+    alive = [link for link in chain if _link_label(link) not in health]
+    if alive:
+        chain = alive
     cap = prompts.MAX_TOKENS[prompt_id] if max_tokens is None else max_tokens
     # Thinking room (registry.MODEL_OUTPUT_HEADROOM): added only when the
     # resolved chain actually names a link that wants it, so a non-premium
@@ -433,6 +521,7 @@ def call_json(
             if any(registry.PROVIDERS[link.provider].api == "anthropic" for link in attempt_chain):
                 factory = functools.partial(meter.factory, effort=effort)
             run_links, metered = meter.plan(attempt_chain, keys), {"client_factory": factory}
+        watch = _FailureWatch(ctx.on_log)
         try:
             value, link = runner(
                 run_links,
@@ -443,13 +532,14 @@ def call_json(
                 max_tokens=cap,
                 temperature=prompts.TEMPERATURE[prompt_id],
                 keys=keys,
-                on_log=ctx.on_log,
+                on_log=watch,
                 deadline=time_fn() + STORY_CALL_DEADLINE_SECONDS,
                 time_fn=time_fn,
                 **cancel_kwargs,
                 **metered,
             )
         except provider_errors.ProviderError as exc:
+            _open_links(ctx, watch, exc, prompt_id)
             reason = _provider_reason(exc)
             if paid:
                 labels = ", ".join(dict.fromkeys(_link_label(link) for link in paid))
@@ -458,6 +548,8 @@ def call_json(
                 reason += "".join(f"; {label} not tried: {why}" for label, why in meter.refused)
             raise StepFailed(f"{prompt_id}: {reason}", reason=reason) from exc
 
+        # The chain answered, perhaps after a link before it failed outright.
+        _open_links(ctx, watch, None, prompt_id)
         errors = list(validator(value))
         if not errors:
             tokens = pacing.estimate_tokens(json.dumps(value, ensure_ascii=False))

@@ -371,6 +371,7 @@ class LlmClient:
             self.last_usage = usage
 
             content = self._content_of(response)
+            self._log_reply_end(response)
             value = jsonx.extract_json(content)
 
             # Only remember a level that produced parseable JSON. A provider
@@ -379,6 +380,21 @@ class LlmClient:
             with _NEGOTIATED_LOCK:
                 _NEGOTIATED[(self.link.provider, self.link.model)] = level
             return value
+
+    def _log_reply_end(self, response):
+        """One line per reply: why the model stopped and how many tokens it
+        wrote, so a reply cut off at ``max_tokens`` is visible before
+        ``jsonx`` reports "No JSON value found" (plan 28 stage A5). Reads
+        only; a reply that lacks either field prints ``?`` for it."""
+        choices = getattr(response, "choices", None) or []
+        reason = getattr(choices[0], "finish_reason", None) if choices else None
+        usage = getattr(response, "usage", None)
+        tokens = getattr(usage, "completion_tokens", None)
+        self._log(
+            f"   ℹ️ {describe(self.link)} reply ended: "
+            f"finish_reason={reason if reason is not None else '?'}, "
+            f"completion_tokens={tokens if tokens is not None else '?'}"
+        )
 
     @staticmethod
     def _content_of(response):

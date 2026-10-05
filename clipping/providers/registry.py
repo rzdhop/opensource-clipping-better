@@ -550,11 +550,17 @@ STORY_NVIDIA_ULTRA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 STORY_NVIDIA_SUPER_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 STORY_OPENROUTER_MODEL = "mistralai/mistral-medium-3.1"
 
+# DEC-305 (amending DEC-224): the order above is the bench's ranking by answer
+# quality; the order below is the order a call walks, reliability first. The
+# 2026-10-05 run saw nemotron-3-ultra answer HTTP 500/503 on 3 of 3 attempts
+# for eight scenes in a row (about 19 s each). So the free Gemini link leads,
+# the paid mistral-medium (cents; skipped while allow_paid is off) follows, and
+# the two Nvidia links come last.
 DEFAULT_STORY_LLM_CHAIN = (
-    f"nvidia/{STORY_NVIDIA_ULTRA_MODEL},"
-    f"nvidia/{STORY_NVIDIA_SUPER_MODEL},"
+    f"gemini/{GEMINI_DEFAULT_MODEL},"
     f"openrouter/{STORY_OPENROUTER_MODEL},"
-    f"gemini/{GEMINI_DEFAULT_MODEL}"
+    f"nvidia/{STORY_NVIDIA_ULTRA_MODEL},"
+    f"nvidia/{STORY_NVIDIA_SUPER_MODEL}"
 )
 
 

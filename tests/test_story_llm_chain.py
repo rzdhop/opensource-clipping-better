@@ -40,15 +40,17 @@ def _llm_call():
 
 # ============================================================ resolve_chain
 
-def test_story_chain_prefers_nvidia_then_openrouter_then_free(monkeypatch):
+def test_story_chain_puts_the_free_gemini_link_first_and_nvidia_last(monkeypatch):
     llm_call = _llm_call()
 
-    # Nothing set anywhere: the shipped AI Story default, in order.
+    # Nothing set anywhere: the shipped AI Story default, in order (DEC-305:
+    # the reliable free link first, the paid cents link next, the two Nvidia
+    # links, which answered HTTP 5xx for a whole run, last).
     assert llm_call.resolve_chain({}) == [
+        Link("gemini", "gemini-3.5-flash-lite"),
+        Link("openrouter", "mistralai/mistral-medium-3.1"),
         Link("nvidia", "nvidia/nemotron-3-ultra-550b-a55b"),
         Link("nvidia", "nvidia/nemotron-3-super-120b-a12b"),
-        Link("openrouter", "mistralai/mistral-medium-3.1"),
-        Link("gemini", "gemini-3.5-flash-lite"),
     ]
     assert llm_call.resolve_chain({}) == registry.parse_chain(registry.DEFAULT_STORY_LLM_CHAIN)
     assert llm_call.resolve_chain(None) == registry.parse_chain(registry.DEFAULT_STORY_LLM_CHAIN)

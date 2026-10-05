@@ -318,12 +318,16 @@ def test_the_free_path_hands_run_chain_exactly_what_it_did_before(story, monkeyp
 
     [(sent_chain, kwargs)] = calls
     factory = kwargs.pop("client_factory", None)
+    # Plan 28 stage A5: on_log is the breaker's watcher, which forwards every
+    # line to the job's own log (the only change to what run_chain is handed).
+    watch = kwargs.pop("on_log")
+    assert watch._on_log is log
     # The snapshot: what call_json handed run_chain on the parent commit.
     assert kwargs == {
         "system": SYSTEM, "user": USER, "schema": {}, "schema_name": "bible_core", "max_tokens": B1_CAP,
         "temperature": 0.5, "keys": {"gemini": "test-gemini-key", "openrouter": "test-openrouter-key"},
         # DEC-224 (phase 7): run_chain's deadline is STORY_CALL_DEADLINE_SECONDS (480 s).
-        "on_log": log, "deadline": 1480.0, "time_fn": TIME_FN, "cancel": ctx.cancel,
+        "deadline": 1480.0, "time_fn": TIME_FN, "cancel": ctx.cancel,
     }
     assert sent_chain == chain
     assert (factory is not None) is metered
