@@ -269,7 +269,8 @@ def test_a_link_without_an_adapter_is_reported_not_called():
     with pytest.raises(NoRunnableLink) as excinfo:
         run("video", DEFAULT_CHAINS["video"], {}, allow_paid=True)
     reasons = [reason for _, reason in excinfo.value.failures]
-    assert len(reasons) == 5 and all("no adapter yet" in r for r in reasons)
+    # Plan 23 stage C3 re-pin: the shipped video chain has six links (fal/ltx-2.5-fast last).
+    assert len(reasons) == 6 and all("no adapter yet" in r for r in reasons)
 
 
 @pytest.mark.parametrize("route,expected", [("local", ["local"]), ("api", ["pollinations"]), ("auto", ["local"])])

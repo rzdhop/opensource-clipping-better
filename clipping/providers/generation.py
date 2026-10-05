@@ -74,9 +74,12 @@ DEFAULT_CHAINS = {
         "local/comfyui,gemini/nano-banana-2-lite,fal/seedream-4-edit,"
         "fal/flux-kontext-pro,gemini/nano-banana-2"
     ),
+    # fal/ltx-2.5-fast is last (plan 23 stage C3): behind every other link no
+    # automatic pick (cheapest wins, first_in_chain, first_with_audio) moves,
+    # and the episode's video-link switch can still choose it.
     VIDEO: (
         "local/comfyui,fal/seedance-1-pro-fast,fal/ltx-2.3-fast,"
-        "fal/kling-2.5-turbo-std,gemini/veo-3.1-lite"
+        "fal/kling-2.5-turbo-std,gemini/veo-3.1-lite,fal/ltx-2.5-fast"
     ),
     # elevenlabs/flash is last and paid: a keyless install skips it, and so does
     # allow_paid off (plan 23 stage B3), so nothing changes without a key.

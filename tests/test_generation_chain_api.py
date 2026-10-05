@@ -128,8 +128,9 @@ def test_get_settings_reports_the_generation_surface(client):
     assert seedream["paid"] is True and seedream["keyed"] is False and seedream["adapter"] is True
     assert seedream["missing_keys"] == ["FAL_KEY"] and seedream["allowed"] is False
     assert seedream["est_usd"] == 0.03
+    # Plan 23 stage C3 re-pin: six links (fal/ltx-2.5-fast last).
     # Every video link has its adapter: local/comfyui since phase 6 stage 4, the hosted ones since stage 3.
-    assert [r["adapter"] for r in chains["video"]["links"]] == [True, True, True, True, True]
+    assert [r["adapter"] for r in chains["video"]["links"]] == [True, True, True, True, True, True]
     assert data["local_comfyui_url"] == "http://127.0.0.1:8188" and data["local_ollama_url"] == "http://127.0.0.1:11434"
     assert "day" in data["usage_today"] and data["usage_today"]["cloudflare"]["rpd"] == 170
     assert data["spend_today_usd"] == 0.0
@@ -274,12 +275,12 @@ def test_a_paid_link_over_the_daily_cap_is_refused_with_the_numbers(client, tran
 
 
 def test_the_video_chain_reports_local_unreachable_and_hosted_links_unkeyed(client, transport, monkeypatch):
-    # Re-pinned in phase 6 stage 4: local/comfyui has its adapter and is asked /system_stats only.
+    # Re-pinned in phase 6 stage 4 (and plan 23 stage C3: six links): local/comfyui has its adapter and is asked /system_stats only.
     monkeypatch.delenv("GEMINI_PAID_API_KEY", raising=False)
     transport.rules[:] = [("/system_stats", APIConnectionError("connection refused"))]
     data = client.post("/api/settings/test-generation-chain", json={"kind": "video"}).json()
     assert data["verdict"] == "blocked"
-    assert [r["status"] for r in data["results"]] == ["unreachable", "no_key", "no_key", "no_key", "no_key"]
+    assert [r["status"] for r in data["results"]] == ["unreachable", "no_key", "no_key", "no_key", "no_key", "no_key"]
     assert "unreachable at http://127.0.0.1:8188" in data["results"][0]["reason"]
     assert [(c["method"], c["url"]) for c in transport.calls] == [("GET", "http://127.0.0.1:8188/system_stats")]
 

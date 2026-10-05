@@ -322,8 +322,10 @@ def test_ltx25_sells_20s(keyframe):
 
 def test_the_estimate_is_seconds_times_price_for_every_hosted_link_of_the_default_chain():
     hosted = [l for l in parse_generation_chain("video", DEFAULT_CHAINS["video"]) if l.provider != "local"]
+    # Plan 23 stage C3 re-pin: fal/ltx-2.5-fast joins the shipped chain, last (no automatic pick moves).
     assert [describe(l) for l in hosted] == ["fal/seedance-1-pro-fast", "fal/ltx-2.3-fast",
-                                             "fal/kling-2.5-turbo-std", "gemini/veo-3.1-lite"]
+                                             "fal/kling-2.5-turbo-std", "gemini/veo-3.1-lite",
+                                             "fal/ltx-2.5-fast"]
     for each in hosted:
         adapter = TABLE[("video", each.provider)]
         for seconds in video.CLIP_LENGTHS[describe(each)]:

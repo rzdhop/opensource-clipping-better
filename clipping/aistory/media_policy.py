@@ -574,7 +574,12 @@ def _preset_video_link(merged, *, sound=False):
     link whose clips always carry sound and whose keys *merged* holds, else
     the first as above (the estimate then says the clips are silent). A
     chain that cannot be read or holds no such link: the shipped default
-    chain's."""
+    chain's.
+
+    Plan 23 stage C3: ``fal/ltx-2.5-fast`` ends the shipped chain, so it is
+    never the first such link (its sound is "optional", not "always"); it is
+    reached only through an episode's video-link switch or a chain that
+    puts it first."""
     def first(chain, *, sounding=False):
         for link in chain:
             label = describe(link)

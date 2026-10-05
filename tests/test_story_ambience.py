@@ -34,6 +34,7 @@ SEEDANCE = "fal/seedance-1-pro-fast"
 LTX = "fal/ltx-2.3-fast"
 KLING = "fal/kling-2.5-turbo-std"
 VEO = "gemini/veo-3.1-lite"
+LTX25 = "fal/ltx-2.5-fast"
 # The shipped default VIDEO_CHAIN's hosted links, in its order.
 CHAIN = ",".join((SEEDANCE, LTX, KLING, VEO))
 GEMINI = {"GEMINI_PAID_API_KEY": "test-gemini-paid-key"}
@@ -682,3 +683,99 @@ def test_the_weak_host_advice_names_both_keys_and_what_each_is_for():
     text = hardware.recommendations_for("cpu_only")[0]["install_hint"]
     assert "Add FAL_KEY in Settings for the images" in text
     assert "GEMINI_PAID_API_KEY for clips with their own sound (gemini/veo-3.1-lite)" in text
+
+
+# ============================================ LTX-2.5 Fast ends the chain (plan 23, stage C3)
+#
+# ``fal/ltx-2.5-fast`` is the shipped VIDEO_CHAIN's last link: behind every
+# other link no automatic pick moves (cheapest wins, first_in_chain,
+# first_with_audio -- its sound is "optional", never "always"), and an
+# episode's video-link switch can still choose it.
+
+def _shipped_video(store, story_id, **keys):
+    """The episode's video units on the SHIPPED chain: no VIDEO_CHAIN at all."""
+    settings = tas._settings(ALLOW_PAID="1", PER_EPISODE_CAP_USD="40", **keys)
+    assert "VIDEO_CHAIN" not in settings
+    return tce._units(store, story_id, settings)["video"]
+
+
+def test_ltx25_appended_moves_no_automatic_pick(store, tmp_path):
+    """Fail-first on the chain, byte-identity on the picks: the shipped chain
+    ends on LTX-2.5 Fast; ``one_dollar`` still picks seedance; ``quality``
+    with the paid Gemini key still picks Veo lite and without it seedance,
+    silent; the planned link, keys assumed, is still Veo lite."""
+    from clipping.aistory import media_policy
+    from clipping.aistory.steps import clips
+    from clipping.providers import generation as gen
+    from clipping.providers.registry import describe
+
+    shipped = gen.parse_generation_chain(gen.VIDEO, gen.DEFAULT_CHAINS[gen.VIDEO])
+    assert [describe(link) for link in shipped][-2:] == [VEO, LTX25]
+
+    cheap = _story(store, tmp_path, tier=2, budget_profile="one_dollar")
+    assert _shipped_video(store, cheap, **tas.FAL, **GEMINI)["link"] == SEEDANCE
+
+    story_id = _story(store, tmp_path)
+    keyed = _shipped_video(store, story_id, **tas.FAL, **GEMINI)
+    assert keyed["link"] == VEO and keyed["ambience"]["sound"] is True
+    silent = _shipped_video(store, story_id, **tas.FAL)
+    assert silent["link"] == SEEDANCE and silent["ambience"]["sound"] is False
+    assert silent["ambience"]["note"].startswith("No ambience:") and VEO in silent["ambience"]["note"]
+
+    ec = tas._ec(store, story_id)
+    assert clips.planned_link(ec, tas._settings(**tas.FAL, **GEMINI)) == VEO
+    assert clips.planned_link(ec, tas._settings()) == VEO
+    assert clips.planned_link(ec, tas._settings(**tas.FAL)) == SEEDANCE
+
+    # The preset's estimate, on the shipped chain with and without the sound key.
+    assert media_policy.preset_estimate({**tas.FAL, **GEMINI})["episode"]["video_link"] == VEO
+    assert media_policy.preset_estimate({**tas.FAL})["episode"]["video_link"] == SEEDANCE
+
+
+def test_episode_switch_to_ltx25_asks_generate_audio_on_ambience(store, tmp_path):
+    """The episode's ``links.video`` switch accepts the new last link on the
+    shipped chain; its clip request then asks for sound on an ambience shot
+    (``native_audio`` -> ``generate_audio: True``, 6 s the shortest clip) and
+    a tier-2 silent shot asks for none (``generate_audio: False``): the
+    adapter's body always says it, the server's default being true."""
+    from clipping.aistory import workflow
+    from clipping.aistory.steps import clips
+    from clipping.providers import images, video
+    from clipping.providers.generation import GenRequest
+    from clipping.providers.registry import Link
+    import test_story_episode_steps as eps
+
+    keyframe = tmp_path / "shot_01.png"
+    keyframe.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    link = Link("fal", "ltx-2.5-fast")
+
+    def body(parts, seconds=6):
+        request = GenRequest(kind="video", prompt=parts["prompt"], negative=parts["negative"], width=720,
+                             height=1280, seed=7, references=(str(keyframe),), duration_s=seconds,
+                             native_audio=parts["native_audio"], out_dir=str(tmp_path / "out"), extra={"name": "shot_01"})
+        return video.FAL_VIDEO._inputs(link, request, 7)
+
+    flags = {"keep_still": False, "animate": False, "keep_native_audio": False}
+    settings = tas._settings(ALLOW_PAID="1", PER_EPISODE_CAP_USD="40", **tas.FAL, **GEMINI)
+    assert video.AUDIO[LTX25] == "optional" and images.FAL_APPS["ltx-2.5-fast"]
+
+    ambience = _story(store, tmp_path)
+    workflow.patch_assets(store, ambience, 1, {"links": {"video": LTX25}}, now=tce.LATER, env=settings)
+    units = tce._units(store, ambience, settings)["video"]
+    assert (units["link"], units["source"]) == (LTX25, "record")
+    ec = tas._ec(store, ambience)
+    script = eps._script(store, ambience)
+    shot = tas._board(store, ambience)["shots"][0]
+    parts = clips.clip_request_parts(ec, shot, script, tier=3, flags=flags, link=LTX25)
+    assert parts["native_audio"] is True and "Sound:" in parts["prompt"]
+    sent = body(parts)
+    assert sent["generate_audio"] is True and sent["duration"] == "6" and "seed" not in sent
+
+    silent = _story(store, tmp_path, tier=2)
+    workflow.patch_assets(store, silent, 1, {"links": {"video": LTX25}}, now=tce.LATER, env=settings)
+    assert tce._units(store, silent, settings)["video"]["link"] == LTX25
+    ec2 = tas._ec(store, silent)
+    quiet = clips.clip_request_parts(ec2, tas._board(store, silent)["shots"][0], eps._script(store, silent),
+                                     tier=2, flags=flags, link=LTX25)
+    assert quiet["native_audio"] is False and "Sound:" not in quiet["prompt"]
+    assert body(quiet)["generate_audio"] is False

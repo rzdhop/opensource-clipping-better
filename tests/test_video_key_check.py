@@ -172,6 +172,8 @@ def test_the_route_asks_each_keyed_hosted_video_link_and_never_generates(client)
     keyed = [row for row in data["results"] if row["provider"] == "fal"]
     assert keyed and all(row["status"] in ("ok", "no_model") for row in keyed)
     assert rows["fal/seedance-1-pro-fast"]["status"] == "ok"
+    # Plan 23 stage C3: the chain's last link is checked like the others (a price read), never generated.
+    assert rows["fal/ltx-2.5-fast"]["status"] in ("ok", "no_model")
     assert data["verdict"] == "ready" and "Nothing was generated" in data["message"]
     # One keyed GET to fal's Platform API per keyed link, and one keyless GET
     # of its public schema for the prompt limit.
