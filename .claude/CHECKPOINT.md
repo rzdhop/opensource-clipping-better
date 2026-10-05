@@ -1,3 +1,18 @@
+## CURRENT STATE — plan 25 (the handoff) APPROVED (DEC-301); phase IMPLEMENT — stages 0 and 1 in worktrees (2026-10-05, local session)
+
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `80baa5a` (+ this docs commit), clean tree,
+  CI green (f3849a5). Plan: `.claude/plans/ai-story/25-handoff-plan.md` (six stages + stage 0). Running: stage 0
+  (Opus, `feat/plan25-s0`, worktree plan25-s0: human-cast handles/anchors by name) and stage 1 (Opus,
+  `feat/plan25-s1`, worktree plan25-s1: `shot_modes` per shot through `class_link`, `upload_target_refusal`, the
+  assets step and the gate; `PATCH …/shots/{id}/mode`). Next: stage 2 (handoff document + routes, Sonnet) → 3 (the
+  Handoff view, Opus; image rebuild at 0 jobs) → 4 (tiles) → 5 (wizard) → 6 (docs + the human's Flow walk).
+- **Live:** main 10defae's code (bundle index-DU7H2ro8.js), health 200. Plan 24 closed (DEC-298/300); its Tier-2 walk
+  (regenerate e7412a3efcc6 ep1) still the human's. Plan 23's human items unchanged (keys, fal top-up, the A/B).
+- **Rules in force:** unchanged (worktrees, DEC-234 both envs + prompts.py → test_story_prompts_episode.py, DEC-297
+  pin files, deploy at 0 jobs after the 3.11 compile, no full local suite, no source edits during a job, money only
+  on the human's go).
+- **Open questions:** none blocking.
+
 ## CURRENT STATE — plan 24 (the timing harness) CODE + DOCS COMPLETE and LIVE; close-out pending the human's walk; plan 23 follow-ups ALL DONE (2026-10-05, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main `f7fcfa4` (+ this docs commit), clean
