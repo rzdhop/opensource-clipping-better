@@ -46,6 +46,7 @@ from clipping.providers import registry
 
 from . import (
     defaults,
+    format_fit,
     imaging,
     media_policy,
     native_speech,
@@ -929,6 +930,7 @@ def patch_story(stories, story_id, fields, *, now) -> dict:
 
     if "episode_template_id" in values:
         check_episode_template(stories, story, values["episode_template_id"])
+        check_format_fits(story, values)
 
     check_narrator_voices(story, values)
 
@@ -3252,6 +3254,21 @@ def check_episode_template(stories, story, template_id) -> None:
         raise WorkflowError(CONFLICT, (f"The episode length cannot change once an episode is written: episode "
                                        f"{written[0]} has a script, and each episode keeps the template it was "
                                        "written against."))
+
+
+def check_format_fits(story, values) -> None:
+    """The patch *values*' ``episode_template_id`` is one *story*'s clips can
+    fit (plan 28 stage A4, the same oracle as ``store.create``:
+    ``format_fit.format_refusal`` on the profile and the narrator as the
+    patch leaves them, the story's language and look) -- else ``invalid``
+    with ``format_fit.FORMAT_REFUSAL``. Only a story that speaks in its own
+    clips is checked; a voiced story keeps every shipped format."""
+    profile = values.get("generation_profile", story.get("generation_profile"))
+    narrator = {**(story.get("narrator") or {}), **(values.get("narrator") or {})}
+    if format_fit.format_refusal(profile, values["episode_template_id"], language=story["language"],
+                                 style_template_id=story.get("style_template_id"),
+                                 narrator_on=bool(narrator.get("enabled"))):
+        raise WorkflowError(INVALID, format_fit.FORMAT_REFUSAL)
 
 
 # ------------------------------------------------------------------- state

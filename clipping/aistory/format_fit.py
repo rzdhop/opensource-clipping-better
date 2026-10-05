@@ -9,7 +9,9 @@ episodes 1 and 2 -- on the story's speech and silent links' lengths
 (``steps.clips.speech_lengths``), in its language, with the narrator off (a
 new story's, plan 28 stage B1), for its look (the style's scene clamp and
 whether its cliffhanger cuts to black; with no look yet, every shipped one)
--- holds every scene and ends inside the window.
+-- holds every scene and ends inside the window. A story's format changed
+later (``workflow.patch_story``) is checked the same way, with its own
+narrator.
 
 A story whose lines are voiced by TTS re-times its scenes to the window:
 every shipped format fits it, as before (no check).
@@ -61,29 +63,32 @@ def _looks(style_template_id):
     return looks or [(None, False)]
 
 
-def format_refusal(profile, template_id, *, language, style_template_id=None):
+def format_refusal(profile, template_id, *, language, style_template_id=None, narrator_on=False):
     """Why a story on *profile*, in *language*, with the look
     *style_template_id* (None: whichever is chosen later), cannot be made on
     the format *template_id* -- one plain clause ending with a full stop --
     or None when it fits (always None on a story that does not speak in its
-    own clips, :func:`checks`)."""
+    own clips, :func:`checks`). *narrator_on*: the story's narrator (off on
+    a new story; an existing story's own when its format changes)."""
     if not checks(profile):
         return None
-    reason = _oracle_refusal(profile, template_id, language=language, style_template_id=style_template_id)
+    reason = _oracle_refusal(profile, template_id, language=language, style_template_id=style_template_id,
+                             narrator_on=narrator_on)
     if reason is None and template_id in V1_FORMATS:
         # Never offered to such a story, whatever its links (plan 28 stage A4).
         return "it is made for stills and short scenes, not for clips that speak."
     return reason
 
 
-def _oracle_refusal(profile, template_id, *, language, style_template_id):
+def _oracle_refusal(profile, template_id, *, language, style_template_id, narrator_on=False):
     """:func:`format_refusal`'s answer from ``timing.plan_floor_preview`` alone."""
     template = templates.load_episode_template(template_id)
     lengths = clip_lengths(profile)
     window_hi = float(template["window_s"][1])
     for lock, cut in _looks(style_template_id):
         for ep in CHECKED_EPISODES:
-            preview = timing.plan_floor_preview(template, ep, lengths, False, lang=language, style_lock=lock,
+            preview = timing.plan_floor_preview(template, ep, lengths, bool(narrator_on), lang=language,
+                                                style_lock=lock,
                                                 end_card=cut)
             unplannable = preview.get("unplannable")
             if unplannable:

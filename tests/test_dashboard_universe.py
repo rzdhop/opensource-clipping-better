@@ -56,10 +56,10 @@ def test_the_labels_are_in_the_story_language_and_the_audience_note_sits_under_t
 def test_the_wizard_sends_the_universe_in_the_generation_profile_and_the_api_model_has_the_field():
     src = _read(WIZARD)
     create = re.search(r"const createFields = \{(.*?)\n      \}", src, re.DOTALL).group(1)
-    # Re-pinned on purpose (plan 28 stage S1): the universe is part of the look -- the style's default, said
-    # under the style cards, never sent (absent: media_policy.universe reads the style's default); a pick
-    # under Advanced is sent, and only then is the profile the form's own.
-    assert "          ...(universeId ? { universe: universeId } : {})," in create
+    assert "          ...(shownUniverse ? { universe: shownUniverse } : {})," in create
+    # Re-pinned on purpose (plan 28 stage S1): the universe is part of the look, said under the style cards.
+    # The form no longer sends a profile just because a universe shows: untouched, the server's profile
+    # names the look's default itself (media_policy.new_story_profile, tests/test_story_new_story_choices.py).
     assert "setProfileChosen(true) }, [shownUniverse]" not in src
     assert "The characters are {universeLabel(shownUniverseEntry).toLowerCase()}." in src
     assert "fruits" in defaults.UNIVERSES

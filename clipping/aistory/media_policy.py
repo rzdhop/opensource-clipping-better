@@ -708,7 +708,7 @@ def quality_keys_present(merged) -> bool:
     return all((merged.get(name) or "").strip() for name in QUALITY_KEYS)
 
 
-def new_story_profile(settings_env, clips=None):
+def new_story_profile(settings_env, clips=None, style_template_id=None):
     """The ``generation_profile`` a story created without one gets.
 
     *clips* (plan 28 stage A4, the new-story form's "Who makes the clips"):
@@ -721,18 +721,23 @@ def new_story_profile(settings_env, clips=None):
     nothing else is set: the store stamps no generated voice and no narrator
     (plan 28 stage B1) and the writing version; the universe is the style's
     default, the frame 9:16, the image provider order, sheets, bodies and
-    clip prompts their defaults (``media_policy``'s absent-key rules). The
-    keys still missing are the offer's to say, not a reason to pick another.
+    clip prompts their defaults (``media_policy``'s absent-key rules) -- but
+    the universe of the look *style_template_id* is named (its
+    ``default_universe``, when it has one): the concepts, the brand check and
+    the style lock read only an explicit one (:func:`universe`), as the old
+    form always sent it. The keys still missing are the offer's to say, not
+    a reason to pick another.
 
     No *clips* (an API or CLI caller): when the Settings values
     *settings_env*, over the process environment, hold every
     :data:`QUALITY_KEYS` value (FAL_KEY alone, stage 2c, DEC-235), the
     manual native-speech profile (plan 22 stage 5); else None -- the store's
     own default."""
-    if clips == defaults.CLIPS_ME:
-        return defaults.manual_speech_generation_profile()
-    if clips == defaults.CLIPS_APP:
-        return dict(native_speech_profile(), speech_model=defaults.APP_CLIPS_SPEECH_MODEL)
+    if clips in defaults.CLIP_MAKERS:
+        profile = (defaults.manual_speech_generation_profile() if clips == defaults.CLIPS_ME else
+                   dict(native_speech_profile(), speech_model=defaults.APP_CLIPS_SPEECH_MODEL))
+        look = universe({"style_template_id": style_template_id}) if style_template_id else None
+        return dict(profile, universe=look) if look else profile
     if quality_keys_present(gating.merged_env(settings_env)):
         return defaults.manual_speech_generation_profile()
     return None

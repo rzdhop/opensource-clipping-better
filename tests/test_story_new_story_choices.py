@@ -199,3 +199,37 @@ def test_the_form_asks_four_things_in_plain_words_and_folds_the_rest_under_advan
     default_view = markup.replace(fold, "") + src[src.index("const CLIP_CHOICES"):].split("\n]\n", 1)[0]
     for word in ("tier", "route", "pipeline", "profile", "native speech", "v2"):
         assert word not in default_view.lower(), word
+
+
+# ------------------------------------------------------------ the format changed later (A4 follow-up)
+
+def test_a_patch_of_the_format_goes_through_the_same_oracle(store):
+    from clipping.aistory import workflow
+
+    story = store.create(language="fr", generation_profile=defaults.manual_speech_generation_profile(), now=NOW)
+    for template_id in ("serial_60s_v1", "serial_90s_v1"):
+        with pytest.raises(workflow.WorkflowError) as caught:
+            workflow.patch_story(store, story["story_id"], {"episode_template_id": template_id}, now=NOW)
+        assert caught.value.code == workflow.INVALID and caught.value.detail == REFUSAL
+    assert store.get(story["story_id"])["episode_template_id"] == "confrontation_50s_v2"
+    # A fitting one is taken; a voiced story keeps every shipped format, as before.
+    patched = workflow.patch_story(store, story["story_id"], {"episode_template_id": "serial_60s_v2"}, now=NOW)
+    assert patched["episode_template_id"] == "serial_60s_v2"
+    voiced = store.create(language="fr", generation_profile=defaults.quality_generation_profile(), now=NOW)
+    assert workflow.patch_story(store, voiced["story_id"], {"episode_template_id": "serial_60s_v1"}, now=NOW)[
+        "episode_template_id"] == "serial_60s_v1"
+
+
+def test_a_story_made_from_who_makes_the_clips_carries_its_look_s_universe(api):
+    # The concepts' species block, the brand check and the style lock read only an explicit universe
+    # (media_policy.universe(explicit=True)): the profile the server makes from "clips" names the look's
+    # default, as the old form always sent it; a look with none gets no key.
+    _settings(api, QUALITY_SETTINGS)
+    story = api.client.post("/api/stories", json={"language": "fr", "clips": "me",
+                                                  "style_template_id": "fruit_drama"}).json()
+    assert story["generation_profile"]["universe"] == "fruits"
+    assert media_policy.universe(story, explicit=True) == "fruits"
+    plain = api.client.post("/api/stories", json={"language": "fr", "clips": "app",
+                                                  "style_template_id": "anime"}).json()
+    assert "universe" not in plain["generation_profile"]
+    assert media_policy.new_story_profile({}, clips="me", style_template_id="viral_3d")["universe"] == "fruits"

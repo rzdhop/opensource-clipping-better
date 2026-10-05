@@ -260,7 +260,8 @@ function CreateStoryForm() {
   // Plan 23 stage D2: the Universe select lists what the chosen style takes (hidden when it lists none);
   // a pick the style does not list is dropped, the style's default shows instead. Plan 28 stage S1: the
   // universe is part of the look -- the style's default, said under the style cards; the select is under
-  // Advanced and only a pick is sent (absent: the style's default, media_policy.universe).
+  // Advanced. A profile the form sends names the universe it shows; untouched, the server names the look's
+  // default itself (media_policy.new_story_profile): the concepts read only an explicit one.
   const styleUniverses = universeCatalogue.by_style[styleTemplateId]
   const universeOptions = styleUniverses
     ? styleUniverses.universes
@@ -308,7 +309,7 @@ function CreateStoryForm() {
           ...(pipeline === 'v2' && sheetMode !== 'three_sheet' ? { sheet_mode: sheetMode } : {}),
           ...(bodyRule ? { body_rule: bodyRule } : {}),
           ...(pipeline === 'v2' && !imagesManual && imagePreference ? { image_preference: imagePreference } : {}),
-          ...(universeId ? { universe: universeId } : {}),
+          ...(shownUniverse ? { universe: shownUniverse } : {}),
           ...(pipeline === 'v2' && promptStyle !== 'studio' ? { prompt_style: promptStyle } : {}),
           ...(shownFrame !== '9:16' ? { aspect: shownFrame } : {}),
         } : null,

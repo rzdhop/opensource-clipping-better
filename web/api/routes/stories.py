@@ -964,7 +964,8 @@ async def create_story(req: StoryCreateRequest) -> dict:
     if req.generation_profile is not None:
         profile = req.generation_profile.model_dump()
     else:
-        profile = media_policy.new_story_profile(worker.get_settings_env(), clips=req.clips)
+        profile = media_policy.new_story_profile(worker.get_settings_env(), clips=req.clips,
+                                                 style_template_id=req.style_template_id)
     if req.mode == defaults.MODE_AGENT:
         profile = dict(profile or {}, mode=defaults.MODE_AGENT)
     try:
