@@ -83,8 +83,11 @@ DEFAULT_CHAINS = {
     ),
     # elevenlabs/flash is last and paid: a keyless install skips it, and so does
     # allow_paid off (plan 23 stage B3), so nothing changes without a key.
-    TTS: ("edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox,"
-          "elevenlabs/flash"),
+    # No edge link (plan 28 stage B2, DEC-305 §2: its quality is too poor): the
+    # adapter stays registered and ``edge`` stays a valid chain provider only
+    # so a story that pinned an Edge voice before keeps speaking it through its
+    # one-link chain (DEC-122); no default chain and no catalogue reaches it.
+    TTS: "gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox,elevenlabs/flash",
     VISION: f"gemini/flash-lite,openrouter/{OPENROUTER_VISION_DEFAULT_MODEL},local/ollama-vision,gemini/flash",
     LIPSYNC: "fal/kling-lipsync",
 }
@@ -157,7 +160,8 @@ GEN_PROVIDERS = {
         name="edge",
         env_keys=(), free_tier=True, rpm=30, rpd=None, probe_timeout=30.0,
         signup_url="", base_url="",
-        notes="Edge TTS through the edge-tts package: free, unofficial, one voice per request.",
+        notes=("Edge TTS through the edge-tts package: free, unofficial, one voice per request. "
+               "Legacy: in no default chain and no AI Story voice catalogue; kept for stories that pinned an Edge voice."),
     ),
     "local": GenProvider(
         name="local",

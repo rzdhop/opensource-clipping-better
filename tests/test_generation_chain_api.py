@@ -291,7 +291,7 @@ def test_the_tts_chain_reports_what_is_missing_on_this_host(client, transport, m
     monkeypatch.setattr(tts, "_installed", lambda name: False)
     data = client.post("/api/settings/test-generation-chain", json={"kind": "tts"}).json()
     rows = {r["label"]: r for r in data["results"]}
-    assert rows["edge/fr-FR-HenriNeural"]["status"] == "unreachable" and "pip install edge-tts" in rows["edge/fr-FR-HenriNeural"]["reason"]
+    assert "edge/fr-FR-HenriNeural" not in rows, "Edge is in no default chain any more (plan 28 stage B2)"
     assert rows["gemini/flash-lite-tts"]["status"] == "no_key"
     assert rows["local/piper"]["status"] == "unreachable" and "rzdhop-ai[local-tts]" in rows["local/piper"]["reason"]
     assert data["verdict"] == "blocked"

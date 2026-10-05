@@ -46,10 +46,35 @@ from test_story_step_jobs import _register, _step_job, job_store, worker  # noqa
 
 NOW = eps.NOW
 SEED = "Une île de téléréalité où des fruits en couple se trahissent pour rester à l'écran."
-SETTINGS = tas._settings()
+# Plan 28 stage B2: no Edge voice is proposed any more, so the agent's cast speaks through a local engine
+# (piper, its package faked below) -- free, keyless, and in every environment.
+SETTINGS = tas._settings(TTS_CHAIN="local/piper")
 PARTS = ("concepts", "bible", "style", "cast", "places_proposal", "places", "season", "knowledge", "episode")
 LABELS = ("concept", "bible", "style", "cast", "places proposal", "places", "season", "knowledge", "episode 1")
 CONTINUE = "Continue the agent run: it picks up here and repeats nothing already done."
+
+
+def fake_piper(text, voice, out_path, request, on_log):
+    """A local engine's WAV: one 24 kHz mono second per ten characters (at least one)."""
+    import wave
+
+    with wave.open(out_path, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(b"\x00\x10" * (24000 * max(1, len(text) // 10)))
+
+
+@pytest.fixture(autouse=True)
+def local_speech(monkeypatch):
+    """piper counts as installed and speaks through ``fake_piper``: the cast proposes its voices from the
+    catalogue and the run measures them (``LOCAL_TTS`` is the real adapter, only the engine is faked)."""
+    from clipping.aistory import voices
+    from clipping.providers import tts
+
+    monkeypatch.setattr(voices, "_installed", lambda name: True)
+    monkeypatch.setattr(tts, "_installed", lambda name: True)
+    monkeypatch.setitem(tts._LOCAL_SYNTH, "piper", fake_piper)
 
 
 def _agent():
@@ -188,9 +213,15 @@ def _story(store, *, mode="agent", seed=SEED, **profile):
                         generation_profile=generation_profile, now=NOW)["story_id"]
 
 
+def _local():
+    from clipping.providers import tts
+
+    return tts.LOCAL_TTS
+
+
 def _fakes(tmp_path, runner=None, *, image=None):
     return tft.Fakes(tmp_path, runner=llm() if runner is None else runner,
-                     image=tas.FakeImage() if image is None else image)
+                     image=tas.FakeImage() if image is None else image, local=_local())
 
 
 def _ctx(store, story_id, *, params=None, settings=None):
@@ -293,7 +324,7 @@ def test_a_second_run_after_a_full_one_repeats_nothing(store, tmp_path):
     before = store.get(story_id)
     final = (tft._ep_dir(store, story_id) / "episode_final.mp4").read_bytes()
 
-    again = tft.Fakes(tmp_path, runner=tft.no_llm(), image=tas.NeverImage())
+    again = tft.Fakes(tmp_path, runner=tft.no_llm(), image=tas.NeverImage(), local=_local())
     summary, log, seen = run(store, story_id, again)
 
     assert again.runner.calls == [] and again.image.requests == [] and again.edge.calls == []
@@ -424,7 +455,7 @@ def test_a_v2_story_s_knowledge_base_is_written_approved_and_its_new_prop_drawn(
     story_id = _v2_story_at_the_knowledge(store)
     inner = eps.FakeLLM(D4=[D4], D6=[D6_KEY], R1=[R1_KEY], default={"D5": d5_reply, "R1v2": r1v2_reply})
     fal = tas.FakeImage(price=0.04)
-    fakes = tft.Fakes(tmp_path, runner=Failing(inner, "E1v2"), image=tas.NeverImage(), fal=fal)
+    fakes = tft.Fakes(tmp_path, runner=Failing(inner, "E1v2"), image=tas.NeverImage(), fal=fal, local=_local())
 
     estimate = wf.story_fast_track_estimate(store, store.get(story_id), env=QUALITY)
     message, log, seen = stopped(store, story_id, fakes, settings=QUALITY)
@@ -851,7 +882,7 @@ def test_the_agent_run_pauses_at_episode_1_for_the_users_clips_and_goes_on_when_
         return {"ep": 1, "steps": {}, "auto_approved": ["assets"], "seconds": 1.0}
 
     monkeypatch.setattr(fast_track_step, "run", done)
-    again = tft.Fakes(tmp_path, runner=tft.no_llm(), image=tas.NeverImage())
+    again = tft.Fakes(tmp_path, runner=tft.no_llm(), image=tas.NeverImage(), local=_local())
     summary, log, _seen = run(store, story_id, again)
     assert not steps.awaiting_uploads(summary) and calls == ["paused", "done"]
     assert again.runner.calls == [] and again.image.requests == []

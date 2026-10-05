@@ -29,10 +29,18 @@ def test_the_tts_default_chain_ends_with_the_paid_elevenlabs_link():
     """Plan 23 stage B3: elevenlabs/flash is appended LAST, so a keyless install (and an
     allow_paid-off one) skips it and every link before it keeps its place."""
     assert DEFAULT_CHAINS["tts"] == (
-        "edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox,elevenlabs/flash")
+        "gemini/flash-lite-tts,local/piper,local/kokoro,local/chatterbox,elevenlabs/flash")
     links = parse_generation_chain("tts", DEFAULT_CHAINS["tts"])
     assert links[-1] == Link("elevenlabs", "flash") and generation.is_paid(links[-1])
     assert not any(generation.is_paid(link) for link in links[:-1])
+
+
+def test_the_tts_default_chain_has_no_edge_link_but_edge_stays_a_valid_provider():
+    """Plan 28 stage B2 (DEC-305 section 2): no default chain reaches Edge, yet an Edge link still
+    parses, so a story that pinned an Edge voice keeps its one-link chain (DEC-122)."""
+    assert not any(link.provider == "edge" for link in parse_generation_chain("tts", DEFAULT_CHAINS["tts"]))
+    assert "edge" not in DEFAULT_CHAINS["tts"]
+    assert parse_generation_chain("tts", "edge/fr-FR-HenriNeural") == [Link("edge", "fr-FR-HenriNeural")]
 
 
 def test_the_spec_notation_for_a_paid_link_is_tolerated_and_stripped():

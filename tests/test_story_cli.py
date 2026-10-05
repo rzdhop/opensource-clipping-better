@@ -661,7 +661,7 @@ def test_the_clip_help_still_works_and_points_at_ai_story(tmp_path):
 # Steps 5-7 from a terminal (phase 2, stage 8): ``cast``, ``places_proposal``,
 # ``places`` and ``season`` run in this process through the worker's registry
 # with the runner defaults -- the LLM through ``llm.run_chain`` (a stand-in
-# answering per prompt id), the image chains and Edge TTS through fake
+# answering per prompt id), the image chains and the speech link through fake
 # adapters registered in the one table the steps read. Hermetic like
 # ``tests/test_story_cast_steps.py``: no image, TTS or vision variable, cap or
 # limit of the machine reaches a test, no request leaves the process, and the
@@ -682,9 +682,9 @@ REAL_FILES = tuple(ROOT / "data" / name for name in ("usage.json", "spend.json",
 REAL_STORIES = (ROOT / "outputs" / "stories", ROOT / "outputs" / "stories.json")
 
 # The free route of this machine (test values): a free text-to-image link, no
-# editor (fal has no key, and would be paid anyway), Edge for the voices.
+# editor (fal has no key, and would be paid anyway), Gemini speech for the voices.
 PHASE2_ENV = {"IMAGE_CHAIN": "pollinations/flux", "IMAGE_EDIT_CHAIN": "fal/seedream-4-edit",
-              "TTS_CHAIN": "edge/fr-FR-HenriNeural"}
+              "TTS_CHAIN": "gemini/flash-lite-tts"}
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 PROMPT_ONLY_HINT = "re-run with --prompt-only to continue with prompt-only consistency (labelled)"
 
@@ -793,7 +793,7 @@ class FakeImage:
 
 
 class FakeTTS:
-    """A free Edge stand-in: writes a small mp3, records every request."""
+    """A free Gemini-speech stand-in: writes a small mp3, records every request."""
 
     def __init__(self):
         self.requests = []
@@ -832,7 +832,7 @@ def studio(cli, tmp_path):
         if name.startswith("LIMIT_"):
             mp.delenv(name, raising=False)
     mp.setenv("LIMIT_POLLINATIONS_RPM", "0")
-    mp.setenv("LIMIT_EDGE_RPM", "0")
+    mp.setenv("LIMIT_GEMINI_RPM", "0")
     mp.setenv("USAGE_PATH", str(tmp_path / "data" / "usage.json"))
     mp.setenv("SPEND_PATH", str(tmp_path / "data" / "spend.json"))
     limits.reset()
@@ -855,7 +855,7 @@ def studio(cli, tmp_path):
 
     fakes = SimpleNamespace(t2i=FakeImage(), editor=FakeImage(), tts=FakeTTS())
     for key, adapter in ((("image", "pollinations"), fakes.t2i), (("image_edit", "fal"), fakes.editor),
-                         (("image_edit", "local"), fakes.editor), (("tts", "edge"), fakes.tts)):
+                         (("image_edit", "local"), fakes.editor), (("tts", "gemini"), fakes.tts)):
         mp.setitem(generation._ADAPTERS, key, adapter)
     for name, value in PHASE2_ENV.items():
         mp.setenv(name, value)

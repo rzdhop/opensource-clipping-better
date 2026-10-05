@@ -184,7 +184,7 @@ def test_a_v2_fruit_cast_run_tells_k1_and_d2_the_species_taken_and_notes_a_speci
                             params={"selected": ["Kiwilo", "Mangella"]}, cancel=CancelToken(),
                             settings_env=dict(SETTINGS), outputs_dir=store.outputs_dir, on_log=logs.append)
     image = FakeImage(events)
-    adapters = {("image", "local"): image, ("image_edit", "local"): image, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "local"): image, ("image_edit", "local"): image, ("tts", "gemini"): FakeTTS()}
     cast.run(ctx, runner=llm, time_fn=lambda: 100.0, sleep_fn=lambda seconds: None, adapters=adapters)
     assert [line for line in logs if "outside the fruits pool" in line] == [
         "ℹ️ Mangella: species 'dragon fruit' is outside the fruits pool; kept."]

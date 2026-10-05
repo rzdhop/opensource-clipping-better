@@ -55,7 +55,7 @@ REAL_STORIES = (ROOT / "outputs" / "stories", ROOT / "outputs" / "stories.json")
 SETTINGS = {
     "LLM_CHAIN": "gemini/gemini-test", "GOOGLE_API_KEY": "test-gemini-key",
     "IMAGE_CHAIN": "pollinations/flux", "IMAGE_EDIT_CHAIN": "local/comfyui",
-    "TTS_CHAIN": "edge/fr-FR-HenriNeural",
+    "TTS_CHAIN": "gemini/flash-lite-tts",
 }
 # fal without a key, allow_paid off: no link of IMAGE_EDIT_CHAIN can run.
 NO_EDITOR = dict(SETTINGS, IMAGE_EDIT_CHAIN="fal/seedream-4-edit")
@@ -92,7 +92,7 @@ def hermetic(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     # No pacing: a test makes more free images in a second than a minute allows.
     monkeypatch.setenv("LIMIT_POLLINATIONS_RPM", "0")
-    monkeypatch.setenv("LIMIT_EDGE_RPM", "0")
+    monkeypatch.setenv("LIMIT_GEMINI_RPM", "0")
     monkeypatch.setenv("USAGE_PATH", str(tmp_path / "data" / "usage.json"))
     monkeypatch.setenv("SPEND_PATH", str(tmp_path / "data" / "spend.json"))
     limits.reset()
@@ -201,7 +201,7 @@ class FakeImage:
 
 
 class FakeTTS:
-    """A free Edge stand-in: writes a small mp3, records every request."""
+    """A free Gemini-speech stand-in: writes a small mp3, records every request."""
 
     def __init__(self):
         self.requests = []
@@ -213,7 +213,8 @@ class FakeTTS:
         return True, "ok"
 
     def generate(self, link, request, *, credentials, on_log, transport=None, **_):
-        self.requests.append((f"{link.provider}/{link.model}", request.text))
+        # "<provider>/<voice>": a Gemini link speaks the voice it is handed, an Edge link IS its voice.
+        self.requests.append((f"{link.provider}/{request.voice if link.provider == 'gemini' else link.model}", request.text))
         path = os.path.join(request.out_dir, "sample.mp3")
         with open(path, "wb") as fh:
             fh.write(b"ID3fake" + str(len(self.requests)).encode())
@@ -226,7 +227,7 @@ class Fakes(SimpleNamespace):
     @property
     def adapters(self):
         return {("image", "pollinations"): self.t2i, ("image_edit", "local"): self.editor,
-                ("image_edit", "fal"): self.paid_editor, ("tts", "edge"): self.tts}
+                ("image_edit", "fal"): self.paid_editor, ("tts", "gemini"): self.tts}
 
     def counts(self):
         """``(images, edits, paid-editor calls, samples)``: the requests each
@@ -506,17 +507,17 @@ def test_three_distinct_voices_are_pinned_from_the_briefs_and_samples_written(st
 
     chars = _chars(store, story_id)
     pinned = {cid: (chars[cid]["voice"]["provider"], chars[cid]["voice"]["voice_id"]) for cid in IDS}
-    assert pinned == {"char_kiwilo": ("edge", "fr-FR-HenriNeural"),
-                      "char_mangella": ("edge", "fr-FR-DeniseNeural"),
-                      "char_figuette": ("edge", "fr-FR-EloiseNeural")}
+    assert pinned == {"char_kiwilo": ("gemini", "Puck"),
+                      "char_mangella": ("gemini", "Kore"),
+                      "char_figuette": ("gemini", "Leda")}
     assert summary["voices"] == {cid: f"{p}/{v}" for cid, (p, v) in pinned.items()}
     assert chars["char_mangella"]["voice"]["sample_line"] == "Je ne perds jamais, chéri."
     assert chars["char_mangella"]["voice"]["direction"] == "smug, warm, a little nasal"
     # Each sample through its own voice alone, speaking its own line.
     assert fakes.tts.requests == [
-        ("edge/fr-FR-HenriNeural", "Je gagne toujours, mon cœur."),
-        ("edge/fr-FR-DeniseNeural", "Je ne perds jamais, chéri."),
-        ("edge/fr-FR-EloiseNeural", "Oh non, pas encore un vote !"),
+        ("gemini/Puck", "Je gagne toujours, mon cœur."),
+        ("gemini/Kore", "Je ne perds jamais, chéri."),
+        ("gemini/Leda", "Oh non, pas encore un vote !"),
     ]
     for cid in IDS:
         assert os.path.isfile(store.media_path(story_id, "characters", cid, "voice_sample.mp3"))
@@ -535,9 +536,9 @@ def test_an_existing_pin_is_taken_and_an_existing_name_is_only_included(store):
     assert len(llm.of("K1")) == 1
     chars = _chars(store, story_id)
     assert sorted(chars) == ["char_kiwilo", "char_pepperino"]
-    # Kiwilo keeps Henri; Pepperino, also a man and an adult, gets the next best one.
-    assert chars["char_kiwilo"]["voice"]["voice_id"] == "fr-FR-HenriNeural"
-    assert chars["char_pepperino"]["voice"]["voice_id"] == "fr-FR-RemyMultilingualNeural"
+    # Kiwilo keeps Puck; Pepperino, also a man and an adult, gets the next best one.
+    assert chars["char_kiwilo"]["voice"]["voice_id"] == "Puck"
+    assert chars["char_pepperino"]["voice"]["voice_id"] == "Charon"
 
 
 def test_a_k1_failure_for_one_character_does_not_stop_the_others(store):
@@ -586,17 +587,17 @@ def test_an_image_or_sample_failure_is_local_and_named(store):
 
     class Broken(FakeTTS):
         def generate(self, link, request, **kwargs):
-            if "Denise" in link.model:
-                raise ProviderError("edge: synthetic failure")
+            if request.voice == "Kore":
+                raise ProviderError("gemini: synthetic failure")
             return super().generate(link, request, **kwargs)
 
     fakes.tts = Broken()
     message, _log = _failed(_new().cast, store, story_id, step="cast", llm=_cast_llm(), fakes=fakes,
                             params=CAST_PARAMS)
 
-    assert "Mangella voice sample failed (Mangella: edge/fr-FR-DeniseNeural could not make the sample" in message
+    assert "Mangella voice sample failed (Mangella: gemini/flash-lite-tts could not make the sample" in message
     assert "'character:char_mangella:voice'" in message
-    assert "Other voices: edge/" in message
+    assert "Other voices: gemini/" in message
     assert [text for _link, text in fakes.tts.requests] == ["Je gagne toujours, mon cœur.",
                                                              "Oh non, pas encore un vote !"]
 
@@ -987,31 +988,52 @@ def test_regenerate_a_voice_refuses_another_leads_voice_and_otherwise_pins_and_s
     tts_before = len(fakes.tts.requests)
 
     message = _refused(store, story_id, fakes, {"target": "character:char_kiwilo:voice",
-                                                "voice": {"provider": "edge", "voice_id": "fr-FR-DeniseNeural"}})
-    assert message == ("edge/fr-FR-DeniseNeural is already Mangella's voice: no two leads or supports share a "
+                                                "voice": {"provider": "gemini", "voice_id": "Kore"}})
+    assert message == ("gemini/Kore is already Mangella's voice: no two leads or supports share a "
                        "voice; pick another for Kiwilo.")
     message = _refused(store, story_id, fakes, {"target": "character:char_kiwilo:voice",
-                                                "voice": {"provider": "edge", "voice_id": "en-US-GuyNeural"}})
-    assert message.startswith("edge/en-US-GuyNeural is not a fr voice TTS_CHAIN can reach; pick one of: ")
+                                                "voice": {"provider": "edge", "voice_id": "fr-FR-HenriNeural"}})
+    # Edge is no catalogue voice any more (plan 28 stage B2): it cannot be picked, and the refusal offers the others.
+    assert message.startswith("edge/fr-FR-HenriNeural is not a fr voice TTS_CHAIN can reach; pick one of: gemini/")
+    assert "edge/" not in message.split("pick one of: ", 1)[1]
     assert len(fakes.tts.requests) == tts_before
     assert store.read_entity(story_id, "characters", "char_kiwilo")["approved_at"] == NOW
 
     summary, _log, _ = _regenerate(store, story_id, fakes, {
         "target": "character:char_kiwilo:voice",
-        "voice": {"provider": "edge", "voice_id": "fr-CA-ThierryNeural", "rate": "+5%", "pitch": "-2Hz"}})
+        "voice": {"provider": "gemini", "voice_id": "Orus", "rate": "+5%", "pitch": "-2Hz"}})
     kiwi = store.read_entity(story_id, "characters", "char_kiwilo")
     assert (kiwi["voice"]["voice_id"], kiwi["voice"]["rate"], kiwi["voice"]["pitch"]) == (
-        "fr-CA-ThierryNeural", "+5%", "-2Hz")
-    assert fakes.tts.requests[tts_before:] == [("edge/fr-CA-ThierryNeural", "Je gagne toujours, mon cœur.")]
-    assert summary == {"target": "character:char_kiwilo:voice", "voice": "edge/fr-CA-ThierryNeural",
+        "Orus", "+5%", "-2Hz")
+    assert fakes.tts.requests[tts_before:] == [("gemini/Orus", "Je gagne toujours, mon cœur.")]
+    assert summary == {"target": "character:char_kiwilo:voice", "voice": "gemini/Orus",
                        "sample": "voice_sample.mp3"}
     assert kiwi["approved_at"] is None and store.get(story_id)["approvals"]["cast"] is None
 
     # No voice given: the best other one -- never the current one, never another lead's; rate and pitch kept.
     summary, _log, _ = _regenerate(store, story_id, fakes, {"target": "character:char_kiwilo:voice"})
     kiwi = store.read_entity(story_id, "characters", "char_kiwilo")
-    assert kiwi["voice"]["voice_id"] == "fr-FR-HenriNeural"
+    assert kiwi["voice"]["voice_id"] == "Puck"
     assert (kiwi["voice"]["rate"], kiwi["voice"]["pitch"]) == ("+5%", "-2Hz")
+
+
+def test_regenerating_an_edge_pinned_voice_proposes_from_the_new_catalogue(store):
+    """Plan 28 stage B2 (DEC-305 section 2): a story that pinned an Edge voice before keeps it until the
+    voice is regenerated; the regenerate proposes from the catalogue (no Edge in it), so the character
+    moves to the best Gemini voice and the human sees the change in the sample and the summary."""
+    story_id, fakes = _full(store)
+    _approve_all(store, story_id)
+    kiwi = store.read_entity(story_id, "characters", "char_kiwilo")
+    kiwi["voice"] = dict(kiwi["voice"], provider="edge", voice_id="fr-FR-HenriNeural")
+    store.write_entity(story_id, "characters", kiwi, now=NOW)
+    tts_before = len(fakes.tts.requests)
+
+    summary, _log, _ = _regenerate(store, story_id, fakes, {"target": "character:char_kiwilo:voice"})
+
+    kiwi = store.read_entity(story_id, "characters", "char_kiwilo")
+    assert (kiwi["voice"]["provider"], kiwi["voice"]["voice_id"]) == ("gemini", "Puck")
+    assert summary["voice"] == "gemini/Puck"
+    assert fakes.tts.requests[tts_before:] == [("gemini/Puck", "Je gagne toujours, mon cœur.")]
 
 
 def test_regenerate_a_voice_can_pin_the_characters_own_recording_through_chatterbox(store, monkeypatch):

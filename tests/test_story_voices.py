@@ -131,8 +131,30 @@ def _write_char(store, story_id, char_id, **kwargs):
     return doc
 
 
+FREE_CHAIN = "gemini/flash-lite-tts,local/piper,local/kokoro"
+GEMINI_KEY = {"GOOGLE_API_KEY": "test-key"}
+
+
+def _free_voices(monkeypatch, chain=FREE_CHAIN, engines=("piper", "kokoro")):
+    """The voices a story can be given since plan 28 stage B2 (Edge is gone from the
+    catalogue): Gemini's eight (a key is set) and the local engines named in *engines*
+    (their packages count as installed). French: 8 + 4 piper + 1 kokoro."""
+    monkeypatch.setenv("TTS_CHAIN", chain)
+    monkeypatch.setenv("GOOGLE_API_KEY", GEMINI_KEY["GOOGLE_API_KEY"])
+    monkeypatch.setattr(voices, "_installed", lambda name: name in engines)
+
+
+def _only_catalogue(monkeypatch, providers):
+    """A tiny ``voices.json`` for a test that needs an entry the shipped one no longer has."""
+    monkeypatch.setattr(tts, "load_voices", lambda path=None: {"$schema": "voices_v1", "providers": providers})
+
+
 EDGE_VOICE = voices.Voice(provider="edge", voice_id="fr-FR-HenriNeural", lang="fr-FR", gender="m",
                           age="adult", style_tags=(), link=Link("edge", "fr-FR-HenriNeural"))
+
+
+GEMINI_KORE = voices.Voice(provider="gemini", voice_id="Kore", lang="multi", gender="f", age="adult",
+                           style_tags=("firm",), link=Link("gemini", "flash-lite-tts"))
 
 
 class FakeAdapter:
@@ -189,39 +211,53 @@ class NeverCalledAdapter:
 # ------------------------------------------------------------------ catalogue
 
 def test_catalogue_is_in_chain_order_and_language_filtered(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch)
     cat = voices.catalogue("fr", env={})
     assert [v.voice_id for v in cat] == [
-        "fr-FR-HenriNeural", "fr-FR-DeniseNeural", "fr-FR-EloiseNeural",
-        "fr-FR-RemyMultilingualNeural", "fr-FR-VivienneMultilingualNeural",
-        "fr-CA-AntoineNeural", "fr-CA-SylvieNeural", "fr-CA-ThierryNeural",
+        "Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr",
+        "fr_FR-tom-medium", "fr_FR-siwis-medium", "fr_FR-upmc-medium", "fr_FR-gilles-low",
+        "ff_siwis",
     ]
-    assert all(v.provider == "edge" for v in cat)
+    assert [v.provider for v in cat] == ["gemini"] * 8 + ["piper"] * 4 + ["kokoro"]
 
 
 def test_catalogue_multi_voices_count_for_every_language(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,gemini/flash-lite-tts")
-    cat_en = voices.catalogue("en", env={"GOOGLE_API_KEY": "test-key"})
+    _free_voices(monkeypatch)
+    cat_en = voices.catalogue("en", env={})
     gemini_ids = {v.voice_id for v in cat_en if v.provider == "gemini"}
     assert gemini_ids == {"Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"}
-    edge_en = {v.voice_id for v in cat_en if v.provider == "edge"}
-    assert edge_en == {"en-US-GuyNeural", "en-US-JennyNeural", "en-US-AriaNeural", "en-US-AndrewNeural",
-                       "en-US-AnaNeural", "en-US-ChristopherNeural", "en-US-MichelleNeural",
-                       "en-GB-RyanNeural", "en-GB-SoniaNeural"}
+    assert {v.voice_id for v in cat_en if v.provider == "piper"} == {"en_US-lessac-medium", "en_US-ryan-high"}
+    assert {v.voice_id for v in cat_en if v.provider == "kokoro"} == {"af_heart", "am_adam"}
+
+
+def test_catalogue_never_offers_an_edge_voice_even_when_a_saved_chain_names_one(monkeypatch):
+    """Plan 28 stage B2 (DEC-305 section 2): no new pin, proposal or alternate can land on Edge --
+    not from the shipped chain, and not from a TTS_CHAIN saved before the change."""
+    _free_voices(monkeypatch, chain="edge/fr-FR-HenriNeural,gemini/flash-lite-tts,local/piper")
+    for language in ("fr", "en"):
+        for v2 in (False, True):
+            cat = voices.catalogue(language, env={}, v2=v2)
+            assert cat and all(v.provider != "edge" and v.link.provider != "edge" for v in cat)
+    assert "edge" not in tts.load_voices()["providers"]
+    assert voices.catalogue("fr", env={"TTS_CHAIN": "edge/fr-FR-HenriNeural"}) == []
+    characters = [_char(f"char_{n}", role="lead", created_at=f"2026-09-26T10:00:0{n}+00:00") for n in range(3)]
+    proposed = voices.propose(characters, "fr", env={})
+    assert all(v is not None and v.provider != "edge" for v in proposed.values())
 
 
 def test_catalogue_skips_keyless_gemini_without_a_network_call(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,gemini/flash-lite-tts")
+    _free_voices(monkeypatch, chain="gemini/flash-lite-tts,local/piper", engines=("piper",))
+    monkeypatch.setenv("GOOGLE_API_KEY", "")
     cat = voices.catalogue("fr", env={"GOOGLE_API_KEY": ""})
     assert all(v.provider != "gemini" for v in cat)
-    assert any(v.provider == "edge" for v in cat)
+    assert any(v.provider == "piper" for v in cat)
 
 
 def test_catalogue_skips_an_uninstalled_local_engine(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,local/piper")
-    monkeypatch.setattr(voices, "_installed", lambda name: False)
+    _free_voices(monkeypatch, chain="gemini/flash-lite-tts,local/piper", engines=())
     cat = voices.catalogue("fr", env={})
     assert all(v.provider != "piper" for v in cat)
+    assert any(v.provider == "gemini" for v in cat)
 
 
 def test_catalogue_includes_an_installed_local_engine(monkeypatch):
@@ -241,7 +277,7 @@ def test_catalogue_malformed_chain_returns_empty_not_an_error(monkeypatch):
 # -------------------------------------------------------------------- propose
 
 def test_propose_gives_three_fr_characters_three_distinct_voices(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch)
     characters = [_char(f"char_{n}", role="lead", created_at=f"2026-09-26T10:00:0{n}+00:00") for n in range(3)]
     result = voices.propose(characters, "fr", env={})
     chosen = [result[c["char_id"]] for c in characters]
@@ -250,7 +286,7 @@ def test_propose_gives_three_fr_characters_three_distinct_voices(monkeypatch):
 
 
 def test_propose_honours_gender_when_possible(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch)
     characters = [
         _char("char_a", role="lead", created_at="2026-09-26T10:00:00+00:00",
               voice=_k1_voice(gender="male")),
@@ -262,14 +298,13 @@ def test_propose_honours_gender_when_possible(monkeypatch):
     assert result["char_b"].gender == "f"
 
 
-def test_propose_9_leads_8_fr_edge_voices_9th_gets_none(monkeypatch, capsys):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,gemini/flash-lite-tts")
-    monkeypatch.setenv("GOOGLE_API_KEY", "")
+def test_propose_9_leads_8_gemini_voices_9th_gets_none(monkeypatch, capsys):
+    _free_voices(monkeypatch, chain="gemini/flash-lite-tts", engines=())
     characters = [
         _char(f"char_lead{n:02d}", role="lead", name=f"Lead{n}", created_at=f"2026-09-26T10:00:{n:02d}+00:00")
         for n in range(9)
     ]
-    result = voices.propose(characters, "fr", env={"GOOGLE_API_KEY": ""})
+    result = voices.propose(characters, "fr", env={})
     voiced = [result[c["char_id"]] for c in characters[:8]]
     assert all(v is not None for v in voiced)
     assert len({(v.provider, v.voice_id) for v in voiced}) == 8
@@ -279,7 +314,7 @@ def test_propose_9_leads_8_fr_edge_voices_9th_gets_none(monkeypatch, capsys):
 
 
 def test_propose_guest_reuses_only_once_the_catalogue_is_exhausted(monkeypatch, capsys):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch, chain="gemini/flash-lite-tts", engines=())
     leads = [_char(f"char_lead{n}", role="lead", created_at=f"2026-09-26T10:00:{n:02d}+00:00") for n in range(8)]
     guest = _char("char_guest", role="guest", created_at="2026-09-26T10:00:09+00:00", name="Guest")
     result = voices.propose(leads + [guest], "fr", env={})
@@ -294,7 +329,7 @@ def test_propose_guest_reuses_only_once_the_catalogue_is_exhausted(monkeypatch, 
 
 
 def test_propose_is_deterministic(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch)
     characters = [_char(f"char_{n}", role="lead", created_at=f"2026-09-26T10:00:0{n}+00:00") for n in range(4)]
     first = voices.propose(characters, "fr", env={})
     second = voices.propose(characters, "fr", env={})
@@ -305,16 +340,16 @@ def test_propose_is_deterministic(monkeypatch):
 # ------------------------------------------------------------------ alternates
 
 def test_alternates_excludes_taken_voices(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch)
     character = _char("char_x", role="lead")
-    taken = {("edge", "fr-FR-HenriNeural"), ("edge", "fr-FR-DeniseNeural")}
+    taken = {("gemini", "Kore"), ("gemini", "Puck")}
     alts = voices.alternates(character, "fr", env={}, taken=taken)
     assert len(alts) <= voices.ALTERNATES_LIMIT
     assert all((v.provider, v.voice_id) not in taken for v in alts)
 
 
 def test_alternates_capped_at_six(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch)
     character = _char("char_x", role="lead")
     alts = voices.alternates(character, "fr", env={}, taken=set())
     assert len(alts) == voices.ALTERNATES_LIMIT
@@ -397,7 +432,8 @@ def test_synthesize_sample_refuses_when_no_voice_is_pinned(store):
     story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
     _write_char(store, story_id, "char_kiwi", name="Kiwi")
     with pytest.raises(voices.VoiceError) as excinfo:
-        voices.synthesize_sample(store, story_id, "char_kiwi", env={}, on_log=lambda l: None, cancel=CancelToken())
+        voices.synthesize_sample(store, story_id, "char_kiwi", env=GEMINI_KEY, on_log=lambda l: None,
+                                 cancel=CancelToken())
     assert "no pinned voice" in str(excinfo.value)
     assert len(excinfo.value.alternates) > 0
 
@@ -423,7 +459,8 @@ def test_synthesize_sample_refuses_an_empty_sample_line(store, monkeypatch):
     monkeypatch.setattr(store, "read_entity", blank_sample_line)
 
     with pytest.raises(voices.VoiceError) as excinfo:
-        voices.synthesize_sample(store, story_id, "char_kiwi", env={}, on_log=lambda l: None, cancel=CancelToken())
+        voices.synthesize_sample(store, story_id, "char_kiwi", env=GEMINI_KEY, on_log=lambda l: None,
+                                 cancel=CancelToken())
     assert "no sample line" in str(excinfo.value)
     assert len(excinfo.value.alternates) > 0
 
@@ -435,7 +472,8 @@ def test_synthesize_sample_pinned_provider_failing_never_tries_the_fallback(stor
     fallback = NeverCalledAdapter()
 
     with pytest.raises(voices.VoiceError) as excinfo:
-        voices.synthesize_sample(store, story_id, "char_kiwi", env={}, on_log=lambda l: None, cancel=CancelToken(),
+        voices.synthesize_sample(store, story_id, "char_kiwi", env=GEMINI_KEY, on_log=lambda l: None,
+                                 cancel=CancelToken(),
                                  adapters={("tts", "edge"): FailingAdapter(), ("tts", "gemini"): fallback})
     assert "synthetic failure" in str(excinfo.value)
     assert len(excinfo.value.alternates) > 0
@@ -445,12 +483,14 @@ def test_synthesize_sample_pinned_provider_failing_never_tries_the_fallback(stor
 def test_synthesize_sample_never_shares_a_lead_or_supports_voice_in_its_alternates(store):
     story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
     _write_char(store, story_id, "char_other", role="lead", name="Other",
-               voice=voices.pin(_char("char_other", voice=_k1_voice(sample_line="Coucou")), EDGE_VOICE))
+               voice=voices.pin(_char("char_other", voice=_k1_voice(sample_line="Coucou")), GEMINI_KORE))
     _write_char(store, story_id, "char_kiwi", role="lead", name="Kiwi")
 
     with pytest.raises(voices.VoiceError) as excinfo:
-        voices.synthesize_sample(store, story_id, "char_kiwi", env={}, on_log=lambda l: None, cancel=CancelToken())
-    assert all((v.provider, v.voice_id) != ("edge", "fr-FR-HenriNeural") for v in excinfo.value.alternates)
+        voices.synthesize_sample(store, story_id, "char_kiwi", env=GEMINI_KEY, on_log=lambda l: None,
+                                 cancel=CancelToken())
+    assert excinfo.value.alternates, "the picker still offers other voices"
+    assert all((v.provider, v.voice_id) != ("gemini", "Kore") for v in excinfo.value.alternates)
 
 
 # --------------------------------------------------------- RC-T2 guard (A)
@@ -520,7 +560,7 @@ def test_a_written_characters_voice_hints_drive_the_proposal_and_the_pin():
                         "direction": "proud, clipped", "sample_line": "Je gagnerai, avec ou sans vous."},
     }
     assert schemas.validate(character["voice_hints"], schemas.CHARACTER_SCHEMA["properties"]["voice_hints"]) == []
-    env = {"TTS_CHAIN": "edge/fr-FR-DeniseNeural"}
+    env = dict(GEMINI_KEY, TTS_CHAIN="gemini/flash-lite-tts")
     chosen = voices.propose([character], "fr", env=env)["char_mangella"]
     assert chosen is not None and chosen.gender in ("f", "female")
     pinned = voices.pin(character, chosen)
@@ -529,28 +569,33 @@ def test_a_written_characters_voice_hints_drive_the_proposal_and_the_pin():
 
 
 def test_an_elder_brief_prefers_an_adult_voice_over_a_young_one():
-    # Found live (Tier-2, 2026-09-26): Broccolia, a female elder, got the
-    # "young" fr-FR-EloiseNeural because no female voice was elder and the
+    # Found live (Tier-2, 2026-09-26): Broccolia, a female elder, got a
+    # "young" voice because no female voice was elder and the
     # age score was all-or-nothing -- catalogue order then picked the young
     # one. Age is a distance: adult is one step from elder, young two.
     elder = {"char_id": "char_b", "name": "B", "role": "recurring", "created_at": "2026-09-26T00:00:00+00:00",
              "voice_hints": {"gender": "female", "age": "elder", "style_tags": [], "direction": "", "sample_line": "x"}}
-    env = {"TTS_CHAIN": "edge/fr-FR-DeniseNeural"}
+    env = dict(GEMINI_KEY, TTS_CHAIN="gemini/flash-lite-tts")
     pool = voices.catalogue("fr", env=env)
     ranked = voices.alternates(elder, "fr", env=env, taken=())
     ages = {v.voice_id: v.age for v in pool}
-    assert ages.get("fr-FR-EloiseNeural") == "young"
+    assert ages.get("Leda") == "young"
     assert ranked[0].gender in ("f", "female")
     assert ranked[0].age != "young"
-    assert [v.voice_id for v in ranked].index("fr-FR-EloiseNeural") > 0
+    assert [v.voice_id for v in ranked].index("Leda") > 0
 
 
-def test_the_catalogue_senior_counts_as_elder():
+def test_the_catalogue_senior_counts_as_elder(monkeypatch):
     senior_male = {"char_id": "char_s", "name": "S", "role": "lead", "created_at": "2026-09-26T00:00:00+00:00",
                    "voice_hints": {"gender": "male", "age": "elder", "style_tags": [], "direction": "", "sample_line": "x"}}
-    env = {"TTS_CHAIN": "edge/fr-FR-HenriNeural"}
+    _only_catalogue(monkeypatch, {"piper": [
+        {"voice_id": "adult-m", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": []},
+        {"voice_id": "senior-m", "lang": "fr-FR", "gender": "m", "age": "senior", "style_tags": []},
+    ]})
+    monkeypatch.setattr(voices, "_installed", lambda name: True)
+    env = {"TTS_CHAIN": "local/piper"}
     ranked = voices.alternates(senior_male, "fr", env=env, taken=())
-    assert ranked[0].voice_id == "fr-CA-ThierryNeural"
+    assert ranked[0].voice_id == "senior-m"
 
 
 # ------------------------------------------------------ phase 7 stage 6c: v2 locale
@@ -560,7 +605,12 @@ def test_v2_catalogue_keeps_to_the_default_locale(monkeypatch):
     and fr-CA -- a v2 story keeps to its one default locale instead
     (:data:`voices._V2_LOCALE`); legacy (v2=False, the default) is
     untouched."""
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _only_catalogue(monkeypatch, {"piper": [
+        {"voice_id": "fr-fr-m", "lang": "fr-FR", "gender": "m", "age": "adult", "style_tags": []},
+        {"voice_id": "fr-ca-m", "lang": "fr-CA", "gender": "m", "age": "adult", "style_tags": []},
+    ]})
+    monkeypatch.setattr(voices, "_installed", lambda name: True)
+    monkeypatch.setenv("TTS_CHAIN", "local/piper")
     legacy = voices.catalogue("fr", env={})
     assert any(v.lang == "fr-CA" for v in legacy)  # today's behaviour: both locales
 
@@ -570,7 +620,7 @@ def test_v2_catalogue_keeps_to_the_default_locale(monkeypatch):
 
 
 def test_v2_propose_gives_a_french_story_only_fr_fr_voices(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural")
+    _free_voices(monkeypatch, chain="local/piper,local/kokoro", engines=("piper", "kokoro"))
     characters = [_char(f"char_{n}", role="lead", created_at=f"2026-09-26T10:00:0{n}+00:00") for n in range(3)]
     result = voices.propose(characters, "fr", env={}, v2=True)
     chosen = [result[c["char_id"]] for c in characters]
@@ -689,12 +739,12 @@ ELEVEN_IDS = {"21m00Tcm4TlvDq8ikWAM", "pNInz6obpgDQGcFmaJgB", "ErXwobaYiN019PkyS
 
 
 def test_catalogue_offers_the_paid_elevenlabs_voices_only_with_the_key(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
+    _free_voices(monkeypatch, chain="gemini/flash-lite-tts,elevenlabs/flash")
     keyed = voices.catalogue("fr", env=ELEVEN_KEY)
     eleven = [v for v in keyed if v.provider == "elevenlabs"]
     assert {v.voice_id for v in eleven} == ELEVEN_IDS
     assert all(v.paid and v.link == Link("elevenlabs", "flash") and v.lang == "multi" for v in eleven)
-    assert not any(v.paid for v in keyed if v.provider == "edge")
+    assert not any(v.paid for v in keyed if v.provider == "gemini")
     assert [v.provider for v in keyed][-8:] == ["elevenlabs"] * 8, "chain order: its link is last"
     assert {v.voice_id for v in voices.catalogue("en", env=ELEVEN_KEY) if v.provider == "elevenlabs"} == ELEVEN_IDS
     assert {v.voice_id for v in voices.catalogue("fr", env=ELEVEN_KEY, v2=True) if v.provider == "elevenlabs"} == ELEVEN_IDS
@@ -731,19 +781,19 @@ def test_propose_never_picks_a_paid_voice_even_when_it_is_the_only_one(monkeypat
 
 
 def test_propose_leaves_a_paid_voice_unused_when_the_free_ones_run_out(monkeypatch, capsys):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
+    _free_voices(monkeypatch, chain="gemini/flash-lite-tts,elevenlabs/flash")
     leads = [_char(f"char_lead{n}", role="lead", name=f"Lead{n}", created_at=f"2026-09-26T10:00:{n:02d}+00:00",
                    voice=_k1_voice(gender="female", age="young", style_tags=["calm", "narration"])) for n in range(9)]
     guest = _char("char_guest", role="guest", created_at="2026-09-26T10:00:30+00:00", name="Guest")
     result = voices.propose(leads + [guest], "fr", env=ELEVEN_KEY)
     assert not any(voice is not None and voice.paid for voice in result.values())
     assert result["char_lead8"] is None, "a ninth lead gets no voice rather than a paid one"
-    assert result["char_guest"] is not None and result["char_guest"].provider == "edge"
+    assert result["char_guest"] is not None and result["char_guest"].provider == "gemini"
 
 
 def test_a_paid_voice_stays_available_as_an_alternate(monkeypatch):
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
-    taken = {("edge", v.voice_id) for v in voices.catalogue("fr", env=ELEVEN_KEY) if v.provider == "edge"}
+    _free_voices(monkeypatch, chain="gemini/flash-lite-tts,elevenlabs/flash")
+    taken = {("gemini", v.voice_id) for v in voices.catalogue("fr", env=ELEVEN_KEY) if v.provider == "gemini"}
     alts = voices.alternates(_char("char_x", role="lead"), "fr", env=ELEVEN_KEY, taken=taken)
     assert alts and all(v.provider == "elevenlabs" and v.paid for v in alts)
     assert len(alts) == voices.ALTERNATES_LIMIT
@@ -820,7 +870,7 @@ def test_the_paid_voice_summary_is_the_gates_verdict_for_a_reference_episode(mon
 def test_the_voice_picker_payload_marks_a_paid_voice_and_leaves_a_free_one_as_it_was(monkeypatch):
     from clipping.aistory import workflow
 
-    monkeypatch.setenv("TTS_CHAIN", "edge/fr-FR-HenriNeural,elevenlabs/flash")
+    monkeypatch.setenv("TTS_CHAIN", "gemini/flash-lite-tts,elevenlabs/flash")
     free = workflow._voice_json(EDGE_VOICE, env=ELEVEN_KEY)
     assert set(free) == {"provider", "voice_id", "lang", "gender", "age", "style_tags", "link"}
     paid = workflow._voice_json(_eleven_voice(), env=ELEVEN_KEY)

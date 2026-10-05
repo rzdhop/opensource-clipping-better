@@ -168,7 +168,7 @@ def test_pollinations_402s_are_paced_until_every_sheet_exists(store):
     story_id = tcs._story(store, mode="prompt_only")
     clock = Clock()
     poll = PacedImage(clock, every=60.0)
-    adapters = {("image", "pollinations"): poll, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "pollinations"): poll, ("tts", "gemini"): FakeTTS()}
     llm = FakeLLM(K1=[K1_KIWI, K1_MANGO])
 
     summary, log, _llm = _run(store, story_id, adapters=adapters, clock=clock, params=PROMPT_ONLY_TWO, llm=llm)
@@ -195,14 +195,14 @@ def test_a_rerun_after_pacing_makes_no_call(store):
     story_id = tcs._story(store, mode="prompt_only")
     clock = Clock()
     poll = PacedImage(clock, every=60.0)
-    adapters = {("image", "pollinations"): poll, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "pollinations"): poll, ("tts", "gemini"): FakeTTS()}
     _run(store, story_id, adapters=adapters, clock=clock, params=PROMPT_ONLY_TWO,
         llm=FakeLLM(K1=[K1_KIWI, K1_MANGO]))
 
     again = Clock()
     poll2 = PacedImage(again, every=60.0)
     summary, log, llm = _run(store, story_id, adapters={("image", "pollinations"): poll2,
-                                                         ("tts", "edge"): FakeTTS()},
+                                                         ("tts", "gemini"): FakeTTS()},
                              clock=again, params={}, llm=FakeLLM())
 
     assert llm.calls == [] and poll2.calls == 0 and again.sleeps == [] and _pauses(log) == []
@@ -215,7 +215,7 @@ def test_the_accepted_proposal_path_completes_in_one_run_under_402s(store):
     store.write_doc(story_id, "season.json", _season_doc(3), now=NOW)
     clock = Clock()
     poll = PacedImage(clock, every=60.0)
-    adapters = {("image", "pollinations"): poll, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "pollinations"): poll, ("tts", "gemini"): FakeTTS()}
     params = dict(CUSTOM_ZESTY, introduced_in=2)
 
     summary, log, _llm = _run(store, story_id, adapters=adapters, clock=clock, params=params,
@@ -234,7 +234,7 @@ def test_a_402_from_another_free_link_is_never_paced(store):
     story_id = tcs._story(store, mode="prompt_only")
     clock = Clock()
     refusing = AlwaysRefuse(status=402, url="https://api.cloudflare.com/client/v4/x", detail="payment required")
-    adapters = {("image", "cloudflare"): refusing, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "cloudflare"): refusing, ("tts", "gemini"): FakeTTS()}
 
     message, log = _failed(store, story_id, adapters=adapters, clock=clock, params=tcs.CAST_PARAMS,
                            settings=CLOUDFLARE_SETTINGS)
@@ -252,7 +252,7 @@ def test_a_paid_sent_item_is_never_paced(store):
     clock = Clock()
     poll = AlwaysRefuse(status=402, detail="Insufficient pollen balance")
     fal = AlwaysBillable()
-    adapters = {("image", "pollinations"): poll, ("image", "fal"): fal, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "pollinations"): poll, ("image", "fal"): fal, ("tts", "gemini"): FakeTTS()}
 
     message, log = _failed(store, story_id, adapters=adapters, clock=clock, params=tcs.CAST_PARAMS,
                            settings=FAL_SETTINGS)
@@ -274,7 +274,7 @@ def test_a_budget_too_small_for_the_next_pause_stops_and_names_what_is_left(stor
     story_id = tcs._story(store, mode="prompt_only")
     clock = Clock()
     poll = PacedImage(clock, every=60.0)
-    adapters = {("image", "pollinations"): poll, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "pollinations"): poll, ("tts", "gemini"): FakeTTS()}
     # Room for the first pause and its call (0 + 60 + 300), not the second.
     budget = episode_common.Budget(clock, limit=cast.pacing.RATE_LIMIT_PAUSE_S + cast._CAST_IMAGE_CALL_SECONDS + 30)
 
@@ -292,7 +292,7 @@ def test_a_round_with_no_progress_stops(store):
     story_id = tcs._story(store, mode="prompt_only")
     clock = Clock()
     poll = PacedImage(clock, every=3600.0)  # the keyless legacy rate: one image an hour
-    adapters = {("image", "pollinations"): poll, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "pollinations"): poll, ("tts", "gemini"): FakeTTS()}
 
     message, log = _failed(store, story_id, adapters=adapters, clock=clock, params=PROMPT_ONLY_TWO,
                            llm=FakeLLM(K1=[K1_KIWI, K1_MANGO]))
@@ -307,14 +307,14 @@ def test_a_round_with_no_progress_stops(store):
 def test_a_429_on_the_voice_sample_is_paced(store, quick_retries):
     from test_story_assets_pacing import GeminiQuota
 
-    story_id = tcs._with_cast(store)  # a normal cast: 3 characters, edge voices and samples made
+    story_id = tcs._with_cast(store)  # a normal cast: 3 characters, Gemini voices and samples made
     doc = store.read_entity(story_id, "characters", "char_kiwilo")
     doc["voice"] = dict(doc["voice"], provider="gemini", voice_id="Kore")
     store.write_entity(story_id, "characters", doc, now=NOW)
     entities_mod.drop_sample(store, story_id, "char_kiwilo")
     clock = Clock()
     gemini = GeminiQuota(clock, per_minute=1, open_minutes={1})
-    adapters = {("image", "pollinations"): FakeImage(), ("tts", "edge"): FakeTTS(), ("tts", "gemini"): tts.GEMINI_TTS}
+    adapters = {("image", "pollinations"): FakeImage(), ("tts", "gemini"): tts.GEMINI_TTS}
     settings = dict(tcs.SETTINGS, GOOGLE_API_KEY="test-google-key")
 
     summary, log, _llm = _run(store, story_id, adapters=adapters, clock=clock, params={}, llm=FakeLLM(),
@@ -332,7 +332,7 @@ def test_needs_editor_still_stops_and_asks_without_a_pause(store):
     story_id = tcs._story(store)  # references mode
     clock = Clock()
     poll = PacedImage(clock, every=60.0)
-    adapters = {("image", "pollinations"): poll, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "pollinations"): poll, ("tts", "gemini"): FakeTTS()}
 
     summary, log, _llm = _run(store, story_id, adapters=adapters, clock=clock, params=tcs.CAST_PARAMS,
                               settings=tcs.NO_EDITOR)

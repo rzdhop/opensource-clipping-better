@@ -35,8 +35,10 @@ that is never itself written to disk. ``pin()`` is what turns that into the
 persisted shape, keeping only ``direction``/``sample_line`` from it.
 
 **Provider naming.** A :class:`Voice` (and a pinned voice's ``provider``) uses
-the ``voices.json`` catalogue key: ``"edge"``, ``"gemini"``, or one of the
-local engine names ``"piper"``/``"kokoro"``/``"chatterbox"`` -- never the bare
+the ``voices.json`` catalogue key: ``"gemini"``, ``"elevenlabs"``, or one of the
+local engine names ``"piper"``/``"kokoro"``/``"chatterbox"`` (``"edge"`` too, but
+only on a story that pinned an Edge voice before plan 28 stage B2: the
+catalogue no longer offers one) -- never the bare
 generation provider ``"local"``, which does not say which engine. The chain
 ``Link`` to call (``edge/<voice_id>``, ``gemini/flash-lite-tts``,
 ``local/piper``, ...) is derived from that name (:func:`_chain_link`) exactly
@@ -165,7 +167,9 @@ def _chain_link(provider: str, voice_id: str) -> Link:
     """The ``generation`` chain link that speaks *provider*'s *voice_id*.
 
     Edge is one voice per request, so the voice IS the model
-    (``edge/<voice_id>``). Gemini's speech model is fixed (only one is
+    (``edge/<voice_id>``); only a pin made before plan 28 stage B2 reaches it
+    (the catalogue offers none), and its adapter stays registered for that.
+    Gemini's speech model is fixed (only one is
     catalogued, spec 8.1) and the voice travels as ``GenRequest.voice``
     instead. A local engine's provider is always ``"local"``; *provider*
     (``piper``/``kokoro``/``chatterbox``) becomes the model, and the voice
@@ -237,12 +241,17 @@ def catalogue(language, *, env, v2=False) -> list:
     that engine can run here right now WITHOUT a network call: Gemini needs
     ``GOOGLE_API_KEY``, ElevenLabs needs ``ELEVENLABS_API_KEY`` (its voices
     are ``paid``: :func:`propose` never picks one), a local engine needs its
-    package installed (``tts.LOCAL_ENGINES``), Edge needs neither (it ships as a base
-    dependency, never an extra). Filtered to *language* (``"fr"`` matches
+    package installed (``tts.LOCAL_ENGINES``). Filtered to *language* (``"fr"`` matches
     ``"fr-FR"``/``"fr-CA"``; a ``"multi"`` voice -- Gemini's prebuilt voices,
     Chatterbox's zero-shot clone -- counts for every language). With *v2*
     True, kept to the story's default locale instead (:data:`_V2_LOCALE`):
     ``"fr"`` then matches ``"fr-FR"`` only, never ``"fr-CA"``.
+
+    Edge is never offered (plan 28 stage B2, DEC-305 §2): ``voices.json`` has no
+    Edge entry and a saved ``TTS_CHAIN`` that still names an ``edge/`` link is
+    skipped here. A story that pinned an Edge voice keeps it (it is read from
+    the character, not from this list); regenerating that character's voice
+    proposes from this list, so it moves to the first engine that can run.
 
     *env* is the Settings overrides as saved (not yet merged with the process
     environment); this function merges them itself (``gating.merged_env``),
@@ -258,8 +267,8 @@ def catalogue(language, *, env, v2=False) -> list:
     voices, seen = [], set()
     for link in chain:
         if link.provider == "edge":
-            key = "edge"
-        elif link.provider == "gemini":
+            continue  # never offered (plan 28 stage B2); an existing pin is read from the character
+        if link.provider == "gemini":
             key = "gemini"
             if generation.missing_keys(link, merged):
                 continue

@@ -29,6 +29,7 @@ import pytest
 
 import test_story_fast_track as tft
 import test_story_fast_track_story as tfts
+from test_story_fast_track_story import local_speech  # noqa: F401 -- piper faked: the agent's cast speaks locally
 from clipping.aistory import defaults
 from test_story_assets_step import hermetic, store  # noqa: F401 -- stage 8's fixtures, used as they are
 from test_story_cli import PHASE2_ENV  # noqa: F401 -- the free route of this machine, as the CLI reads it
@@ -64,10 +65,11 @@ def _keyed(cli):
 
 def _free_route(cli):
     """The free route of this machine (test values): a free text-to-image
-    link, an editor (unused under prompt-only), Edge for the voices --
+    link, an editor (unused under prompt-only), Gemini speech for the voices --
     ``test_story_cli.py``'s own ``PHASE2_ENV``, reused as it is."""
     for name, value in PHASE2_ENV.items():
         cli.monkeypatch.setenv(name, value)
+    cli.monkeypatch.setenv("TTS_CHAIN", "local/piper")  # the agent's cast speaks locally (plan 28 stage B2)
 
 
 def _new_agent(cli, *extra):
@@ -117,7 +119,7 @@ def _bind_agent_fakes(cli, tmp_path):
     1 rendered when the runner is called directly."""
     from clipping.aistory.steps import story_fast_track as story_fast_track_module
 
-    fakes = tft.Fakes(tmp_path, runner=tfts.llm())
+    fakes = tft.Fakes(tmp_path, runner=tfts.llm(), local=tfts._local())
     _patch_run(cli, story_fast_track_module, **fakes.kwargs())
     return fakes
 

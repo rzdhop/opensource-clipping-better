@@ -1367,8 +1367,8 @@ built from.
 ### 5. Cast
 
 Unlocked once the style is approved. A cast has at most **8** characters in
-all (Edge, the free default voice provider, speaks 8 French voices — the
-limiting resource).
+all (no two leads or supports share a voice, so the voices the
+catalogue offers are the limiting resource).
 
 **No cast yet** offers two sources: the chosen concept's **cast sketch**
 (name, role, one-line; pre-checked) and **your own** — a name, a role
@@ -1701,7 +1701,7 @@ or `partly measured`, and, below it, any flags — a scene over its slot, a
 line to trim — each linking straight to the scene or line it names, with a
 **Trim** button beside it. The total is on the one speech clock, so a line
 read by a Gemini voice is estimated about a third longer (×1.35) than the
-same line on Edge; a script written before plan 24 shows that only once one of
+same line on an Edge voice; a script written before plan 24 shows that only once one of
 its lines is rewritten or edited.
 
 Under the hood, every scene and shot is timed to the nearest whole frame (at
@@ -1744,7 +1744,7 @@ one part at a time).
 **Measure with real voices** is opt-in: it synthesises every line whose
 timing is still an estimate (or whose text or pinned voice changed) through
 that character's own pinned voice, and keeps the audio as phase 4's line
-audio. It costs **$0** on the free tiers (Edge, Gemini's free TTS) — its own
+audio. It costs **$0** on the free tiers (Gemini's free TTS, a local engine) — its own
 estimate chip shows the lines, characters and cost before you press it. It
 stays disabled until the script is complete *and* the consistency check is
 current: measuring runs after whatever the script step is still missing, and
@@ -2893,10 +2893,15 @@ estimate prices the first link of each.
 legacy edit chain above and by no v2 role. `gemini_first` puts the Gemini
 link first in every role of one story.
 
-**Voice calls** run on `TTS_CHAIN`: **Edge** (free, keyless, many
-languages, the shipped default's first link), Gemini's TTS model (needs
-`GOOGLE_API_KEY`, still free), or a local engine (`piper` / `kokoro` /
-`chatterbox`, once its package is installed). A voice sample is a single,
+**Voice calls** run on `TTS_CHAIN`, whose shipped default is Gemini's TTS
+model (needs `GOOGLE_API_KEY`, still free; a free key allows about 10 voice
+requests a day, so it does not carry a whole cast), then a local engine
+(`piper` / `kokoro` / `chatterbox`, once its package is installed), then
+ElevenLabs (paid, last). **Edge is not offered any more** (plan 28 stage B2:
+its voices are too poor): a story that pinned an Edge voice earlier keeps
+speaking it, and **Regenerate voice** on that character proposes from the
+list above instead, so the change is visible; a new story pins no Edge voice.
+A new native story speaks with no voice at all (`voices: none`). A voice sample is a single,
 fixed-link chain built from the character's *pinned* voice alone — it never
 falls through to another provider or another voice; a failure names other
 voices to try instead of the one that failed.
@@ -2927,7 +2932,7 @@ failure. The step retries every item it was held back on in rounds, a
 60-second pause before each, until they succeed or a round makes no more
 progress. A free Cloudflare key (`CLOUDFLARE_API_TOKEN` and
 `CLOUDFLARE_ACCOUNT_ID`, still free) skips that limit and is much faster;
-Edge TTS is free and effectively unlimited. A paid link — `fal/flux-schnell`
+A local voice engine is free and unlimited. A paid link — `fal/flux-schnell`
 for an image, a paid voice — is only ever reached with `allow_paid` on and
 only within the per-episode, daily and per-story caps; the fast track goes
 further and stops before spending anything paid unless every cap fits, with

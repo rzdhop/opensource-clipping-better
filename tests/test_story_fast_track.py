@@ -84,12 +84,14 @@ class Fakes:
     """Every seam of a run, recorded."""
 
     def __init__(self, tmp_path, *, runner=None, image=None, edge=None, fal=None, gemini=None, edit=None,
-                 clock=None, ffmpeg=None, cover=None):
+                 clock=None, ffmpeg=None, cover=None, local=None):
         self.runner = runner if runner is not None else llm()
         self.image = image if image is not None else tas.FakeImage()
         self.edge = edge if edge is not None else tsm.Edge()
         self.fal = fal
         self.adapters = tas._adapters(self.edge, image=self.image, fal=fal, gemini=gemini, edit=edit)
+        if local is not None:  # a run that proposes voices (the agent's cast) speaks through a local engine
+            self.adapters[("tts", "local")] = local
         self.clock = clock if clock is not None else eps.Clock(0.0)
         self.ffmpeg = ffmpeg if ffmpeg is not None else rr.FakeFFmpeg()
         self.cover = cover if cover is not None else tms.FakeCover()

@@ -268,7 +268,7 @@ def test_the_provider_needs_its_key_and_is_no_longer_an_extension_point():
 def test_it_is_the_last_link_of_the_default_chain_so_a_keyless_install_is_unchanged():
     links = generation.parse_generation_chain("tts", generation.DEFAULT_CHAINS["tts"])
     assert links[-1] == FLASH and [link.provider for link in links[:-1]] == [
-        "edge", "gemini", "local", "local", "local"]
+        "gemini", "local", "local", "local"]
 
 
 def run_chain(link, transport, *, allow_paid, env=None):

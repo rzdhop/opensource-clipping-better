@@ -7,7 +7,7 @@ an empty table persisted under ``tmp_path``, ``worker.OUTPUTS_ROOT`` under
 ``tmp_path`` and ``worker.submit_job`` replaced by a recorder. A step that has
 to *run* goes through the real worker path (``worker._execute_story_step``)
 with the registered runner answered by stand-ins: the LLM per prompt id, the
-image chains, Edge TTS and the vision chain through fake adapters. Hermetic
+image chains, the speech link and the vision chain through fake adapters. Hermetic
 like ``tests/test_story_cast_steps.py``: no key, chain, cap or limit of the
 machine reaches a test (``clipping.config`` loads the main checkout's
 ``.env``, A-049: every provider key is cleared), no request leaves the
@@ -65,7 +65,7 @@ REAL_STORIES = (ROOT / "outputs" / "stories", ROOT / "outputs" / "stories.json")
 # Test values only: every request goes to a fake.
 BASE = {
     "LLM_CHAIN": "gemini/gemini-test", "GOOGLE_API_KEY": "test-gemini-key",
-    "IMAGE_CHAIN": "pollinations/flux", "TTS_CHAIN": "edge/fr-FR-HenriNeural",
+    "IMAGE_CHAIN": "pollinations/flux", "TTS_CHAIN": "gemini/flash-lite-tts",
     "VISION_CHAIN": "gemini/flash-lite",
 }
 # The free route of this machine: a free text-to-image link, and no editor --
@@ -109,7 +109,7 @@ def hermetic(monkeypatch, tmp_path):
             monkeypatch.delenv(name, raising=False)
     # No pacing: a test makes more free images in a second than a minute allows.
     monkeypatch.setenv("LIMIT_POLLINATIONS_RPM", "0")
-    monkeypatch.setenv("LIMIT_EDGE_RPM", "0")
+    monkeypatch.setenv("LIMIT_GEMINI_RPM", "0")
     monkeypatch.setenv("USAGE_PATH", str(tmp_path / "data" / "usage.json"))
     monkeypatch.setenv("SPEND_PATH", str(tmp_path / "data" / "spend.json"))
     limits.reset()
@@ -200,7 +200,7 @@ class FakeImage:
 
 
 class FakeTTS:
-    """A free Edge stand-in: writes a small mp3, records every request."""
+    """A free Gemini-speech stand-in: writes a small mp3, records every request."""
 
     def __init__(self):
         self.requests = []
@@ -212,7 +212,9 @@ class FakeTTS:
         return True, "ok"
 
     def generate(self, link, request, *, credentials, on_log, transport=None, **_):
-        self.requests.append((f"{link.provider}/{link.model}", request.text))
+        # "<provider>/<voice>": a Gemini link speaks the voice it is handed, an Edge link IS its voice.
+        self.requests.append((f"{link.provider}/{request.voice if link.provider == 'gemini' else link.model}",
+                              request.text))
         path = os.path.join(request.out_dir, "sample.mp3")
         with open(path, "wb") as fh:
             fh.write(b"ID3fake" + str(len(self.requests)).encode())
@@ -263,7 +265,7 @@ class Fakes(SimpleNamespace):
     @property
     def adapters(self):
         return {("image", "pollinations"): self.t2i, ("image_edit", "local"): self.editor,
-                ("image_edit", "fal"): self.paid_editor, ("tts", "edge"): self.tts,
+                ("image_edit", "fal"): self.paid_editor, ("tts", "gemini"): self.tts,
                 ("vision", "gemini"): self.vision}
 
 
@@ -838,7 +840,7 @@ def test_the_phase_2_happy_path_from_style_to_ready(api):
     assert response.json()["detail"] == "Kiwilo cannot be approved yet; missing: a voice sample."
     third = _post_step(api, story_id, "cast", {}).json()
     assert _run(api, third["id"])["status"] == "awaiting_approval"
-    assert fakes.tts.requests[-1] == ("edge/fr-FR-HenriNeural", "Le vote, c'est moi.")
+    assert fakes.tts.requests[-1] == ("gemini/Puck", "Le vote, c'est moi.")
 
     # Each character approved; the two leads alone do not approve the cast.
     for cid in ("char_kiwilo", "char_mangella"):
@@ -1310,16 +1312,17 @@ def test_a_picked_voice_is_one_of_the_languages_and_no_other_leads(api):
     url = _url(story_id, "/regenerate")
     kiwilo = "character:char_kiwilo:voice"
 
-    response = api.client.post(url, json={"target": kiwilo, "voice": {"provider": "edge",
-                                                                      "voice_id": "fr-FR-DeniseNeural"}})
+    response = api.client.post(url, json={"target": kiwilo, "voice": {"provider": "gemini",
+                                                                      "voice_id": "Kore"}})
     assert response.status_code == 409
-    assert response.json()["detail"] == ("edge/fr-FR-DeniseNeural is already Mangella's voice: no two leads or "
+    assert response.json()["detail"] == ("gemini/Kore is already Mangella's voice: no two leads or "
                                          "supports share a voice; pick another for Kiwilo.")
     response = api.client.post(url, json={"target": kiwilo, "voice": {"provider": "edge",
-                                                                      "voice_id": "en-US-GuyNeural"}})
+                                                                      "voice_id": "fr-FR-HenriNeural"}})
+    # Edge is no catalogue voice any more (plan 28 stage B2): it cannot be picked, the refusal offers the others.
     assert response.status_code == 400
-    assert response.json()["detail"].startswith("edge/en-US-GuyNeural is not a fr voice TTS_CHAIN can reach; "
-                                                "pick one of: edge/fr-FR-")
+    assert response.json()["detail"].startswith("edge/fr-FR-HenriNeural is not a fr voice TTS_CHAIN can reach; "
+                                                "pick one of: gemini/Kore")
     for body in ({"target": kiwilo, "voice": {"provider": "edge"}},
                  {"target": kiwilo, "voice": {"provider": "edge", "voice_id": "fr-CA-ThierryNeural", "rate": "fast"}},
                  {"target": kiwilo, "voice": {"provider": "edge", "voice_id": "fr-CA-ThierryNeural", "age": 3}},
@@ -1328,15 +1331,15 @@ def test_a_picked_voice_is_one_of_the_languages_and_no_other_leads(api):
         assert api.client.post(url, json=body).status_code == 400, body
     assert api.jobs.list_step_jobs(story_id, step="regenerate") == []
 
-    thierry = {"provider": "edge", "voice_id": "fr-CA-ThierryNeural", "rate": "+10%"}
+    thierry = {"provider": "gemini", "voice_id": "Orus", "rate": "+10%"}
     response = api.client.post(url, json={"target": kiwilo, "voice": thierry})
     assert response.status_code == 201, response.text
     job = response.json()
     assert job["params"] == {"target": kiwilo, "note": None, "voice": thierry}
     assert _run(api, job["id"])["status"] == "awaiting_approval"
     kiwi = api.store.read_entity(story_id, "characters", "char_kiwilo")
-    assert (kiwi["voice"]["voice_id"], kiwi["voice"]["rate"]) == ("fr-CA-ThierryNeural", "+10%")
-    assert api.fakes.tts.requests[-1][0] == "edge/fr-CA-ThierryNeural"
+    assert (kiwi["voice"]["voice_id"], kiwi["voice"]["rate"]) == ("Orus", "+10%")
+    assert api.fakes.tts.requests[-1][0] == "gemini/Orus"
 
 
 # ================================================= the story page, approvals
@@ -1516,7 +1519,7 @@ def test_the_voice_picker_lists_the_pinned_voice_alternates_and_what_others_took
     kiwilo = api.store.read_entity(story_id, "characters", "char_kiwilo")
     mangella = api.store.read_entity(story_id, "characters", "char_mangella")
     figuette = api.store.read_entity(story_id, "characters", "char_figuette")
-    # Three characters, eight fr voices in the catalogue: each got its own.
+    # Three characters, eight Gemini voices in the catalogue: each got its own.
     assert kiwilo["voice"] and mangella["voice"] and figuette["voice"]
 
     response = api.client.get(_url(story_id, "/characters/char_kiwilo/voices"))
@@ -1530,7 +1533,8 @@ def test_the_voice_picker_lists_the_pinned_voice_alternates_and_what_others_took
     assert (body["pinned"]["provider"], body["pinned"]["voice_id"]) not in keys
     for entry in body["alternates"]:
         assert set(entry) == {"provider", "voice_id", "lang", "gender", "age", "style_tags", "link"}
-        assert entry["lang"].lower().startswith("fr")
+        assert entry["lang"].lower().startswith("fr") or entry["lang"] == "multi"
+        assert entry["provider"] != "edge"  # Edge is no catalogue voice any more (plan 28 stage B2)
 
     others = {(mangella["voice"]["provider"], mangella["voice"]["voice_id"]),
               (figuette["voice"]["provider"], figuette["voice"]["voice_id"])}

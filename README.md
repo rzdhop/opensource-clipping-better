@@ -273,7 +273,7 @@ paste in. **Fast track**, on the episode page, runs the whole thing — script
 through metadata — as a single job.
 
 It runs free by default on hosted free tiers (Gemini or Groq for text,
-Pollinations or Cloudflare for images, Edge or Gemini for voices). Paid
+Pollinations or Cloudflare for images, Gemini or a local engine for voices). Paid
 generation is off until you turn it on, and even then it stays inside
 per-episode, per-day and per-story spending caps.
 

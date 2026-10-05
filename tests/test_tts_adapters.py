@@ -369,15 +369,13 @@ def test_xtts_is_never_offered():
 def test_the_voice_catalogue_covers_the_default_chain_in_both_languages():
     voices = tts.load_voices()
     assert voices["$schema"] == "voices_v1"
-    for provider in ("edge", "gemini", "piper", "kokoro"):
+    for provider in ("gemini", "piper", "kokoro"):
         assert voices["providers"][provider], provider
-    ids = {v["voice_id"] for v in voices["providers"]["edge"]}
-    assert "fr-FR-HenriNeural" in ids and "en-US-GuyNeural" in ids
+    assert "edge" not in voices["providers"], "Edge is not catalogued any more (plan 28 stage B2)"
     for provider, entries in voices["providers"].items():
         for entry in entries:
             assert set(entry) >= {"voice_id", "lang", "gender", "age", "style_tags"}, (provider, entry)
-    assert len(tts.voices_for("edge", "fr")) >= 4
-    assert len(tts.voices_for("edge", "en")) >= 4
+    assert tts.voices_for("edge", "fr") == [] and tts.voices_for("edge", "en") == []
     assert tts.voices_for("kokoro", "fr") == [v for v in voices["providers"]["kokoro"] if v["lang"].startswith("fr")]
 
 

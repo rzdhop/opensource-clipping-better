@@ -38,7 +38,7 @@ TENTAFRUIT = next(c for c in templates.load_concepts() if c["concept_id"] == "te
 SETTINGS = {
     "LLM_CHAIN": "gemini/gemini-test", "GOOGLE_API_KEY": "test-gemini-key",
     "IMAGE_CHAIN": "local/comfyui", "IMAGE_EDIT_CHAIN": "local/comfyui",
-    "TTS_CHAIN": "edge/fr-FR-HenriNeural",
+    "TTS_CHAIN": "gemini/flash-lite-tts",
 }
 GEN_VARS = (
     "FAL_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_PAID_API_KEY", "CLOUDFLARE_API_TOKEN",
@@ -248,7 +248,7 @@ def hermetic(monkeypatch, tmp_path):
     for name in list(os.environ):
         if name.startswith("LIMIT_"):
             monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("LIMIT_EDGE_RPM", "0")
+    monkeypatch.setenv("LIMIT_GEMINI_RPM", "0")
     monkeypatch.setenv("USAGE_PATH", str(tmp_path / "data" / "usage.json"))
     monkeypatch.setenv("SPEND_PATH", str(tmp_path / "data" / "spend.json"))
     limits.reset()
@@ -380,7 +380,7 @@ def _run_cast(store, story_id, llm, events, image=None):
                             params={"selected": ["Kiwilo", "Mangella"]}, cancel=CancelToken(),
                             settings_env=dict(SETTINGS), outputs_dir=store.outputs_dir, on_log=lambda line: None)
     image = image or FakeImage(events)
-    adapters = {("image", "local"): image, ("image_edit", "local"): image, ("tts", "edge"): FakeTTS()}
+    adapters = {("image", "local"): image, ("image_edit", "local"): image, ("tts", "gemini"): FakeTTS()}
 
     def no_sleep(seconds):
         raise AssertionError(f"slept {seconds}s")
