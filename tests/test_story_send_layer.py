@@ -231,7 +231,7 @@ def test_a_461_word_link_keeps_the_style_and_the_present_looks_before_the_core(s
 
     assert sent["limit"] == 461 and sent["words"] <= 461 < sent["full_words"]
     assert sent["text"] != parts["prompt"] and sent["text"].endswith("\n\n" + parts["prompt"])
-    assert sent["text"].startswith("ART STYLE: photorealistic 3D render")
+    assert sent["text"].startswith("ART STYLE: Medium: ")
     assert "Palette: saturated natural fruit colours" in sent["text"]
     assert "(in this shot) is an anthropomorphic character whose head is a whole" in sent["text"]
     assert "PLACE (in this shot):" in sent["text"] and "SCENE:" in sent["text"]

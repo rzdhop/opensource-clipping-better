@@ -356,6 +356,7 @@ def test_the_fit_ladder_drops_in_order_keeps_the_shot_and_falls_to_the_core_alon
     style["rendering"] = "photorealistic 3D render of anthropomorphic fruits with carved faces on human bodies"
     style["character_design_rules"] = "The head is one whole fruit with a carved face; bodies and hands are human."
     style["environment_rules"] = "real-world sets at human scale"
+    style["medium"] = "a CGI animated film"
     shot = dict(SHOT, subject_tags=["@char_rida", "#place_glass_walled_bullpen:day"], staging=[], speaks=False,
                 lines=[])
     core = "Slow push-in toward the subject. The hacker leans over the tablet."
@@ -402,7 +403,8 @@ def test_the_style_rules_are_the_last_rung_so_a_small_cap_keeps_the_style_and_th
     by_key = {section.key: section for section in sections}
     rules, style = by_key["style_rules"], by_key["style"]
     assert pt.DROP_ORDER[-1] == "style_rules" and style.rank is None and rules.rank == len(pt.DROP_ORDER) - 1
-    assert style.text.startswith("ART STYLE: " + STYLE["rendering"]) and STYLE["palette"]["palette_line"] in style.text
+    assert style.text.startswith("ART STYLE: Medium: ") and STYLE["rendering"] in style.text
+    assert STYLE["palette"]["palette_line"] in style.text
     assert "Character design rules" not in style.text and "Environment rules" not in style.text
     assert rules.text.startswith("STYLE RULES: Character design rules:") and "Finish: ultra detailed" in rules.text
     assert "Motion:" in rules.text and "Voice direction:" in rules.text and "Camera" not in rules.text

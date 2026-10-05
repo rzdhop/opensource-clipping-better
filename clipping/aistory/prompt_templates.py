@@ -407,13 +407,44 @@ def _series_sections(story, style_lock, *, language, image, droppable=False):
             Section("series_lore", "series lore", _paragraph("SERIES LORE", lore), _rank("series_lore"))]
 
 
+# The medium said first in ART STYLE, per style template (the human, 2026-10-05: a Veo render of the fruit
+# style came out as live action with a fruit mask -- "photorealistic 3D render" alone reads as a photograph).
+# A frozen style lock has no ``medium`` key, so the template id picks one here; ``style_lock["medium"]`` wins.
+_CGI = ("a fully computer-animated 3D CGI film in the manner of a Pixar or DreamWorks feature: every character, "
+        "set and prop is rendered CGI; the characters' heads are their real heads, not masks, costumes or "
+        "prosthetics on actors; no live-action footage, no real people, no photographs")
+MEDIUM = {
+    "fruit_drama": _CGI,
+    "family_3d": _CGI,
+    "viral_3d": _CGI,
+    "anime": "a hand-drawn 2D anime episode, cel-shaded animation; no live action, no real people, no 3D render, "
+             "no photographs",
+    "cartoon_flat": "a flat 2D cartoon animation; no live action, no real people, no 3D render, no photographs",
+    "claymation": "stop-motion claymation, plasticine puppets on a miniature handmade set; no live action, no CGI, "
+                  "no real people",
+    "storybook_watercolor": "a painted watercolour picture-book animation; no live action, no real people, no 3D "
+                            "render, no photographs",
+    "cinematic_real": "a live-action cinematic film with real actors on real sets",
+}
+
+
+def medium_of(style_lock) -> str:
+    """The medium sentence of *style_lock*: its own ``medium`` key, else :data:`MEDIUM` by its template id."""
+    own = _ws(str(style_lock.get("medium") or ""))
+    if own:
+        return own
+    key = style_lock.get("template_id") or style_lock.get("template_name") or ""
+    return MEDIUM.get(str(key), "")
+
+
 def _style_sections(style_lock, *, image):
     """``style`` (the rendering sentence, the palette line, the forbidden colours: never dropped), ``style_rules``
     (character design and environment rules, the quality tail, the motion and voice direction: the last rung of
     the ladder), the palette hexes and the camera and light, in that order."""
     palette = style_lock.get("palette") or {}
     forbidden = _join(palette.get("forbidden"), " or ")
-    style = [_sentence(style_lock.get("rendering")), _labelled("Palette", palette.get("palette_line")),
+    style = [_labelled("Medium", medium_of(style_lock)), _sentence(style_lock.get("rendering")),
+             _labelled("Palette", palette.get("palette_line")),
              _sentence(f"Never use {forbidden}") if forbidden else ""]
     rules = [_labelled("Character design rules", style_lock.get("character_design_rules")),
              _labelled("Environment rules", style_lock.get("environment_rules")),
