@@ -869,3 +869,11 @@ and untested — Stage 11 is where it would be.
   `Content-Disposition: attachment` by default. It now answers `inline` unless
   `?download=1` is given. Only the dashboard and `docs/studio/` consume it, and
   `docs/studio/` cannot authenticate against this API at all. UNCONFIRMED.
+- **A-181** — (plan 28) The human's "me + gen button" means: clips made by hand on Flow/Higgsfield by default, and a
+  button that buys an API clip for one shot or the whole episode after showing its price. UNCONFIRMED.
+- **A-182** — (plan 28) With the narrator removed, a template that narrates (narrated_drama_60s_v2) renders its
+  narration as on-screen text, never as a generated voice; the characters' own lines stay in their clips. UNCONFIRMED.
+- **A-183** — (plan 28, Q3 defaulted) The serial_60s_v2 format on tonight's story came from the wizard's suggestion
+  path, not a deliberate pick; the creation rule (A4/S1) makes the question moot. UNCONFIRMED.
+- **A-184** — (plan 28, Q4/Q5/Q6 defaulted) Hiding the concept library (not deleting it), a redraw ceiling of
+  shots × 2 × the link price inside the $2 cap, and a v2-only writer-prompt upgrade are acceptable. UNCONFIRMED.

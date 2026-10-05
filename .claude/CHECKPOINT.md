@@ -1,8 +1,9 @@
 ## CURRENT STATE — plan 28 (the one-click episode: fits every time, ≤ $2, strict consistency, no TTS voices, Approve all, generated concepts, writer prompts upgraded) — phase CLARIFY, plan DRAFT awaiting answers + "Go" (2026-10-05, late local session)
 
-- **In-progress header:** phase = CLARIFY → PLAN (draft written). Checkpoint commit = main c656ff1 (clean tree +
-  this docs change; `FETCH_HEAD` untracked). Live unchanged: e2c8b46 code, health 200, 0 running jobs.
-  Tier-1 baseline: CI green on e2c8b46 (DEC-278).
+- **In-progress header:** phase = IMPLEMENT (plan 28 APPROVED, DEC-305, the human's "1) me + gen button 2) remove, Go").
+  Checkpoint commit = main (this commit, clean tree; `FETCH_HEAD` untracked). Live unchanged: e2c8b46 code, health
+  200, 0 running jobs. Tier-1 baseline: CI green on e2c8b46 (DEC-278). Stages in flight: A1 (wt plan28-a1, Sonnet),
+  B1 (wt plan28-b1, Opus), A5 (wt plan28-a5, Sonnet). Next: A4+S1, A2, A3, B2, C, D, E, F, S2/S3, G.
 - **Trigger:** job 13bbb11a5896 (story d71852710962 "Cœurs Sous Clé", agent mode, native_speech on Veo fast,
   narrator on, serial_60s_v2) failed at the storyboard: 84 s vs 55–75. Root causes, the four context maps and the
   staged plan: `.claude/plans/ai-story/28-one-click-reliability-plan.md` §1 and §3.
@@ -10,11 +11,9 @@
   time); an Approve-all button; no voice generation, never edge; the concept prompt reviewed with generated
   concepts only; strict rules against consistency problems; every set-up writer prompt upgraded to the plan-26
   standard.
-- **Open questions (blocking, plan §2):** Q1 the $2 promise = manual clips by default (recommended) vs API clips
-  at a higher cap; Q2 narrator off by default + no voices on native stories, legacy keeps non-edge TTS; Q3 was
-  serial_60s_v2 picked by hand; Q4 hide vs delete the concept library; Q5 the redraw ceiling inside the $2;
-  Q6 v2-only prompt upgrade.
-- **Next action:** on the answers, finalise the plan (stage files/tests per stage), checkpoint, then A1 first.
+- **Answers:** Q1 the human makes the clips + a Generate button at a shown price (A-181); Q2 the narrator and every
+  generated voice removed (A-182); Q3–Q6 defaulted to the recommendations (A-183/A-184).
+- **Next action:** merge A1/B1/A5 as they go green (both envs, exit codes checked), push, then the next three.
 - **Rules in force (unchanged):** worktrees off main; DEC-234 selections both envs; deploy at 0 jobs after the
   3.11 compile; no full local suite (DEC-278); no source edits on main while a job runs; money only on the go.
 
