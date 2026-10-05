@@ -32,6 +32,17 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-30)
+- **2026-10-05 — plan 26 (rich prompts on every link, DEC-303):** a Gemini render of a Dragon Fruit shot came out
+  photoreal with the dragon-fruit hacker as a plain man, because the generator was handed a 200-word core with one
+  style line, and the Handoff's Copy buttons did nothing over http on the phone. Now every generation prompt — pasted
+  by hand, sent to an API or to a local model — opens with a master block rebuilt from the records at each request
+  (the series, the whole art-style lock, every character's full look, the places, the props, what to avoid), then
+  the scene (staging, camera, the line's delivery), then the unchanged core; it is bounded only by the provider's real
+  limit, fitted by value when over it, and shown with its word count and a warning under 500 words. Nothing already
+  made goes stale, because the hashes stay on the core. Copy works over http. And in a fruit world every head is a
+  fruit: the species is a field the writers fill, the human can set on the Cast tile, and every prompt, sheet and
+  judge brief says. The product's promise — consistent characters across a season, whoever generates — now rests on
+  prompts that carry the whole plan.
 - **2026-10-05 — plan 25 (the handoff, DEC-301/302):** the human makes clips by hand on Flow and Higgsfield from the
   app's prompts, and the app only offered a long clips-only Shot list, no prompts for images, a hidden mode and no
   way to mix. Now one Handoff screen per episode, built for the phone, shows every shot's prompts, provider, mode
