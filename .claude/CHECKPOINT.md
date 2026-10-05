@@ -1,26 +1,29 @@
-## CURRENT STATE — plan 24 (the timing harness) IMPLEMENT stage 1 + plan 23 D5 follow-up, in worktrees; the human's calls delegated (2026-10-05, local session)
+## CURRENT STATE — plan 24 (the timing harness) stages 1–4 + 6 MERGED and DEPLOYED; stage 5 in a worktree; plan 23 follow-ups ALL DONE (2026-10-05, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main `cc1d734` (+ this docs commit), clean tree.
-  Running: plan 24 stage 1 (Opus, `feat/plan24-s1`, worktree plan24-s1: `timing.seconds_for`, `timing.scene_plan`,
-  `slot_s`/`line_plan` on the scene, the provider overrun in the Script-step estimate) and the D5 follow-up (Opus,
-  `feat/plan23-d5-follow`: variant sheets in the image brief + `?variant=` upload + tiles; image rebuild at 0 jobs
-  after the merge). Next: stage 1 merge → stage 2 (prompts told seconds + hard caps + retry text + under-only
-  acceptance, Opus) → stage 3 (trim pass + failure sentence) → stage 4 (storyboard follows the plan) → stage 5
-  (narrator share / 2–4 character lines) → stage 6 (the dashboard Trim action, rebuild) → stage 7 docs + the walk
-  (regenerate e7412a3efcc6 ep1 to 0 warnings). Plan: `.claude/plans/ai-story/24-timing-harness-plan.md`; DEC-298.
-- **Plan 23 follow-through status:** (1) keys + zone: STILL WAITS for the human to set `ANTHROPIC_API_KEY`,
-  `ELEVENLABS_API_KEY`, `PIXABAY_API_KEY`, `BUDGET_TIMEZONE=Europe/Paris` (free checks ready). (2) the A/B: dry-run
-  done ($1.96 one try); runs on the delegated go once the Anthropic key is set. (3) C2: the tool merged (122c25d);
-  the paid probe ATTEMPTED on the delegated go and REFUSED by fal (HTTP 403, exhausted balance): nothing booked;
-  **the human tops up fal, then re-run:** `python3 tools/probe_speech_link.py --image
-  outputs/stories/d16026f12e77/episodes/ep01/assets/shots/shot_01.jpg --allow-paid --max-usd 0.60`. (4) A8, D7,
-  B8, A5 merged; D5 in progress (DEC-299). (5) done; CI's hidden second failure (the two-mode route test vs
-  `/settings#budget`) fixed in d3eac3f — **CI result on cc1d734 pending; must be green**. (6) the walks after.
-- **Live state:** health 200, 0 running jobs, today (UTC) $0.848 of the $4 cap (all e7412a3efcc6), zone UTC;
-  bundle index-BfVk0EWS.js (the D5 tiles and plan 24 stage 6 need a rebuild).
-- **Rules in force:** as before (worktrees, DEC-234 both envs, DEC-297 pin files, pins mirrored, deploy at 0 jobs
-  after the 3.11 compile, no full local suite, no source edits during a job, money only on the human's go — the
-  delegated go covers the probe and the A/B as listed, nothing else).
+- **In-progress header:** phase = IMPLEMENT of plan 24 stage 5 (Sonnet, `feat/plan24-s5`, worktree plan24-s5: E1v3
+  assigns which scenes carry a character line within the template's `character_lines`, narrator-only scenes plan one
+  narrator line, E2v3 refuses an unplanned character line). Then stage 7: docs (`docs/AI_STORY.md`, DEC-300 for the
+  shipped mechanism, A-166/A-167 verdicts), VISION, the close-out, and the Tier-2 walk = the human regenerates episode
+  1 of e7412a3efcc6 (expect 0 timing warnings; a Trim button on any that remain). Checkpoint commit = main `b0d85ee`
+  (+ this docs commit), clean tree. **Deployed 2026-10-05 11:02 UTC** from b0d85ee: health 200, bundle
+  index-DU7H2ro8.js, zone ok, 361 jobs. Stage 5 will need only a restart (Python; routes untouched) — do it at 0 jobs.
+- **Shipped by plan 24 so far (DEC-298):** one speech clock (`timing.seconds_for`, provider overrun, 6.6 chars/word for
+  v3 budgets), a per-line plan on every v3 scene (`slot_s`/`line_plan`; native: character 6 s / 12 words first, the
+  narrator the rest; pauses + 5 % margin paid), the writer told seconds and hard caps (E2v3/E3v3), hard validators
+  with named overshoots, under-only acceptance, a bounded trim pass (4 calls per episode) then one failure sentence,
+  the shots following the plan, the dashboard Trim action. Follow-ups logged: trim calls outside the cost estimate;
+  pooling off-native character caps; reaction shots on top of the plan's clips.
+- **Plan 23 follow-through:** (1) keys + zone: STILL WAITS for the human (`ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`,
+  `PIXABAY_API_KEY`, `BUDGET_TIMEZONE=Europe/Paris`). (2) the A/B: on the delegated go once the Anthropic key is set
+  (`python3 tools/bench_llm.py --episode-ab outputs/stories/d16026f12e77 --episode 1 --chains
+  "gemini-paid/gemini-3.8-flash,anthropic/claude-sonnet-5-5,anthropic/claude-opus-5-5" --allow-paid --max-usd 3.00`).
+  (3) C2's probe: refused by fal (exhausted balance) — the human tops up, then `python3 tools/probe_speech_link.py
+  --image outputs/stories/d16026f12e77/episodes/ep01/assets/shots/shot_01.jpg --allow-paid --max-usd 0.60`; C4/C5
+  only on a pass. (4) A8, D7, B8, A5, D5 all merged and deployed. (5) done; CI green since cc1d734. (6) the walks:
+  the cap panel, a two-view cast on a new Viral 3D story, the action brief on Flow, a 16:9 story on seedance, a
+  variant sheet upload, the Trim button — steps to give at the close-out.
+- **Rules in force:** unchanged (worktrees, DEC-234 both envs, DEC-297 pin files, pins mirrored, deploy at 0 jobs
+  after the 3.11 compile, no full local suite, no source edits during a job, money only on the human's go).
 - **Open questions:** none blocking; the keys and the fal top-up are the human's hands.
 
 ## CURRENT STATE — plan 23 (the upgrade ideas) CODE COMPLETE and DEPLOYED; phase DOCUMENT / close-out (2026-10-05, local session)
