@@ -11,6 +11,12 @@
    "images": [
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 580,
+      "limit": null,
+      "words": 580
+     },
      "id": "char_broccolia",
      "kind": "sheet",
      "label": "Broccolia — portrait",
@@ -19,7 +25,7 @@
       640
      ],
      "negative_prompt": "",
-     "prompt": "Full-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark green cluster of tight broccoli florets is an anthropomorphic character whose head is a whole dark green cluster of tight broccoli florets serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult man. Build: stocky broccoli body. Face: small dark eyes. Hair: dense green florets. Skin and surface: matte green stalk. Wearing (every day): white tank top, swim shorts. Silhouette: green tree-like crown. Height: about 160 cm. Signature items: Rhombus crystal rhinestone headband microphone, Tailored emerald velvet evening gown. Character colours: green.\n\nPERSONALITY: the dark green cluster of tight broccoli florets: Manipulateur, Charmeur.\n\nFull-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
      "references": [],
      "role": "portrait",
      "size": [
@@ -32,6 +38,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 591,
+      "limit": null,
+      "words": 591
+     },
      "id": "char_broccolia",
      "kind": "sheet",
      "label": "Broccolia — turnaround",
@@ -40,7 +52,7 @@
       360
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark green cluster of tight broccoli florets is an anthropomorphic character whose head is a whole dark green cluster of tight broccoli florets serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult man. Build: stocky broccoli body. Face: small dark eyes. Hair: dense green florets. Skin and surface: matte green stalk. Wearing (every day): white tank top, swim shorts. Silhouette: green tree-like crown. Height: about 160 cm. Signature items: Rhombus crystal rhinestone headband microphone, Tailored emerald velvet evening gown. Character colours: green.\n\nPERSONALITY: the dark green cluster of tight broccoli florets: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "turnaround",
      "size": [
@@ -53,6 +65,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 546,
+      "limit": null,
+      "words": 546
+     },
      "id": "char_broccolia",
      "kind": "sheet",
      "label": "Broccolia — expressions",
@@ -61,7 +79,7 @@
       400
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark green cluster of tight broccoli florets is an anthropomorphic character whose head is a whole dark green cluster of tight broccoli florets serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult man. Build: stocky broccoli body. Face: small dark eyes. Hair: dense green florets. Skin and surface: matte green stalk. Wearing (every day): white tank top, swim shorts. Silhouette: green tree-like crown. Height: about 160 cm. Signature items: Rhombus crystal rhinestone headband microphone, Tailored emerald velvet evening gown. Character colours: green.\n\nPERSONALITY: the dark green cluster of tight broccoli florets: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "expressions",
      "size": [
@@ -74,6 +92,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 583,
+      "limit": null,
+      "words": 583
+     },
      "id": "char_kiwilo",
      "kind": "sheet",
      "label": "Kiwilo — portrait",
@@ -82,7 +106,7 @@
       640
      ],
      "negative_prompt": "",
-     "prompt": "Full-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark brown ripe kiwi fruit is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: a young woman. Build: small round kiwi body. Face: wide green eyes. Hair: short brown fuzz. Skin and surface: fuzzy brown kiwi skin. Wearing (every day): green sundress, straw sandals. Silhouette: fuzzy brown oval. Height: about 120 cm. Signature items: A thin gold chain around the neck, A sharp tailored charcoal suit. Character colours: brown, green.\n\nPERSONALITY: the dark brown ripe kiwi fruit: Manipulateur, Charmeur.\n\nFull-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
      "references": [],
      "role": "portrait",
      "size": [
@@ -95,6 +119,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 594,
+      "limit": null,
+      "words": 594
+     },
      "id": "char_kiwilo",
      "kind": "sheet",
      "label": "Kiwilo — turnaround",
@@ -103,7 +133,7 @@
       360
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark brown ripe kiwi fruit is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: a young woman. Build: small round kiwi body. Face: wide green eyes. Hair: short brown fuzz. Skin and surface: fuzzy brown kiwi skin. Wearing (every day): green sundress, straw sandals. Silhouette: fuzzy brown oval. Height: about 120 cm. Signature items: A thin gold chain around the neck, A sharp tailored charcoal suit. Character colours: brown, green.\n\nPERSONALITY: the dark brown ripe kiwi fruit: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "turnaround",
      "size": [
@@ -116,6 +146,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 549,
+      "limit": null,
+      "words": 549
+     },
      "id": "char_kiwilo",
      "kind": "sheet",
      "label": "Kiwilo — expressions",
@@ -124,7 +160,7 @@
       400
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark brown ripe kiwi fruit is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: a young woman. Build: small round kiwi body. Face: wide green eyes. Hair: short brown fuzz. Skin and surface: fuzzy brown kiwi skin. Wearing (every day): green sundress, straw sandals. Silhouette: fuzzy brown oval. Height: about 120 cm. Signature items: A thin gold chain around the neck, A sharp tailored charcoal suit. Character colours: brown, green.\n\nPERSONALITY: the dark brown ripe kiwi fruit: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "expressions",
      "size": [
@@ -137,6 +173,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 572,
+      "limit": null,
+      "words": 572
+     },
      "id": "char_mangella",
      "kind": "sheet",
      "label": "Mangella — portrait",
@@ -145,7 +187,7 @@
       640
      ],
      "negative_prompt": "",
-     "prompt": "Full-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the deep red ripe mango is an anthropomorphic character whose head is a whole deep red ripe mango serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult woman. Build: tall pear-shaped mango body. Face: sharp amber eyes. Hair: leafy green crown. Skin and surface: glossy mango skin. Wearing (every day): red silk blouse, gold hoops. Silhouette: smooth golden teardrop. Height: about 170 cm. Signature items: sparkling rhinestone crown hair clip, gold statement necklace. Character colours: gold, red.\n\nPERSONALITY: the deep red ripe mango: Manipulateur, Charmeur.\n\nFull-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
      "references": [],
      "role": "portrait",
      "size": [
@@ -158,6 +200,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 583,
+      "limit": null,
+      "words": 583
+     },
      "id": "char_mangella",
      "kind": "sheet",
      "label": "Mangella — turnaround",
@@ -166,7 +214,7 @@
       360
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the deep red ripe mango is an anthropomorphic character whose head is a whole deep red ripe mango serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult woman. Build: tall pear-shaped mango body. Face: sharp amber eyes. Hair: leafy green crown. Skin and surface: glossy mango skin. Wearing (every day): red silk blouse, gold hoops. Silhouette: smooth golden teardrop. Height: about 170 cm. Signature items: sparkling rhinestone crown hair clip, gold statement necklace. Character colours: gold, red.\n\nPERSONALITY: the deep red ripe mango: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "turnaround",
      "size": [
@@ -179,6 +227,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 538,
+      "limit": null,
+      "words": 538
+     },
      "id": "char_mangella",
      "kind": "sheet",
      "label": "Mangella — expressions",
@@ -187,7 +241,7 @@
       400
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the deep red ripe mango is an anthropomorphic character whose head is a whole deep red ripe mango serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult woman. Build: tall pear-shaped mango body. Face: sharp amber eyes. Hair: leafy green crown. Skin and surface: glossy mango skin. Wearing (every day): red silk blouse, gold hoops. Silhouette: smooth golden teardrop. Height: about 170 cm. Signature items: sparkling rhinestone crown hair clip, gold statement necklace. Character colours: gold, red.\n\nPERSONALITY: the deep red ripe mango: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "expressions",
      "size": [
@@ -200,6 +254,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 156,
+      "limit": null,
+      "words": 156
+     },
      "id": "place_la_piscine_de_la_trahison",
      "kind": "plate",
      "label": "La Piscine de la Trahison — day",
@@ -221,6 +281,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 156,
+      "limit": null,
+      "words": 156
+     },
      "id": "place_la_piscine_de_la_trahison",
      "kind": "plate",
      "label": "La Piscine de la Trahison — night",
@@ -242,6 +308,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 158,
+      "limit": null,
+      "words": 158
+     },
      "id": "place_le_parloir_des_secrets",
      "kind": "plate",
      "label": "Le Parloir des Secrets — day",
@@ -263,6 +335,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 158,
+      "limit": null,
+      "words": 158
+     },
      "id": "place_le_parloir_des_secrets",
      "kind": "plate",
      "label": "Le Parloir des Secrets — night",
@@ -284,6 +362,12 @@
     },
     {
      "entity": "props",
+     "fit": {
+      "dropped": [],
+      "full_words": 76,
+      "limit": null,
+      "words": 76
+     },
      "id": "prop_telephone_en_noix_de_coco",
      "kind": "prop",
      "label": "Téléphone en noix de coco — object",
@@ -1537,7 +1621,7 @@
    "story_id": "<story_id>",
    "title": "L'Île Tentafruit"
   },
-  "markdown_sha256": "0d86892d2b4648948fd2d3f803fb87ee98d19f526a6d523544ba4396cfa665fb"
+  "markdown_sha256": "ea0a52457107a4c477995a1022f125dd2998ec2946c48c588a35c184a1c79aa4"
  },
  "three_sheet": {
   "json": {
@@ -1551,6 +1635,12 @@
    "images": [
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 580,
+      "limit": null,
+      "words": 580
+     },
      "id": "char_broccolia",
      "kind": "sheet",
      "label": "Broccolia — portrait",
@@ -1559,7 +1649,7 @@
       640
      ],
      "negative_prompt": "",
-     "prompt": "Full-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark green cluster of tight broccoli florets is an anthropomorphic character whose head is a whole dark green cluster of tight broccoli florets serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult man. Build: stocky broccoli body. Face: small dark eyes. Hair: dense green florets. Skin and surface: matte green stalk. Wearing (every day): white tank top, swim shorts. Silhouette: green tree-like crown. Height: about 160 cm. Signature items: Rhombus crystal rhinestone headband microphone, Tailored emerald velvet evening gown. Character colours: green.\n\nPERSONALITY: the dark green cluster of tight broccoli florets: Manipulateur, Charmeur.\n\nFull-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
      "references": [],
      "role": "portrait",
      "size": [
@@ -1572,6 +1662,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 591,
+      "limit": null,
+      "words": 591
+     },
      "id": "char_broccolia",
      "kind": "sheet",
      "label": "Broccolia — turnaround",
@@ -1580,7 +1676,7 @@
       360
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark green cluster of tight broccoli florets is an anthropomorphic character whose head is a whole dark green cluster of tight broccoli florets serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult man. Build: stocky broccoli body. Face: small dark eyes. Hair: dense green florets. Skin and surface: matte green stalk. Wearing (every day): white tank top, swim shorts. Silhouette: green tree-like crown. Height: about 160 cm. Signature items: Rhombus crystal rhinestone headband microphone, Tailored emerald velvet evening gown. Character colours: green.\n\nPERSONALITY: the dark green cluster of tight broccoli florets: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "turnaround",
      "size": [
@@ -1593,6 +1689,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 546,
+      "limit": null,
+      "words": 546
+     },
      "id": "char_broccolia",
      "kind": "sheet",
      "label": "Broccolia — expressions",
@@ -1601,7 +1703,7 @@
       400
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark green cluster of tight broccoli florets is an anthropomorphic character whose head is a whole dark green cluster of tight broccoli florets serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult man. Build: stocky broccoli body. Face: small dark eyes. Hair: dense green florets. Skin and surface: matte green stalk. Wearing (every day): white tank top, swim shorts. Silhouette: green tree-like crown. Height: about 160 cm. Signature items: Rhombus crystal rhinestone headband microphone, Tailored emerald velvet evening gown. Character colours: green.\n\nPERSONALITY: the dark green cluster of tight broccoli florets: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "expressions",
      "size": [
@@ -1614,6 +1716,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 583,
+      "limit": null,
+      "words": 583
+     },
      "id": "char_kiwilo",
      "kind": "sheet",
      "label": "Kiwilo — portrait",
@@ -1622,7 +1730,7 @@
       640
      ],
      "negative_prompt": "",
-     "prompt": "Full-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark brown ripe kiwi fruit is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: a young woman. Build: small round kiwi body. Face: wide green eyes. Hair: short brown fuzz. Skin and surface: fuzzy brown kiwi skin. Wearing (every day): green sundress, straw sandals. Silhouette: fuzzy brown oval. Height: about 120 cm. Signature items: A thin gold chain around the neck, A sharp tailored charcoal suit. Character colours: brown, green.\n\nPERSONALITY: the dark brown ripe kiwi fruit: Manipulateur, Charmeur.\n\nFull-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
      "references": [],
      "role": "portrait",
      "size": [
@@ -1635,6 +1743,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 594,
+      "limit": null,
+      "words": 594
+     },
      "id": "char_kiwilo",
      "kind": "sheet",
      "label": "Kiwilo — turnaround",
@@ -1643,7 +1757,7 @@
       360
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark brown ripe kiwi fruit is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: a young woman. Build: small round kiwi body. Face: wide green eyes. Hair: short brown fuzz. Skin and surface: fuzzy brown kiwi skin. Wearing (every day): green sundress, straw sandals. Silhouette: fuzzy brown oval. Height: about 120 cm. Signature items: A thin gold chain around the neck, A sharp tailored charcoal suit. Character colours: brown, green.\n\nPERSONALITY: the dark brown ripe kiwi fruit: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "turnaround",
      "size": [
@@ -1656,6 +1770,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 549,
+      "limit": null,
+      "words": 549
+     },
      "id": "char_kiwilo",
      "kind": "sheet",
      "label": "Kiwilo — expressions",
@@ -1664,7 +1784,7 @@
       400
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark brown ripe kiwi fruit is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: a young woman. Build: small round kiwi body. Face: wide green eyes. Hair: short brown fuzz. Skin and surface: fuzzy brown kiwi skin. Wearing (every day): green sundress, straw sandals. Silhouette: fuzzy brown oval. Height: about 120 cm. Signature items: A thin gold chain around the neck, A sharp tailored charcoal suit. Character colours: brown, green.\n\nPERSONALITY: the dark brown ripe kiwi fruit: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "expressions",
      "size": [
@@ -1677,6 +1797,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 572,
+      "limit": null,
+      "words": 572
+     },
      "id": "char_mangella",
      "kind": "sheet",
      "label": "Mangella — portrait",
@@ -1685,7 +1811,7 @@
       640
      ],
      "negative_prompt": "",
-     "prompt": "Full-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the deep red ripe mango is an anthropomorphic character whose head is a whole deep red ripe mango serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult woman. Build: tall pear-shaped mango body. Face: sharp amber eyes. Hair: leafy green crown. Skin and surface: glossy mango skin. Wearing (every day): red silk blouse, gold hoops. Silhouette: smooth golden teardrop. Height: about 170 cm. Signature items: sparkling rhinestone crown hair clip, gold statement necklace. Character colours: gold, red.\n\nPERSONALITY: the deep red ripe mango: Manipulateur, Charmeur.\n\nFull-body character reference sheet, head to toe, front three-quarter view, neutral standing pose, arms relaxed: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Plain light grey background, even soft studio light. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; one character.",
      "references": [],
      "role": "portrait",
      "size": [
@@ -1698,6 +1824,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 583,
+      "limit": null,
+      "words": 583
+     },
      "id": "char_mangella",
      "kind": "sheet",
      "label": "Mangella — turnaround",
@@ -1706,7 +1838,7 @@
       360
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the deep red ripe mango is an anthropomorphic character whose head is a whole deep red ripe mango serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult woman. Build: tall pear-shaped mango body. Face: sharp amber eyes. Hair: leafy green crown. Skin and surface: glossy mango skin. Wearing (every day): red silk blouse, gold hoops. Silhouette: smooth golden teardrop. Height: about 170 cm. Signature items: sparkling rhinestone crown hair clip, gold statement necklace. Character colours: gold, red.\n\nPERSONALITY: the deep red ripe mango: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Turnaround sheet of this character, four full-body views side by side in one row, front, three-quarter, profile and back, head to toe in each: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Plain light grey background, flat even light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "turnaround",
      "size": [
@@ -1719,6 +1851,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 538,
+      "limit": null,
+      "words": 538
+     },
      "id": "char_mangella",
      "kind": "sheet",
      "label": "Mangella — expressions",
@@ -1727,7 +1865,7 @@
       400
      ],
      "negative_prompt": "",
-     "prompt": "Image 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the deep red ripe mango is an anthropomorphic character whose head is a whole deep red ripe mango serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult woman. Build: tall pear-shaped mango body. Face: sharp amber eyes. Hair: leafy green crown. Skin and surface: glossy mango skin. Wearing (every day): red silk blouse, gold hoops. Silhouette: smooth golden teardrop. Height: about 170 cm. Signature items: sparkling rhinestone crown hair clip, gold statement necklace. Character colours: gold, red.\n\nPERSONALITY: the deep red ripe mango: Manipulateur, Charmeur.\n\nImage 1 is this character's reference: keep identity, proportions and outfit exactly. Every cell shows the same head as image 1, never a different face. Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and outfit in every cell: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. Plain light grey background, even soft light, no labels. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "expressions",
      "size": [
@@ -1740,6 +1878,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 156,
+      "limit": null,
+      "words": 156
+     },
      "id": "place_la_piscine_de_la_trahison",
      "kind": "plate",
      "label": "La Piscine de la Trahison — day",
@@ -1761,6 +1905,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 156,
+      "limit": null,
+      "words": 156
+     },
      "id": "place_la_piscine_de_la_trahison",
      "kind": "plate",
      "label": "La Piscine de la Trahison — night",
@@ -1782,6 +1932,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 158,
+      "limit": null,
+      "words": 158
+     },
      "id": "place_le_parloir_des_secrets",
      "kind": "plate",
      "label": "Le Parloir des Secrets — day",
@@ -1803,6 +1959,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 158,
+      "limit": null,
+      "words": 158
+     },
      "id": "place_le_parloir_des_secrets",
      "kind": "plate",
      "label": "Le Parloir des Secrets — night",
@@ -1824,6 +1986,12 @@
     },
     {
      "entity": "props",
+     "fit": {
+      "dropped": [],
+      "full_words": 76,
+      "limit": null,
+      "words": 76
+     },
      "id": "prop_telephone_en_noix_de_coco",
      "kind": "prop",
      "label": "Téléphone en noix de coco — object",
@@ -3077,7 +3245,7 @@
    "story_id": "<story_id>",
    "title": "L'Île Tentafruit"
   },
-  "markdown_sha256": "855cf3ae7b61c64fb16f6673d93ecc6939c8f2c05766d985ece97f5830b289a2"
+  "markdown_sha256": "bcd180366bc53796f19f0810d87d4d69092738fc4e66884d07839f4699472cf8"
  },
  "two_view": {
   "json": {
@@ -3091,6 +3259,12 @@
    "images": [
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 668,
+      "limit": null,
+      "words": 668
+     },
      "id": "char_broccolia",
      "kind": "sheet",
      "label": "Broccolia — character sheet (front and back)",
@@ -3099,7 +3273,7 @@
       960
      ],
      "negative_prompt": "",
-     "prompt": "A character reference sheet showing two full-body views of the same character side by side, separated by a clean vertical line in the centre. LEFT HALF: full frontal view head to toe facing the camera. RIGHT HALF: full back view head to toe. Never cut the character in half across the line. Never more than two views. Never crop a view. Character: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Fully dressed from shoulders to feet: a complete top, a complete bottom (trousers, or a skirt or dress below the knee) and shoes; no bare legs, no visible underwear. Plain light grey background, soft uniform light, no text, no grid, no labels. Adult proportions, never chibi. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark green cluster of tight broccoli florets is an anthropomorphic character whose head is a whole dark green cluster of tight broccoli florets serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult man. Build: stocky broccoli body. Face: small dark eyes. Hair: dense green florets. Skin and surface: matte green stalk. Wearing (every day): white tank top, swim shorts. Silhouette: green tree-like crown. Height: about 160 cm. Signature items: Rhombus crystal rhinestone headband microphone, Tailored emerald velvet evening gown. Character colours: green.\n\nPERSONALITY: the dark green cluster of tight broccoli florets: Manipulateur, Charmeur.\n\nA character reference sheet showing two full-body views of the same character side by side, separated by a clean vertical line in the centre. LEFT HALF: full frontal view head to toe facing the camera. RIGHT HALF: full back view head to toe. Never cut the character in half across the line. Never more than two views. Never crop a view. Character: an adult man, stocky broccoli body, green tree-like crown, small dark eyes, dense green florets, matte green stalk, wearing white tank top, swim shorts, colours green, with rhombus crystal rhinestone headband microphone and tailored emerald velvet evening gown. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Fully dressed from shoulders to feet: a complete top, a complete bottom (trousers, or a skirt or dress below the knee) and shoes; no bare legs, no visible underwear. Plain light grey background, soft uniform light, no text, no grid, no labels. Adult proportions, never chibi. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "sheet_two_view",
      "size": [
@@ -3112,6 +3286,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 671,
+      "limit": null,
+      "words": 671
+     },
      "id": "char_kiwilo",
      "kind": "sheet",
      "label": "Kiwilo — character sheet (front and back)",
@@ -3120,7 +3300,7 @@
       960
      ],
      "negative_prompt": "",
-     "prompt": "A character reference sheet showing two full-body views of the same character side by side, separated by a clean vertical line in the centre. LEFT HALF: full frontal view head to toe facing the camera. RIGHT HALF: full back view head to toe. Never cut the character in half across the line. Never more than two views. Never crop a view. Character: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Fully dressed from shoulders to feet: a complete top, a complete bottom (trousers, or a skirt or dress below the knee) and shoes; no bare legs, no visible underwear. Plain light grey background, soft uniform light, no text, no grid, no labels. Adult proportions, never chibi. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the dark brown ripe kiwi fruit is an anthropomorphic character whose head is a whole dark brown ripe kiwi fruit serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: a young woman. Build: small round kiwi body. Face: wide green eyes. Hair: short brown fuzz. Skin and surface: fuzzy brown kiwi skin. Wearing (every day): green sundress, straw sandals. Silhouette: fuzzy brown oval. Height: about 120 cm. Signature items: A thin gold chain around the neck, A sharp tailored charcoal suit. Character colours: brown, green.\n\nPERSONALITY: the dark brown ripe kiwi fruit: Manipulateur, Charmeur.\n\nA character reference sheet showing two full-body views of the same character side by side, separated by a clean vertical line in the centre. LEFT HALF: full frontal view head to toe facing the camera. RIGHT HALF: full back view head to toe. Never cut the character in half across the line. Never more than two views. Never crop a view. Character: a young woman, small round kiwi body, fuzzy brown oval, wide green eyes, short brown fuzz, fuzzy brown kiwi skin, wearing green sundress, straw sandals, colours brown and green, with a thin gold chain around the neck and a sharp tailored charcoal suit. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Fully dressed from shoulders to feet: a complete top, a complete bottom (trousers, or a skirt or dress below the knee) and shoes; no bare legs, no visible underwear. Plain light grey background, soft uniform light, no text, no grid, no labels. Adult proportions, never chibi. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "sheet_two_view",
      "size": [
@@ -3133,6 +3313,12 @@
     },
     {
      "entity": "characters",
+     "fit": {
+      "dropped": [],
+      "full_words": 660,
+      "limit": null,
+      "words": 660
+     },
      "id": "char_mangella",
      "kind": "sheet",
      "label": "Mangella — character sheet (front and back)",
@@ -3141,7 +3327,7 @@
       960
      ],
      "negative_prompt": "",
-     "prompt": "A character reference sheet showing two full-body views of the same character side by side, separated by a clean vertical line in the centre. LEFT HALF: full frontal view head to toe facing the camera. RIGHT HALF: full back view head to toe. Never cut the character in half across the line. Never more than two views. Never crop a view. Character: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Fully dressed from shoulders to feet: a complete top, a complete bottom (trousers, or a skirt or dress below the knee) and shoes; no bare legs, no visible underwear. Plain light grey background, soft uniform light, no text, no grid, no labels. Adult proportions, never chibi. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
+     "prompt": "SERIES: Logline: Sur une île de téléréalité, des fruits forment des couples et complotent pour survivre au vote hebdomadaire. Tone: Sombre, cynique, satirique.\n\nSERIES LORE: Premise: Chaque semaine, un couple est éliminé. Le the polished half coconut shell shaped like a vintage telephone with annonce le vote.\n\nART STYLE: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. Character design rules: The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Environment rules: real-world sets — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like a reality-TV show or a live-action comedy, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals. Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink backgrounds.\n\nPALETTE COLOURS: Primary: #F2C14E, #E4572E, #3A7D44. Accents: #FFFFFF, #1E1E24.\n\nCAMERA AND LIGHT: Camera: telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals. Finish: ultra detailed, 8k, sharp focus.\n\nCHARACTER: the deep red ripe mango is an anthropomorphic character whose head is a whole deep red ripe mango serving as a human-scale, the face carved into its surface, never a human head. Apparent age and gender: an adult woman. Build: tall pear-shaped mango body. Face: sharp amber eyes. Hair: leafy green crown. Skin and surface: glossy mango skin. Wearing (every day): red silk blouse, gold hoops. Silhouette: smooth golden teardrop. Height: about 170 cm. Signature items: sparkling rhinestone crown hair clip, gold statement necklace. Character colours: gold, red.\n\nPERSONALITY: the deep red ripe mango: Manipulateur, Charmeur.\n\nA character reference sheet showing two full-body views of the same character side by side, separated by a clean vertical line in the centre. LEFT HALF: full frontal view head to toe facing the camera. RIGHT HALF: full back view head to toe. Never cut the character in half across the line. Never more than two views. Never crop a view. Character: an adult woman, tall pear-shaped mango body, smooth golden teardrop, sharp amber eyes, leafy green crown, glossy mango skin, wearing red silk blouse, gold hoops, colours gold and red, with sparkling rhinestone crown hair clip and gold statement necklace. Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin. The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image. Fully dressed from shoulders to feet: a complete top, a complete bottom (trousers, or a skirt or dress below the knee) and shoes; no bare legs, no visible underwear. Plain light grey background, soft uniform light, no text, no grid, no labels. Adult proportions, never chibi. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; the same single character throughout.",
      "references": [],
      "role": "sheet_two_view",
      "size": [
@@ -3154,6 +3340,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 156,
+      "limit": null,
+      "words": 156
+     },
      "id": "place_la_piscine_de_la_trahison",
      "kind": "plate",
      "label": "La Piscine de la Trahison — day",
@@ -3175,6 +3367,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 156,
+      "limit": null,
+      "words": 156
+     },
      "id": "place_la_piscine_de_la_trahison",
      "kind": "plate",
      "label": "La Piscine de la Trahison — night",
@@ -3196,6 +3394,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 158,
+      "limit": null,
+      "words": 158
+     },
      "id": "place_le_parloir_des_secrets",
      "kind": "plate",
      "label": "Le Parloir des Secrets — day",
@@ -3217,6 +3421,12 @@
     },
     {
      "entity": "places",
+     "fit": {
+      "dropped": [],
+      "full_words": 158,
+      "limit": null,
+      "words": 158
+     },
      "id": "place_le_parloir_des_secrets",
      "kind": "plate",
      "label": "Le Parloir des Secrets — night",
@@ -3238,6 +3448,12 @@
     },
     {
      "entity": "props",
+     "fit": {
+      "dropped": [],
+      "full_words": 76,
+      "limit": null,
+      "words": 76
+     },
      "id": "prop_telephone_en_noix_de_coco",
      "kind": "prop",
      "label": "Téléphone en noix de coco — object",
@@ -4491,6 +4707,6 @@
    "story_id": "<story_id>",
    "title": "L'Île Tentafruit"
   },
-  "markdown_sha256": "cfab38b937b8f38b9581355eb738c26166ed1dbd1c302ae888b8c8f2c27fed7e"
+  "markdown_sha256": "deca517ef731d7923c5e78482cf3faebfb8955df863000df8eb0b943e7ce4290"
  }
 }

@@ -20,9 +20,11 @@ own guides ask for one focused paragraph. So a keyframe stops at 320 words
 (the T5 window), a clip at 160 (twice the 80 that animated well, room for
 the beat's emotion, the micro-actions and the camera's intent, under the
 230 words of our own seedance cap), an ambience clip at 160 plus the sound
-brief's 60-word share, a sheet at 200 (one character and the design rules),
-a plate at 220 (a whole set: layout, light, scale, dressing) and a prop at
-120 (one object). Every link of the quality preset accepts more than any
+brief's 60-word share, and a sheet at 200 (one character and the design
+rules). Plan 26 (H1) dropped the plate's, the prop's and the two-view sheet's
+ceilings: those images carry no hash, their link bounds them (their fixed
+number with no link known); the sheet's stays, as it bounds a turnaround
+the image brief pins. Every link of the quality preset accepts more than any
 ceiling (seedream 461 words, nano-banana 5041, Veo 630, kling 384, seedance
 230), so there the ceiling is the budget; a live limit fal publishes under it
 (``provider_limits.json``) wins, and the ladder in ``shots`` fits the prompt
@@ -52,24 +54,22 @@ KEYFRAME_CEILING_WORDS = 320
 CLIP_CEILING_WORDS = 160
 CLIP_AUDIO_CEILING_WORDS = CLIP_CEILING_WORDS + prompting.CLIP_AUDIO_SHARE_WORDS
 SHEET_CEILING_WORDS = 200
-# Plan 23 stage D4: the two-view sheet's skeleton alone is ~150 words.
-TWO_VIEW_CEILING_WORDS = 280
-PLATE_CEILING_WORDS = 220
-PROP_CEILING_WORDS = 120
 
 
 def _label(link):
     return link if isinstance(link, str) or link is None else describe(link)
 
 
-def words_for(link, *, default, ceiling, live=None) -> int:
+def words_for(link, *, default, ceiling=None, live=None) -> int:
     """The word budget of a prompt on *link* (a link or its label): its
-    ``prompt_limits.budget_words`` bounded by *ceiling*; *default* with no
-    link, or a link with no known limit. *live* as ``prompt_limits.limit_for``'s."""
+    ``prompt_limits.budget_words`` bounded by *ceiling* (None: by the link
+    alone); *default* with no link, or a link with no known limit. *live* as
+    ``prompt_limits.limit_for``'s."""
     label = _label(link)
     if not label:
         return default
-    return min(prompt_limits.budget_words(label, default=default, live=live), ceiling)
+    words = prompt_limits.budget_words(label, default=default, live=live)
+    return words if ceiling is None else min(words, ceiling)
 
 
 def keyframe_words(link, *, live=None) -> int:
@@ -103,18 +103,19 @@ def sheet_words(link, *, live=None) -> int:
 
 
 def two_view_words(link, *, live=None) -> int:
-    """A v2 two-view character sheet prompt's budget on *link* (plan 23 stage D4)."""
-    return words_for(link, default=prompting.TWO_VIEW_V2_MAX_WORDS, ceiling=TWO_VIEW_CEILING_WORDS, live=live)
+    """A v2 two-view character sheet prompt's budget on *link* (plan 23 stage
+    D4): the link's own, no ceiling (plan 26); the fixed number with none."""
+    return words_for(link, default=prompting.TWO_VIEW_V2_MAX_WORDS, live=live)
 
 
 def plate_words(link, *, live=None) -> int:
-    """A v2 plate prompt's budget on *link*."""
-    return words_for(link, default=prompting.PLATE_V2_MAX_WORDS, ceiling=PLATE_CEILING_WORDS, live=live)
+    """A v2 plate prompt's budget on *link*: the link's own, no ceiling (plan 26)."""
+    return words_for(link, default=prompting.PLATE_V2_MAX_WORDS, live=live)
 
 
 def prop_words(link, *, live=None) -> int:
-    """A v2 prop reference prompt's budget on *link*."""
-    return words_for(link, default=prompting.PROP_V2_MAX_WORDS, ceiling=PROP_CEILING_WORDS, live=live)
+    """A v2 prop reference prompt's budget on *link*: the link's own, no ceiling (plan 26)."""
+    return words_for(link, default=prompting.PROP_V2_MAX_WORDS, live=live)
 
 
 # ------------------------------------------------- the whole prompt, unbounded but by its link (plan 26)

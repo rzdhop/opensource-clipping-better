@@ -667,13 +667,30 @@ def entity_image_slot(story_id, kind, eid, slot, *, variant_id=None) -> str:
     return f"/api/stories/{story_id}/props/{eid}/image"
 
 
+def _sent_entry(entry, story, sent):
+    """*entry* with its prompt the sent one (plan 26 H1) and, on a v2 story, its ``fit``."""
+    entry["prompt"] = sent["text"]
+    if media_policy.is_v2(story):
+        entry["fit"] = {key: sent[key] for key in ("limit", "words", "full_words", "dropped")}
+    return entry
+
+
 def _entity_entries(stories, story, *, env):
     """The image brief's entries for the cast sheets, place plates and props
-    (a refimages prompt each, as the cast and places steps would ask it)."""
+    (a refimages prompt each, as the cast and places steps would ask it):
+    on a v2 story (plan 26 H1) the series, the style and the entity's own
+    paragraph before it (``refimages._sent`` on the manual link: nothing
+    dropped), with its ``fit``."""
     from .. import imaging, refimages
 
     story_id = story["story_id"]
     lock = imaging.read_lock(stories, story_id, error=refimages.RefImageError)
+    roster = refimages._story_entities(stories, story_id)
+
+    def sent(kind, doc, core, variant=None):
+        return refimages._sent(story, lock, kind, doc, core, links=[gen.MANUAL_LINK], variant=variant,
+                               entities=roster)
+
     entries = []
     for character in stories.list_entities(story_id, "characters"):
         if not character.get("descriptor") or not character.get("signature_items"):
@@ -682,47 +699,55 @@ def _entity_entries(stories, story, *, env):
             entry = character["refs"].get(which)
             # Plan 23 stage D4: a two-view story's portrait slot holds the front+back sheet.
             two_view = which == "portrait" and media_policy.two_view(story)
-            entries.append({
+            core = refimages.character_prompt(story, character, which, env=env, lock=lock)
+            entries.append(_sent_entry({
                 "kind": "sheet", "entity": "characters", "id": character["char_id"], "slot": which,
                 "label": (f"{character['name']} — character sheet (front and back)" if two_view
                           else f"{character['name']} — {which}"),
                 "role": "sheet_two_view" if two_view else which,
-                "prompt": refimages.character_prompt(story, character, which, env=env, lock=lock),
+                "prompt": core,
                 "state": "uploaded" if entry else "missing",
-                "upload_slot": entity_image_slot(story_id, "characters", character["char_id"], which)})
+                "upload_slot": entity_image_slot(story_id, "characters", character["char_id"], which)},
+                story, sent("character", character, core)))
         if character.get("variants") and media_policy.variants_enabled(story):
-            entries += _variant_entries(stories, story, character, env=env, lock=lock)
+            entries += _variant_entries(stories, story, character, env=env, lock=lock, roster=roster)
     for place in stories.list_entities(story_id, "places"):
         if not place.get("descriptor"):
             continue
         variants = list(dict.fromkeys([refimages.MASTER_PLATE] + list(place.get("time_variants") or {})))
         for variant in variants:
-            entries.append({
+            core = refimages.place_prompt(stories, story, place, variant, env=env, lock=lock)
+            entries.append(_sent_entry({
                 "kind": "plate", "entity": "places", "id": place["place_id"], "slot": variant,
                 "label": f"{place['name']} — {variant.replace('_', ' ')}", "role": "plate",
-                "prompt": refimages.place_prompt(stories, story, place, variant, env=env, lock=lock),
+                "prompt": core,
                 "state": "uploaded" if (place.get("time_variants") or {}).get(variant) else "missing",
-                "upload_slot": entity_image_slot(story_id, "places", place["place_id"], variant)})
+                "upload_slot": entity_image_slot(story_id, "places", place["place_id"], variant)},
+                story, sent("place", place, core, variant)))
     for prop in stories.list_entities(story_id, "props"):
         if not prop.get("descriptor"):
             continue
-        entries.append({
+        core = refimages.prop_prompt(story, prop, env=env, lock=lock)
+        entries.append(_sent_entry({
             "kind": "prop", "entity": "props", "id": prop["prop_id"], "slot": "image",
             "label": f"{prop['name']} — object", "role": "prop",
-            "prompt": refimages.prop_prompt(story, prop, env=env, lock=lock),
+            "prompt": core,
             "state": "uploaded" if prop.get("image") else "missing",
-            "upload_slot": entity_image_slot(story_id, "props", prop["prop_id"], "image")})
+            "upload_slot": entity_image_slot(story_id, "props", prop["prop_id"], "image")},
+            story, sent("prop", prop, core)))
     return entries
 
 
-def _variant_entries(stories, story, character, *, env, lock):
+def _variant_entries(stories, story, character, *, env, lock, roster=None):
     """The image brief's entries for *character*'s appearance variants
     (plan 23 D5 follow-up): one per variant per sheet the story's sheet
     mode draws, labelled as the shot brief labels a variant's sheet, asked
     the prompt :func:`refimages.variant_image` would send -- an edit of the
     base portrait, named in ``reference`` (None while it is not on disk) --
     and uploaded on the sheet route with ``&variant=<vid>``. None without a
-    look (a variant is drawn from it)."""
+    look (a variant is drawn from it). The prompt is ``refimages._sent``'s
+    on the manual link, as :func:`_entity_entries`' (*roster*: the story's
+    entities, read when not given)."""
     from .. import refimages
 
     if not character.get("look"):
@@ -741,22 +766,26 @@ def _variant_entries(stories, story, character, *, env, lock):
             reference = {"kind": "sheet", "label": f"{character['name']} — character sheet ({front})",
                          "path": f"characters/{char_id}/refs/{portrait['name']}", "name": portrait["name"],
                          "url": f"/api/stories/{story_id}/media/characters/{char_id}/{portrait['name']}"}
+    if roster is None:
+        roster = refimages._story_entities(stories, story_id)
     entries = []
     for variant in character["variants"]:
         for which in refimages.character_images(story):
             two_view = which == "portrait" and media_policy.two_view(story)
             sheet = "front and back" if two_view else which
-            entries.append({
+            core = refimages.variant_prompt(story, character, variant, which, env=env, lock=lock, names=names)
+            sent = refimages._sent(story, lock, "character", character, core, links=[gen.MANUAL_LINK],
+                                   variant=variant["variant_id"], entities=roster)
+            entries.append(_sent_entry({
                 "kind": "sheet", "entity": "characters", "id": f"{char_id}:{variant['variant_id']}", "slot": which,
                 "variant_id": variant["variant_id"], "variant_label": variant["label"],
                 "label": f"{character['name']} ({variant['label']}) — character sheet ({sheet})",
                 "role": "sheet_two_view" if two_view else which,
-                "prompt": refimages.variant_prompt(story, character, variant, which, env=env, lock=lock,
-                                                   names=names),
+                "prompt": core,
                 "reference": reference,
                 "state": "uploaded" if (variant.get("refs") or {}).get(which) else "missing",
                 "upload_slot": entity_image_slot(story_id, "characters", char_id, which,
-                                                 variant_id=variant["variant_id"])})
+                                                 variant_id=variant["variant_id"])}, story, sent))
     return entries
 
 

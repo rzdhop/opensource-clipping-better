@@ -69,11 +69,13 @@ def test_each_kind_takes_its_links_budget_bounded_by_its_ceiling_and_todays_numb
     assert pb.clip_audio_words(VEO, live=NO_LIVE) == pb.CLIP_AUDIO_CEILING_WORDS == 220
     assert pb.clip_audio_words(None) == prompting.CLIP_AUDIO_MAX_WORDS == 140
     assert pb.clip_audio_words(SEEDANCE, live=_live(SEEDANCE, 650)) == 100
-    # The sheets, plates and props on seedream get more room than their fixed caps.
+    # The sheets, plates and props on seedream get more room than their fixed caps: the sheet up to its
+    # ceiling; the plate and the prop the link's own (plan 26 H1 dropped their ceilings, no hash on them).
     seedream = "fal/seedream-4.5"
     assert pb.sheet_words(seedream, live=NO_LIVE) == pb.SHEET_CEILING_WORDS == 200 > prompting.SHEET_V2_MAX_WORDS
-    assert pb.plate_words(seedream, live=NO_LIVE) == pb.PLATE_CEILING_WORDS == 220 > prompting.PLATE_V2_MAX_WORDS
-    assert pb.prop_words(seedream, live=NO_LIVE) == pb.PROP_CEILING_WORDS == 120 > prompting.PROP_V2_MAX_WORDS
+    assert pb.plate_words(seedream, live=NO_LIVE) == pb.prop_words(seedream, live=NO_LIVE) == 461
+    assert pb.plate_words(seedream, live=_live(seedream, 650)) == 100 < prompting.PLATE_V2_MAX_WORDS
+    assert not hasattr(pb, "PLATE_CEILING_WORDS") and not hasattr(pb, "PROP_CEILING_WORDS")
     assert (pb.sheet_words(None), pb.plate_words(None), pb.prop_words(None)) == (130, 150, 80)
     # The pair the shots module is given: the numbers and the links they came from.
     budgets = pb.for_links(SEEDREAM_EDIT, VEO, live=NO_LIVE)

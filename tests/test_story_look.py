@@ -417,12 +417,14 @@ def test_v2_cast_runs_k1_d1_d2_then_the_sheets_and_a_legacy_story_makes_no_d1_or
     _run_cast(store, v2_id, llm, events, image)
     assert events == ["K1", "D1", "D2", "image:portrait", "image:turnaround", "image:expressions",
                       "K1", "D1", "D2", "image:portrait", "image:turnaround", "image:expressions"]
-    # The sheets are drawn from the look: a full-body portrait, then edits of it.
+    # The sheets are drawn from the look: a full-body portrait, then edits of it -- each core last, after
+    # the series, the style and the character (plan 26 H1).
     portrait, turnaround, expressions = image.requests[:3]
-    assert portrait.prompt.startswith("Full-body character reference sheet, head to toe")
+    assert portrait.prompt.startswith("SERIES:")
+    assert portrait.prompt.split("\n\n")[-1].startswith("Full-body character reference sheet, head to toe")
     assert "wearing white linen shirt, gold chain" in portrait.prompt and "Kiwilo" not in portrait.prompt
-    assert turnaround.prompt.startswith("Image 1 is this character's reference")
-    assert expressions.prompt.startswith("Image 1 is this character's reference")
+    assert turnaround.prompt.split("\n\n")[-1].startswith("Image 1 is this character's reference")
+    assert expressions.prompt.split("\n\n")[-1].startswith("Image 1 is this character's reference")
     assert turnaround.kind == "image_edit" and len(turnaround.references) == 1
     chars = {doc["char_id"]: doc for doc in store.list_entities(v2_id, "characters")}
     assert chars["char_kiwilo"]["look"]["height_cm"] == 175 and chars["char_kiwilo"]["look"]["season_change"] is None
@@ -499,13 +501,15 @@ def test_v2_places_run_p1_d3_plate_then_r1_r1v2_prop_image(tmp_path, hermetic):
 
     assert events == ["P1", "D3", "image:variant_day", "R1", "R1v2", "image:image"]
     plate, prop_image = (request.prompt for request in image.requests)
-    assert plate.startswith("Establishing wide shot of an empty set, day, no people, no characters:")
+    # Plan 26 H1: the core last, after the series, the style and the place.
+    assert plate.split("\n\n")[-1].startswith("Establishing wide shot of an empty set, day, no people, no characters:")
     assert "on the left palm-leaf huts" in plate and "hard tropical sun" in plate
     assert "Plage" not in plate and "Coco" not in plate
     # A1 (phase 7 quality overhaul): the reference image carries no scale phrase (it invited a hand
     # holding the object for a size reference) -- "fits in one hand" stays out of this prompt, even
     # though R1v2 wrote it as the prop's scale_phrase; render_prop keeps it for a keyframe instead.
-    assert prop_image.startswith("Reference image of the object alone on a plain surface, nothing holding it")
+    assert prop_image.split("\n\n")[-1].startswith(
+        "Reference image of the object alone on a plain surface, nothing holding it")
     assert "fits in one hand" not in prop_image and "a hollow coconut with a curly cord and a brass dial" in prop_image
     # Kiwilo's height went to R1v2; D3's prop and R1v2's names became ids.
     assert "Owner: Kiwilo (lean human body; 175 cm tall)" in llm.of("R1v2")[0]["user"]

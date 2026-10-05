@@ -81,11 +81,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from clipping.providers import adapters as adapters_mod
-from clipping.providers import gating
+from clipping.providers import gating, prompt_limits
 from clipping.providers import generation as gen
 from clipping.providers.registry import ChainError
 
-from . import defaults, imaging, media_policy, prompt_budgets, prompting, schemas, shots
+from . import defaults, imaging, media_policy, prompt_budgets, prompt_templates, prompting, schemas, shots
 from . import names as names_mod
 from . import uploads as uploads_mod
 
@@ -375,6 +375,60 @@ def _first_link(story, role, kind, env):
     except ChainError:
         return None
     return gen.describe(chain[0]) if chain else None
+
+
+def _chain_labels(story, role, kind, env) -> list:
+    """The labels of the chain an image of *role* and *kind* goes to on
+    *story* (``media_policy.role_chain``), ``[]`` when it cannot be read --
+    :func:`_make` then says why, before anything is sent."""
+    try:
+        chain = media_policy.role_chain(role, kind, gating.merged_env(env), story)
+    except ChainError:
+        return []
+    return [gen.describe(link) for link in chain]
+
+
+def _derived_kind(story) -> str:
+    """The kind of an image :func:`_derived` asks: an edit, or text to image in ``prompt_only`` mode."""
+    return gen.IMAGE if story["generation_profile"]["consistency_mode"] == PROMPT_ONLY else gen.IMAGE_EDIT
+
+
+def _story_entities(stories, story_id) -> dict:
+    """``{"characters": {id: doc}, "places": ..., "props": ...}`` of the story
+    (``prompt_templates.entity_prompt``'s *entities*: the name sweep, a prop's owner)."""
+    ids = {CHARACTERS: "char_id", PLACES: "place_id", PROPS: "prop_id"}
+    return {kind: {doc[key]: doc for doc in stories.list_entities(story_id, kind)} for kind, key in ids.items()}
+
+
+def _sent(story, style_lock, kind, doc, core, *, links, variant=None, entities=None, live=None) -> dict:
+    """The prompt sent for an entity's image (plan 26 H1): on a v2 story,
+    for a *doc* drawn from its look (the v2 builders' *core*), SERIES + ART
+    STYLE + that entity's own paragraph before *core* -- unchanged and last,
+    its note included -- (``prompt_templates.entity_prompt``; *kind*
+    ``character``, ``place`` or ``prop``; *variant* a character's appearance
+    variant or a place's time variant), fitted to the smallest bound of
+    *links* (the role chain's labels, ``prompt_budgets.chain_words``: a
+    prompt fitted to the first would be refused by a smaller fallback and
+    lose the chain) and every bounded link's own check; else *core* alone,
+    as it always was. ``{text, words, full_words, limit, dropped: [label]}``.
+    A sheet carries no hash: nothing made turns stale. A prop's own reference
+    image is told neither its scale nor its owner (A1, ``shots.render_prop``'s
+    ``for_reference``: nothing in frame to judge scale against, so a size
+    there invited a hand holding the object, and an owner a character)."""
+    if not media_policy.is_v2(story) or not doc.get("look"):
+        words = len(core.split())
+        return {"text": core, "words": words, "full_words": words, "limit": None, "dropped": []}
+    if kind == "prop":
+        look = {key: value for key, value in doc["look"].items() if key not in ("scale_phrase", "scale_cm")}
+        doc = dict(doc, look=look, owner_char_id=None)
+    labels = [label for label in links or () if label]
+    limit = prompt_budgets.chain_words(labels, live=live)
+    bounded = [label for label in labels
+               if not label.startswith(prompt_budgets.UNBOUNDED_PREFIXES)
+               and prompt_limits.limit_for(label, live=live) is not None]
+    fits = (lambda text: all(prompt_limits.fits(label, text, live=live)[0] for label in bounded)) if bounded else None
+    return prompt_templates.entity_prompt(story, style_lock, kind, doc, core, limit_words=limit, fits=fits,
+                                          variant=variant, entities=entities)
 
 
 def _remove_other_extensions(stories, story_id, kind, eid, stem, keep) -> None:
@@ -695,6 +749,10 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     size = character_size(story, which)
 
     override = seed
+    # Plan 26 H1: the series, the style and this character before the core, fitted to its chain.
+    kind = gen.IMAGE if which == "portrait" else _derived_kind(story)
+    prompt = _sent(story, lock, "character", character, prompt, links=_chain_labels(story, "sheet", kind, env),
+                   entities=_story_entities(stories, story_id))["text"]
     if which == "portrait":
         seed = override if override is not None else character["ref_seed"]
         if seed is None:
@@ -839,6 +897,10 @@ def variant_image(stories, story_id, char_id, variant_id, which, *, env, on_log,
     if seed is None:
         seed = variant_seed(story_id, char_id, variant_id)
     stem = f"{which}_{variant_id}"
+    # Plan 26 H1: the series, the style and this character in its variant before the core.
+    prompt = _sent(story, lock, "character", character, prompt,
+                   links=_chain_labels(story, "sheet", _derived_kind(story), env), variant=variant_id,
+                   entities=_story_entities(stories, story_id))["text"]
     plan = _derived(story, subject=subject, prompt=prompt, size=character_size(story, which), seed=seed,
                     references=[portrait_path], stem=stem, step=variant_step(char_id, variant_id, which),
                     source="the portrait", role="sheet")
@@ -925,6 +987,10 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
     stem = f"variant_{variant}"
     plate = place["time_variants"].get(MASTER_PLATE)
     override = seed
+    # Plan 26 H1: the series, the style and this place in its light before the core, fitted to its chain.
+    kind = gen.IMAGE if variant == MASTER_PLATE else _derived_kind(story)
+    prompt = _sent(story, lock, "place", place, prompt, links=_chain_labels(story, "plate", kind, env),
+                   variant=variant, entities=_story_entities(stories, story_id))["text"]
 
     if variant == MASTER_PLATE:
         seed = override if override is not None else _seed_of(plate)
@@ -1005,6 +1071,9 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, se
         seed = _seed_of(prop["image"])
     if seed is None:
         seed = image_seed(story_id, PROPS, prop_id)
+    # Plan 26 H1: the series, the style and this prop before the core, fitted to its chain.
+    prompt = _sent(story, lock, "prop", prop, prompt, links=_chain_labels(story, "prop", gen.IMAGE, env),
+                   entities=_story_entities(stories, story_id))["text"]
     plan = _Plan(subject, gen.IMAGE, prompt, PROP_SIZE, seed, (), BASE, "image", f"prop_image:{prop_id}",
                  f"{media_policy.chain_name('prop', gen.IMAGE, story)}, text to image", role="prop")
 

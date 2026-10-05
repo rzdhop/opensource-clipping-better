@@ -287,3 +287,135 @@ def test_the_keyframe_fit_line_says_keyframe():
     line = assets._fit_line("sh04", "fal/seedream-4.5-edit", {"limit": 461, "words": 455, "full_words": 700,
                                                               "dropped": ["Chloe"]}, kind="keyframe")
     assert line.startswith("ℹ️ Shot sh04's keyframe prompt: fal/seedream-4.5-edit accepts 461 words: 700 → 455")
+
+
+# ================================================================ the sheets, plates and props (stage 4b)
+
+class _Stop(Exception):
+    """Raised by the fake ``refimages._make``: the plan is all a test reads."""
+
+
+def _plans(monkeypatch):
+    from clipping.aistory import refimages
+
+    plans = []
+
+    def fake_make(stories, story, plan, **_kwargs):
+        plans.append(plan)
+        raise _Stop()
+
+    monkeypatch.setattr(refimages, "_make", fake_make)
+    return plans
+
+
+def _planned(call):
+    try:
+        call()
+    except _Stop:
+        pass
+
+
+def _live_for(monkeypatch, labels, chars):
+    from clipping.providers import prompt_limits
+
+    live = {label: {"status": prompt_limits.PUBLISHED, "prompt_max_chars": chars, "endpoint": label,
+                    "read_at": "2026-10-05T00:00:00+00:00"} for label in labels}
+    monkeypatch.setattr(prompt_limits, "read_live", lambda path=None: live)
+
+
+def test_a_sheet_request_carries_the_series_style_and_character_before_the_v2_core(tmp_path, monkeypatch):
+    """Fail-first. ``character_image``'s plan: the series, the art style and
+    this character's paragraph before the v2 core (the note's tail last),
+    fitted to the smallest bound of the sheet chain (a fallback never
+    refuses it); with the table's Seedream cap the core alone fits."""
+    import test_story_episode_steps as eps
+    import test_story_variant_shots as tvs
+    from clipping.aistory import imaging, prompt_budgets, refimages
+    from clipping.providers import generation as gen
+    from clipping.providers import prompt_limits
+
+    store = eps.StoryStore(tmp_path / "outputs", on_log=lambda line: None)
+    story_id = tvs._speech_story(store)
+    story = store.get(story_id)
+    env = tas._settings(**tas.FAL)
+    lock = imaging.read_lock(store, story_id, error=refimages.RefImageError)
+    character = store.read_entity(story_id, "characters", eps.KIWILO)
+    labels = refimages._chain_labels(story, "sheet", gen.IMAGE, env)
+    assert len(labels) > 1
+    core = refimages.character_prompt(story, character, "portrait", env=env, lock=lock)
+
+    def portrait(note=None):
+        _planned(lambda: refimages.character_image(store, story_id, eps.KIWILO, "portrait", env=env,
+                                                   on_log=lambda _line: None, cancel=None, note=note))
+
+    plans = _plans(monkeypatch)
+    _live_for(monkeypatch, labels, 8000)
+    portrait()
+    prompt = plans[-1].prompt
+    assert prompt.startswith("SERIES:") and prompt.endswith(core) and prompt != core
+    assert len(prompt.split()) <= prompt_budgets.chain_words(labels)
+    assert all(prompt_limits.fits(label, prompt)[0] for label in labels)
+    assert "CHARACTER:" in prompt and "Kiwilo" not in prompt
+    # A note stays the very tail, after the core.
+    portrait(note="Kiwilo sourit")
+    assert plans[-1].prompt.endswith(core + " Author's note: the character sourit.")
+    assert plans[-1].prompt.startswith("SERIES:")
+    # On the table's limits the smallest link of the chain decides; whatever fits, the core ends it.
+    _live_for(monkeypatch, labels, 0)
+    portrait()
+    assert plans[-1].prompt.endswith(core)
+    assert all(prompt_limits.fits(label, plans[-1].prompt)[0] for label in labels)
+
+
+def test_plates_props_and_variant_sheets_carry_their_entity_and_a_v1_story_s_are_their_core(tmp_path, monkeypatch):
+    import test_story_episode_steps as eps
+    import test_story_variant_shots as tvs
+    from clipping.aistory import imaging, refimages, workflow
+    from clipping.providers import generation as gen
+
+    store = eps.StoryStore(tmp_path / "outputs", on_log=lambda line: None)
+    story_id = tvs._speech_story(store, sheet_mode="three_sheet")
+    workflow.add_variant(store, story_id, eps.KIWILO, tvs.GHOST, now=NOW)
+    story = store.get(story_id)
+    env = tas._settings(**tas.FAL)
+    lock = imaging.read_lock(store, story_id, error=refimages.RefImageError)
+    labels = {label for role, kind in (("plate", gen.IMAGE), ("prop", gen.IMAGE), ("sheet", gen.IMAGE_EDIT))
+              for label in refimages._chain_labels(story, role, kind, env)}
+    _live_for(monkeypatch, labels, 8000)
+    plans = _plans(monkeypatch)
+
+    # The v2 builders draw a place and a prop from their looks.
+    place = store.read_entity(story_id, "places", eps.PARLOIR)
+    place["look"] = {"layout_map": {"left": "a bamboo chair", "right": "a curtain", "back": "a carved wall",
+                                    "foreground": "", "centre": "a lamp"},
+                     "scale_note": "a small booth", "lighting": {"day": "soft daylight"}, "props_here": []}
+    store.write_entity(story_id, "places", place, now=NOW)
+    prop = store.read_entity(story_id, "props", eps.PHONE)
+    prop["look"] = {"scale_cm": 15, "material": "polished coconut shell", "colour": "brown",
+                    "scale_phrase": "fits in a hand", "where_when": []}
+    store.write_entity(story_id, "props", prop, now=NOW)
+    story = store.get(story_id)
+    _planned(lambda: refimages.place_image(store, story_id, eps.PARLOIR, "day", env=env, on_log=lambda _l: None,
+                                           cancel=None))
+    core = refimages.place_prompt(store, story, place, "day", env=env, lock=lock)
+    assert plans[-1].prompt.startswith("SERIES:") and plans[-1].prompt.endswith(core) and "PLACE:" in plans[-1].prompt
+
+    _planned(lambda: refimages.prop_image(store, story_id, eps.PHONE, env=env, on_log=lambda _l: None, cancel=None))
+    core = refimages.prop_prompt(story, prop, env=env, lock=lock)
+    assert plans[-1].prompt.startswith("SERIES:") and plans[-1].prompt.endswith(core)
+    # A1: the prop's own reference image is told neither its scale nor its owner.
+    assert "fits in a hand" not in plans[-1].prompt and "Size:" not in plans[-1].prompt
+    assert "belongs to" not in plans[-1].prompt
+
+    character = store.read_entity(story_id, "characters", eps.KIWILO)
+    variant = character["variants"][0]
+    _planned(lambda: refimages.variant_image(store, story_id, eps.KIWILO, variant["variant_id"], "turnaround",
+                                             env=env, on_log=lambda _l: None, cancel=None))
+    core = refimages.variant_prompt(story, character, variant, "turnaround", env=env, lock=lock,
+                                    names=refimages._entity_names(store, story_id))
+    assert plans[-1].prompt.startswith("SERIES:") and plans[-1].prompt.endswith(core)
+
+    # A v1 story: the core alone, byte for byte.
+    legacy = {**story, "generation_profile": {**story["generation_profile"], "pipeline": "v1"}}
+    sent = refimages._sent(legacy, lock, "character", character, "the core", links=sorted(labels))
+    assert sent == {"text": "the core", "words": 2, "full_words": 2, "limit": None, "dropped": []}

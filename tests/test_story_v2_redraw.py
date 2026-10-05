@@ -106,7 +106,8 @@ def test_a_legacy_cast_moved_to_v2_is_counted_then_redrawn_from_its_looks(tmp_pa
                       "D1", "D2", "image:portrait", "image:turnaround", "image:expressions"]
     # Drawn from the look (the v2 prompts), the sheets as edits of the new portrait.
     portrait, turnaround = image.requests[:2]
-    assert portrait.prompt.startswith("Full-body character reference sheet, head to toe")
+    # Plan 26 H1: the core last, after the series, the style and the character.
+    assert portrait.prompt.split("\n\n")[-1].startswith("Full-body character reference sheet, head to toe")
     assert turnaround.kind == "image_edit" and turnaround.references[0].endswith("portrait.png")
     for doc in store.list_entities(story_id, "characters"):
         assert doc["look"] and all(doc["refs"][which]["created_at"] != NOW
@@ -200,7 +201,7 @@ def test_legacy_places_and_props_moved_to_v2_are_counted_then_redrawn_from_their
     places.run(ctx, runner=llm, time_fn=lambda: 100.0, adapters={("image", "local"): image})
 
     assert events == ["D3", "image:variant_day", "R1v2", "image:image"]
-    assert image.requests[0].prompt.startswith("Establishing wide shot of an empty set, day")
+    assert image.requests[0].prompt.split("\n\n")[-1].startswith("Establishing wide shot of an empty set, day")
     place = store.read_entity(story_id, "places", place_id)
     # The night variant was made from the old plate: made again on demand from the new one (a shot falls
     # back to the day plate meanwhile).

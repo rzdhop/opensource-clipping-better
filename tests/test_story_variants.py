@@ -242,8 +242,10 @@ def test_a_variant_sheet_is_one_edit_of_the_base_portrait_booked_on_its_own_step
     base = store.media_path(story_id, "characters", KIWI, "portrait.png")
     assert list(request.references) == [base], "the BASE portrait alone, image 1"
     assert (request.width, request.height) == size
-    assert request.prompt.startswith("Image 1 is this character's reference: same character, same identity and "
-                                     "proportions, now a translucent pale-blue glowing ghost")
+    # Plan 26 H1: the core last, after the series, the style and the character in its variant.
+    assert request.prompt.split("\n\n")[-1].startswith(
+        "Image 1 is this character's reference: same character, same identity and proportions, now a translucent "
+        "pale-blue glowing ghost")
     assert request.seed == refimages.variant_seed(story_id, KIWI, "ghost_version")
     assert ref["name"] == f"{which}_ghost_version.png" and ref["consistency"] == "references"
     character = store.read_entity(story_id, "characters", KIWI)

@@ -514,7 +514,9 @@ def test_a_story_without_variants_gets_the_image_brief_byte_for_byte_as_before(t
     slot -- and the markdown -- is what it was. Re-recorded by plan 26 H1
     alone, a brief-layer pin (never a hash): stage 4a, each keyframe's
     prompt is the image master and scene template before the same core,
-    with its ``fit``."""
+    with its ``fit``; stage 4b, each sheet drawn from a look the series,
+    the style and its character before the same core, and every entity
+    entry its ``fit``."""
     counter = iter(range(10))
 
     def factory():
@@ -554,8 +556,10 @@ def test_the_image_brief_lists_each_variant_sheet_with_its_prompt_reference_and_
         assert (entry["kind"], entry["entity"], entry["id"]) == ("sheet", "characters", f"{eps.KIWILO}:{GHOST_ID}")
         assert entry["variant_label"] == "Ghost version"
         assert entry["label"] == f"Kiwilo (Ghost version) — character sheet ({which})"
-        assert entry["prompt"] == refimages.variant_prompt(story, character, character["variants"][0], which,
-                                                           env={}, lock=lock, names=names)
+        # Plan 26 H1: the brief's prompt ends with the core the variant sheet is asked, after the master.
+        assert entry["prompt"].endswith(refimages.variant_prompt(story, character, character["variants"][0], which,
+                                                                 env={}, lock=lock, names=names))
+        assert entry["prompt"].startswith("SERIES:") and entry["fit"]["limit"] is None
         assert entry["reference"]["path"] == KIWI_BASE
         assert entry["upload_slot"] == (f"/api/stories/{story_id}/cast/{eps.KIWILO}/sheet?which={which}"
                                         f"&variant={GHOST_ID}")

@@ -153,8 +153,9 @@ def test_the_two_view_prompt_keeps_its_skeleton_whole_when_the_budget_is_tight()
 def test_the_budget_of_the_sheet_link_and_the_other_sheets_are_untouched():
     from clipping.aistory import prompt_budgets as pb
 
-    # Seedream takes long prompts: the sheet gets the ceiling; with no link, the default.
-    assert pb.two_view_words("fal/seedream-4.5") == pb.TWO_VIEW_CEILING_WORDS == 280
+    # Seedream takes long prompts: the two-view sheet gets the link's own (plan 26 H1 dropped its
+    # ceiling); with no link, the default.
+    assert pb.two_view_words("fal/seedream-4.5", live={}) == 461 and not hasattr(pb, "TWO_VIEW_CEILING_WORDS")
     assert pb.two_view_words(None) == prompting.TWO_VIEW_V2_MAX_WORDS
     assert pb.sheet_words(None) == prompting.SHEET_V2_MAX_WORDS == 130
     assert pb.SHEET_CEILING_WORDS == 200
@@ -187,7 +188,8 @@ def test_a_two_view_story_estimates_and_draws_one_image_per_character(tmp_path, 
     assert [request.kind for request in image.requests] == ["image", "image"]
     for request in image.requests:
         assert (request.width, request.height) == (1080, 1920)
-        assert request.prompt.startswith("A character reference sheet showing two full-body views")
+        # Plan 26 H1: the core last, after the series, the style and the character.
+        assert request.prompt.split("\n\n")[-1].startswith("A character reference sheet showing two full-body views")
         assert "LEFT HALF: full frontal view head to toe" in request.prompt and "Vertical 9:16." in request.prompt
     for doc in store.list_entities(story_id, "characters"):
         assert doc["refs"]["portrait"]["consistency"] == "base"
@@ -221,7 +223,7 @@ def test_two_view_expressions_adds_one_edit_of_the_sheet(tmp_path, look_hermetic
                       "K1", "D1", "D2", "image:portrait", "image:expressions"]
     expressions = image.requests[1]
     assert expressions.kind == "image_edit" and expressions.references[0].endswith("portrait.png")
-    assert expressions.prompt.startswith(prompting.ROLE_TEXT_PORTRAIT)
+    assert expressions.prompt.split("\n\n")[-1].startswith(prompting.ROLE_TEXT_PORTRAIT)
     for doc in store.list_entities(story_id, "characters"):
         assert doc["refs"]["portrait"] and doc["refs"]["expressions"] and doc["refs"]["turnaround"] is None
 
@@ -235,7 +237,7 @@ def test_the_three_sheet_cast_is_what_it_was(tmp_path, look_hermetic):
     tsl._run_cast(store, story_id, _k1_d1_d2_queues(events), events, image)
     assert events[:6] == ["K1", "D1", "D2", "image:portrait", "image:turnaround", "image:expressions"]
     assert (image.requests[0].width, image.requests[0].height) == (720, 1280)
-    assert image.requests[0].prompt.startswith("Full-body character reference sheet, head to toe")
+    assert image.requests[0].prompt.split("\n\n")[-1].startswith("Full-body character reference sheet, head to toe")
 
 
 def test_the_preset_estimate_counts_the_story_s_sheets_and_says_so(look_hermetic):
