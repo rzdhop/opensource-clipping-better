@@ -17,6 +17,7 @@ Layout, under the same ``outputs/`` directory the job store uses::
             refs/portrait.png, turnaround.png, expressions.png, extra_<NN>.png
             refs/uploads/<32 hex>.png      # the user's design references
             voice_sample.mp3
+            voice_reference.wav     # the character's own voice recording (plan 23 stage B4)
         places/<place_id>/
             place.json              # Place (place_v1)
             refs/variant_<name>.png # variant_day.png is the master plate
@@ -176,12 +177,13 @@ MEDIA_NAME_PATTERNS = {
         "refs": re.compile(schemas.CHARACTER_REF_NAME_PATTERN),
         "uploads": re.compile(schemas.UPLOAD_NAME_PATTERN),
         "voice": re.compile(schemas.VOICE_SAMPLE_NAME_PATTERN),
+        "voice_reference": re.compile(schemas.VOICE_REFERENCE_NAME_PATTERN),
     },
     "places": {"refs": re.compile(schemas.PLACE_REF_NAME_PATTERN)},
     "props": {"refs": re.compile(schemas.PROP_REF_NAME_PATTERN)},
 }
 # Each place's folder below the entity's own, one level at a time.
-MEDIA_DIRS = {"refs": ("refs",), "uploads": ("refs", "uploads"), "voice": ()}
+MEDIA_DIRS = {"refs": ("refs",), "uploads": ("refs", "uploads"), "voice": (), "voice_reference": ()}
 
 # An episode's folder is <story>/episodes/ep<NN>/, NN two digits: the "ep"
 # bounds of episode_script_v1 and storyboard_v1.

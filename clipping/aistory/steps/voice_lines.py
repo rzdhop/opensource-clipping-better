@@ -57,7 +57,7 @@ import os
 
 from clipping.providers import tts, tts_tail
 
-from .. import media_policy, schemas, shots, timing, voices, wordtiming
+from .. import media_policy, schemas, shots, timing, voice_reference, voices, wordtiming
 from .. import store as store_mod
 from . import episode_common, llm_call
 from .episode_common import STORYBOARD_DOC
@@ -426,6 +426,13 @@ class LineMeasurement:
                 extra["take"] = self.voice_take
             if self.voice_direction is not None:
                 extra["direction"] = self.voice_direction
+            if voice_reference.is_reference_voice(voice) and speaker != "narrator":
+                # The character's own recording (plan 23 stage B4); None when
+                # the file is gone, which synthesize_line refuses in a sentence.
+                try:
+                    extra["reference"] = voice_reference.reference_path(ec.store, ec.story_id, speaker)
+                except KeyError:
+                    extra["reference"] = None
             try:
                 spoken = voices.synthesize_line(gates, voice=voice, text=line["text"], dest_for=dest_for,
                                                 on_log=ctx.on_log, cancel=ctx.cancel, step=self.measure_step,

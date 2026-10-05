@@ -63,7 +63,7 @@ from clipping.providers import generation, gating, limits, pricing, tts
 from clipping.providers.registry import ChainError, Link, describe
 
 from . import ledger as ledger_mod
-from . import schemas
+from . import schemas, voice_reference
 
 STEP = "voice_sample"
 MEASURE_STEP = "voice_measure"
@@ -183,6 +183,34 @@ def _chain_link(provider: str, voice_id: str) -> Link:
     if provider in tts.LOCAL_ENGINES:
         return Link("local", provider)
     raise VoiceError(f"{provider!r} is not a TTS provider this module knows how to build a chain link for.")
+
+
+def reference_engine() -> tuple:
+    """``(ready, reason)``: whether chatterbox, the engine that clones a
+    character's own recording, can run here (``LocalTtsAdapter.probe``: an
+    import lookup, nothing is loaded and no request is made)."""
+    return tts.LOCAL_TTS.probe(Link("local", voice_reference.REFERENCE_PROVIDER), credentials={})
+
+
+def reference_voice(stories, story_id, character) -> "Voice":
+    """The voice a character's own recording makes (plan 23 stage B4):
+    ``chatterbox/reference``, spoken by the local chatterbox engine through
+    ``GenRequest.references``. Not a catalogue voice (it is the character's
+    alone, so no other character can "take" it).
+
+    ``VoiceError`` -- with ``LocalTtsAdapter.probe``'s reason -- when the
+    character has no voice reference (its entry and its file) or chatterbox
+    is not installed here."""
+    name = character.get("name") or character.get("char_id")
+    link = Link("local", voice_reference.REFERENCE_PROVIDER)
+    if not character.get("voice_reference") or voice_reference.reference_path(
+            stories, story_id, character["char_id"]) is None:
+        raise VoiceError(f"{name} has no voice reference: upload a recording first.")
+    ready, reason = reference_engine()
+    if not ready:
+        raise VoiceError(f"{name}'s own voice needs chatterbox: {reason}")
+    return Voice(provider=voice_reference.REFERENCE_PROVIDER, voice_id=voice_reference.REFERENCE_VOICE_ID,
+                 lang="multi", gender="any", age="any", style_tags=("your own recording",), link=link)
 
 
 # A v2 story's default locale per language (phase 7 stage 6c, A17): a bare
@@ -551,6 +579,14 @@ def synthesize_sample(stories, story_id, char_id, *, env, on_log, cancel, adapte
     )
     if link.provider == "elevenlabs":
         request.extra["language"] = story["language"]
+    if voice_reference.is_reference_voice(voice):
+        # The character's own recording (plan 23 stage B4): the engine clones
+        # it, and the generation cache's key follows the file's bytes.
+        path = voice_reference.reference_path(stories, story_id, char_id)
+        if path is None:
+            raise VoiceError(f"{name}'s voice is its own recording, but the file is missing; upload it again.",
+                             alternates=alts())
+        request.references = (path,)
 
     if adapters is None:
         adapters_mod.load_all()
@@ -805,7 +841,7 @@ def prosody_for(voice: dict, line: dict) -> tuple:
 
 def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASURE_STEP, adapters=None,
                     transport=None, cache=None, take=None, direction=None, line=None, v2=False,
-                    language=None) -> dict:
+                    language=None, reference=None) -> dict:
     """*text* spoken by the pinned *voice* (a character's ``voice`` block,
     or the narrator's) through a single-link chain built from that voice
     ALONE (DEC-122: never another provider, never another voice, never
@@ -863,6 +899,12 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     *language* (plan 23 stage B3: the story's, ``fr``) joins the request as
     ``extra["language"]`` for an ElevenLabs link only -- the one engine that
     is told the language; every other request is exactly what it was.
+
+    *reference* (plan 23 stage B4: the real path of the character's
+    ``voice_reference.wav``) is required for a voice pinned to
+    ``chatterbox/reference`` and joins the request as ``references``; the
+    cache's key follows the file's bytes, so a new recording speaks the lines
+    again. None for that voice is a ``VoiceError``; any other voice ignores it.
     """
     label = voice_label(voice)
     if label is None:
@@ -881,6 +923,11 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     if language and link.provider == "elevenlabs":
         extra["language"] = language
     request = generation.GenRequest(kind=generation.TTS, text=text, voice=voice["voice_id"], extra=extra)
+    if voice_reference.is_reference_voice(voice):
+        if not reference:
+            raise VoiceError(f"{spoken} cannot speak: the character's voice recording is missing; upload it "
+                             "again.")
+        request.references = (reference,)
     if adapters is None:
         adapters_mod.load_all()
     journaled = {} if cache is None else {"cache": cache}

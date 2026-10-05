@@ -1014,6 +1014,40 @@ def test_regenerate_a_voice_refuses_another_leads_voice_and_otherwise_pins_and_s
     assert (kiwi["voice"]["rate"], kiwi["voice"]["pitch"]) == ("+5%", "-2Hz")
 
 
+def test_regenerate_a_voice_can_pin_the_characters_own_recording_through_chatterbox(store, monkeypatch):
+    """Plan 23 stage B4: ``chatterbox/reference`` is no catalogue voice and is never "taken", but it needs the
+    character's recording (its entry and its file) and chatterbox; the sample is then spoken by the local link."""
+    from clipping.providers import tts
+
+    story_id, fakes = _full(store)
+    _approve_all(store, story_id)
+    local = SimpleNamespace(adapters={**fakes.adapters, ("tts", "local"): fakes.tts})
+    pin = {"target": "character:char_kiwilo:voice", "voice": {"provider": "chatterbox", "voice_id": "reference"}}
+
+    monkeypatch.setattr(tts, "_installed", lambda name: True)
+    assert "has no voice reference" in _refused(store, story_id, local, pin)
+
+    source = Path(store.story_dir(story_id)) / "incoming.wav"
+    source.write_bytes(b"RIFF-recording")
+    store.write_media(story_id, "characters", "char_kiwilo", "voice_reference.wav", str(source))
+    kiwi = store.read_entity(story_id, "characters", "char_kiwilo")
+    kiwi["voice_reference"] = {"name": "voice_reference.wav", "sha256": "a" * 64, "duration_s": 8.0,
+                               "uploaded_at": NOW, "consent": True}
+    store.write_entity(story_id, "characters", kiwi, now=NOW)
+
+    monkeypatch.setattr(tts, "_installed", lambda name: False)
+    assert "chatterbox is not installed" in _refused(store, story_id, local, pin)
+
+    monkeypatch.setattr(tts, "_installed", lambda name: True)
+    tts_before = len(fakes.tts.requests)
+    summary, _log, _ = _regenerate(store, story_id, local, pin)
+
+    kiwi = store.read_entity(story_id, "characters", "char_kiwilo")
+    assert (kiwi["voice"]["provider"], kiwi["voice"]["voice_id"]) == ("chatterbox", "reference")
+    assert fakes.tts.requests[tts_before:] == [("local/chatterbox", "Je gagne toujours, mon cœur.")]
+    assert summary["voice"] == "chatterbox/reference" and kiwi["approved_at"] is None
+
+
 def test_regenerate_places_and_props_touch_only_their_item(store, monkeypatch):
     m = _new()
     story_id, fakes = _full(store, mode="prompt_only")

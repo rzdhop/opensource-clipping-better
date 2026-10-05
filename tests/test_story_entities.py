@@ -285,10 +285,11 @@ PHASE5_OPTIONAL = {
     # Plan 21 stage 1, re-pinned on purpose: ``approved_by`` -- the agent run's
     # mark beside an approval it gave -- is optional on each, absent on every
     # approval a human gave.
-    # Plan 23 stage D5, re-pinned on purpose: the appearance variants, optional
-    # on the character (absent on every character written before them), and
-    # in a variant's refs the sheets its story's sheet mode may not draw.
-    ("CHARACTER_SCHEMA", "$"): {"look", "dossier", "approved_by", "variants"},
+    # Plan 23 stages D5 + B4, re-pinned on purpose: the appearance variants and
+    # the voice reference (its consent, DEC-281) are optional on the character
+    # (absent on every character written before them), and in a variant's refs
+    # the sheets its story's sheet mode may not draw.
+    ("CHARACTER_SCHEMA", "$"): {"look", "dossier", "approved_by", "variants", "voice_reference"},
     ("CHARACTER_SCHEMA", "$.properties.variants.items.properties.refs"): {"turnaround", "expressions"},
     ("PLACE_SCHEMA", "$"): {"look", "approved_by"},
     ("PROP_SCHEMA", "$"): {"look", "approved_by"},

@@ -11,6 +11,7 @@ import { EditableText, EditableList, RegenerateControl, StepError } from '../fie
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
 import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
+import VoiceReferenceSlot from './VoiceReferenceSlot'
 import { Mic } from '../../../ui/icons'
 
 // The character roles a custom entry may pick (spec 2.3): the closed list
@@ -874,6 +875,8 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
         disabled={cardBusy}
         onChange={onChange}
       />
+
+      <VoiceReferenceSlot storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
 
       <UploadsSection storyId={storyId} character={character} disabled={cardBusy} onChange={onChange} />
 

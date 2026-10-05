@@ -1503,6 +1503,9 @@ EXTRA_REF_NAME_PATTERN = r"^extra_[0-9]{2}\.(png|jpg|jpeg|webp)$"
 UPLOAD_NAME_PATTERN = r"^[0-9a-f]{32}\.png$"
 # A character's voice sample, at the root of its folder.
 VOICE_SAMPLE_NAME_PATTERN = r"^voice_sample\.(mp3|wav)$"
+# A character's voice reference (plan 23 stage B4): the re-encoded recording a
+# local engine clones, at the root of its folder.
+VOICE_REFERENCE_NAME_PATTERN = r"^voice_reference\.wav$"
 
 # How each generated image was made (spec 8.1): "base" = without references by
 # design (a portrait, a master plate, a prop image); "references" = edited with
@@ -1585,6 +1588,17 @@ _UPLOAD_SCHEMA = _document({
     # What the vision chain saw in it (U1), folded into the descriptor.
     "description": {"type": ["string", "null"], "maxLength": 400},
     "uploaded_at": _NON_EMPTY_STRING,
+})
+
+# A character's voice reference (plan 23 stage B4; DEC-281): ``consent`` is
+# always true -- an upload without the speaker's permission is refused, so a
+# document that says otherwise is not one.
+VOICE_REFERENCE_SCHEMA = _document({
+    "name": {"type": "string", "pattern": VOICE_REFERENCE_NAME_PATTERN},
+    "sha256": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+    "duration_s": {"type": "number", "minimum": 0},
+    "uploaded_at": _NON_EMPTY_STRING,
+    "consent": {"type": "boolean", "const": True},
 })
 
 # ------------------------------------------------- phase 7: the structured look (A10)
@@ -1913,6 +1927,8 @@ CHARACTER_SCHEMA = _document({
     "approved_by": _AGENT_APPROVED_SCHEMA,
     # Plan 23 stage D5: the character's appearance variants (_VARIANT_SCHEMA, at most VARIANTS_MAX).
     "variants": {"type": "array", "items": _VARIANT_SCHEMA, "maxItems": VARIANTS_MAX},
+    # Plan 23 stage B4: the character's own voice recording, cloned locally.
+    "voice_reference": VOICE_REFERENCE_SCHEMA,
 })
 
 

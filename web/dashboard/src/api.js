@@ -957,6 +957,43 @@ export function uploadCharacterReference(storyId, charId, file, onProgress) {
 }
 
 /**
+ * What the cast step shows for a character's own voice recording:
+ * `{voice_reference, pinned, engine: {ready, reason}}`
+ * (`GET /stories/{id}/characters/{cid}/voice-reference`, plan 23 stage B4).
+ * `engine` says whether chatterbox, the local engine that clones it, is
+ * installed on the server, with the probe's own sentence as `reason`.
+ */
+export async function fetchVoiceReference(storyId, charId) {
+  const res = await request(`/stories/${storyId}/characters/${charId}/voice-reference`)
+  if (!res.ok) throw await apiError(res, 'Failed to load the voice recording')
+  return res.json()
+}
+
+/**
+ * Give a character a voice recording (multipart, field `file`; 5 to 30
+ * seconds, at most 10 MB). `consent` must be true -- "this is my voice, or I
+ * have the speaker's permission" -- and travels as `?consent=true`, so the
+ * server refuses before it reads the body. Resolves with the stored entry.
+ */
+export async function uploadVoiceReference(storyId, charId, file, consent) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await request(
+    `/stories/${storyId}/characters/${charId}/voice-reference?consent=${consent ? 'true' : 'false'}`,
+    { method: 'POST', body: formData },
+  )
+  if (!res.ok) throw await apiError(res, 'Failed to upload the voice recording')
+  return res.json()
+}
+
+/** Remove a character's voice recording; 409 while its voice is the recording. */
+export async function deleteVoiceReference(storyId, charId) {
+  const res = await request(`/stories/${storyId}/characters/${charId}/voice-reference`, { method: 'DELETE' })
+  if (!res.ok) throw await apiError(res, 'Failed to remove the voice recording')
+  return res.json()
+}
+
+/**
  * One style-preview image, as a blob URL. The route is token-gated like
  * every other story route (DEC-113: no signed URL), so it is fetched with
  * the auth header rather than used directly as an <img src> -- the caller is

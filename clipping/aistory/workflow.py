@@ -58,6 +58,7 @@ from . import (
     templates,
     timing,
     video_plan,
+    voice_reference,
     voices,
     wordtiming,
 )
@@ -1828,6 +1829,8 @@ def _pinned_by_others(stories, story_id, char_id) -> dict:
     for doc in list_entities(stories, story_id, CHARACTERS):
         if doc["char_id"] == char_id or doc["role"] not in schemas.CAST_APPROVAL_ROLES or not doc["voice"]:
             continue
+        if voice_reference.is_reference_voice(doc["voice"]):
+            continue  # a character's own recording is its alone: never "taken" (plan 23 stage B4)
         taken.setdefault((doc["voice"]["provider"], doc["voice"]["voice_id"]), doc["name"])
     return taken
 
@@ -1895,6 +1898,15 @@ def check_voice_choice(stories, story, char_id, voice, *, env) -> dict:
         value = voice.get(key)
         if value is not None and (not isinstance(value, str) or re.fullmatch(pattern, value) is None):
             raise WorkflowError(INVALID, f"{key} {value!r} is not like {example!r}.")
+    if (provider, voice_id) == (voice_reference.REFERENCE_PROVIDER, voice_reference.REFERENCE_VOICE_ID):
+        # The character's own recording (plan 23 stage B4): not a catalogue
+        # voice and never shared, but it needs the recording and chatterbox.
+        try:
+            voices.reference_voice(stories, story["story_id"], read_entity(stories, story["story_id"],
+                                                                           CHARACTERS, char_id))
+        except voices.VoiceError as exc:
+            raise WorkflowError(INVALID, str(exc)) from None
+        return {key: voice[key] for key in VOICE_KEYS if key in voice}
     language = story["language"]
     catalogue = voices.catalogue(language, env=env, v2=media_policy.is_v2(story))
     if not any((v.provider, v.voice_id) == (provider, voice_id) for v in catalogue):

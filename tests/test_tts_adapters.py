@@ -465,3 +465,96 @@ def test_local_prints_once_that_rate_pitch_are_not_supported(tmp_path, monkeypat
     warnings = [line for line in log if "not supported" in line]
     assert len(warnings) == 1
     assert "local/piper" in warnings[0]
+
+
+# ----------------------------------------------- chatterbox voice reference (plan 23 stage B4)
+
+def _fake_chatterbox(monkeypatch, calls):
+    """The ``chatterbox`` and ``torchaudio`` modules ``_synthesize_chatterbox`` imports inside its call, as fakes:
+    ``generate`` records the prompt path it was given, ``save`` writes a real (tiny) WAV."""
+    import types
+
+    class Model:
+        sr = 24000
+
+        @classmethod
+        def from_pretrained(cls, device):
+            calls.append(("device", device))
+            return cls()
+
+        def generate(self, text, language_id, audio_prompt_path=None):
+            calls.append(("generate", text, language_id, audio_prompt_path))
+            return b"\x00\x10" * 2400
+
+    package, module = types.ModuleType("chatterbox"), types.ModuleType("chatterbox.mtl_tts")
+    module.ChatterboxMultilingualTTS = Model
+    package.mtl_tts = module
+    audio = types.ModuleType("torchaudio")
+
+    def save(path, data, rate):
+        with wave.open(path, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(rate)
+            wav.writeframes(data)
+
+    audio.save = save
+    monkeypatch.setitem(sys.modules, "chatterbox", package)
+    monkeypatch.setitem(sys.modules, "chatterbox.mtl_tts", module)
+    monkeypatch.setitem(sys.modules, "torchaudio", audio)
+    monkeypatch.setattr(tts, "_installed", lambda name: True)
+
+
+def _prompt_of(calls):
+    return next(call[3] for call in calls if call[0] == "generate")
+
+
+def test_chatterbox_clones_the_request_reference_when_it_has_one(tmp_path, monkeypatch):
+    calls = []
+    _fake_chatterbox(monkeypatch, calls)
+    reference = tmp_path / "voice_reference.wav"
+    reference.write_bytes(b"RIFF")
+    other = tmp_path / "second.wav"
+    other.write_bytes(b"RIFF")
+    request = GenRequest(kind="tts", text="Bonjour", voice="reference", references=(str(reference), str(other)),
+                         out_dir=str(tmp_path), extra={"name": "line_01"})
+
+    result = tts.LOCAL_TTS.generate(Link("local", "chatterbox"), request, credentials={}, on_log=lambda *a: None)
+
+    assert _prompt_of(calls) == str(reference)  # references[0], never the voice name nor the second file
+    assert result.model == "chatterbox" and result.meta["source"] == tts.SOURCE_DURATION
+    timing = json.loads(pathlib.Path(result.paths[1]).read_text(encoding="utf-8"))
+    assert timing["words"] == [] and timing["source"] == tts.SOURCE_DURATION  # no word cues: approximate timing
+
+
+def test_chatterbox_without_a_reference_keeps_the_path_as_voice_behaviour(tmp_path, monkeypatch):
+    calls = []
+    _fake_chatterbox(monkeypatch, calls)
+    prompt = tmp_path / "prompt.wav"
+    prompt.write_bytes(b"RIFF")
+    out = str(tmp_path / "out.wav")
+
+    tts._synthesize_chatterbox("Bonjour", str(prompt), out, GenRequest(kind="tts", text="Bonjour"), lambda *a: None)
+    assert _prompt_of(calls) == str(prompt)
+
+    calls.clear()
+    tts._synthesize_chatterbox("Bonjour", "zero-shot", out, GenRequest(kind="tts", text="Bonjour"), lambda *a: None)
+    assert _prompt_of(calls) is None  # a voice name that is no file: the engine's own voice
+
+    calls.clear()
+    tts._synthesize_chatterbox("Bonjour", None, out, GenRequest(kind="tts", text="Bonjour", references=()),
+                               lambda *a: None)
+    assert _prompt_of(calls) is None
+
+
+def test_a_reference_wins_over_a_voice_that_is_also_a_path(tmp_path, monkeypatch):
+    calls = []
+    _fake_chatterbox(monkeypatch, calls)
+    voice, reference = tmp_path / "voice.wav", tmp_path / "ref.wav"
+    voice.write_bytes(b"RIFF")
+    reference.write_bytes(b"RIFF")
+
+    tts._synthesize_chatterbox("x", str(voice), str(tmp_path / "o.wav"),
+                               GenRequest(kind="tts", text="x", references=(str(reference),)), lambda *a: None)
+
+    assert _prompt_of(calls) == str(reference)

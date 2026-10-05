@@ -69,7 +69,7 @@ from __future__ import annotations
 import re
 import time
 
-from .. import media_policy, prompts, refimages, schemas, voices
+from .. import media_policy, prompts, refimages, schemas, voice_reference, voices
 from .. import store as store_mod
 from . import bible, concepts, entities, llm_call
 from .entities import CHARACTERS, PLACES, PROPS
@@ -436,16 +436,23 @@ def _pinned_by_others(store, story_id, char_id) -> dict:
     for doc in store.list_entities(story_id, CHARACTERS):
         if doc["char_id"] == char_id or doc["role"] not in schemas.CAST_APPROVAL_ROLES or not doc["voice"]:
             continue
+        if voice_reference.is_reference_voice(doc["voice"]):
+            continue  # a character's own recording is its alone (plan 23 stage B4)
         taken.setdefault((doc["voice"]["provider"], doc["voice"]["voice_id"]), doc["name"])
     return taken
 
 
-def _chosen_voice(ctx, story, character, wanted, taken):
+def _chosen_voice(ctx, story, character, wanted, taken, store):
     """The catalogue voice *wanted* names; ``StepFailed`` when it is not one
     of the story language's on ``TTS_CHAIN`` or another lead's/support's."""
     provider, voice_id = wanted.get("provider"), wanted.get("voice_id")
     if not (isinstance(provider, str) and provider and isinstance(voice_id, str) and voice_id):
         raise StepFailed("A voice is {provider, voice_id} (and optionally rate, pitch).")
+    if (provider, voice_id) == (voice_reference.REFERENCE_PROVIDER, voice_reference.REFERENCE_VOICE_ID):
+        try:
+            return voices.reference_voice(store, ctx.story_id, character)
+        except voices.VoiceError as exc:
+            raise StepFailed(str(exc)) from None
     catalogue = voices.catalogue(story["language"], env=ctx.settings_env, v2=media_policy.is_v2(story))
     choice = next((v for v in catalogue if (v.provider, v.voice_id) == (provider, voice_id)), None)
     if choice is None:
@@ -471,7 +478,7 @@ def _regenerate_voice(ctx, store, story, target, char_id, params, tools) -> dict
     current = character["voice"] or {}
 
     if wanted:
-        choice = _chosen_voice(ctx, story, character, wanted, taken)
+        choice = _chosen_voice(ctx, story, character, wanted, taken, store)
     else:
         excluded = set(taken)
         if current:

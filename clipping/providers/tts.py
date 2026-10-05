@@ -544,7 +544,11 @@ def _synthesize_chatterbox(text, voice, out_path, request, on_log):
     device = (request.extra or {}).get("device") or "cpu"
     model = ChatterboxMultilingualTTS.from_pretrained(device=device)
     language = (request.extra or {}).get("language_id") or "fr"
-    prompt = voice if voice and os.path.exists(voice) else None
+    # A reference recording (plan 23 stage B4: ``GenRequest.references``, the
+    # character's own voice) is cloned; without one, the voice is a path to a
+    # prompt file, as it was, or none (the engine's default voice).
+    references = tuple(getattr(request, "references", None) or ())
+    prompt = references[0] if references else (voice if voice and os.path.exists(voice) else None)
     audio = model.generate(text, language_id=language, audio_prompt_path=prompt)
     torchaudio.save(out_path, audio, model.sr)
 

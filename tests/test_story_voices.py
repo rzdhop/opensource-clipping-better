@@ -826,3 +826,121 @@ def test_the_voice_picker_payload_marks_a_paid_voice_and_leaves_a_free_one_as_it
     paid = workflow._voice_json(_eleven_voice(), env=ELEVEN_KEY)
     assert paid["paid"] is True and paid["est_usd"] == 0.072 and paid["allowed"] is False
     assert "allow_paid is off" in paid["reason"] and paid["link"] == "elevenlabs/flash"
+
+
+# ------------------------------------------- a voice reference (plan 23 stage B4)
+
+REFERENCE_PIN = {"provider": "chatterbox", "voice_id": "reference", "rate": None, "pitch": None,
+                 "direction": "a voice", "sample_line": "Salut !"}
+CHATTERBOX = Link("local", "chatterbox")
+
+
+def _put_reference(store, story_id, content, char_id="char_kiwi"):
+    src = Path(store.story_dir(story_id)) / "incoming.wav"
+    src.write_bytes(content)
+    store.write_media(story_id, "characters", char_id, "voice_reference.wav", str(src))
+    return store.media_path(story_id, "characters", char_id, "voice_reference.wav")
+
+
+def _sample(store, story_id, adapter):
+    return voices.synthesize_sample(store, story_id, "char_kiwi", env={}, on_log=lambda l: None,
+                                    cancel=CancelToken(), adapters={("tts", "local"): adapter})
+
+
+def test_the_pinned_reference_voice_hands_its_file_to_the_engine_for_the_sample(store):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi", voice=dict(REFERENCE_PIN))
+    path = _put_reference(store, story_id, b"RIFF-first")
+    fake = FakeAdapter(ext="wav", duration_s=2.0)
+
+    result = _sample(store, story_id, fake)
+
+    assert result["name"] == "voice_sample.wav" and result["voice_id"] == "reference"
+    request = fake.calls[0]
+    assert request.references == (path,) and os.path.isabs(request.references[0])
+    assert request.voice == "reference" and request.text == "Salut !"
+    # The one-link chain is the local chatterbox engine, billed nothing.
+    entries = __import__("json").loads(open(os.path.join(store.story_dir(story_id), "cost_ledger.json"),
+                                            encoding="utf-8").read())["entries"]
+    assert (entries[0]["provider"], entries[0]["model"], entries[0]["paid"]) == ("local", "chatterbox", False)
+
+
+def test_a_missing_recording_file_is_refused_in_a_sentence_and_nothing_is_called(store):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi", voice=dict(REFERENCE_PIN))
+    fake = FakeAdapter(ext="wav")
+
+    with pytest.raises(voices.VoiceError, match="the file is missing"):
+        _sample(store, story_id, fake)
+
+    assert fake.calls == []
+
+
+def test_any_other_voice_sends_no_reference(store):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi",
+                voice=voices.pin(_char("char_kiwi", voice=_k1_voice()), EDGE_VOICE))
+    _put_reference(store, story_id, b"RIFF-unused")
+    fake = FakeAdapter()
+
+    voices.synthesize_sample(store, story_id, "char_kiwi", env={}, on_log=lambda l: None, cancel=CancelToken(),
+                             adapters={("tts", "edge"): fake})
+
+    assert fake.calls[0].references == ()
+
+
+def test_the_cache_key_follows_the_recordings_bytes_so_a_new_upload_speaks_again(store):
+    from clipping.providers import gencache
+
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi", voice=dict(REFERENCE_PIN))
+    fake = FakeAdapter(ext="wav")
+
+    def key_after_a_sample():
+        # Keyed by the file's bytes as they are when the request is made.
+        _sample(store, story_id, fake)
+        return gencache.request_key("tts", CHATTERBOX, fake.calls[-1])
+
+    _put_reference(store, story_id, b"RIFF-first")
+    first = key_after_a_sample()
+    again = key_after_a_sample()
+    _put_reference(store, story_id, b"RIFF-second")
+    second = key_after_a_sample()
+
+    assert first is not None and first == again and second != first
+
+
+def test_a_line_is_spoken_with_the_reference_it_is_given(store, monkeypatch):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi", voice=dict(REFERENCE_PIN))
+    path = _put_reference(store, story_id, b"RIFF-first")
+    gates = voices.LineGates(store, story_id, env={})
+    captured = []
+
+    def fake_chain(kind, chain, request, **kwargs):
+        captured.append((copy.copy(request), list(chain)))
+        raise generation.NoRunnableLink("no link reached", failures=[])
+
+    monkeypatch.setattr(voices.generation, "run_generation_chain", fake_chain)
+
+    def dest_for(ext):
+        return str(Path(store.story_dir(story_id)) / f"line.{ext}")
+
+    def speak(voice, **extra):
+        with pytest.raises(voices.VoiceError) as excinfo:
+            voices.synthesize_line(gates, voice=voice, text="Bonjour", dest_for=dest_for, on_log=lambda l: None,
+                                   cancel=CancelToken(), **extra)
+        return excinfo.value
+
+    speak(REFERENCE_PIN, reference=path)
+    request, chain = captured[-1]
+    assert request.references == (path,) and request.voice == "reference" and chain == [CHATTERBOX]
+
+    # No file to give: refused in a sentence, before any request is built.
+    captured.clear()
+    assert "recording is missing" in str(speak(REFERENCE_PIN)) and captured == []
+    assert "recording is missing" in str(speak(REFERENCE_PIN, reference=None)) and captured == []
+
+    # Another voice ignores the argument: today's request.
+    speak({"provider": "edge", "voice_id": "fr-FR-HenriNeural", "rate": None, "pitch": None}, reference=path)
+    assert captured[-1][0].references == ()

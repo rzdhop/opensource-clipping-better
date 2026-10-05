@@ -136,6 +136,8 @@ from clipping.aistory import defaults, media_policy, platforms, refimages, schem
 from clipping.aistory import manual_uploads
 from clipping.aistory import store as story_store
 from clipping.aistory import uploads as uploads_mod
+from clipping.aistory import voice_reference as voice_reference_mod
+from clipping.aistory import voices as voices_mod
 from clipping.aistory.steps import brief as brief_step
 from clipping.aistory.steps import episode_common
 from clipping.aistory.steps import bible as bible_step
@@ -3547,6 +3549,96 @@ async def delete_reference(story_id: str, char_id: str, name: str) -> dict:
         raise HTTPException(status_code=404, detail=f"This story has no character {char_id!r}.") from None
 
 
+# ------------------------------------------- voice reference (plan 23 stage B4)
+
+@router.get("/{story_id}/characters/{char_id}/voice-reference")
+async def voice_reference_state(story_id: str, char_id: str) -> dict:
+    """What the cast step shows for a character's own voice recording::
+
+        {"voice_reference": {name, sha256, duration_s, uploaded_at, consent} | null,
+         "pinned": bool,
+         "engine": {"ready": bool, "reason": str}}
+
+    ``engine`` is whether chatterbox, the local engine that clones it, is
+    installed here (``LocalTtsAdapter.probe``, an import lookup: nothing is
+    loaded), with the probe's own sentence as ``reason``. 404 for an unknown
+    story or character.
+    """
+    stories = _stories()
+    _load(stories, story_id)
+    character = _entity(stories, story_id, CHARACTERS, char_id)
+    ready, reason = voices_mod.reference_engine()
+    return {"voice_reference": character.get("voice_reference"),
+            "pinned": voice_reference_mod.is_reference_voice(character.get("voice")),
+            "engine": {"ready": bool(ready), "reason": reason}}
+
+
+@router.post("/{story_id}/characters/{char_id}/voice-reference", status_code=201)
+async def upload_voice_reference(story_id: str, char_id: str, request: Request,
+                                 consent: bool = Query(False)) -> dict:
+    """Give a character a voice recording to be cloned locally (multipart,
+    field ``file``, and ``?consent=true``: "this is my voice, or I have the
+    speaker's permission", DEC-281); 201 with its entry ``{name, sha256,
+    duration_s, uploaded_at, consent}``. A new upload replaces the old one.
+
+    Refused before the body is read: 404 for an unknown story or character;
+    409 while a step of the story is queued or running (it may be speaking in
+    this voice); 400 without consent; 413 for a declared size over
+    ``voice_reference.MAX_UPLOAD_BYTES``. Then the body is streamed
+    (``_receive_upload``: 413 the moment it passes the cap) and
+    ``voice_reference.accept_voice_reference`` checks and re-encodes it in a
+    worker thread: 415 for anything ffprobe finds no audio in, 400 for one
+    shorter than 5 s or longer than 30 s.
+    """
+    stories = _stories()
+    _load(stories, story_id)
+    _entity(stories, story_id, CHARACTERS, char_id)
+    _refuse_busy(story_id, "add the recording once that step is done, or cancel it first.")
+    if not consent:
+        raise _upload_refused(voice_reference_mod.HTTP_STATUS["no_consent"], voice_reference_mod.CONSENT_REFUSAL)
+    try:
+        folder = stories.entity_dir(story_id, CHARACTERS, char_id)
+    except KeyError:
+        raise _upload_refused(voice_reference_mod.HTTP_STATUS["storage"], (
+            "The character's folder is not a real folder (a symlink is never followed).")) from None
+
+    received = await _receive_upload(request, folder, limit=voice_reference_mod.MAX_UPLOAD_BYTES, what="recording")
+    try:
+        # A step may have started while the recording was arriving.
+        _refuse_busy(story_id, "add the recording once that step is done, or cancel it first.")
+        return await run_in_threadpool(voice_reference_mod.accept_voice_reference, stories, story_id, char_id,
+                                       received, consent=True, now=_now())
+    except voice_reference_mod.VoiceReferenceError as exc:
+        raise _upload_refused(exc.http_status, str(exc), exc.reasons) from None
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"This story has no character {char_id!r}.") from None
+    finally:
+        try:
+            os.unlink(received)
+        except OSError:
+            pass
+
+
+@router.delete("/{story_id}/characters/{char_id}/voice-reference")
+async def delete_voice_reference(story_id: str, char_id: str) -> dict:
+    """Remove a character's voice recording (``voice_reference.
+    delete_voice_reference``): its entry and its file. 404 for an unknown
+    character or no recording; 409 while a step of the story is queued or
+    running, while the character's voice is the recording (pin another voice
+    first), or when a symlink sits in its place (kept, never followed).
+    Answers ``{"name", "entry_removed", "file_removed"}``."""
+    stories = _stories()
+    _load(stories, story_id)
+    _entity(stories, story_id, CHARACTERS, char_id)
+    _refuse_busy(story_id, "remove the recording once that step is done, or cancel it first.")
+    try:
+        return voice_reference_mod.delete_voice_reference(stories, story_id, char_id, now=_now())
+    except voice_reference_mod.VoiceReferenceError as exc:
+        raise _upload_refused(exc.http_status, str(exc), exc.reasons) from None
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"This story has no character {char_id!r}.") from None
+
+
 # ---------------------------------------------------------------- media
 
 @router.get("/{story_id}/media/{kind}/{eid}/{name}")
@@ -3557,7 +3649,7 @@ async def entity_media(story_id: str, kind: str, eid: str, name: str, size: Opti
     ``kind`` is ``characters``, ``places`` or ``props``; ``eid`` an id of that
     kind; ``name`` one the kind may hold (``StoryStore.media_path``:
     ``portrait|turnaround|expressions|extra_NN``, ``<32 hex>.png``,
-    ``voice_sample.mp3|wav``; ``variant_<name>``; ``image``, each ``.png``,
+    ``voice_sample.mp3|wav``, ``voice_reference.wav``; ``variant_<name>``; ``image``, each ``.png``,
     ``.jpg``, ``.jpeg`` or ``.webp`` for an image), each checked before a path
     is built, and only as a regular file in the entity's real folder -- no
     symlink at any level. Anything else, another story's file included, is

@@ -29,6 +29,23 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Optional local text-to-speech (AI Story: a character's own voice recording is
+# cloned by chatterbox; piper and kokoro come with it). OFF by default, so the
+# default image is exactly what it was: build with
+#   docker compose build --build-arg INSTALL_LOCAL_TTS=1
+# (or INSTALL_LOCAL_TTS=1 in the shell/.env that compose reads) to add the
+# [local-tts] extra of pyproject.toml. Cost: torch and the engines add about
+# 2 GB to the image, the models are downloaded on first use, and on a 4-core
+# ARM host without a GPU synthesis is slower than real time (measure per line
+# before relying on it). Edge, Gemini and ElevenLabs voices need none of this.
+ARG INSTALL_LOCAL_TTS=0
+COPY pyproject.toml /tmp/pyproject.toml
+RUN if [ "$INSTALL_LOCAL_TTS" = "1" ]; then \
+        python -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/pyproject.toml','rb'))['project']['optional-dependencies']['local-tts']))" > /tmp/local-tts.txt \
+        && pip install --no-cache-dir -r /tmp/local-tts.txt; \
+    fi \
+    && rm -f /tmp/pyproject.toml /tmp/local-tts.txt
+
 # ---- Final stage ----
 FROM python:3.11-slim
 

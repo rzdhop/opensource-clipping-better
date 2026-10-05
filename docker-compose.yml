@@ -1,6 +1,11 @@
 services:
   backend:
-    build: .
+    build:
+      context: .
+      args:
+        # 0 (default) = the image as it always was; 1 adds the local TTS
+        # engines (chatterbox voice cloning): about +2 GB, see the Dockerfile.
+        INSTALL_LOCAL_TTS: ${INSTALL_LOCAL_TTS:-0}
     container_name: rzc-backend
     # The bind mounts below replace the image's own directories, which throws
     # away the Dockerfile's build-time `chown appuser`. What the container sees
