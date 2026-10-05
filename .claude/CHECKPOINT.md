@@ -1,8 +1,8 @@
 ## CURRENT STATE — plan 26 (rich prompts on every link + Copy + species in a fruit world) CODE + DOCS COMPLETE and LIVE; close-out pending the human's Tier 2 (2026-10-05, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main (this commit), clean tree
-  (`FETCH_HEAD` untracked, left alone). **Live:** d306415 deployed (bundle index-D4KzpUle.js), health 200, 371 jobs,
-  0 running. CI: green through 4a0f080; 0b444c3 (stage 4) and the later commits to read on `actions/runs?branch=main`.
+  (`FETCH_HEAD` untracked, left alone). **Live:** c27fba0 (d306415 rebuilt + the medium hotfix restarted at 0 jobs; bundle index-D4KzpUle.js),
+  health 200, 371 jobs, 0 running. CI: green through 4a0f080; 0b444c3 (stage 4) and the later commits to read on `actions/runs?branch=main`.
 - **Shipped (DEC-303, A-169…A-175; the plan file `.claude/plans/ai-story/26-rich-handoff-prompts-plan.md`):** stages
   1 Copy over http (lib/clipboard.js) · 2 prompt_templates + link_words · 3 clips at the send layer + handoff
   master_prompt/fit/prompt_warning · 4a keyframes · 4b entities · 4c prop reference text + the style split · 5 the
@@ -25,6 +25,9 @@
 - **Rules in force (unchanged):** worktrees off main; DEC-234 selections in both envs per stage; DEC-297 pin files;
   deploy only at 0 running jobs after the 3.11 compile (`rm -sfv` + rebuild for the dashboard, `restart` for Python);
   no full local suite (DEC-278); no edits to main's source while a job runs; money only on the human's go.
+- **The medium hotfix (c27fba0):** ART STYLE now opens with "Medium: a fully computer-animated 3D CGI film … not
+  masks … no live-action footage" per style (`prompt_templates.MEDIUM`, `style_lock["medium"]` wins) after the
+  human's second Gemini render came out as an actor in a fruit mask. The next paste of sh11 is the verdict (A-176).
 - **Open questions:** none.
 
 ## CURRENT STATE — SESSION CLOSED 2026-10-05 ~14:15 UTC: plans 23 (follow-through), 24 (timing harness) and 25 (the handoff) shipped and live; the next session upgrades from here

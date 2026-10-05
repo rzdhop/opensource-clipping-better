@@ -623,6 +623,9 @@
 - **A-175** — (plan 26 stage 7c) Dragon Fruit's repair by three PATCHes (Marie-Jeanne pear, Chloe pear, Sam avocado,
   as drawn) needs no sheet redrawn and, with the storyboard NOT refreshed, keeps the 8 pear-headed keyframes made
   (the human's answers). UNCONFIRMED until the PATCHes land after the deploy.
+- **A-176** — (plan 26 hotfix) Saying the medium first ("a fully computer-animated 3D CGI film … not masks … no
+  live-action footage") turns Veo/Gemini from live action with a fruit mask into CGI animation for the fruit, family
+  and viral 3D styles. UNCONFIRMED until the human's next sh11 paste.
 
 ## Confirmed
 - **A-167** — (plan 24) A reply written inside its per-line caps never raises a `scene_over` flag. CONFIRMED
