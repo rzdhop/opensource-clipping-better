@@ -626,6 +626,16 @@
 - **A-176** — (plan 26 hotfix) Saying the medium first ("a fully computer-animated 3D CGI film … not masks … no
   live-action footage") turns Veo/Gemini from live action with a fruit mask into CGI animation for the fruit, family
   and viral 3D styles. UNCONFIRMED until the human's next sh11 paste.
+- **A-177** — (plan 27) 2.4 words/s with a 0.7 s lead (A-148, unmeasured) sizes the exchanges right: an 8 s Veo clip
+  carrying 13–17 words in 2–3 lines ends within 0.3–1.0 s of the last word, no dead air, no cut word. UNCONFIRMED
+  until the human's first exchange clips (the take's end_s vs clip_s on the Handoff).
+- **A-178** — (plan 27, D1) Clamping the window to what the link sells (Flow/Veo 6–8 s) is acceptable to the human;
+  the full 5–10 holds on kling, seedance and ltx. UNCONFIRMED.
+- **A-179** — (plan 27, D2) Dragon Fruit's exchanges arrive with the next "Regenerate episode" (new shot ids, new
+  keyframes ≈ $1.50 + the script calls); the human accepts the redraw. UNCONFIRMED until they regenerate.
+- **A-180** — (plan 27) Veo renders a two-speaker exchange with the right voice on each line from "X says …; Y
+  answers at once …; Audio: the voices of A and B only, in turn, no overlap" — no voice swap, no overlap.
+  UNCONFIRMED until the first exchange clip is heard.
 
 ## Confirmed
 - **A-167** — (plan 24) A reply written inside its per-line caps never raises a `scene_over` flag. CONFIRMED
