@@ -600,14 +600,14 @@
 - **A-166** — (plan 24, stage 1) Written French dialogue averages 6.6 characters per word (6.2–7.3 per scene on
   e7412a3efcc6), so a v3 word budget converted at 5.7 under-counts seconds by ~15 %; 6.6 is the right constant for
   v3 budgets until measured on more scripts. UNCONFIRMED.
-- **A-167** — (plan 24) A reply written inside a per-line cap derived from `timing.scene_plan` (every pause paid,
-  5 % margin, the provider overrun applied) never raises a `scene_over` flag at the Script step. UNCONFIRMED until
-  stage 2's first episode.
 - **A-168** — (plan 25) The Handoff makes a shot on Flow in fewer taps than the Shot list did (copy, download the
   references, upload) and nothing the human needs is missing from a card (plan 22 stage 8's question). UNCONFIRMED
   until the human's Flow walk of 3 shots.
 
 ## Confirmed
+- **A-167** — (plan 24) A reply written inside its per-line caps never raises a `scene_over` flag. CONFIRMED
+  2026-10-05 on e7412a3efcc6 episode 1: six parts rewritten through the caps (hook 9/10 words, body scenes 10+10,
+  8+9, 10+11, 10+11 of 11+12, cliffhanger 11/15), every reply accepted first time, 60.0 s, 0 flags, ≈ $0.01.
 - **A-145** — (plan 22, stage 1) The paid writer's model id on Gemini's OpenAI-compatible endpoint is `gemini-3.8-flash`
   (priced $0.75 / $3.75 per M until 2026-12-31, then $1.50 / $7.50, read 2026-10-04 at ai.google.dev/gemini-api/docs/pricing).
   **Confirmed 2026-10-04:** a free `GET /v1beta/models` with the human's paid key lists `gemini-3.8-flash`,

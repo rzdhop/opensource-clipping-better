@@ -7,6 +7,9 @@
   last read. DEC-301 (approval), DEC-302 (as shipped).
 - **Shipped today (three plans):** plan 23's follow-through (CI keys, the hidden route-test red, follow-ups A8 D7 B8
   A5 D5, the C2 probe tool), plan 24 (the timing harness, DEC-298/300), plan 25 (the handoff, DEC-301/302).
+- **Done on the human's ask (13:41–14:05 UTC):** e7412a3efcc6 ep1 rewritten by parts through the caps (0 flags,
+  60.0 s, A-167 confirmed), script approved with approve_anyway (2 E4 issues left for the human to read),
+  storyboard rebuilt + approved, 10 keyframes drawn ($0.39), the Handoff ready with 10 clips missing.
 - **The human's hands:** (1) the Flow walk from the Handoff: open e7412a3efcc6 → episode 1 → the "Handoff →" tab,
   make 3 shots on Flow from the cards (time spent, what was missing — plan 22 stage 8's question), upload them, watch
   the take verdicts; (2) decide the storyboard prompt refresh of e7412a3efcc6 (stage 0's names; stales the 10 made
