@@ -153,6 +153,10 @@ CHECK_ONLY_MEASURE_REFUSAL = (f"A check-only run measures nothing: send {CHECK_O
 FILL_CALLS_MAX = 2
 FILL_NOTE = ("This scene runs short of the episode's length: write it fuller, close to the top of its word budget, "
              "with one more line if the beat allows it.")
+# Plan 24 stage 2 (D-4): a writing-v3 scene has hard caps a line and a scene
+# (its line plan), so its fill note asks for words up to them, never past.
+FILL_NOTE_V3 = ("This scene runs short of the episode's length: write it fuller, each line close to its cap and "
+                "within its caps.")
 
 # The v2 repair pass (phase 7 follow-up, stage G): after J1, the scenes its
 # issues name are written again with the fix as the note -- at most this many
@@ -315,15 +319,6 @@ def writes_v3(ec, script=None) -> bool:
     return judge.writes_v3(ec.story, script)
 
 
-def _word_budget_v3(ec, script, scene) -> dict:
-    """``timing.word_budget_v3`` for *scene*: the template's
-    ``episode_words`` spread over the episode's scene targets, the line
-    words a native-speech story's (``media_policy.native_speech``)."""
-    total = sum(other["target_duration_s"] for other in script["scenes"]) or None
-    return timing.word_budget_v3(scene, ec.template, ec.template.get("episode_words"), total_s=total,
-                                 native=media_policy.native_speech(ec.story))
-
-
 def _speech_lengths(ec) -> tuple:
     """``(speaking lengths, silent lengths)`` of a native-speech story's
     clips (``clips.speech_lengths``: its links' own tables, Veo's 4/6/8 s by
@@ -351,16 +346,39 @@ def line_plan(ec, script, scene, *, tail_floor=None) -> dict:
         tail_floor=tail_floor, speech_lengths=speech, silent_lengths=silent)
 
 
+def _store_plan(scene, plan) -> None:
+    """*scene*'s stored ``slot_s`` and ``line_plan`` set from *plan*."""
+    scene["slot_s"] = list(plan["slot_s"])
+    scene["line_plan"] = {key: plan[key] for key in ("allowed_speech_s", "lines", "max_words", "min_words")}
+
+
 def store_line_plans(ec, script) -> None:
     """Every scene of *script* (in place) gains its ``slot_s`` and its
-    ``line_plan`` (:func:`line_plan`; plan 24 stage 1, D-2) -- stored, not
-    yet read: the writer switches to it in stage 2 (``timing.plan_budget``),
-    :func:`_word_budget_v3`'s numbers stay what they were."""
+    ``line_plan`` (:func:`line_plan`; plan 24 stage 1, D-2). The writer
+    never reads the stored plan: E2v3/E3v3 recompute it when they write a
+    scene (:func:`current_plan`, plan 24 stage 2)."""
     floors = timing.plan_tail_floors(script, ec.template)
     for scene in script["scenes"]:
-        plan = line_plan(ec, script, scene, tail_floor=floors[scene["scene_id"]])
-        scene["slot_s"] = list(plan["slot_s"])
-        scene["line_plan"] = {key: plan[key] for key in ("allowed_speech_s", "lines", "max_words", "min_words")}
+        _store_plan(scene, line_plan(ec, script, scene, tail_floor=floors[scene["scene_id"]]))
+
+
+def current_plan(ec, script, scene) -> dict:
+    """*scene*'s line plan as it stands now (:func:`line_plan`: the voices,
+    the clip lengths and the neighbours of this moment), stored on the scene
+    in place of whatever plan it had (plan 24 stage 2: a stale stored plan is
+    never trusted)."""
+    plan = line_plan(ec, script, scene)
+    _store_plan(scene, plan)
+    return plan
+
+
+def over_cap_errors(errors) -> list:
+    """The word-cap errors among *errors* (``prompts.is_word_cap_error``: a
+    line or a scene over its plan's hard cap, plan 24 stage 2, D-4). A
+    writing-v3 reply with any of them is never accepted; plan 24 stage 3's
+    trim pass rewrites exactly the lines they name (see
+    :func:`write_body_scene`)."""
+    return [error for error in errors if prompts.is_word_cap_error(error)]
 
 
 def narrator_in(ec, scene) -> bool:
@@ -889,7 +907,11 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         # Plan 22 stage 3: E2v3 -- every line so far, the spine, this scene's
         # and the next scene's summary, the line rule.
         prompt_id = "E2v3"
-        budget3 = _word_budget_v3(ec, script, scene)
+        # Plan 24 stage 2 (D-3): the scene's line plan, recomputed now, is
+        # what the writer is told and what the reply is held to.
+        native = media_policy.native_speech(ec.story)
+        plan3 = current_plan(ec, script, scene)
+        budget3 = timing.plan_budget(plan3, line_lo=timing.line_words_v3(ec.template, native=native)[0])
         index = script["scenes"].index(scene)
         next_scene = script["scenes"][index + 1] if index + 1 < len(script["scenes"]) else None
         system, user, schema = prompts.build_e2_v3(
@@ -898,7 +920,7 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
             sfx_cues=ec.sfx_cues, narrator_enabled=kwargs["narrator_enabled"],
             voice_direction=kwargs["voice_direction"], note=pack.note, narration=kwargs["narration"],
             slice_text=context.slice_for_scene(ec, scene, knowledge=knowledge_of(ec)),
-            native=media_policy.native_speech(ec.story))
+            native=native, plan=plan3)
     elif v2:
         # Phase 7 stage 5c (A13): E2v2, with the scene's slice of the knowledge base.
         prompt_id = "E2v2"
@@ -917,7 +939,14 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
     # wrong with the reply) is accepted with a log line (spec 4.2, F3; the
     # human's own choice) -- a real problem (a bad speaker, an over-cap
     # line) still fails the scene exactly as before.
-    attempt = {"n": 0}
+    #
+    # Plan 24 stage 2 (D-4, amends DEC-143 on writing v3): the leniency is
+    # for UNDER-length replies only -- a v3 reply over its plan's caps is
+    # never accepted; once the ladder is spent the scene fails as any broken
+    # reply does (stage 3's trim pass hooks in before that, below).
+    word_count_prefixes = ((prompts.E2_WORD_FLOOR_PREFIX,) if v3 else
+                           (prompts.E2_WORD_FLOOR_PREFIX, prompts.E2_WORD_CEILING_PREFIX))
+    attempt = {"n": 0, "reply": None, "errors": []}
 
     def validate(reply):
         attempt["n"] += 1
@@ -926,14 +955,13 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         if v3:
             errors = prompts.validate_e2_v3(reply, scene=scene, narrator_enabled=kwargs["narrator_enabled"],
                                             sfx_cues=ec.sfx_cues, budget=budget3,
-                                            floor=prompts.line_floor_v3(ec.template), episode_lines=episode_lines)
+                                            floor=prompts.line_floor_v3(ec.template), episode_lines=episode_lines,
+                                            plan=plan3)
         else:
             errors = prompts.validate_e2(reply, scene=scene, narrator_enabled=kwargs["narrator_enabled"],
                                          sfx_cues=ec.sfx_cues, word_budget=budget, **extra)
-        word_count_only = bool(errors) and all(
-            e.startswith(prompts.E2_WORD_FLOOR_PREFIX) or e.startswith(prompts.E2_WORD_CEILING_PREFIX)
-            for e in errors
-        )
+        attempt["reply"], attempt["errors"] = reply, list(errors)
+        word_count_only = bool(errors) and all(e.startswith(word_count_prefixes) for e in errors)
         if errors and not (word_count_only and attempt["n"] >= 2):
             return errors
         if word_count_only and attempt["n"] >= 2:
@@ -942,8 +970,18 @@ def write_body_scene(ctx, ec, script, sid, *, tools, announced, note=None) -> bo
         apply_e2(ec, scene_of(trial, sid), reply)
         return episode_common.trial_errors(ec, trial)
 
-    reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
-                               time_fn=tools.time_fn)
+    try:
+        reply = llm_call.call_json(ctx, prompt_id, system, user, schema, validator=validate, runner=tools.runner,
+                                   time_fn=tools.time_fn)
+    except StepFailed:
+        over = over_cap_errors(attempt["errors"]) if v3 else []
+        if over:
+            # Plan 24 stage 3 (D-4) hooks its trim pass HERE: attempt["reply"]
+            # is the last reply, `over` the lines (and the total) past their
+            # caps; a trimmed reply inside its caps is applied instead of
+            # failing. Until then the scene fails, never accepted over its caps.
+            ctx.on_log(f"✖ Scene {sid}: still over its caps after every try ({over[0]}).")
+        raise
     apply_e2(ec, scene, reply)
     return True
 
@@ -1033,15 +1071,18 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         line_words = timing.line_words_v3(ec.template, native=native)
         sliced = _framing_slice_scene(script, part)
         slice_text = context.slice_for_scene(ec, sliced, knowledge=knowledge_of(ec)) if sliced else ""
-        kwargs["word_budgets"] = {key: _word_budget_v3(ec, script, scene)["words"][1]
-                                  for key, scene in (("hook", hook), ("cliffhanger", cliff), ("recap", recap))
-                                  if scene is not None}
+        # Plan 24 stage 2 (D-3): each framing part's line plan, recomputed
+        # now, sets its seconds and its hard total.
+        plans3 = {key: current_plan(ec, script, scene) for key, scene in (("hook", hook), ("cliffhanger", cliff),
+                                                                            ("recap", recap))
+                  if scene is not None}
+        kwargs["word_budgets"] = {key: plan["max_words"] for key, plan in plans3.items()}
         narrator_parts = ([key for key, scene in parts.items() if narrator_in(ec, scene)]
                           if "narrator_slots" in ec.template else None)
         system, user, schema = prompts.build_e3_v3(
             pack, slice_text=slice_text, so_far=_so_far(ec, script, skip=rewritten), spine=script.get("spine"),
             line_words=line_words, single_place=bool(ec.template.get("single_place")), native=native,
-            narrator_parts=narrator_parts, **kwargs)
+            narrator_parts=narrator_parts, plans=plans3, **kwargs)
     elif v2:
         # Phase 7 stage 5c (A13): E3v2, with the slice of the scene it mostly writes.
         prompt_id = "E3v2"
@@ -1061,7 +1102,7 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
                                             episode_defaults=ec.episode_defaults, line_words=line_words,
                                             floor=prompts.line_floor_v3(ec.template),
                                             single_place=bool(ec.template.get("single_place")),
-                                            episode_lines=v2_checks["episode_lines"])
+                                            episode_lines=v2_checks["episode_lines"], plans=plans3)
         else:
             errors = prompts.validate_e3(reply, ep=ec.ep, part=part, hook_scene=hook, cliffhanger_scene=cliff,
                                          recap_scene=recap, narrator_enabled=kwargs["narrator_enabled"],
@@ -1574,7 +1615,7 @@ class _Run(LineMeasurement):
             scene["target_duration_s"] = timing.slot_range(scene, ec.template, ec.style_lock)[1]
             try:
                 write_body_scene(self.ctx, ec, script, sid, tools=self.tools, announced=self.announced,
-                                 note=FILL_NOTE)
+                                 note=FILL_NOTE_V3 if writes_v3(ec, script) else FILL_NOTE)
             except StepFailed as exc:
                 scene["target_duration_s"] = target
                 self.calls += 1

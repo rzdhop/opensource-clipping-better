@@ -113,6 +113,45 @@ def test_a_native_character_line_of_6_4_s_snaps_to_a_6s_clip_of_12_words():
     assert line["clip_s"] <= plan["slot_s"][1]
 
 
+# Plan 24 stage 2 (2026-10-05), expectations moved on purpose: stage 1 split a
+# native scene at the middle of the narrator share, which left the character
+# line a 4 s clip of 7 words -- too tight for a complete line with its reason.
+# The character line is now planned first at its 6 s clip (12 words) and the
+# narrator takes the seconds left; off native, the narrator gets the LOW end
+# of the template's share (0.6), not its middle.
+
+def test_a_native_13s_body_scene_plans_the_characters_6s_clip_first_and_the_narrator_the_rest():
+    plan = timing.scene_plan(NARRATED, _scene("setup"), lang=FR, native=True, narrator_provider="edge",
+                             speakers={"char_rida": "gemini"}, tail_floor=timing.plan_tail_floor(NARRATED))
+    narrator, character = plan["lines"]
+    assert (character["kind"], character["clip_s"], character["max_words"]) == ("character", 6, 12)
+    # 11.4 s allowed - 6 s = 5.4 s, but the clips must sum inside 13 s: the narrator's
+    # clip is 6 s (not the 8 s 5.4 + 0.7 snaps up to), so it speaks 5.3 s: 11 words at Edge.
+    assert (narrator["kind"], narrator["clip_s"], narrator["seconds"], narrator["max_words"]) == (
+        "narrator", 6, 5.3, 11)
+    assert plan["max_words"] == 23 and plan["min_words"] == 11
+    assert narrator["clip_s"] + character["clip_s"] <= plan["slot_s"][1]
+
+
+def test_a_native_9s_body_scene_steps_the_character_clip_down_to_4s():
+    template = copy.deepcopy(NARRATED)
+    template["slots"]["body"]["duration_s"] = [6.0, 9.0]
+    plan = timing.scene_plan(template, _scene("setup"), lang=FR, native=True, narrator_provider="edge",
+                             speakers={"char_rida": None}, tail_floor=timing.plan_tail_floor(template))
+    narrator, character = plan["lines"]
+    assert character["clip_s"] == 4 and narrator["clip_s"] == 4  # 6 + 4 > 9: the character steps down
+    assert sum(line["clip_s"] for line in plan["lines"]) <= 9
+
+
+def test_off_native_the_narrator_gets_the_low_end_of_the_share():
+    plan = timing.scene_plan(NARRATED, _scene("setup"), lang=FR, native=False, narrator_provider="edge",
+                             speakers={"char_rida": "edge"}, tail_floor=timing.plan_tail_floor(NARRATED))
+    narrator, character = plan["lines"]
+    assert NARRATED["narrator_share"][0] == 0.6
+    assert narrator["seconds"] == round(plan["allowed_speech_s"] * 0.6, 3)
+    assert character["seconds"] == round(plan["allowed_speech_s"] * 0.4, 3)
+
+
 @pytest.mark.parametrize("template,function,narrator", [
     (NARRATED, "turn", True), (NARRATED, "cliffhanger", True), (CONFRONTATION, "rising", False),
 ])

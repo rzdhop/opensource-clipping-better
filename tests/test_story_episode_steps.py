@@ -898,6 +898,93 @@ def test_an_e2_reply_over_the_word_ceiling_is_retried_then_accepted_with_a_log_l
     assert summary["ep"] == 1 and summary["scenes"] == len(ALL_SCENES)
 
 
+# ---------------------------------------------- plan 24 stage 2 (D-4): over-cap is never accepted on v3
+
+V3_SPINE = {"logline": "Kiwilo veut garder le pouvoir sur l'île, mais le téléphone annonce un vote qui le désigne.",
+            "want": "Kiwilo veut rester sur l'île.", "obstacle": "Le vote surprise du téléphone.",
+            "stakes": "Kiwilo quitte l'île s'il perd.", "turn": "Le téléphone désigne Kiwilo."}
+
+
+def _v3_tag(call):
+    stub = call["user"].split("This scene (", 1)[1].split("\n", 1)[0]
+    return hashlib.sha256(stub.encode("utf-8")).hexdigest()[:6]
+
+
+def e2_v3_ok(call):
+    """Two complete lines, 7 + 5 words, of the scene's own: inside every plan
+    (the fixture's serial_60s_v1 body scene plans 7 words a line)."""
+    tag, speakers = _v3_tag(call), _speakers(call)
+    return {"lines": [{"speaker": speakers[0], "text": f"Tu mens a{tag} b{tag} depuis ton arrivée.",
+                       "emotion": "angry", "delivery": "cold"},
+                      {"speaker": speakers[-1], "text": f"Je refuse c{tag} d{tag} net.", "emotion": "tension",
+                       "delivery": "quiet"}],
+            "sfx_cues": [], "on_screen_text": None}
+
+
+def e2_v3_over(call):
+    """Two lines of 22 words (44): over any body scene's plan."""
+    reply = e2_v3_ok(call)
+    tag = _v3_tag(call)
+    for i, line in enumerate(reply["lines"]):
+        line["text"] = " ".join(f"w{i}{k}{tag}" for k in range(22))
+    return reply
+
+
+def e2_v3_under(call):
+    """One 4-word line: a sentence, under half of any body scene's plan."""
+    reply = e2_v3_ok(call)
+    reply["lines"] = reply["lines"][:1]
+    reply["lines"][0]["text"] = f"Non, e{_v3_tag(call)}, jamais ici."
+    return reply
+
+
+def _v3_llm(queue):
+    return FakeLLM(E1v3=[dict(copy.deepcopy(E1_REPLY), spine=dict(V3_SPINE))], E2v3=queue, E3v3=[E3_FULL],
+                   E4=[E4_PASSED], default={"E2v3": e2_v3_ok, "J1v3": J1_PASSED})
+
+
+def test_a_v3_reply_over_its_caps_is_retried_with_the_cap_named_and_the_inside_retry_accepted(store):
+    story_id = _ready_story(store, v2=True, writing="v3")
+    llm = _v3_llm([e2_v3_over, e2_v3_ok])
+
+    _summary, log = _run(_new().script, store, story_id, llm=llm)
+
+    calls = [call for call in llm.of("E2v3") if "This scene (s02," in call["user"]]
+    assert len(calls) == 2
+    refusal = calls[1]["user"].split("Your previous reply was refused: ", 1)[1]
+    assert re.match(r"\$\.lines\[0\]\.text: 22 words, at most \d+ \((a \d+ s shot|about [\d.]+ s)\)", refusal)
+    script = _script(store, story_id)
+    assert _scene(script, "s02")["state"] == "written" and len(_scene(script, "s02")["lines"][0]["text"].split()) == 7
+    assert not any("accepting a reply after a retry" in line for line in log)
+    # The scene carries the plan it was written to, recomputed at call time.
+    assert _scene(script, "s02")["line_plan"]["max_words"] < 44
+    # E3v3 is told each framing part's seconds and hard cap.
+    assert re.search(r"The hook lasts at most [\d.]+ s: at most \d+ words\.", llm.of("E3v3")[0]["user"])
+    # The fill pass asks a v3 scene for words within its caps.
+    assert "within its caps" in steps.script.FILL_NOTE_V3 and "top of its word budget" not in steps.script.FILL_NOTE_V3
+
+
+def test_a_v3_reply_still_over_its_caps_after_the_retry_is_never_accepted(store):
+    story_id = _ready_story(store, v2=True, writing="v3")
+    llm = _v3_llm([e2_v3_over, e2_v3_over])
+
+    message, log = _failed(_new().script, store, story_id, llm=llm)
+
+    assert "scene:1:s02" in message and "failed validation twice" in message and "words in total, at most" in message
+    assert not any("accepting a reply after a retry" in line for line in log)
+    assert _scene(_script(store, story_id), "s02")["state"] == "stub"
+
+
+def test_a_v3_reply_still_under_after_the_retry_is_accepted_with_a_log_line(store):
+    story_id = _ready_story(store, v2=True, writing="v3")
+    llm = _v3_llm([e2_v3_under, e2_v3_under])
+
+    _summary, log = _run(_new().script, store, story_id, llm=llm)
+
+    assert any("Scene s02" in line and "accepting a reply after a retry" in line for line in log)
+    assert _scene(_script(store, story_id), "s02")["state"] == "written"
+
+
 def test_a_body_scene_nobody_can_speak_in_is_written_silent_without_a_call(store):
     m = _new()
     story_id = _ready_story(store)

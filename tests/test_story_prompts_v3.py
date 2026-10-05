@@ -127,18 +127,45 @@ def _j1v3(**extra):
 
 # ================================================================ the goldens
 
+# Plan 24 stage 2 (2026-10-05), re-pinned on purpose (RC-M1): E2v3 and E3v3
+# are pinned as the script step now sends them -- with the scene's line plan
+# (the seconds, each line's hard cap, the hard total; the framing parts'
+# seconds and caps). The prompts built without a plan (any caller that hands
+# none in) keep their former bytes, pinned under "-unplanned" with the shas
+# E2v3/E3v3 had before this stage.
 GOLDENS = {
     "E1v3": "0579bd35879fad084e44d23dfc2b0a54d405fb2bbd26be515393f16eb50a6c8a",
-    "E2v3": "bf903d5c575481093415141036757c13e93fafcf1fee0e7a3aae7bb84ab8c3a9",
-    "E3v3": "6b066de95e1c58626c88e3261741b5a070291b6af0457d60184c3d00334426cb",
+    "E2v3": "213cdce7bff6e0b6f2cdb91015b05222b141e3375d64edd505a09fd2fe27e0a6",
+    "E3v3": "5c63d51131b3b9c0293308dca082d1818dd38ab57e29ff05682240a3b0098f05",
     "J1v3": "59b7355c21d68a8dab52178333b4fdc1fc210551918b3be5f1335412a2e23eaf",
+    "E2v3-unplanned": "bf903d5c575481093415141036757c13e93fafcf1fee0e7a3aae7bb84ab8c3a9",
+    "E3v3-unplanned": "6b066de95e1c58626c88e3261741b5a070291b6af0457d60184c3d00334426cb",
 }
+
+
+def _fixture_plan(scene):
+    """The fixture scene's line plan on the confrontation format (native
+    speech, no narrator, Veo's 4/6/8 s clips)."""
+    return timing.scene_plan(CONFRONTATION, scene, lang="fr", native=True, narrator=False,
+                             speakers={"char_rouge": None, "char_nude": None},
+                             tail_floor=timing.plan_tail_floor(CONFRONTATION))
+
+
+def _planned_e2v3():
+    plan = _fixture_plan(OUTLINE[1])
+    return _e2v3(plan=plan, budget=timing.plan_budget(plan, line_lo=5))
+
+
+def _planned_e3v3():
+    plans = {"hook": _fixture_plan(OUTLINE[0]), "cliffhanger": _fixture_plan(OUTLINE[3])}
+    return _e3v3(plans=plans, word_budgets={key: plan["max_words"] for key, plan in plans.items()})
 
 
 def test_the_v3_prompts_are_byte_identical_to_their_goldens():
     """Each v3 prompt on the small French fixture, pinned whole (system,
     user, schema): a wording change is a decision, re-pinned on purpose."""
-    built = {"E1v3": _e1v3(), "E2v3": _e2v3(), "E3v3": _e3v3(), "J1v3": _j1v3()}
+    built = {"E1v3": _e1v3(), "E2v3": _planned_e2v3(), "E3v3": _planned_e3v3(), "J1v3": _j1v3(),
+             "E2v3-unplanned": _e2v3(), "E3v3-unplanned": _e3v3()}
     assert {prompt_id: _sha(triple) for prompt_id, triple in built.items()} == GOLDENS
 
 
@@ -395,6 +422,104 @@ def test_validate_j1v3_takes_the_new_kinds_and_j1v2_does_not():
     assert any("is not one of" in error for error in prompts.validate_j1(reply, scene_ids=["s01", "s02"]))
 
 
+# ================================================================ plan 24 stage 2: seconds and hard caps
+#
+# D-3/D-4: the writer is told the scene's seconds and each line's hard cap
+# from the line plan (``timing.scene_plan``); a longer line or scene is
+# refused, the error naming the line, its words, its cap and its seconds.
+
+NARRATED = templates.load_episode_template("narrated_drama_60s_v2")
+# e7412a3efcc6's shape: a 13 s body scene, native speech, an Edge narrator, a Gemini character.
+S02 = dict(OUTLINE[1], characters=["char_rouge"])
+HOOK = dict(OUTLINE[0], characters=["char_rouge"])
+
+
+def _s02_plan():
+    return timing.scene_plan(NARRATED, S02, lang="fr", native=True, narrator_provider="edge",
+                             speakers={"char_rouge": "gemini"}, tail_floor=timing.plan_tail_floor(NARRATED))
+
+
+def _hook_plan():
+    return timing.scene_plan(NARRATED, HOOK, lang="fr", native=True, narrator_provider="edge",
+                             speakers={"char_rouge": "gemini"}, tail_floor=timing.plan_tail_floor(NARRATED))
+
+
+def _words(n, tag):
+    return " ".join(f"{tag}{k}" for k in range(n))
+
+
+def test_the_e2v3_prompt_of_a_13s_native_scene_names_its_seconds_each_lines_cap_and_the_total():
+    plan = _s02_plan()
+    assert [line["max_words"] for line in plan["lines"]] == [11, 12] and plan["max_words"] == 23
+    _s, user, schema = _e2v3(scene=S02, plan=plan, budget=timing.plan_budget(plan, line_lo=5),
+                             cast=PERSONALITIES[:1], narrator_enabled=True)
+    block = ("This scene lasts at most 13 s.\n"
+             "Line 1 (narrator): at most 11 words, heard over one 6 s shot.\n"
+             "Line 2 (Rouge): at most 12 words, spoken in one 6 s shot.\n"
+             "Hard limits: 23 words in total; a longer line is refused.\n"
+             "Write at least 11 and at most 23 words of dialogue in total.")
+    assert block in user
+    assert "not fewer than" not in user and "one shot of at most 8 seconds" not in user
+    assert "- lines: 2 lines, each with speaker (one of char_rouge, narrator)" in user
+    assert "Each text is one or two complete sentences in French, 5 to 12 words" in user
+    assert prompts.LINE_RULE_V3 in user
+
+
+def _check_planned(*lines, plan=None):
+    plan = plan or _s02_plan()
+    return prompts.validate_e2_v3(_e2_reply(*lines), scene=S02, narrator_enabled=True, sfx_cues=["gasp_crowd"],
+                                  budget=timing.plan_budget(plan, line_lo=5), floor=5, plan=plan)
+
+
+def test_validate_e2v3_refuses_a_line_or_a_scene_over_its_plan_and_takes_one_exactly_at_its_caps():
+    assert _check_planned(_line("narrator", _words(11, "n")), _line("char_rouge", _words(12, "c"))) == []
+    errors = _check_planned(_line("narrator", _words(11, "n")), _line("char_rouge", _words(15, "c")))
+    assert errors[0] == "$.lines[1].text: 15 words, at most 12 (a 6 s shot)"
+    errors = _check_planned(_line("narrator", _words(18, "n")), _line("char_rouge", _words(12, "c")))
+    assert errors[:2] == ["$.lines[0].text: 18 words, at most 11 (a 6 s shot)",
+                          "$.lines: 30 words in total, at most 23 (a 13 s scene)"]
+    # A line the plan has no room for is refused, naming the count.
+    errors = _check_planned(_line("narrator", _words(5, "n")), _line("char_rouge", _words(5, "c")),
+                            _line("char_rouge", _words(5, "d")))
+    assert "$.lines[2]: one character line too many: this scene's plan holds 1 character line" in errors
+    # Under: the floor error keeps its prefix (the script step's under-only leniency reads it).
+    errors = _check_planned(_line("char_rouge", _words(6, "c")))
+    assert errors == [f"{prompts.E2_WORD_FLOOR_PREFIX}: 6 in total, expected at least 11 (half of the 23-word plan)"]
+    # Without a plan the validator keeps its band (a legacy caller).
+    assert _check_e2(_e2_reply(_line("char_rouge", GOOD_A), _line("char_rouge", GOOD_B))) == []
+
+
+def test_e3v3_names_the_hooks_seconds_and_refuses_a_hook_over_its_cap():
+    plan = _hook_plan()
+    assert plan["max_words"] == 10 and plan["slot_s"][1] == 6.0
+    _s, user, _ = _e3v3(hook_scene=HOOK, narrator_enabled=True, plans={"hook": plan})
+    assert "The hook lasts at most 6 s: at most 10 words." in user
+    assert "Keep the hook's dialogue within" not in user
+    reply = {"hook": {"lines": [_line("narrator", _words(14, "h"))], "on_screen_text": "Elle cache sa couleur"},
+             "cliffhanger": {"reveal": "Rouge arrache le capuchon.",
+                             "lines": [_line("char_rouge", "Maintenant, je vais retirer ton capuchon devant toute "
+                                                           "l'académie.")]},
+             "teaser": "Demain, toute l'académie saura."}
+    kwargs = dict(ep=1, part=None, hook_scene=HOOK, cliffhanger_scene=OUTLINE[3], recap_scene=None,
+                  narrator_enabled=True, episode_defaults=dict(DEFAULTS, hook_style="text_overlay"),
+                  line_words=(5, 17), floor=5, single_place=True, plans={"hook": plan})
+    errors = prompts.validate_e3_v3(reply, **kwargs)
+    assert errors[0] == "$.hook.lines: 14 words in total, at most 10 (a 6 s hook)"
+    reply["hook"]["lines"] = [_line("narrator", _words(10, "h"))]
+    assert prompts.validate_e3_v3(reply, **kwargs) == []
+
+
+def test_a_word_cap_error_is_told_whole_and_first_on_the_retry():
+    from clipping.aistory.steps import llm_call, script as script_step
+
+    errors = _check_planned(_line("narrator", _words(18, "n")), _line("char_rouge", _words(12, "c")))
+    assert script_step.over_cap_errors(errors) == errors[:2]
+    assert script_step.over_cap_errors([f"{prompts.E2_WORD_FLOOR_PREFIX}: 6 in total"]) == []
+    retry = llm_call.refused_prompt("USER", errors)
+    assert retry.startswith("USER\n\nYour previous reply was refused: $.lines[0].text: 18 words, at most 11 (a 6 s "
+                            "shot); $.lines: 30 words in total, at most 23 (a 13 s scene)")
+
+
 # ================================================================ the script document
 
 def test_the_spine_is_an_optional_key_of_the_script_and_capped():
@@ -433,7 +558,8 @@ def test_the_spine_is_an_optional_key_of_the_script_and_capped():
 # words, the cut named), the next scene, the native-speech and narrated lines,
 # the narrator offered. Budget = worst case + 15 %, rounded up to ten.
 
-MEASURED_V3 = {"E1v3": 2807, "E2v3": 2628, "E3v3": 3475, "J1v3": 4083}
+# Plan 24 stage 2 (2026-10-05): E2v3 2,628 -> 2,705 and E3v3 3,475 -> 3,488, planned (_worst_plan below).
+MEASURED_V3 = {"E1v3": 2807, "E2v3": 2705, "E3v3": 3488, "J1v3": 4083}
 MEASURED_V3_REPLY = {"E1v3": 2232.1, "E1v3-payoff": 2770.3, "J1v3": 854.1}
 SPINE_AT_CAPS = {key: budgets._fr(words) for key, words in prompts.SPINE_MAX_WORDS.items()}
 SCENES_V3 = [dict(scene, summary=budgets._fr(prompts.SUMMARY_V3_MAX_WORDS)) for scene in budgets.SCENES]
@@ -462,13 +588,33 @@ def _worst_e1v3(template):
         slice_text=context.slice_for_episode(ec, knowledge=knowledge, char_ids=budgets.IDS), narration=NARRATION)
 
 
+# Plan 24 stage 2 (2026-10-05), re-measured on purpose: E2v3/E3v3 are sent
+# with the scene's line plan (``timing.scene_plan``), so the worst cases are
+# planned too -- four lines, the narrator's at 22 words over an 8 s shot, each
+# character line the longest name at 17 words in an 8 s shot, a 12.5 s scene;
+# the framing parts' seconds and caps in place of "Keep ... within N words".
+
+def _worst_plan(narrator, *, words=None, hi=12.5):
+    longest = max((c["char_id"] for c in budgets.PERSONALITIES),
+                  key=lambda cid: len(next(c["name"] for c in budgets.PERSONALITIES if c["char_id"] == cid)))
+    lines = [{"kind": "narrator", "speaker": "narrator", "seconds": 7.3, "clip_s": 8, "max_words": 22}] if narrator \
+        else []
+    lines += [{"kind": "character", "speaker": longest, "seconds": 8.0, "clip_s": 8, "max_words": 17}
+              for _ in range(4 - len(lines))]
+    total = words or sum(line["max_words"] for line in lines)
+    return {"slot_s": [3.0, hi], "allowed_speech_s": 11.0, "lines": lines, "max_words": total,
+            "min_words": total // 2}
+
+
 def _worst_e2v3(narrator, native):
     ec, knowledge = budgets._sliced_ec()
     pack = budgets._pack(budgets.NOTE)
     body = SCENES_V3[10]
+    plan = _worst_plan(narrator)
     return prompts.build_e2_v3(
         pack, scene=body, outline=SCENES_V3, next_scene=SCENES_V3[11], so_far=SO_FAR_AT_CAPS, spine=SPINE_AT_CAPS,
-        budget={"words": [60, 88], "lines": [4, 4], "line_words": [5, 22]}, cast=budgets.PERSONALITIES,
+        budget={"words": [plan["min_words"], plan["max_words"]], "lines": [4, 4], "line_words": [5, 22]},
+        cast=budgets.PERSONALITIES, plan=plan,
         place={k: budgets.LONGEST_PLACE[k] for k in ("place_id", "name", "layout_notes")},
         props=[{"prop_id": budgets.PROP["prop_id"], "name": budgets.PROP["name"]}],
         sfx_cues=budgets.STYLE["audio"]["sfx_cues"], narrator_enabled=narrator,
@@ -486,6 +632,8 @@ def _worst_e3v3(part, single_place):
         recap_scene=SCENES_V3[0], outline=SCENES_V3, first_body_line=budgets.LINE, last_body_line=budgets.LINE,
         arc_entry=budgets.ARC2, next_arc_entry=budgets.ARC3, memory=budgets.MEMORY, episode_defaults=budgets.DEFAULTS,
         word_budgets={"hook": 19, "cliffhanger": 24, "recap": 9}, cast=budgets.PERSONALITIES, narrator_enabled=True,
+        plans={key: _worst_plan(True, words=words) for key, words in (("hook", 19), ("cliffhanger", 24),
+                                                                       ("recap", 9))},
         open_hooks=budgets.OPEN_HOOKS[:budgets.E3_WORST_HOOKS],
         slice_text=context.slice_for_scene(ec, sliced, knowledge=knowledge), so_far=SO_FAR_AT_CAPS,
         spine=SPINE_AT_CAPS, line_words=(5, 22), single_place=single_place, native=True, narrator_parts=["recap"])
@@ -577,10 +725,14 @@ def _tag(call, label):
 
 def e2_v3_reply(call):
     """An E2v3 reply: two complete lines of the scene's own (tagged from
-    its "This scene (" line, so no line repeats another of the episode)."""
+    its "This scene (" line, so no line repeats another of the episode).
+
+    Plan 24 stage 2 (2026-10-05), re-pinned on purpose: the fixture's
+    serial_60s_v1 body scene (8 s, two Edge lines) plans 7 words a line, a
+    hard cap now -- the first line drops its "gamma" word (8 -> 7)."""
     tag = _tag(call, "This scene")
     speakers = eps._speakers(call)
-    return {"lines": [{"speaker": speakers[0], "text": f"Tu mens alpha{tag} beta{tag} gamma{tag} depuis ton arrivée.",
+    return {"lines": [{"speaker": speakers[0], "text": f"Tu mens alpha{tag} beta{tag} depuis ton arrivée.",
                        "emotion": "angry", "delivery": "cold"},
                       {"speaker": speakers[-1], "text": f"Je refuse epsilon{tag} zeta{tag} eta{tag}.",
                        "emotion": "tension", "delivery": "quiet"}],

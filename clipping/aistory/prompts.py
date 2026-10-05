@@ -495,7 +495,12 @@ def anthropic_effort(prompt_id):
 # Kept beside INPUT_BUDGET rather than in it: that registry's rows, in order,
 # are pinned by the RC-M1 file (tests/test_story_prompts_episode.py), which
 # stays unedited; every reader goes through :func:`input_budget`.
-WRITING_V3_INPUT_BUDGET = {"E1v3": 3230, "E2v3": 3030, "E3v3": 4000, "J1v3": 4700}
+# Plan 24 stage 2 (2026-10-05), re-measured on purpose: E2v3/E3v3 are sent
+# with the scene's line plan (the seconds, a sentence and a hard cap per
+# planned line, the framing parts' seconds and caps): E2v3 2,705 -> 3,120
+# (was 3,030), E3v3 3,488 -> 4,020 (was 4,000; past the spec's 4,000 by 20
+# tokens, like J1v3 on the premium chain -- nothing is trimmed to fit).
+WRITING_V3_INPUT_BUDGET = {"E1v3": 3230, "E2v3": 3120, "E3v3": 4020, "J1v3": 4700}
 # Plan 23 stage D5: N1v2's input -- N1's French worst case with the variant
 # block at its caps (eight characters, each with two 40-character variants
 # and room for a third, and the ask) measures 3,613; + 15 %, rounded up to ten
@@ -2629,7 +2634,7 @@ HOOK_LINE_NEW_SENTENCE = ("That line belongs to the next scene: the hook's own l
                           "or a paraphrase of it.")
 
 
-def _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budget, *, v2=False) -> str:
+def _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budget, *, v2=False, budget_line=None) -> str:
     lines = [_scene_stub_line(hook_scene).replace("Scene (", "Hook scene (")]
     lines.append(f"Hook style: {_HOOK_STYLE_LINES[episode_defaults['hook_style']]}")
     if first_body_line is None:
@@ -2638,13 +2643,15 @@ def _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budget, *
         lines.append(f"The next scene opens with -- {first_body_line['speaker_name']}: {first_body_line['text']}")
         if v2:
             lines.append(HOOK_LINE_NEW_SENTENCE)
-    if word_budget is not None:
+    if budget_line is not None:
+        lines.append(budget_line)  # plan 24 stage 2: E3v3's seconds and hard cap
+    elif word_budget is not None:
         lines.append(f"Keep the hook's dialogue within {word_budget} words.")
     return "\n".join(lines)
 
 
 def _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_defaults, word_budget,
-                          v2=False) -> str:
+                          v2=False, budget_line=None) -> str:
     lines = [_scene_stub_line(cliffhanger_scene).replace("Scene (", "Cliffhanger scene (")]
     lines.append(f"Cliffhanger style: {_CLIFFHANGER_STYLE_LINES[episode_defaults['cliffhanger_style']]}")
     if last_body_line is None:
@@ -2655,7 +2662,9 @@ def _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_
         )
     if arc_entry.get("open_hooks_out"):
         lines.append("Leave one of these hooks open: " + "; ".join(arc_entry["open_hooks_out"]))
-    if word_budget is not None:
+    if budget_line is not None:
+        lines.append(budget_line)  # plan 24 stage 2: E3v3's seconds and hard cap
+    elif word_budget is not None:
         lines.append(f"Keep its line within {word_budget} words.")
     if v2:
         lines.append(NO_REPEAT_SENTENCE)
@@ -2663,7 +2672,7 @@ def _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_
     return "\n".join(lines)
 
 
-def _e3_recap_block(recap_scene, word_budget, recap_of=None) -> str:
+def _e3_recap_block(recap_scene, word_budget, recap_of=None, budget_line=None) -> str:
     """The recap scene's stub and, from the previous episode's recap
     (*recap_of*: ``(episode, text)``, phase 5 stage 3), what it is written
     from -- spec 2.7: its one line or on-screen text recalls where the
@@ -2671,7 +2680,9 @@ def _e3_recap_block(recap_scene, word_budget, recap_of=None) -> str:
     lines = [_scene_stub_line(recap_scene).replace("Scene (", "Recap scene (")]
     if recap_of is not None:
         lines.append(f"Write it from episode {recap_of[0]}'s recap: {recap_of[1]}")
-    if word_budget is not None:
+    if budget_line is not None:
+        lines.append(budget_line)  # plan 24 stage 2: E3v3's seconds and hard cap
+    elif word_budget is not None:
         lines.append(f"Keep its line within {word_budget} words.")
     return "\n".join(lines)
 
@@ -5009,6 +5020,80 @@ def narration_e2_line_v3(narration) -> str:
     return NARRATED_E2_LINE_V3.format(**_narration_values(narration)) if narration else ""
 
 
+# Plan 24 stage 2 (D-3, D-4): the writer is told the scene's seconds and each
+# planned line's hard cap (``timing.scene_plan``); a reply over a cap is
+# refused with the line, its words, its cap and its seconds named. Every
+# sentence below is said only when the caller hands in a plan; without one
+# the v3 prompts and validators are what they were.
+PLAN_SCENE_SECONDS_V3 = "This scene lasts at most {seconds} s."
+PLAN_LINE_V3 = "Line {i} ({who}): at most {words} words{shot}."
+PLAN_CHARACTER_SHOT_V3 = ", spoken in one {clip} s shot"
+PLAN_NARRATOR_SHOT_V3 = ", heard over one {clip} s shot"
+PLAN_HARD_LIMITS_V3 = "Hard limits: {words} words in total; a longer line is refused."
+PLAN_TOTAL_V3 = "Write at least {lo} and at most {hi} words of dialogue in total."
+PLAN_FRAMING_V3 = "The {part} lasts at most {seconds} s: at most {words} words."
+NATIVE_LINE_PLAN_V3 = "Each line is spoken on camera by its speaker in one shot, as long as its line below says."
+NATIVE_LINE_PLAN_NARRATOR_V3 = ("Each character line is spoken on camera by its speaker in one shot, as long as its "
+                                "line below says; the narrator is heard over the picture.")
+# A word-cap error (a line or a whole scene/part over its plan): what the
+# script step's over-cap rule and the retry's first errors read.
+WORD_CAP_ERROR_RE = re.compile(r"^\$\.[^:]*: \d+ words(?: in total)?, at most \d+ \(")
+
+
+def is_word_cap_error(error) -> bool:
+    """Whether *error* is a plan's word-cap refusal (:data:`WORD_CAP_ERROR_RE`)."""
+    return bool(WORD_CAP_ERROR_RE.match(str(error)))
+
+
+def plan_seconds(value) -> str:
+    """Seconds as the writer reads them: ``13`` for 13.0, ``5.3`` for 5.3."""
+    return f"{round(float(value), 1):g}"
+
+
+def plan_line_caps(plan, *, line_hi=None) -> list:
+    """Each planned line of *plan* (``timing.scene_plan`` or a stored
+    ``line_plan``) as ``{"kind", "speaker", "cap", "seconds", "clip_s"}``:
+    a narrator line's cap at most :data:`NARRATOR_LINE_MAX_WORDS`, a
+    character line's at most *line_hi* (the template's line words) when
+    given; ``clip_s`` None off native speech."""
+    out = []
+    for line in plan["lines"]:
+        cap = int(line["max_words"])
+        if line["kind"] == "narrator":
+            cap = min(NARRATOR_LINE_MAX_WORDS, cap)
+        elif line_hi is not None:
+            cap = min(int(line_hi), cap)
+        out.append({"kind": line["kind"], "speaker": line["speaker"], "cap": max(1, cap),
+                    "seconds": float(line["seconds"]), "clip_s": line.get("clip_s")})
+    return out
+
+
+def _plan_why(entry) -> str:
+    """A line's seconds as its cap error names them."""
+    if entry["clip_s"]:
+        return f"a {int(entry['clip_s'])} s shot"
+    return f"about {plan_seconds(entry['seconds'])} s"
+
+
+def plan_block_v3(plan, names, *, line_hi=None) -> str:
+    """E2v3's plan sentences (D-3): the scene's seconds, one sentence per
+    planned line (its cap; on native speech its shot), the hard total and
+    the band."""
+    caps = plan_line_caps(plan, line_hi=line_hi)
+    out = [PLAN_SCENE_SECONDS_V3.format(seconds=plan_seconds(plan["slot_s"][1]))]
+    for i, entry in enumerate(caps, start=1):
+        narrator = entry["kind"] == "narrator"
+        shot = ""
+        if entry["clip_s"]:
+            shot = (PLAN_NARRATOR_SHOT_V3 if narrator else PLAN_CHARACTER_SHOT_V3).format(clip=int(entry["clip_s"]))
+        who = "narrator" if narrator else names.get(entry["speaker"], entry["speaker"])
+        out.append(PLAN_LINE_V3.format(i=i, who=who, words=entry["cap"], shot=shot))
+    total = sum(entry["cap"] for entry in caps)
+    out.append(PLAN_HARD_LIMITS_V3.format(words=total))
+    out.append(PLAN_TOTAL_V3.format(lo=min(int(plan["min_words"]), total), hi=total))
+    return "\n".join(out)
+
+
 def spine_block(spine) -> str:
     """The episode's spine as the v3 calls read it, "" without one (a script
     written before writing v3)."""
@@ -5261,7 +5346,7 @@ def validate_e1_v3(reply, *, ep, template, episode_defaults, cast_ids, places, p
 _E2_V3_ASK_TEMPLATE = (
     "Write this scene's dialogue.\n\n"
     "Give:\n"
-    "- lines: {n_lo} to {n_hi} lines, each with speaker (one of {speakers}), text, emotion (one of {emotions}) and "
+    "- lines: {n_text} lines, each with speaker (one of {speakers}), text, emotion (one of {emotions}) and "
     "delivery (English, at most 12 words; the story's voice performance is {voice_direction}). Each text is one "
     "or two complete sentences in {language}, {w_lo} to {w_hi} words, that this person would say aloud right "
     "now.\n"
@@ -5269,7 +5354,7 @@ _E2_V3_ASK_TEMPLATE = (
     "- on_screen_text: null unless the scene truly needs one (at most 6 words, story language)\n\n"
     "{line_rule}\n\n"
     "{native_line}"
-    "Write {t_lo}-{t_hi} words of dialogue in total: not fewer than {t_lo}, not more than {t_hi}.\n\n"
+    "{total_line}\n\n"
     "{v3_lines}"
     "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
@@ -5292,15 +5377,17 @@ def e2_v3_schema(speakers, sfx_cue_names, *, lines=(1, E2_V3_LINES_MAX), line_wo
     return schema
 
 
-def _native_line(native, speakers, hi) -> str:
+def _native_line(native, speakers, hi, *, planned=False) -> str:
     if not native:
         return ""
+    if planned:  # plan 24 stage 2: each line's shot is said with its cap
+        return (NATIVE_LINE_PLAN_NARRATOR_V3 if "narrator" in speakers else NATIVE_LINE_PLAN_V3) + "\n\n"
     template = NATIVE_LINE_NARRATOR_V3 if "narrator" in speakers else NATIVE_LINE_V3
     return template.format(hi=hi) + "\n\n"
 
 
 def build_e2_v3(pack, *, scene, outline, next_scene, so_far, spine, budget, cast, place, props, sfx_cues,
-                narrator_enabled, voice_direction, slice_text, native=False, note=None, narration=None):
+                narrator_enabled, voice_direction, slice_text, native=False, note=None, narration=None, plan=None):
     """One body scene's dialogue on a writing-v3 story (module section
     above). *so_far* is every line of the episode before this scene,
     ``[(scene_id, speaker name, text)]`` in order (:func:`dialogue_so_far`
@@ -5309,7 +5396,12 @@ def build_e2_v3(pack, *, scene, outline, next_scene, so_far, spine, budget, cast
     (None: it is the last). *budget* is ``timing.word_budget_v3``'s answer
     (the scene's words, lines and words a line); *native* (a native-speech
     story) adds the one-shot line. The rest as :func:`build_e2_v2`'s; the
-    place is said by name (the slice holds its layout and light)."""
+    place is said by name (the slice holds its layout and light).
+
+    *plan* (plan 24 stage 2, D-3; ``timing.scene_plan``, *budget* then
+    ``timing.plan_budget`` of it): the scene's seconds, each planned line's
+    hard cap (its shot on native speech) and the hard total replace the
+    total band (:func:`plan_block_v3`). None: the prompt as it was."""
     names = {c["char_id"]: c["name"] for c in cast}
     user = FIRST_WATCH_RULES
     spine_text = spine_block(spine)
@@ -5341,11 +5433,18 @@ def build_e2_v3(pack, *, scene, outline, next_scene, so_far, spine, budget, cast
     if new:
         lines.append(f"First time on screen in this episode: {', '.join(new)} -- say or show who they are and "
                      "what they want.")
+    if plan is None:
+        n_text = f"{n_lo} to {n_hi}"
+        total_line = f"Write {t_lo}-{t_hi} words of dialogue in total: not fewer than {t_lo}, not more than {t_hi}."
+    else:
+        n_text = _count_range(n_lo, n_hi)
+        total_line = plan_block_v3(plan, names, line_hi=w_hi)
     user += _E2_V3_ASK_TEMPLATE.format(
-        n_lo=n_lo, n_hi=n_hi, speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS),
+        n_text=n_text, speakers=", ".join(speakers), emotions=", ".join(schemas.EMOTIONS),
         voice_direction=voice_direction, language=pack.language_name, w_lo=w_lo, w_hi=w_hi,
         sfx_cues=", ".join(sfx_cue_names) if sfx_cue_names else "none available for this story",
-        line_rule=LINE_RULE_V3, native_line=_native_line(native, speakers, w_hi), t_lo=t_lo, t_hi=t_hi,
+        line_rule=LINE_RULE_V3, native_line=_native_line(native, speakers, w_hi, planned=plan is not None),
+        total_line=total_line,
         v3_lines="\n".join(lines) + "\n\n" + narration_e2_line_v3(narration),
         french_line=_french_block(pack),
     )
@@ -5379,7 +5478,46 @@ def _v3_line_errors(errors, path, line, *, line_words, floor) -> None:
                       "or two complete sentences a person would say, never a fragment")
 
 
-def validate_e2_v3(reply, *, scene, narrator_enabled, sfx_cues, budget, floor, episode_lines=()) -> list:
+def _plan_line_errors(errors, lines, caps, *, floor, path="$.lines") -> None:
+    """Plan 24 stage 2 (D-4): each reply line against its planned line, by
+    kind in order (the first narrator line against the first planned
+    narrator line, ...): over its cap -> ``"<path>[i].text: N words, at most
+    C (<its seconds>)"``; under the floor (a character line: *floor*, a
+    narrator line: :data:`LINE_FLOOR_WORDS`; never above its cap) the
+    fragment error; a line of a kind the plan has no more room for, one
+    error naming the count."""
+    planned = {"narrator": [c for c in caps if c["kind"] == "narrator"],
+               "character": [c for c in caps if c["kind"] == "character"]}
+    seen = {"narrator": 0, "character": 0}
+    for i, line in enumerate(lines):
+        text = line.get("text") if isinstance(line, dict) else None
+        if not (isinstance(text, str) and text.strip()):
+            continue  # the schema's / the v2 checks' own error
+        kind = "narrator" if line.get("speaker") == "narrator" else "character"
+        k = seen[kind]
+        seen[kind] += 1
+        if k >= len(planned[kind]):
+            count = len(planned[kind])
+            errors.append(f"{path}[{i}]: one {kind} line too many: this scene's plan holds {count} {kind} "
+                          f"line{'s' if count != 1 else ''}")
+            continue
+        entry = planned[kind][k]
+        count = _word_count(text)
+        lo = min(LINE_FLOOR_WORDS if kind == "narrator" else floor, entry["cap"])
+        if count > entry["cap"]:
+            errors.append(f"{path}[{i}].text: {count} words, at most {entry['cap']} ({_plan_why(entry)})")
+        elif count < lo:
+            errors.append(f"{path}[{i}].text: {count} word{'s' if count != 1 else ''}, expected at least {lo}: a "
+                          "line is one or two complete sentences a person would say, never a fragment")
+
+
+def _cap_errors_first(errors) -> list:
+    """*errors* with every word-cap error first (:func:`is_word_cap_error`),
+    so the retry -- told the first three -- is told the overshoot whole."""
+    return [e for e in errors if is_word_cap_error(e)] + [e for e in errors if not is_word_cap_error(e)]
+
+
+def validate_e2_v3(reply, *, scene, narrator_enabled, sfx_cues, budget, floor, episode_lines=(), plan=None) -> list:
     """Post-validation for an E2v3 reply: its schema, 1 to
     :data:`E2_V3_LINES_MAX` lines, each line's words (:func:`_v3_line_errors`:
     at most the budget's ``line_words`` high end; at least *floor*,
@@ -5387,7 +5525,13 @@ def validate_e2_v3(reply, *, scene, narrator_enabled, sfx_cues, budget, floor, e
     text as E2's, the scene's total words against its budget's high end as
     :func:`validate_e2`'s (half to 1.5x, the same prefixes, so the script
     step's second-attempt leniency reads them), and no line repeating
-    another of the episode (*episode_lines*) or of the reply."""
+    another of the episode (*episode_lines*) or of the reply.
+
+    *plan* (plan 24 stage 2, D-4): each line against its planned line's
+    hard cap (:func:`_plan_line_errors`), the total against the plan's
+    ``max_words`` -- ``"$.lines: N words in total, at most M (a S s
+    scene)"``, no 1.5x -- and at least its ``min_words`` (the floor prefix
+    kept); the word-cap errors first. None: today's band."""
     speakers = list(scene["characters"]) + (["narrator"] if narrator_enabled else [])
     errors = schemas.validate(reply, e2_v3_schema(speakers, list(sfx_cues)))
     if errors:
@@ -5396,19 +5540,34 @@ def validate_e2_v3(reply, *, scene, narrator_enabled, sfx_cues, budget, floor, e
     lines = reply["lines"]
     if not (1 <= len(lines) <= E2_V3_LINES_MAX):
         errors.append(f"$.lines: {len(lines)} line(s), expected 1-{E2_V3_LINES_MAX}")
+    caps = plan_line_caps(plan, line_hi=budget["line_words"][1]) if plan is not None else None
     for i, line in enumerate(lines):
         path = f"$.lines[{i}]"
         _text_errors(errors, f"{path}.text", line["text"])
-        _v3_line_errors(errors, path, line, line_words=budget["line_words"], floor=floor)
+        if caps is None:
+            _v3_line_errors(errors, path, line, line_words=budget["line_words"], floor=floor)
         _text_errors(errors, f"{path}.delivery", line["delivery"], max_words=12)
+    if caps is not None:
+        _plan_line_errors(errors, lines, caps, floor=floor)
     n = len(lines)
     for i, cue in enumerate(reply["sfx_cues"]):
         at = cue["at"]
         if at != "start" and not (at.isdigit() and 1 <= int(at) <= n):
             errors.append(f"$.sfx_cues[{i}].at: {at!r} is not 'start' or a line number 1-{n}")
     _nullable_text_errors(errors, "$.on_screen_text", reply["on_screen_text"], 6)
-    word_budget = budget["words"][1]
     total_words = sum(_word_count(line["text"]) for line in lines)
+    if caps is not None:
+        ceiling = sum(entry["cap"] for entry in caps)
+        floor_total = min(int(plan["min_words"]), ceiling)
+        if total_words > ceiling:
+            errors.append(f"$.lines: {total_words} words in total, at most {ceiling} (a "
+                          f"{plan_seconds(plan['slot_s'][1])} s scene)")
+        elif total_words < floor_total:
+            errors.append(f"{E2_WORD_FLOOR_PREFIX}: {total_words} in total, expected at least {floor_total} (half of "
+                          f"the {ceiling}-word plan)")
+        _duplicate_line_errors(errors, "$.lines", [line["text"] for line in lines], episode_lines or ())
+        return _cap_errors_first(errors)
+    word_budget = budget["words"][1]
     floor_total, ceiling = (word_budget + 1) // 2, (3 * word_budget) // 2
     if total_words < floor_total:
         errors.append(f"{E2_WORD_FLOOR_PREFIX}: {total_words} in total, expected at least {floor_total} (half of the "
@@ -5469,7 +5628,7 @@ def _e3_v3_ask(keys, speakers, *, language, line_words, hook_words, act, native,
 def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,
                 first_body_line, last_body_line, arc_entry, next_arc_entry, memory, episode_defaults,
                 word_budgets, cast, narrator_enabled, slice_text, so_far, spine, line_words, single_place=False,
-                native=False, narrator_parts=None, open_hooks=None):
+                native=False, narrator_parts=None, open_hooks=None, plans=None):
     """The framing scenes on a writing-v3 story (module section above):
     E3v2's blocks (:func:`build_e3_v2`) with the spine first in place of
     the outline (the spine says what the episode tells; the outline's
@@ -5481,8 +5640,21 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
     antagonist's last, stating the act they are about to do. *narrator_parts*
     (the template's ``narrator_slots`` among the framing parts; None: every
     part) is said when the narrator may speak in some parts only. The schema
-    is E3's."""
+    is E3's.
+
+    *plans* (plan 24 stage 2, D-3: ``{"hook" | "cliffhanger" | "recap":
+    timing.scene_plan}``): each planned part says its seconds and its hard
+    total (:data:`PLAN_FRAMING_V3`) in place of "Keep ... within N words",
+    the line words asked never past the largest of them. None: as it was."""
     keys = _e3_keys(part, ep)
+    plans = plans or {}
+
+    def budget_line(key):
+        plan = plans.get(key)
+        if plan is None:
+            return None
+        return PLAN_FRAMING_V3.format(part=key, seconds=plan_seconds(plan["slot_s"][1]), words=plan["max_words"])
+
     speakers = [c["char_id"] for c in cast] + (["narrator"] if narrator_enabled else [])
     word_budgets = word_budgets or {}
 
@@ -5493,10 +5665,11 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
     user += dialogue_so_far(so_far) + "\n\n"
     if "hook" in keys:
         user += _e3_hook_block(hook_scene, first_body_line, episode_defaults, word_budgets.get("hook"),
-                               v2=True) + "\n\n"
+                               v2=True, budget_line=budget_line("hook")) + "\n\n"
     if "cliffhanger" in keys:
         block = _e3_cliffhanger_block(cliffhanger_scene, last_body_line, arc_entry, episode_defaults,
-                                      word_budgets.get("cliffhanger"), v2=True)
+                                      word_budgets.get("cliffhanger"), v2=True,
+                                      budget_line=budget_line("cliffhanger"))
         user += block + ("\n" + CLIFFHANGER_ACT_V3 if single_place else "") + "\n\n"
     if "recap" in keys:
         memory_text, was_cut = context.memory_section(memory, ep, open_hooks=open_hooks)
@@ -5505,7 +5678,7 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
         user += f"{memory_text}\n\n"
         recap = context.previous_recap(memory, ep)
         user += _e3_recap_block(recap_scene, word_budgets.get("recap"),
-                                (ep - 1, recap) if recap else None) + "\n\n"
+                                (ep - 1, recap) if recap else None, budget_line=budget_line("recap")) + "\n\n"
     if "teaser" in keys:
         user += _e3_teaser_block(next_arc_entry) + "\n\n"
     if cast:
@@ -5521,7 +5694,12 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
         allowed = [key for key in ("recap", "hook", "cliffhanger") if key in narrator_parts]
         narrator_note = (f"The narrator speaks only in the {' and the '.join(allowed)}." if allowed
                          else "The narrator never speaks here.")
-    user += _e3_v3_ask(keys, speakers, language=pack.language_name, line_words=line_words,
+    planned = [plans[key]["max_words"] for key in line_keys if plans.get(key) is not None]
+    asked_words = line_words
+    if planned:
+        top = max(planned)
+        asked_words = (min(int(line_words[0]), top), min(int(line_words[1]), top))
+    user += _e3_v3_ask(keys, speakers, language=pack.language_name, line_words=asked_words,
                        hook_words=hook_text_max_words(episode_defaults), act=single_place, native=native,
                        narrator_note=narrator_note,
                        french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "")
@@ -5529,27 +5707,40 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
 
 
 def validate_e3_v3(reply, *, ep, part, hook_scene, cliffhanger_scene, recap_scene, narrator_enabled,
-                   episode_defaults, line_words, floor, single_place=False, episode_lines=()) -> list:
+                   episode_defaults, line_words, floor, single_place=False, episode_lines=(), plans=None) -> list:
     """Post-validation for an E3v3 reply: every check of :func:`validate_e3`
     (v2: the hook's on-screen text, no line repeating another), each line's
     words (:func:`_v3_line_errors`), and on a *single_place* template the
-    cliffhanger's one line."""
+    cliffhanger's one line. *plans* (plan 24 stage 2, D-4; as
+    :func:`build_e3_v3`'s): each planned part's words in total at most its
+    plan's ``max_words`` -- ``"$.hook.lines: N words in total, at most M (a
+    S s hook)"`` -- the word-cap errors first."""
     errors = validate_e3(reply, ep=ep, part=part, hook_scene=hook_scene, cliffhanger_scene=cliffhanger_scene,
                          recap_scene=recap_scene, narrator_enabled=narrator_enabled, episode_defaults=episode_defaults,
                          v2=True, episode_lines=list(episode_lines or ()))
     keys = _e3_keys(part, ep)
     extra = []
+    plans = plans or {}
     for key in ("hook", "cliffhanger", "recap"):
         if key not in keys or not isinstance(reply, dict) or not isinstance(reply.get(key), dict):
             continue
-        for i, line in enumerate(reply[key].get("lines") or []):
+        part_lines = reply[key].get("lines") or []
+        for i, line in enumerate(part_lines):
             _v3_line_errors(extra, f"$.{key}.lines[{i}]", line, line_words=line_words, floor=floor)
+        plan = plans.get(key)
+        texts = [line.get("text") for line in part_lines if isinstance(line, dict)]
+        if plan is not None and all(isinstance(text, str) for text in texts):
+            total = sum(_word_count(text) for text in texts)
+            if total > int(plan["max_words"]):
+                extra.append(f"$.{key}.lines: {total} words in total, at most {int(plan['max_words'])} (a "
+                             f"{plan_seconds(plan['slot_s'][1])} s {key})")
     if single_place and "cliffhanger" in keys and isinstance(reply, dict) and isinstance(reply.get("cliffhanger"),
                                                                                           dict):
         if len(reply["cliffhanger"].get("lines") or []) != 1:
             extra.append("$.cliffhanger.lines: exactly 1 line on this format -- the antagonist's last, stating the "
                          "act they are about to do")
-    return errors + [error for error in extra if error not in errors]
+    out = errors + [error for error in extra if error not in errors]
+    return _cap_errors_first(out) if plans else out
 
 
 # ------------------------------------------------------------------ J1v3

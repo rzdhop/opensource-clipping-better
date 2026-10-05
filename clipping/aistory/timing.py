@@ -514,6 +514,11 @@ PLAN_NARRATOR_SHARE = 0.5
 # speech (``native_speech.SPEECH_OVERHEAD_S``).
 PLAN_SPEECH_LENGTHS = (4, 6, 8)
 PLAN_SPEECH_OVERHEAD_S = 0.7
+# Plan 24 stage 2 (D-2 amended): on a native-speech scene with a narrator, a
+# character line is planned first at this clip (snapped down to the link's
+# lengths) -- 6 s holds 12 words, room for the reason inside the line; the
+# midpoint split left it 4 s / 7 words, too tight for the format.
+PLAN_CHARACTER_CLIP_S = 6
 
 
 def seconds_per_word_v3(lang: str, *, provider: str = None, factor: float = None) -> float:
@@ -625,8 +630,9 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
     left aside: ``allowed_speech_s``. The planned lines
     (:func:`_plan_speakers`; *narrator* says whether the narrator speaks in
     the scene -- by default whenever a *narrator_provider* is named) share
-    it: the narrator the middle of the template's ``narrator_share`` when a
-    character line is planned too, each kind's lines evenly. Each line's
+    it: the narrator the LOW end of the template's ``narrator_share`` when a
+    character line is planned too (plan 24 stage 2: the character keeps room
+    for a complete line), each kind's lines evenly. Each line's
     seconds become a hard word cap on the one clock (:func:`words_for_seconds`
     at its voice's provider: *narrator_provider*, ``speakers[handle]``).
 
@@ -638,7 +644,12 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
     longest silent clip less its 0.7 s, its clip that plus 0.7 s snapped UP
     (as ``shots.speech_shot_plan`` sizes it). While the clips sum past the
     slot's high end, the narrator's clip shrinks to the next length first,
-    then a character's.
+    then a character's. With both a narrator and a character line (plan 24
+    stage 2) the character lines are planned FIRST, at
+    :data:`PLAN_CHARACTER_CLIP_S` -- stepped down while they and the
+    narrator's shortest silent clips cannot sum inside the slot's high end --
+    and the narrator takes the seconds left, its clip the longest that still
+    fits the slot beside them.
 
     Pure; a line's cap is never below 1 word."""
     _check_language(lang)
@@ -657,7 +668,7 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
     n_narr, n_char = kinds.count("narrator"), kinds.count("character")
     if n_narr and n_char:
         share = template.get("narrator_share")
-        narr_share = (float(share[0]) + float(share[1])) / 2 if share else PLAN_NARRATOR_SHARE
+        narr_share = float(share[0]) if share else PLAN_NARRATOR_SHARE
     else:
         narr_share = 1.0 if n_narr else 0.0
     narr_s = allowed * narr_share / n_narr if n_narr else 0.0
@@ -676,14 +687,40 @@ def scene_plan(template: dict, scene: dict, *, lang: str, native: bool, narrator
         speech = tuple(speech_lengths or PLAN_SPEECH_LENGTHS)
         silent_ls = tuple(silent_lengths or speech)
         narr_max = max(silent_ls) - PLAN_SPEECH_OVERHEAD_S
-        char_clips = [_snap_down(char_s, speech) for _ in range(n_char)]
+        ordered_silent, ordered_speech = sorted(silent_ls), sorted(speech)
 
         def narration(clips):
             return min(narr_max, max(0.0, (allowed - sum(clips)) / n_narr)) if n_narr else 0.0
 
-        narr_seconds = narration(char_clips)
-        narr_clips = [_snap_up(narr_seconds + PLAN_SPEECH_OVERHEAD_S, silent_ls)] * n_narr
-        ordered_silent, ordered_speech = sorted(silent_ls), sorted(speech)
+        def step_down(clips):
+            """*clips* with its longest stepped to the next shorter length;
+            None when every clip is the shortest already."""
+            longest = max(range(len(clips)), key=lambda k: clips[k])
+            smaller = [length for length in ordered_speech if length < clips[longest]]
+            if not smaller:
+                return None
+            return clips[:longest] + [smaller[-1]] + clips[longest + 1:]
+
+        if n_narr and n_char:
+            # Plan 24 stage 2: the character lines first, at the default clip,
+            # while they and the narrator's shortest clips fit the slot.
+            char_clips = [_snap_down(PLAN_CHARACTER_CLIP_S, speech)] * n_char
+            while sum(char_clips) + n_narr * ordered_silent[0] > hi + 1e-9:
+                smaller = step_down(char_clips)
+                if smaller is None:
+                    break
+                char_clips = smaller
+            narr_seconds = narration(char_clips)
+            room = (hi - sum(char_clips)) / n_narr
+            wanted = _snap_up(narr_seconds + PLAN_SPEECH_OVERHEAD_S, silent_ls)
+            fitting = [length for length in ordered_silent if length <= room + 1e-9]
+            narr_clip = wanted if wanted <= room + 1e-9 else (fitting[-1] if fitting else ordered_silent[0])
+            narr_seconds = min(narr_seconds, max(0.0, narr_clip - PLAN_SPEECH_OVERHEAD_S))
+            narr_clips = [narr_clip] * n_narr
+        else:
+            char_clips = [_snap_down(char_s, speech) for _ in range(n_char)]
+            narr_seconds = narration(char_clips)
+            narr_clips = [_snap_up(narr_seconds + PLAN_SPEECH_OVERHEAD_S, silent_ls)] * n_narr
         while sum(narr_clips) + sum(char_clips) > hi + 1e-9:
             smaller_narr = [length for length in ordered_silent if narr_clips and length < narr_clips[0]]
             if smaller_narr:
