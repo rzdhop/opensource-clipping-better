@@ -1,3 +1,40 @@
+## CURRENT STATE — plan 26 (rich prompts on every link + working Copy) APPROVED; phase IMPLEMENT — stages 1 and 2 in worktrees (2026-10-05, local session)
+
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main (this commit, the plan + this header), code
+  identical to the deployed a07180c; clean tree (`FETCH_HEAD` untracked, left alone). Tier-1 baseline: CI green on
+  the deployed code a07180c (DEC-278; no local full run). Plan: `.claude/plans/ai-story/26-rich-handoff-prompts-plan.md`
+  (v3 approved; the approved text also at `~/.claude/plans/inherited-baking-lerdorf.md`). Live: a07180c unchanged.
+- **The design in one line (H1):** the master + scene template is prepended at the send layer (`assets.clip_request`,
+  `_Assets.make_image`, the four `refimages.*_image`) and in the brief (`shot_entry`, `_keyframe_entries`,
+  `_entity_entries`, `handoff`); every hash, `*_request_parts`, state function and stored prompt stays byte-identical,
+  so nothing made or uploaded turns stale (the human's answer). The full prompt is bounded only by the link's limit
+  (`prompt_budgets.link_words`, DEC-303 amends DEC-247); the core keeps its ceilings (hash basis). v2 stories only.
+- **Stages:** 1 Copy helper (http) → 2 `prompt_templates.py` + `link_words` (pure additions; 1 ∥ 2) → 3 clips at the
+  send layer + the handoff fields (riskiest) → 4a keyframes, 4b entities (the image-brief fixture re-recorded once) →
+  5 the Handoff screen → 6 docs + DEC-303 + A-169… + one deploy at 0 jobs (rm -sfv + rebuild) + the human's Gemini re-test.
+- **Regression contract at risk:** DEC-292 (brief formatting outside the hash), DEC-294/295, the goldens
+  `studio_prompts.json` and `before_d5.json` byte-identical, RC-M9 no-auth guards, RC-Q1 v1 byte-identical.
+- **Next action:** merge stages 1 and 2 → stage 3.
+- **Open questions:** none blocking (Q4 action style gets the master too, Q5 `prompt_override` sent as written, Q6 a
+  512-token window for local Wan: defaulted, to record as A-170…A-172).
+
+## CURRENT STATE — plan 26 (rich handoff prompts + working Copy) PLANNED, awaiting the human's Go (2026-10-05 ~16:30 UTC, local session)
+
+- **In-progress header:** phase = PLAN (approval pending). Checkpoint commit = main `891429b`, clean tree (`FETCH_HEAD`
+  untracked, left alone). Plan: `.claude/plans/ai-story/26-rich-handoff-prompts-plan.md` v2 (6 stages; stage 3 riskiest; every link, not only
+  the handoff; DEC-240's quality ceilings amended on the human's 'the longer the better'; made assets grandfathered).
+  Live: a07180c unchanged. Jobs: not checked this session (nothing deployed yet).
+- **The human's report:** the Handoff Copy buttons do nothing; the prompts lack the personas / universe / art style; a
+  Gemini render of e7412a3efcc6 sh11 came out photoreal with Rida as a plain man. Asked for: templates, a master prompt
+  reused at every generation, ≥ 500 words per handoff prompt.
+- **Root causes (EXPLORE, two agents):** (1) plain http → no clipboard API; the fallback only selects a textarea at the
+  bottom of the card, never `execCommand('copy')`, no toast. (2) the pasted clip prompt is the 200-word hashed builder
+  text + a closing; the style lock's rendering/rules/palette, the characters' looks, the world and the scene context are
+  not in it; the negative sits in a field Flow/Veo ignore.
+- **Next action:** on the Go → stage 1 (copy helper) and stage 2 (`brief.master_prompt`) in parallel worktrees (Sonnet),
+  then 3 → 4 → 5 → 6. Deploy at 0 jobs (rebuild for the dashboard + restart for Python).
+- **Open questions:** Q1–Q3 of the plan (non-blocking, defaulted).
+
 ## CURRENT STATE — SESSION CLOSED 2026-10-05 ~14:15 UTC: plans 23 (follow-through), 24 (timing harness) and 25 (the handoff) shipped and live; the next session upgrades from here
 
 - **In-progress header:** phase = none in flight (close-out done). Checkpoint commit = main (this commit), clean tree,
