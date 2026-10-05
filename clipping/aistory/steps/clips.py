@@ -691,14 +691,52 @@ def class_link(story, shot, assets_doc, default):
     speaking shot's is the episode's ``links.video_speech`` record (else
     the story's speech link), a silent shot's ``links.video`` (else its
     silent link); any other story's, *default* (the episode's one video
-    link), as always."""
+    link), as always.
+
+    Plan 25 stage 1 (D-1): on a native-speech story the shot's own clip mode
+    (``assets.json``'s ``shot_modes``, :func:`video_plan.shot_mode`) comes
+    first: ``manual`` is ``manual/upload`` whatever the profile; ``auto`` is
+    the class's link when that is an API link, else -- the manual profile --
+    :func:`media_policy.auto_clip_link` (None when there is none: the plan
+    refuses the shot). A shot with no mode (and a class probe with no
+    ``shot_id``): as before, byte for byte."""
     if not media_policy.native_speech(story):
         return default
+    mode = video_plan.shot_mode(assets_doc, shot.get("shot_id"), "clip")
+    if mode == video_plan.MANUAL:
+        return gen.MANUAL_LINK
     if shot.get("speaks"):
         recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO_SPEECH)
-        return recorded["link"] if recorded is not None else media_policy.speech_link(story)
-    recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO)
-    return recorded["link"] if recorded is not None else media_policy.silent_link(story)
+        link = recorded["link"] if recorded is not None else media_policy.speech_link(story)
+    else:
+        recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO)
+        link = recorded["link"] if recorded is not None else media_policy.silent_link(story)
+    if mode == video_plan.AUTO and media_policy.is_manual_link(link):
+        return media_policy.auto_clip_link(story, speaks=bool(shot.get("speaks")))
+    return link
+
+
+def off_class(story, shot, assets_doc) -> bool:
+    """Whether *shot*'s clip mode puts it on another link than its class's
+    (plan 25 stage 1): an auto shot on the manual profile, a manual shot on
+    the API one. Such a shot's clip is never recorded as the episode's
+    sticky link of its class (``links.video`` / ``links.video_speech``): the
+    other shots stay on theirs."""
+    if video_plan.shot_mode(assets_doc, shot.get("shot_id"), "clip") is None:
+        return False
+    own = class_link(story, shot, assets_doc, None)
+    return own != class_link(story, {"speaks": bool(shot.get("speaks"))}, assets_doc, None)
+
+
+def clip_mode(story, shot, assets_doc):
+    """Who makes *shot*'s clip now (plan 25 stage 1): ``manual`` when its link
+    is ``manual/upload`` (:func:`class_link`), else ``auto``; None on a
+    story that is not native speech (its clips are the app's, one link an
+    episode: no per-shot mode)."""
+    if not media_policy.native_speech(story):
+        return None
+    link = class_link(story, shot, assets_doc, None)
+    return video_plan.MANUAL if media_policy.is_manual_link(link) else video_plan.AUTO
 
 
 # A placeholder key: what a hosted link would be picked as once its key is
@@ -1350,7 +1388,6 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
     committed = float(committed_usd or 0.0)
     recorded = sticky_link.recorded(assets_doc, sticky_link.VIDEO_SPEECH) or sticky_link.recorded(
         assets_doc, sticky_link.VIDEO)
-    manual_labels = {label for label, row in rows.items() if row.get("manual")}
     units.update(mode=settings.get("animate") or "all_shots", link=speech_label, route_class="paid",
                  source="record" if recorded else "policy", links=list(rows.values()),
                  price_per_second=speech_row["price_per_second"])
@@ -1362,7 +1399,11 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
             still.append({"shot_id": shot_id, "reason": "keep_still"})
             continue
         speaks = bool(shot.get("speaks"))
-        label = speech_label if speaks else silent_label
+        default = speech_label if speaks else silent_label
+        # Plan 25 stage 1: the shot's own mode may put it on another link than its class's.
+        label = class_link(ec.story, shot, assets_doc, None)
+        if label not in rows:
+            rows[label] = link_row(label, merged, adapters, resolution=resolution, aspect=frame)
         row = rows[label]
         lengths = link_lengths(label)
         clip_s = shot.get("clip_s")
@@ -1380,16 +1421,24 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
         elif booked is not None and booked(shot, link=label, clip_s=clip_s, template=None):
             why, est = "booked", 0.0
             booked_ids.append(shot_id)
-        plan.append({"shot_id": shot_id, "clip_s": int(clip_s), "est_usd": round(est, 4), "why": why,
-                     "link": label, "speaks": speaks})
+        entry = {"shot_id": shot_id, "clip_s": int(clip_s), "est_usd": round(est, 4), "why": why, "link": label,
+                 "speaks": speaks}
+        if label != default:
+            # Plan 25 stage 1: a row its shot's mode moved off its class's link says so.
+            entry["mode"] = video_plan.shot_mode(assets_doc, shot_id, "clip")
+        plan.append(entry)
+    units["links"] = list(rows.values())
+    manual_labels = {label for label, row in rows.items() if row.get("manual")}
     new = [row for row in plan if row["why"] not in ("current", "booked")]
     speech_new = [row for row in new if row["speaks"]]
     silent_new = [row for row in new if not row["speaks"]]
     speech_usd = sum(row["est_usd"] for row in speech_new)
     silent_usd = sum(row["est_usd"] for row in silent_new)
     retake = retake_budget(ec, assets_doc)
-    # The retake contingency: what the run may spend retaking a speaking clip it buys now.
-    retake_usd = retake["left_usd"] if retake["max_per_shot"] > 0 and speech_new else 0.0
+    # The retake contingency: what the run may spend retaking a speaking clip it buys now (never one of
+    # the human's own: plan 25 stage 1).
+    bought_speech = [row for row in speech_new if row["link"] not in manual_labels]
+    retake_usd = retake["left_usd"] if retake["max_per_shot"] > 0 and bought_speech else 0.0
     est = round(speech_usd + silent_usd + retake_usd, 4)
     seconds = sum(row["clip_s"] for row in new)
     units.update(plan=plan, still=still, count=len(new), seconds=int(seconds), est_usd=est,
@@ -1406,11 +1455,8 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
         "silent_seconds": sum(row["clip_s"] for row in silent_new),
         "speech_usd": round(speech_usd, 4), "silent_usd": round(silent_usd, 4), "retake_usd": round(retake_usd, 4),
         "retake": retake, "manual_count": len(manual_new),
-        "manual_shots": [row["shot_id"] for row in manual_new], "classes": [
-            {"class": "speech", "link": speech_label, "count": len(speech_new), "usd": round(speech_usd, 4),
-             "row": speech_row},
-            {"class": "silent", "link": silent_label, "count": len(silent_new), "usd": round(silent_usd, 4),
-             "row": silent_row}],
+        "manual_shots": [row["shot_id"] for row in manual_new],
+        "classes": _speech_classes(speech_new, silent_new, rows, speech_label, silent_label),
     }
     refusal = None
     needed = [row for label, row in rows.items()
@@ -1418,6 +1464,14 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
     for row in needed:
         if row["status"] != "keyed":
             refusal = f"{row['link']}: {row['reason']}"
+            moved = [item["shot_id"] for item in new if item["link"] == row["link"] and item.get("mode")]
+            if moved and row["link"] not in (speech_label, silent_label):
+                # Plan 25 stage 1: an auto shot whose link cannot run is refused by name -- never the human's.
+                # ``imaging.missing_keys_reason``'s wording: a missing key is fixed in Settings.
+                fix = "set the key in Settings" if str(row["reason"] or "").startswith("no API key") else "fix that"
+                refusal = (f"shot{_s(len(moved))} {_and(moved)} {'is' if len(moved) == 1 else 'are'} set to auto on "
+                           f"{row['link'] or 'no link'}, which cannot run now ({row['reason']}): {fix}, or switch "
+                           f"{'it' if len(moved) == 1 else 'them'} to 'my own'")
             break
     if refusal is None and new and any(row["paid"] for row in needed) and not budget_obj.allow_paid:
         refusal = "allow_paid is off"
@@ -1431,6 +1485,45 @@ def _speech_units(ec, script, shots, flags, assets_doc, *, units, settings, merg
         units["hold"] = hold
         units["message"] += f" Held: {hold}."
     return units
+
+
+def _speech_classes(speech_new, silent_new, rows, speech_label, silent_label) -> list:
+    """The ``classes`` of a native-speech plan: each class of shot on its own
+    link (count and dollars), then -- plan 25 stage 1 -- one entry for each
+    other link a shot's mode moved new rows to (none without a mode: the two
+    entries as before)."""
+    classes = []
+    for name, new, label in (("speech", speech_new, speech_label), ("silent", silent_new, silent_label)):
+        on = [row for row in new if row["link"] == label]
+        classes.append({"class": name, "link": label, "count": len(on),
+                        "usd": round(sum(row["est_usd"] for row in on), 4), "row": rows[label]})
+    for name, new, label in (("speech", speech_new, speech_label), ("silent", silent_new, silent_label)):
+        for other in dict.fromkeys(row["link"] for row in new if row["link"] != label):
+            on = [row for row in new if row["link"] == other]
+            classes.append({"class": name, "link": other, "count": len(on),
+                            "usd": round(sum(row["est_usd"] for row in on), 4), "row": rows[other]})
+    return classes
+
+
+def _moved_sentence(units, size, tail) -> str:
+    """The estimate's sentence of a native-speech plan some of whose new rows
+    a shot's mode moved off their class's link (plan 25 stage 1): each API
+    link's clips with their seconds and dollars, the human's own at $0."""
+    new = [row for row in units["plan"] if row["why"] not in ("current", "booked")]
+    groups, own = {}, []
+    for row in new:
+        if gen.is_manual(row["link"] or ""):
+            own.append(row)
+        else:
+            groups.setdefault(row["link"], []).append(row)
+    parts = [f"{len(items)} on {link} ({sum(row['clip_s'] for row in items)} s, "
+             f"${sum(row['est_usd'] for row in items):.3f})" for link, items in groups.items()]
+    if own:
+        parts.append(f"{len(own)} of your own on {gen.MANUAL_LINK} ($0.00)")
+    part = units["speech"]
+    return (f"{units['count']} clip{_s(units['count'])} ({units['seconds']} s){size}: {'; '.join(parts)}, paid: est "
+            f"${units['est_usd']:.3f}" + (f" with up to ${part['retake_usd']:.2f} of retakes" if part["retake_usd"]
+                                          else "") + f"{tail}.")
 
 
 def _speech_message(units, current_ids, booked_ids, *, resolution=None) -> str:
@@ -1458,6 +1551,9 @@ def _speech_message(units, current_ids, booked_ids, *, resolution=None) -> str:
                 f"{part['speech_count']} speaking and {part['silent_count']} silent on {gen.MANUAL_LINK}, $0.00 -- "
                 f"{platforms.own_clips_phrase(units['count'])}; download the shot brief, make them and upload "
                 f"them{tail}.")
+    elif any(row.get("mode") for row in units["plan"] if row["why"] not in ("current", "booked")):
+        # Plan 25 stage 1: some new rows are on another link than their class's.
+        text = _moved_sentence(units, size, tail)
     else:
         text = (f"{units['count']} clip{_s(units['count'])} ({units['seconds']} s){size}: "
                 f"{part['speech_count']} speaking ({part['speech_seconds']} s on {part['speech_link']} at "

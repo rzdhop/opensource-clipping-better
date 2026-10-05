@@ -525,6 +525,10 @@ def assets_fingerprint(storyboard, script, assets_doc, *, image_shas, audio_shas
     links = assets_doc.get("links")
     if links:
         payload["links"] = {kind: entry.get("link") for kind, entry in links.items()}
+    modes = assets_doc.get("shot_modes")
+    if modes:
+        # Plan 25 stage 1: who makes each shot is approved too; a document without modes keeps its fingerprint.
+        payload["shot_modes"] = {shot_id: dict(entry) for shot_id, entry in sorted(modes.items())}
     clips_part = _clips_part(storyboard, assets_doc, clip_shas or {}, tier)
     if clips_part is not None:
         payload["clips"] = clips_part
@@ -906,15 +910,45 @@ def recorded_image_link(doc):
     return entry["link"] if entry else None
 
 
-def shot_state(ec, shot, *, link=_READ) -> str:
+def own_keyframe(story, shot, doc) -> bool:
+    """Whether *shot*'s keyframe is the human's own upload by its own mode
+    (plan 25 stage 1: ``shot_modes[shot_id].image`` ``manual``) on a story
+    whose keyframes the app draws -- on a story whose images are all the
+    human's (``media_policy.images_manual``) every keyframe is, as before."""
+    return (not media_policy.images_manual(story)
+            and video_plan.shot_mode(doc, shot["shot_id"], "image") == video_plan.MANUAL)
+
+
+def shot_image_link(story, shot, link, doc):
+    """The image link *shot*'s keyframe is held to: ``manual/upload`` when it
+    is the human's own by its mode (:func:`own_keyframe`), else *link* (the
+    episode's recorded one), as before."""
+    return gen.MANUAL_LINK if own_keyframe(story, shot, doc) else link
+
+
+def image_mode(story, shot, doc) -> str:
+    """Who makes *shot*'s keyframe now (plan 25 stage 1): ``manual`` on a
+    story whose images are the human's or for a shot set to ``manual``,
+    else ``auto``."""
+    if media_policy.images_manual(story) or own_keyframe(story, shot, doc):
+        return video_plan.MANUAL
+    return video_plan.AUTO
+
+
+def shot_state(ec, shot, *, link=_READ, doc=_READ) -> str:
     """:func:`image_state` of *shot* now: its hash recomputed with the note
     its image was made with; *link* the episode's recorded image link (read
-    from ``assets.json`` unless given)."""
+    from ``assets.json`` unless given) -- ``manual/upload`` for a shot whose
+    keyframe is the human's own by its mode (plan 25 stage 1,
+    :func:`shot_image_link`; *doc* ``assets.json``, read unless given)."""
     if shot["assets"].get("route") == schemas.STOCK_ROUTE:
         # Plan 23 stage B8: a frame cut from a stock clip is never made again by a call.
         return stock_cutaways.keyframe_state(ec, shot, file_ok=shot_image_path(ec, shot) is not None)
+    if doc is _READ:
+        doc = _read_assets_doc(ec)
     if link is _READ:
-        link = recorded_image_link(_read_assets_doc(ec))
+        link = recorded_image_link(doc)
+    link = shot_image_link(ec.story, shot, link, doc)
     assets = shot["assets"]
     expected = request_parts(ec, shot, note=assets.get("note"), link=link)["hash"]
     return image_state(assets, expected_hash=expected, file_ok=shot_image_path(ec, shot) is not None, link=link)
@@ -929,24 +963,34 @@ def outdated_images(ec, storyboard, *, link=_READ) -> list:
     takes it). What a render refuses (phase 5 stage 7): an assets approval's
     fingerprint holds each image's *recorded* hash, so it does not see the
     shot change under it."""
+    doc = _read_assets_doc(ec)
     if link is _READ:
-        link = recorded_image_link(_read_assets_doc(ec))
+        link = recorded_image_link(doc)
     outdated = []
     for shot in storyboard["shots"]:
         if shot_image_path(ec, shot) is None:
             continue
-        state = shot_state(ec, shot, link=link)
+        state = shot_state(ec, shot, link=link, doc=doc)
         if state != "current" and not (shot["assets"].get("locked") and state == "locked_stale"):
             outdated.append(shot["shot_id"])
     return outdated
 
 
-def shots_to_make(ec, storyboard, *, link=_READ) -> list:
-    """The shots the step makes an image for: neither locked nor current."""
+def shots_to_make(ec, storyboard, *, link=_READ, doc=_READ) -> list:
+    """The shots whose image is to make: neither locked nor current (the
+    human's own by their mode too: :func:`app_shots` leaves those out)."""
+    if doc is _READ:
+        doc = _read_assets_doc(ec)
     if link is _READ:
-        link = recorded_image_link(_read_assets_doc(ec))
+        link = recorded_image_link(doc)
     return [shot for shot in storyboard["shots"]
-            if not shot["assets"].get("locked") and shot_state(ec, shot, link=link) != "current"]
+            if not shot["assets"].get("locked") and shot_state(ec, shot, link=link, doc=doc) != "current"]
+
+
+def app_shots(ec, shots, doc) -> list:
+    """*shots* less those whose keyframe is the human's own by their mode
+    (plan 25 stage 1, :func:`own_keyframe`): what the step draws and prices."""
+    return [shot for shot in shots if not own_keyframe(ec.story, shot, doc)]
 
 
 def image_kind(ec) -> str:
@@ -999,9 +1043,10 @@ def episode_image_link(ec, storyboard, *, env=None, doc=_READ) -> dict:
     chain = _chain_labels(ec, image_kind(ec), gating.merged_env(env))
     served = {}
     for shot in storyboard["shots"]:
-        if shot_image_path(ec, shot) is None:
+        if shot_image_path(ec, shot) is None or own_keyframe(ec.story, shot, doc):
+            # Plan 25 stage 1: a keyframe the human's own by its mode is no link's the episode keeps.
             continue
-        if not shot["assets"].get("locked") and shot_state(ec, shot, link=link) != "current":
+        if not shot["assets"].get("locked") and shot_state(ec, shot, link=link, doc=doc) != "current":
             continue
         made_on = served_link(shot["assets"])
         if made_on:
@@ -1222,7 +1267,8 @@ def sticky_offer(ec, storyboard, link, *, why, env, story_spent, adapters=None, 
     again -- the unlocked current images *link* made -- with the shots still
     to make, and what they would cost on that next link."""
     kind = image_kind(ec)
-    todo = [shot["shot_id"] for shot in shots_to_make(ec, storyboard, link=link)]
+    doc = _read_assets_doc(ec)
+    todo = [shot["shot_id"] for shot in app_shots(ec, shots_to_make(ec, storyboard, link=link, doc=doc), doc)]
     redo = [shot["shot_id"] for shot in storyboard["shots"]
             if shot["shot_id"] not in todo and not shot["assets"].get("locked")
             and shot_image_path(ec, shot) is not None and sticky_link.on_link(served_link(shot["assets"]), link)]
@@ -1388,6 +1434,70 @@ def overridden_assets_doc(ec, doc, changes, *, now):
     return new
 
 
+def moded_assets_doc(ec, doc, shot_id, changes, *, now):
+    """*doc* (``assets.json``, or None: a minimal one is started) with shot
+    *shot_id*'s modes *changes* (``{"clip"|"image": "auto" | "manual" |
+    None}``; None clears that kind) applied to its ``shot_modes`` map -- an
+    entry left empty is dropped, and so is an empty map, so a mode set then
+    cleared leaves the document as it was -- or None when nothing changes
+    (plan 25 stage 1, ``workflow.patch_shot_mode``). The storyboard is never
+    touched; the assets approval goes stale with the fingerprint's
+    ``shot_modes``."""
+    base = doc if doc is not None else _minimal_assets_doc(ec, now)
+    modes = {sid: dict(entry) for sid, entry in (base.get("shot_modes") or {}).items()}
+    entry = modes.get(shot_id, {})
+    for kind, value in changes.items():
+        if value is None:
+            entry.pop(kind, None)
+        else:
+            entry[kind] = value
+    if entry:
+        modes[shot_id] = {kind: entry[kind] for kind in schemas.SHOT_MODE_KINDS if kind in entry}
+    else:
+        modes.pop(shot_id, None)
+    if modes == (base.get("shot_modes") or {}):
+        return None
+    new = copy.deepcopy(base)
+    new.pop("shot_modes", None)
+    if modes:
+        new["shot_modes"] = {sid: modes[sid] for sid in sorted(modes)}
+    return new
+
+
+def shot_mode_verdict(ec, script, storyboard, shot, *, env, adapters=None, ledger=None) -> dict:
+    """The gate's dry run on one new clip of *shot* on the link its mode puts
+    it on (plan 25 stage 1), calling nothing: ``{"link", "est_usd",
+    "allowed", "reason"}`` -- the plan of :func:`clip_quote` (that shot
+    alone, a current clip counted as new), its refusal (the link cannot run:
+    no key, no adapter, ``allow_paid`` off -- the sentence names the shot),
+    then the caps. Not held by the keyframes' approval: a verdict on the
+    link and the money, not on when the step runs."""
+    ledger = ledger or _open_ledger(ec)
+    doc = _read_assets_doc(ec)
+    trial = copy.deepcopy(doc) if doc else {}
+    real = trial.get("shots") or {}
+    trial["shots"] = {other["shot_id"]: {"keep_still": True} for other in storyboard["shots"]
+                      if other["shot_id"] != shot["shot_id"]}
+    trial["shots"][shot["shot_id"]] = dict(real.get(shot["shot_id"]) or {}, keep_still=False, animate=True)
+    caps, _over = spending_caps(ec, 0.0, env=env, ledger=ledger)
+    spent = float((caps.get("episode") or {}).get("spent_usd") or 0.0)
+    video = clips.video_units(ec, script, storyboard, trial, env=env, caps=caps, committed_usd=spent,
+                              adapters=adapters, image_sha=None)
+    row = next((item for item in video["plan"] if item["shot_id"] == shot["shot_id"]), None)
+    if row is None:
+        return {"link": video.get("link"), "est_usd": 0.0, "allowed": False,
+                "reason": video.get("refused") or video["message"]}
+    link, est = row.get("link") or video["link"], round(float(row["est_usd"]), 4)
+    if not video["ready"]:
+        return {"link": link, "est_usd": est, "allowed": False, "reason": video["refused"] or video["message"]}
+    if gen.is_manual(link or ""):
+        return {"link": link, "est_usd": 0.0, "allowed": True, "reason": "your own clip: nothing is sent or bought"}
+    _caps, over = spending_caps(ec, est, env=env, ledger=ledger)
+    if over:
+        return {"link": link, "est_usd": est, "allowed": False, "reason": over}
+    return {"link": link, "est_usd": est, "allowed": True, "reason": "paid, allowed" if est else "free"}
+
+
 def spending_caps(ec, total, *, env, ledger=None, video=None, fix_usd=0.0, with_refusal=False) -> tuple:
     """``(caps, over_cap)`` for a plan that would spend *total* paid
     dollars on episode *ec.ep*: ``caps`` is ``{"allow_paid", "episode"|"day"|
@@ -1522,7 +1632,7 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
     story_spent = float(ledger.totals()["est_usd"])
 
     doc = _read_assets_doc(ec)
-    todo = shots_to_make(ec, storyboard, link=recorded_image_link(doc))
+    todo = app_shots(ec, shots_to_make(ec, storyboard, link=recorded_image_link(doc), doc=doc), doc)
     mode = ec.consistency_mode
     kind = gen.IMAGE if mode == PROMPT_ONLY else gen.IMAGE_EDIT
     if not todo:
@@ -1577,6 +1687,9 @@ def asset_units(ec, script, storyboard, *, env, align_words=False, adapters=None
                 # Plan 22: a native-speech episode's two links, each with its own price.
                 part = video["speech"]
                 for entry in part["classes"]:
+                    if (entry.get("row") or {}).get("manual"):
+                        # Plan 25 stage 1: the human's own clips beside bought ones are no paid link.
+                        continue
                     usd = entry["usd"] + (part["retake_usd"] if entry["class"] == "speech" else 0.0)
                     if entry["count"] or usd:
                         paid_links.append({"kind": gen.VIDEO, "link": entry["link"], "allowed": video["ready"],
@@ -2059,7 +2172,7 @@ def clip_hold(ec, storyboard, doc):
     if not media_policy.is_v2(ec.story):
         return None
     ep = ec.ep
-    todo = [shot["shot_id"] for shot in shots_to_make(ec, storyboard, link=recorded_image_link(doc))]
+    todo = [shot["shot_id"] for shot in shots_to_make(ec, storyboard, link=recorded_image_link(doc), doc=doc)]
     if todo:
         many = len(todo) > 1
         return (f"shot{'s' if many else ''} {_and(todo)} {'have' if many else 'has'} no current keyframe yet: the "
@@ -2985,10 +3098,20 @@ class _Assets(voice_lines.LineMeasurement):
     def images(self) -> None:
         ec, ctx = self.ec, self.ctx
         board = self.storyboard
-        todo = shots_to_make(ec, board)
+        doc = _read_assets_doc(ec)
+        todo = shots_to_make(ec, board, doc=doc)
         if not todo:
             ctx.on_log("🖼 Every shot has its image (or is locked): nothing to make.")
             return
+        own = [shot for shot in todo if own_keyframe(ec.story, shot, doc)]
+        if own:
+            # Plan 25 stage 1: the keyframes the human makes by their shot's mode are listed, never asked.
+            todo = [shot for shot in todo if shot not in own]
+            self.missing_keyframes = brief_step.missing_keyframes(ec, board, doc)
+            ctx.on_log(f"✋ {len(own)} keyframe{'s' if len(own) != 1 else ''} to upload (your own, "
+                       f"{gen.MANUAL_LINK}): {_and([shot['shot_id'] for shot in own])}.")
+            if not todo:
+                return
         if media_policy.images_manual(ec.story):
             # Plan 22 stage 5: the keyframes are the user's own uploads -- none is asked of anything.
             self.missing_keyframes = brief_step.missing_keyframes(ec, board, _read_assets_doc(ec))
@@ -3212,8 +3335,12 @@ class _Assets(voice_lines.LineMeasurement):
             seconds = sum(int(row["clip_s"]) for row in todo)
             price = f", est ${sum(row['est_usd'] for row in todo):.3f} paid" if video["route_class"] == "paid" else ""
             kept = f" ({self.video['reused']} current, kept)" if self.video["reused"] else ""
+            on = video["link"]
+            if any(row.get("mode") for row in todo):
+                # Plan 25 stage 1: the links the shots' modes put the clips on.
+                on = _and(list(dict.fromkeys(row["link"] for row in todo)))
             ctx.on_log(f"🎬 Animating {len(todo)} shot{'s' if len(todo) != 1 else ''} ({seconds} s) on "
-                       f"{video['link']}{price}{kept}")
+                       f"{on}{price}{kept}")
             for row in todo:
                 if row.get("cover") == "stretch":
                     # DEC-250: said in the feed, as the estimate says it.
@@ -3626,7 +3753,9 @@ class _Assets(voice_lines.LineMeasurement):
         shot["assets"]["video"] = clips.clip_rel(shot_id)
         self.write_board()
         speaking = bool(shot.get("speaks")) and media_policy.native_speech(ec.story)
-        self.keep_video_link(record["link"], kind=sticky_link.VIDEO_SPEECH if speaking else sticky_link.VIDEO)
+        if not clips.off_class(ec.story, shot, _read_assets_doc(ec)):
+            # Plan 25 stage 1: a shot its mode moved to another link never becomes its class's sticky link.
+            self.keep_video_link(record["link"], kind=sticky_link.VIDEO_SPEECH if speaking else sticky_link.VIDEO)
         summary = self.video
         if info["cached"]:
             summary["reused"] += 1
@@ -4106,9 +4235,10 @@ class _Assets(voice_lines.LineMeasurement):
             links[sticky_link.IMAGE] = self.link_pending
         if links:
             doc["links"] = links
-        # The user's per-shot overrides (phase 6 stage 7): carried as they are.
-        if (previous or {}).get("shots"):
-            doc["shots"] = previous["shots"]
+        # The user's per-shot overrides (phase 6 stage 7) and modes (plan 25 stage 1): carried as they are.
+        for key in ("shots", "shot_modes"):
+            if (previous or {}).get(key):
+                doc[key] = previous[key]
         # A v2 episode's keyframe verdicts and approval (phase 7 stage 6b) and
         # its keyframe auto-fix records (phase 8 stage B): carried as they are
         # -- the approval goes stale by its fingerprint, never cleared here.
@@ -4323,6 +4453,9 @@ class _Assets(voice_lines.LineMeasurement):
         shot = self.storyboard["shots"][index]
         shot_id = shot["shot_id"]
         most = settings["max_redraws_per_shot"]
+        if own_keyframe(ec.story, shot, held["doc"]):
+            # Plan 25 stage 1: a keyframe the human makes is never redrawn by the app.
+            return
         while True:
             item = keyframe_item(ec, self.storyboard, index, link=recorded_image_link(held["doc"]))
             if item is None or shot["assets"].get("locked"):
@@ -4488,7 +4621,7 @@ class _Assets(voice_lines.LineMeasurement):
             # Plan 22 stage 5: the user's own keyframes first; their clips are asked once they are approved.
             self.uploads = uploads_record(ec, self.missing_keyframes)
         link = recorded_image_link(doc)
-        states = {shot["shot_id"]: shot_state(ec, shot, link=link) for shot in board["shots"]}
+        states = {shot["shot_id"]: shot_state(ec, shot, link=link, doc=doc) for shot in board["shots"]}
         native = media_policy.native_speech(ec.story)
         unvoiced = [line["line_id"] for scene in self.script["scenes"] for line in scene["lines"]
                     if not voice_lines.is_measured(ec, line) and not (native and voice_lines.spoken_by_clip(ec, line))]
@@ -4664,6 +4797,9 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
                      f"{shots_mod.shot_ids_phrase(board['shots'])}).")
     if shot["assets"].get("locked"):
         raise refuse(f"shot {shot_id} is locked: unlock it first.")
+    if own_keyframe(ec.story, shot, _read_assets_doc(ec)):
+        raise refuse(f"shot {shot_id}'s keyframe is your own (its mode is 'my own'): upload it, or switch it to "
+                     "auto first.")
     if note is not None and len(note) > schemas.REGENERATE_NOTE_MAX:
         raise refuse(f"a note is at most {schemas.REGENERATE_NOTE_MAX} characters ({len(note)} given).")
     gates = host.open_asset_gates()

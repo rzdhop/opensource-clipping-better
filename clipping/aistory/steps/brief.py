@@ -45,7 +45,7 @@ import zipfile
 
 from clipping.providers import generation as gen
 
-from .. import media_policy, platforms, prompting, schemas
+from .. import media_policy, platforms, prompting, schemas, video_plan
 from .. import shots as shots_mod
 from . import clips, episode_common
 
@@ -259,8 +259,11 @@ def shot_state(ec, script, shot, assets_doc=None) -> str:
     if not clip or clip.get("state") != "current" or clips.shot_clip_path(ec, shot) is None:
         return "missing"
     flags = clips.shot_flags(shot, assets_doc)
+    # Plan 25 stage 1: a shot whose mode moved it is held to its own link (a clip made on the other is missing).
+    link = (clips.class_link(ec.story, shot, assets_doc, None)
+            if video_plan.shot_mode(assets_doc, shot.get("shot_id"), "clip") else None)
     try:
-        state = clips.clip_state(ec, shot, script, link=None, tier=3, flags=flags,
+        state = clips.clip_state(ec, shot, script, link=link, tier=3, flags=flags,
                                  image_sha=clip.get("image_sha256"))
     except (KeyError, ValueError):
         state = "current"
@@ -316,15 +319,21 @@ def missing_clips(ec, script, storyboard, assets_doc=None) -> list:
 def missing_keyframes(ec, storyboard, assets_doc=None) -> list:
     """On a story whose images are the user's own
     (``media_policy.images_manual``): the shots with no current keyframe
-    (and not locked), ``[{kind: "keyframe", shot_id, order, upload_slot}]``."""
-    if not media_policy.images_manual(getattr(ec, "story", None)):
+    (and not locked), ``[{kind: "keyframe", shot_id, order, upload_slot}]``;
+    on any other v2 story, those of the shots whose keyframe is the user's
+    own by their mode (plan 25 stage 1, ``assets.own_keyframe``)."""
+    story = getattr(ec, "story", None)
+    if not media_policy.images_manual(story) and not (assets_doc or {}).get("shot_modes"):
         return []
     from . import assets as assets_step  # the step imports this module: a cycle at import time
 
     link = assets_step.recorded_image_link(assets_doc)
+    todo = assets_step.shots_to_make(ec, storyboard, link=link, doc=assets_doc)
+    if not media_policy.images_manual(story):
+        todo = [shot for shot in todo if assets_step.own_keyframe(story, shot, assets_doc)]
     return [{"kind": "keyframe", "shot_id": shot["shot_id"], "order": shot["order"],
              "upload_slot": keyframe_slot(ec.story_id, ec.ep, shot["shot_id"])}
-            for shot in assets_step.shots_to_make(ec, storyboard, link=link)]
+            for shot in todo]
 
 
 def waiting_sentence(count, *, what="clip", keyframes=0) -> str:

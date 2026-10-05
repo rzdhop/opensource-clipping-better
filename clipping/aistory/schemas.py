@@ -4071,6 +4071,17 @@ _EPISODE_LINKS_SCHEMA = _document({}, optional={"image": _EPISODE_LINK_SCHEMA, "
 SHOT_OVERRIDE_FLAGS = ("keep_still", "animate", "keep_native_audio")
 _EPISODE_ASSETS_SHOT_SCHEMA = _document({}, optional={flag: {"type": "boolean"} for flag in SHOT_OVERRIDE_FLAGS})
 
+# Plan 25 stage 1 (D-1, DEC-301): who makes a shot's clip and its keyframe --
+# ``auto`` (the app, on an API link) or ``manual`` (the human's own upload,
+# ``manual/upload``) -- over the story's own choice (its budget profile, its
+# ``images`` switch). Kept beside the overrides above, keyed by shot id, an
+# entry naming at least one kind; optional: absent, every shot is made as the
+# story's profile says, as before.
+SHOT_MODE_KINDS = ("clip", "image")
+SHOT_MODES = ("auto", "manual")
+_EPISODE_ASSETS_SHOT_MODE_SCHEMA = _document({}, optional={
+    kind: {"type": "string", "enum": list(SHOT_MODES)} for kind in SHOT_MODE_KINDS})
+
 # Phase 7 stage 6b (A16, DEC-230): a v2 episode's keyframe judge (J2), one
 # vision verdict per shot, keyed by shot id: does the keyframe show the
 # shot's beat, what it misses, and what changed from the previous shot's
@@ -4173,11 +4184,14 @@ EPISODE_ASSETS_SCHEMA = _document({
     # once for a take that missed its line): the profile's ``speech_retake``
     # budget, what it spent, and per shot (keyed by shot id) how many.
     "speech_retakes": _EPISODE_ASSETS_SPEECH_RETAKES_SCHEMA,
+    # Plan 25 stage 1: keyed by shot id -> _EPISODE_ASSETS_SHOT_MODE_SCHEMA,
+    # checked in episode_assets_errors.
+    "shot_modes": {"type": "object"},
 })
 # The maps of assets.json keyed by shot id (above): the ids a storyboard
-# re-plan never gives a new shot (walk follow-up F5), so no override, verdict
-# or fix record of a shot gone is ever read as a new shot's.
-EPISODE_ASSETS_SHOT_MAPS = ("shots", "keyframe_verdicts", "keyframe_fixes")
+# re-plan never gives a new shot (walk follow-up F5), so no override, verdict,
+# fix record or mode of a shot gone is ever read as a new shot's.
+EPISODE_ASSETS_SHOT_MAPS = ("shots", "keyframe_verdicts", "keyframe_fixes", "shot_modes")
 
 
 def episode_assets_errors(doc) -> list:
@@ -4222,6 +4236,17 @@ def episode_assets_errors(doc) -> list:
             errors.extend(found)
         elif not entry:
             errors.append(f"{path}: an override names at least one of {', '.join(SHOT_OVERRIDE_FLAGS)}")
+
+    for key, entry in (doc.get("shot_modes") or {}).items():
+        path = f"$.shot_modes.{key}"
+        if not (isinstance(key, str) and _search(SHOT_ID_PATTERN, key)):
+            errors.append(f"$.shot_modes: {key!r} is not a shot id")
+            continue
+        found = validate(entry, _EPISODE_ASSETS_SHOT_MODE_SCHEMA, path)
+        if found:
+            errors.extend(found)
+        elif not entry:
+            errors.append(f"{path}: a mode names at least one of {', '.join(SHOT_MODE_KINDS)}")
 
     for key, entry in (doc.get("keyframe_verdicts") or {}).items():
         path = f"$.keyframe_verdicts.{key}"

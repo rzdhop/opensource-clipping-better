@@ -167,6 +167,7 @@ from ..models import (
     PropPatchRequest,
     RenderStepParams,
     ScriptPatchRequest,
+    ShotModeRequest,
     StoryApproveRequest,
     StoryboardPatchRequest,
     StoryCreateRequest,
@@ -1833,6 +1834,9 @@ def _merge_clips(assets, story_id, ep, clips) -> None:
     tier 1 -- with ``url``, the clip route's path while its file is there."""
     assets.update(tier=clips["tier"], links=clips["links"], video=clips["video"],
                   image_offer=clips["image_offer"])
+    if "shot_modes" in clips:
+        # Plan 25 stage 1: who makes each shot (only once assets.json sets one).
+        assets["shot_modes"] = clips["shot_modes"]
     for shot in assets["shots"]:
         clip = clips["shots"].get(shot["shot_id"])
         if clip is not None:
@@ -2777,6 +2781,32 @@ async def patch_episode_assets(story_id: str, ep: str, req: AssetsPatchRequest) 
     return await run_in_threadpool(_episode_edit, story_id, ep, req, edit)
 
 
+def _shot_mode_edit(story_id, ep, shot_id, sent) -> dict:
+    stories = _stories()
+    story = _load(stories, story_id)
+    with _answering():
+        number = workflow.episode_bounds(stories, story, ep)
+    _refuse_busy(story_id, "change the shot's mode once that step is done, or cancel it first.")
+    with _answering():
+        return workflow.patch_shot_mode(stories, story_id, number, shot_id, sent, now=_now(),
+                                        env=worker.get_settings_env())
+
+
+@router.patch("/{story_id}/episodes/{ep}/shots/{shot_id}/mode")
+async def patch_shot_mode(story_id: str, ep: str, shot_id: str, req: ShotModeRequest) -> dict:
+    """Who makes one shot's clip and keyframe (plan 25 stage 1, D-1):
+    ``{"clip"?: "auto"|"manual"|null, "image"?: ...}`` into ``assets.json``'s
+    ``shot_modes`` (``workflow.patch_shot_mode``, which says what it
+    answers): 200 with the shot's modes, what became stale (a clip or a
+    keyframe made on the other link, as a link switch makes it) and, for
+    ``auto``, the gate's dry-run verdict ``{link, est_usd, allowed,
+    reason}``. 404 for an unknown story, episode or shot; 400 with the
+    reasons for a bad value or a mode the story cannot take; 409 while a
+    step of the story is queued or running, or without a storyboard. No
+    auth, as every story route (the app stays open by design)."""
+    return await run_in_threadpool(_shot_mode_edit, story_id, ep, shot_id, _sent(req))
+
+
 @router.get("/{story_id}/episodes/{ep}/shots/{name}")
 async def episode_shot(story_id: str, ep: str, name: str):
     """One shot's image, ``shot_NN.<png|jpg|jpeg|webp>`` (the assets step's,
@@ -3094,7 +3124,9 @@ async def upload_shot_keyframe(story_id: str, ep: str, shot_id: str, request: Re
     number = _episode_number(ep)
     if _SHOT_ID.fullmatch(shot_id) is None:
         raise HTTPException(status_code=404, detail=f"There is no shot {shot_id!r}.")
-    refusal = manual_uploads._images_refusal(story)
+    # Plan 25 stage 1: the shot's own image mode first (its keyframe may be yours on a story the app draws).
+    refusal = await run_in_threadpool(manual_uploads.keyframe_route_refusal, stories, story, number, shot_id,
+                                      env=worker.get_settings_env())
     if refusal:
         raise _upload_refused(400, refusal)
     keyframe_busy = "upload the keyframe once that step is done, or cancel it first."

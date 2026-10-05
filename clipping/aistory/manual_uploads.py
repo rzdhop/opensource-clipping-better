@@ -246,16 +246,22 @@ def _shot_of(host, shot_id):
 
 
 def upload_target_refusal(ec, shot, doc) -> str | None:
-    """Why *shot*'s clip is not the human's to upload, or None."""
+    """Why *shot*'s clip is not the human's to upload, or None. Plan 25
+    stage 1: a shot set to ``manual`` is the human's on either native-speech
+    profile (``clips.class_link`` honours its mode); one set to ``auto`` is
+    refused with how to switch it."""
+    from . import video_plan
     from .steps import clips
 
     if not media_policy.native_speech(ec.story):
         return (f"Episode {ec.ep}'s clips are not yours to upload: the story is not on a native-speech profile "
                 f"whose clips are on {gen.MANUAL_LINK} (choose Native speech — your own clips).")
     link = clips.class_link(ec.story, shot, doc, None)
-    if not gen.is_manual(link or ""):
-        return f"Shot {shot['shot_id']}'s clip is made on {link}, not uploaded: its link is not {gen.MANUAL_LINK}."
-    return None
+    if gen.is_manual(link or ""):
+        return None
+    if video_plan.shot_mode(doc, shot["shot_id"], "clip") == video_plan.AUTO:
+        return f"Shot {shot['shot_id']}'s clip is made on {link} (auto): switch it to 'my own' to upload."
+    return f"Shot {shot['shot_id']}'s clip is made on {link}, not uploaded: its link is not {gen.MANUAL_LINK}."
 
 
 def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None, on_log=None, now=None,
@@ -337,7 +343,9 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
     kind = sticky_link.VIDEO_SPEECH if speaks else sticky_link.VIDEO
     host.video_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO) is not None
     host.speech_link_kept = sticky_link.recorded(doc, sticky_link.VIDEO_SPEECH) is not None
-    host.keep_video_link(gen.MANUAL_LINK, kind=kind)
+    if not clips.off_class(ec.story, shot, doc):
+        # Plan 25 stage 1: a shot the human makes by its own mode never sets its class's link.
+        host.keep_video_link(gen.MANUAL_LINK, kind=kind)
     on_log(f"📥 Shot {shot_id}: your clip ({info['duration_s']:g} s, {info['width']}x{info['height']}"
            f"{', with sound' if info['audio'] else ''}) is stored as {manual_clip_rel(shot_id)}"
            + (" (the one before is kept in assets/clips/takes/)" if replaced else ""))
@@ -426,6 +434,48 @@ def _images_refusal(story) -> str | None:
         return None
     return ("This story's images are made by the app: switch its images to your own uploads (the generation "
             "profile's Images: manual) to upload them.")
+
+
+def keyframe_target_refusal(ec, shot, doc, *, env=None) -> str | None:
+    """Why *shot*'s keyframe is not the human's to upload, or None (plan 25
+    stage 1): a shot set to ``manual`` is the human's on any v2 story; one
+    set to ``auto`` on a story whose keyframes the app draws is refused with
+    how to switch it; a shot with no mode follows the story
+    (:func:`_images_refusal`), as before."""
+    from . import video_plan
+    from .steps import assets as assets_step
+    from .steps import clips
+
+    mode = video_plan.shot_mode(doc, shot["shot_id"], "image")
+    if assets_step.image_mode(ec.story, shot, doc) == video_plan.MANUAL:
+        return None
+    if mode == video_plan.AUTO:
+        link = clips.planned_image_link(ec, env or {}, assets_doc=doc) or "the app's image links"
+        return f"Shot {shot['shot_id']}'s keyframe is made on {link} (auto): switch it to 'my own' to upload."
+    return _images_refusal(ec.story)
+
+
+def keyframe_route_refusal(stories, story, ep, shot_id, *, env=None) -> str | None:
+    """The keyframe route's check before the body is read: None on a story
+    whose images are the human's (as before), else
+    :func:`keyframe_target_refusal` of the shot when the episode and the
+    shot can be read (plan 25 stage 1), else the story's own refusal."""
+    refusal = _images_refusal(story)
+    if refusal is None:
+        return None
+    from .steps import assets as assets_step
+    from .steps import episode_common
+    from .steps.llm_call import StepFailed
+
+    try:
+        ec = episode_common.load_context(stories, story["story_id"], ep)
+        board = episode_common.read_episode(ec, store_mod.EPISODE_STORYBOARD_DOC)
+    except StepFailed:
+        return refusal
+    shot = next((item for item in (board or {}).get("shots") or () if item["shot_id"] == shot_id), None)
+    if shot is None:
+        return refusal
+    return keyframe_target_refusal(ec, shot, assets_step._read_assets_doc(ec), env=env)
 
 
 def accept_image(stories, story_id, kind, eid, slot, received, *, now=None, guard=None, variant_id=None) -> dict:
@@ -555,10 +605,10 @@ def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_lo
     on_log = on_log or (lambda _line: None)
     now = now or _utc_now()
     host, ec = _host(stories, story_id, ep, env=env, on_log=on_log, transcribe=None, run=None)
-    refusal = _images_refusal(ec.story)
+    shot = _shot_of(host, shot_id)
+    refusal = keyframe_target_refusal(ec, shot, assets_step._read_assets_doc(ec), env=env)
     if refusal:
         raise UploadRefused(refusal)
-    shot = _shot_of(host, shot_id)
     if shot["assets"].get("locked"):
         raise UploadRefused(f"Shot {shot_id} is locked: unlock it first.", status=409)
     name = f"shot_{shot_id[2:]}.png"
@@ -579,7 +629,8 @@ def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_lo
     os.chmod(dest, 0o644)
     host.drop_other_images(shot_id, "png")
     doc = assets_step._read_assets_doc(ec)
-    link = assets_step.recorded_image_link(doc)
+    # Plan 25 stage 1: a keyframe the human's own by its mode is hashed on manual/upload (its own link).
+    link = assets_step.shot_image_link(ec.story, shot, assets_step.recorded_image_link(doc), doc)
     parts = assets_step.request_parts(ec, shot, note=None, link=link)
     # An image paid for by nobody here: ``route: free`` (the image routes are free, local or paid).
     shot["assets"].update({"image": f"{schemas.SHOT_IMAGE_DIR}/{name}", "seed": None, "provider": gen.MANUAL,
@@ -587,7 +638,7 @@ def accept_keyframe(stories, story_id, ep, shot_id, received, *, env=None, on_lo
                            "prompt_hash": parts["hash"], "est_usd": 0.0, "cache_key": None, "generated_at": now,
                            "note": None, "pending": None})
     host.write_board()
-    if sticky_link.recorded(doc, sticky_link.IMAGE) is None:
+    if sticky_link.recorded(doc, sticky_link.IMAGE) is None and not assets_step.own_keyframe(ec.story, shot, doc):
         host.link_pending = sticky_link.record(gen.MANUAL_LINK, now=now)
         try:
             host.write_assets_doc()

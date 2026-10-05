@@ -1076,6 +1076,17 @@ class AssetsPatchRequest(BaseModel):
     links: Optional[dict] = None
 
 
+class ShotModeRequest(BaseModel):
+    """PATCH /api/stories/{id}/episodes/{ep}/shots/{shot_id}/mode (plan 25
+    stage 1): who makes the shot's clip and keyframe -- ``"auto"`` (the app,
+    on an API link) or ``"manual"`` (your own upload), null to clear (the
+    story's profile again). Plain strings here: ``workflow.patch_shot_mode``
+    refuses a bad value with a 400 naming it, not a 422. "Sent" is
+    ``model_fields_set``."""
+    clip: Optional[str] = None
+    image: Optional[str] = None
+
+
 # Phase 5 (spec 2.6, 9.1, 9.2, plan 11 stages 4-5): the series steps --
 # ``memory``, ``feedback``, ``propose-next`` -- run through the generic
 # ``POST /steps/{step}`` (``StoryStepRequest``, unchanged) like any other

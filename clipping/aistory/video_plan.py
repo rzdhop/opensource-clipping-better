@@ -239,6 +239,20 @@ def shot_overrides(assets_doc, shot_id):
     return entry if isinstance(entry, dict) else None
 
 
+# Plan 25 stage 1 (D-1): who makes a shot's clip and its keyframe, over the
+# story's own choice (``assets.json``'s ``shot_modes``).
+AUTO, MANUAL = schemas.SHOT_MODES
+
+
+def shot_mode(assets_doc, shot_id, kind):
+    """Shot *shot_id*'s mode for *kind* (``clip`` or ``image``) in
+    *assets_doc* (``assets.json``'s ``shot_modes``): ``auto``, ``manual``,
+    or None when it sets none (the story's profile decides, as before)."""
+    entry = ((assets_doc or {}).get("shot_modes") or {}).get(shot_id)
+    value = entry.get(kind) if isinstance(entry, dict) else None
+    return value if value in schemas.SHOT_MODES else None
+
+
 def effective_shot_flags(board_shot: Mapping, assets_shot: Mapping | None = None) -> dict:
     """``{"keep_still", "animate", "keep_native_audio"}`` of one shot, as the
     planner, the video phase and the renderer must all read them: each is

@@ -3482,7 +3482,7 @@ def _derived_key(ec, script, board, doc, manifest) -> tuple:
 def _derive(ec, script, board, doc, manifest) -> dict:
     """The hashed part of :func:`episode_outputs` (see ``_DERIVED_CACHE``)."""
     link = assets_step.recorded_image_link(doc)
-    shots = {shot["shot_id"]: assets_step.shot_state(ec, shot, link=link)
+    shots = {shot["shot_id"]: assets_step.shot_state(ec, shot, link=link, doc=doc)
              for shot in (board or {}).get("shots") or []}
     lines = {}
     for scene in (script or {}).get("scenes") or []:
@@ -3934,6 +3934,9 @@ def episode_clips(stories, story, ep, *, env=None) -> dict:
     tier = int(story["generation_profile"]["tier"])
     view = {"tier": tier, "links": {kind: copy.deepcopy(sticky_link.recorded(doc, kind)) for kind in sticky_link.KINDS},
             "shots": {}, "video": None, "image_offer": None}
+    if (doc or {}).get("shot_modes"):
+        # Plan 25 stage 1: who makes each shot, as assets.json sets it (absent: the story's profile).
+        view["shot_modes"] = copy.deepcopy(doc["shot_modes"])
     if board is None or not board["shots"]:
         return view
     script = read_episode(stories, story_id, ep, SCRIPT_DOC)
@@ -4484,7 +4487,7 @@ def approve_assets(stories, story_id, ep, *, now, by=USER_APPROVED) -> dict:
     missing = []
     link = assets_step.recorded_image_link(doc)
     for shot in board["shots"]:
-        state = assets_step.shot_state(ec, shot, link=link)
+        state = assets_step.shot_state(ec, shot, link=link, doc=doc)
         imaged = assets_step.shot_image_path(ec, shot) is not None
         if not imaged or not (state == "current" or (shot["assets"].get("locked") and state == "locked_stale")):
             missing.append(shot["shot_id"])
@@ -5365,6 +5368,118 @@ def patch_assets(stories, story_id, ep, fields, *, now, env=None) -> dict:
         if new is not None:
             _write_assets_doc(stories, story_id, ep, new, now=now, what="this video link")
     return board
+
+
+def _shot_mode_states(ec, script, shot, *, env_link):
+    """``{"clip", "image"}``: the states of *shot*'s clip (``clips.clip_state``
+    on the link its mode puts it on; ``none`` without a record) and keyframe
+    (``assets.shot_state``) as ``assets.json`` stands on disk now."""
+    doc = read_episode(ec.store, ec.story_id, ec.ep, ASSETS_DOC)
+    clip = "none"
+    if shot["assets"].get("clip"):
+        image = assets_step.shot_image_path(ec, shot)
+        try:
+            clip = clips_step.clip_state(ec, shot, script, link=clips_step.class_link(ec.story, shot, doc, env_link),
+                                         tier=clips_step.tier_of(ec), flags=clips_step.shot_flags(shot, doc),
+                                         image_sha=assets_step._sha256_file(image) if image is not None else None)
+        except (KeyError, ValueError):
+            clip = "stale"
+    return {"clip": clip, "image": assets_step.shot_state(ec, shot, doc=doc)}
+
+
+def patch_shot_mode(stories, story_id, ep, shot_id, fields, *, now, env=None) -> dict:
+    """Who makes shot *shot_id*'s clip and keyframe (plan 25 stage 1, D-1):
+    *fields* ``{"clip"?: "auto" | "manual" | None, "image"?: ...}`` (None
+    clears that kind: back to the story's profile) into ``assets.json``'s
+    ``shot_modes`` (``assets.moded_assets_doc``); the storyboard is never
+    written, the assets approval goes stale with the fingerprint. Returns::
+
+        {"shot_id", "modes": {"clip": "auto"|"manual"|None, "image": "auto"|"manual"},
+         "set": {the kinds assets.json sets}, "link": {"clip", "image"},
+         "states": {"clip", "image"}, "stale": ["clip"|"image", ...],
+         "verdict": {"clip": {link, est_usd, allowed, reason} | None, "image": ... | None}}
+
+    ``stale`` names what was current and is not any more: a clip or a
+    keyframe made on the other link -- the link-change rule
+    (``clips.clip_state``, ``assets.image_state``), nothing written on the
+    shot. ``verdict``: for a kind sent whose mode is now ``auto``, the
+    gate's dry run (``assets.shot_mode_verdict``; the image quote for one
+    keyframe), calling nothing. Refused: ``not_found`` for a shot the
+    storyboard does not have; ``invalid`` for nothing sent, a value that is
+    not ``auto``/``manual``/null, a clip mode on a story that is not native
+    speech (its clips are one link an episode), an image mode on a legacy
+    story, an image mode ``auto`` on a story whose images are all the
+    human's (switch the story's images first); ``conflict`` without a
+    storyboard or a script."""
+    story = load(stories, story_id)
+    ep = episode_bounds(stories, story, ep)
+    board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
+    if board is None or not board["shots"]:
+        raise _no_storyboard(ep)
+    script = read_episode(stories, story_id, ep, SCRIPT_DOC)
+    if script is None or not script["scenes"]:
+        raise _no_script(ep)
+    shot = next((item for item in board["shots"] if item["shot_id"] == shot_id), None)
+    if shot is None:
+        raise WorkflowError(NOT_FOUND, f"Episode {ep}'s storyboard has no shot {shot_id!r}.")
+    errors = []
+    unknown = sorted(set(fields) - set(schemas.SHOT_MODE_KINDS))
+    if unknown:
+        errors.append(f"{', '.join(unknown)}: not a mode (send clip or image)")
+    if not set(fields) & set(schemas.SHOT_MODE_KINDS):
+        errors.append("send clip or image: 'auto' or 'manual' (or null to clear)")
+    for kind in schemas.SHOT_MODE_KINDS:
+        if kind in fields and fields[kind] is not None and fields[kind] not in schemas.SHOT_MODES:
+            errors.append(f"{kind}: expected 'auto' or 'manual' (or null to clear), not {fields[kind]!r}")
+    if fields.get("clip") is not None and not media_policy.native_speech(story):
+        errors.append(f"clip: shot {shot_id}'s clip is made by the app on the episode's one video link: a per-shot "
+                      "mode needs a native-speech story (Native speech, or Native speech — your own clips)")
+    if fields.get("image") is not None and not media_policy.is_v2(story):
+        errors.append(f"image: shot {shot_id}'s keyframe follows the story: a per-shot mode needs a v2 story")
+    elif fields.get("image") == video_plan.AUTO and media_policy.images_manual(story):
+        errors.append(f"image: shot {shot_id}'s keyframe cannot be set to auto: this story's images are all your "
+                      "own uploads (Images: manual); switch the story's images to the app first, then set the shots "
+                      "you make yourself to 'my own'")
+    if errors:
+        raise _invalid_values(f"Shot {shot_id}'s mode would not be valid with these values.", errors)
+    ec = _context(stories, story_id, ep)
+    env_link = (sticky_link.recorded(read_episode(stories, story_id, ep, ASSETS_DOC), sticky_link.VIDEO) or {}).get(
+        "link")
+    before = _shot_mode_states(ec, script, shot, env_link=env_link)
+    doc = read_episode(stories, story_id, ep, ASSETS_DOC)
+    changes = {kind: fields[kind] for kind in schemas.SHOT_MODE_KINDS if kind in fields}
+    new = assets_step.moded_assets_doc(ec, doc, shot_id, changes, now=now)
+    if new is not None:
+        _write_assets_doc(stories, story_id, ep, new, now=now, what="this shot's mode")
+        doc = new
+    after = _shot_mode_states(ec, script, shot, env_link=env_link)
+    verdict = {"clip": None, "image": None}
+    modes = {"clip": clips_step.clip_mode(ec.story, shot, doc),
+             "image": assets_step.image_mode(ec.story, shot, doc)}
+    if "clip" in changes and modes["clip"] == video_plan.AUTO:
+        verdict["clip"] = assets_step.shot_mode_verdict(ec, script, board, shot, env=env)
+    if "image" in changes and modes["image"] == video_plan.AUTO:
+        verdict["image"] = _keyframe_verdict(ec, board, doc, env=env)
+    image_link = assets_step.shot_image_link(ec.story, shot, assets_step.recorded_image_link(doc), doc)
+    return {
+        "shot_id": shot_id, "modes": modes, "set": dict(((doc or {}).get("shot_modes") or {}).get(shot_id) or {}),
+        "link": {"clip": clips_step.class_link(ec.story, shot, doc, env_link) if modes["clip"] else None,
+                 "image": image_link or clips_step.planned_image_link(ec, env, assets_doc=doc)},
+        "states": after,
+        "stale": [kind for kind in schemas.SHOT_MODE_KINDS if before[kind] == "current" and after[kind] != "current"],
+        "verdict": verdict,
+    }
+
+
+def _keyframe_verdict(ec, board, doc, *, env) -> dict:
+    """The image quote of one keyframe on the episode's image link (or its
+    chain's first runnable one), as a mode verdict: ``{link, est_usd,
+    allowed, reason}``, calling nothing."""
+    ledger = assets_step._open_ledger(ec)
+    quote = assets_step.image_quote(ec, 1, env=env, story_spent=float(ledger.totals()["est_usd"]), storyboard=board,
+                                    link_info=assets_step.episode_image_link(ec, board, env=env, doc=doc))
+    return {"link": quote.get("link"), "est_usd": round(float(quote.get("est_usd") or 0.0), 4),
+            "allowed": bool(quote.get("ready")), "reason": quote.get("message")}
 
 
 def _overridden_assets(stories, story_id, ep, ec, board, changes, paths, errors, *, now):

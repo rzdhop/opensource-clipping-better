@@ -566,6 +566,22 @@ def silent_link(story):
     return link if isinstance(link, str) and link else None
 
 
+def auto_clip_link(story, *, speaks):
+    """The API link a clip the app makes is bought on when *story*'s own link
+    for that class of shot is ``manual/upload`` (plan 25 stage 1, D-1: a shot
+    set to ``auto`` on the manual profile): the ``native_speech`` budget
+    profile's speech link of the story's speech model (:func:`speech_model`)
+    for a speaking shot, its silent link for a silent one -- or None when
+    that profile cannot be read or names no API link (the plan then refuses
+    the shot, naming why; never the human's upload in its place)."""
+    try:
+        settings = budget_mod.profile_settings(defaults.NATIVE_SPEECH_PROFILE)
+    except (OSError, ValueError, KeyError):
+        return None
+    link = (settings.get("speech_links") or {}).get(speech_model(story)) if speaks else settings.get("silent_link")
+    return link if isinstance(link, str) and link and not is_manual_link(link) else None
+
+
 def speech_retake(story):
     """``{"max_per_shot", "cap_usd"}``: how a native-speech story retakes a
     speaking clip whose take missed its line (its budget profile's
