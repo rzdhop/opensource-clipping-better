@@ -11,6 +11,7 @@ dependencies = [
     "google-genai",
     "openai>=2.24.0,<3",  # OpenAI-compatible client for every provider in clipping/providers/
     "anthropic>=1.11.0,<2",  # Claude on the Anthropic API: clipping/providers/anthropic_llm.py
+    "tzdata>=2026.5",  # the IANA zone files zoneinfo reads when the OS has none: BUDGET_TIMEZONE (clipping/providers/budget.py)
     "numpy<2.0.0",
     "mediapipe",
     "opencv-python",
