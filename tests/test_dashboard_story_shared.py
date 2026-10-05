@@ -54,6 +54,8 @@ STORY_FUNCTIONS = [
     "postEpisodeFeedback", "decideProposal",
     # 2026-10-02 (the Visual tier card's "Regenerate on v2"): the pipeline switch.
     "switchPipeline",
+    # Plan 28 stage C: "Approve all" of the cast or the places.
+    "approveStoryGroup",
 ]
 
 
@@ -93,7 +95,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 31  # 2026-10-02: + switchPipeline
+    assert len(STORY_FUNCTIONS) == 32  # 2026-10-02: + switchPipeline; plan 28 C: + approveStoryGroup
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx

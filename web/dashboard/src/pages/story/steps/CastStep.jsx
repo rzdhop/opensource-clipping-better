@@ -9,6 +9,7 @@ import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
+import ApproveAllGroup from '../ApproveAllGroup'
 import ManualUploadSlot, { EntityImageSlots, entityImageSlot, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import VoiceReferenceSlot from './VoiceReferenceSlot'
@@ -1281,6 +1282,10 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
 
       {anyMissing && (
         <ContinueCast storyId={storyId} disabled={busy} onChange={onChange} consistencyMode={consistencyMode} />
+      )}
+
+      {characters.some((character) => !character.approved_at) && (
+        <ApproveAllGroup storyId={storyId} group="cast" disabled={busy} onChange={onChange} />
       )}
     </div>
   )

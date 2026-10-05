@@ -1815,6 +1815,66 @@ def test_the_places_estimate_counts_the_list_the_user_is_editing_not_only_the_sa
     assert props_only["units"] == {"llm_calls": 1, "images": 1, "edit_images": 0, "tts_chars": 0}
 
 
+# ============================================================ approve all (plan 28 C1)
+
+def test_approve_all_approves_the_complete_ones_and_names_what_the_others_lack(api):
+    """One call approves every character with everything made; Kiwilo's edited
+    sample line left it without a voice sample, so it is skipped and named --
+    the cast is not approved until it is."""
+    story_id = _cast_via_api(api)
+    cast_job = api.jobs.list_step_jobs(story_id)[0]["id"]
+    response = api.client.patch(_url(story_id, "/characters/char_kiwilo"), json={"sample_line": "Le vote, c'est moi."})
+    assert response.status_code == 200, response.text
+
+    response = api.client.post(_url(story_id, "/approve-all/cast"))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert sorted(item["id"] for item in body["approved"]) == ["char_figuette", "char_mangella"]
+    assert body["skipped"] == [{"id": "char_kiwilo", "kind": "character", "name": "Kiwilo",
+                                "missing": ["sample"], "lacks": ["a voice sample"]}]
+    assert body["refused"] is None
+    page = _page(api, story_id)
+    assert {doc["char_id"]: bool(doc["approved_at"]) for doc in page["characters"]} == {
+        "char_kiwilo": False, "char_mangella": True, "char_figuette": True}
+    assert page["story"]["approvals"]["cast"] is None
+    assert _status(api, cast_job) == "awaiting_approval"
+
+    # The sample made again: the next call approves the last one, the group folds, the cast job completes.
+    again = _post_step(api, story_id, "cast", {}).json()
+    assert _run(api, again["id"])["status"] == "awaiting_approval"
+    body = api.client.post(_url(story_id, "/approve-all/cast")).json()
+    assert [item["id"] for item in body["approved"]] == ["char_kiwilo"] and body["skipped"] == []
+    page = _page(api, story_id)
+    assert page["story"]["approvals"]["cast"] and page["story"]["status"] == "cast_approved"
+    assert _status(api, again["id"]) == "completed"
+    # Nothing left: an answer, not an error.
+    assert api.client.post(_url(story_id, "/approve-all/cast")).json() == {"approved": [], "skipped": [],
+                                                                         "refused": None}
+
+
+def test_approve_all_of_the_places_covers_the_props_too(api):
+    story_id = _full_via_api(api)
+    response = api.client.post(_url(story_id, "/approve-all/places"))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert sorted((item["kind"], item["id"]) for item in body["approved"]) == [
+        ("place", BEACH), ("place", FIRE), ("prop", PHONE)]
+    assert body["skipped"] == [] and body["refused"] is None
+    assert _page(api, story_id)["story"]["approvals"]["places"]
+
+
+def test_approve_all_is_a_409_while_a_step_runs_and_a_404_for_an_unknown_group_or_story(api):
+    story_id = _cast_via_api(api)
+    job_id = _job(api, story_id, "cast", "running")
+    response = api.client.post(_url(story_id, "/approve-all/cast"))
+    assert response.status_code == 409
+    assert "cast" in response.json()["detail"] and "cancel it first" in response.json()["detail"]
+    assert all(not doc["approved_at"] for doc in _page(api, story_id)["characters"])
+    assert _status(api, job_id) == "running"
+    for url in (_url(story_id, "/approve-all/season"), _url(UNKNOWN_ID, "/approve-all/cast")):
+        assert api.client.post(url).status_code == 404, url
+
+
 # ================================================================= the token
 
 NEW_ROUTES = [
@@ -1822,6 +1882,8 @@ NEW_ROUTES = [
     ("POST", "/steps/places_proposal", {}),
     ("POST", "/approve/character:char_kiwilo", None),
     ("POST", "/approve/season", None),
+    ("POST", "/approve-all/cast", None),
+    ("POST", "/approve-all/places", None),
     ("POST", "/regenerate", {"target": "character:char_kiwilo:text"}),
     ("PATCH", "/characters/char_kiwilo", {"name": "Kiwi"}),
     ("PATCH", f"/places/{BEACH}", {"name": "x"}),

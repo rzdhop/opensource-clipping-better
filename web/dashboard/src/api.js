@@ -709,6 +709,19 @@ export async function approveStoryDoc(storyId, doc, body) {
   return res.json()
 }
 
+/**
+ * "Approve all" of one group, `cast` or `places` (the places and the props):
+ * every entity with everything made is approved in one call; one that still
+ * lacks something is skipped and named. Answers `{approved: [{id, kind,
+ * name}], skipped: [{id, kind, name, missing, lacks}], refused}` -- 409 while
+ * a step of the story is running, as one approval is.
+ */
+export async function approveStoryGroup(storyId, group) {
+  const res = await request(`/stories/${storyId}/approve-all/${group}`, { method: 'POST' })
+  if (!res.ok) throw await apiError(res, `Failed to approve all of '${group}'`)
+  return res.json()
+}
+
 /** Regenerate one piece (`{target, note?}`, spec 9.2 grammar); 201 with the queued job. */
 export async function regenerateStory(storyId, payload) {
   const res = await request(`/stories/${storyId}/regenerate`, {

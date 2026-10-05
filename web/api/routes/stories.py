@@ -2066,6 +2066,43 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
         workflow.refuse_approval(doc)
 
 
+# What "approve all" of a group approves: the cast is its characters; the
+# places are the places and the props (the group the store folds them into).
+APPROVE_ALL_GROUPS = {"cast": (CHARACTERS,), "places": (PLACES, PROPS)}
+
+
+@router.post("/{story_id}/approve-all/{group}")
+async def approve_all(story_id: str, group: str) -> dict:
+    """Approve every complete, unapproved entity of one group in one call
+    (the "Approve all" button): ``cast`` (the characters) or ``places`` (the
+    places and the props); 404 for any other group or an unknown story.
+
+    409 while a step of the story is queued or running -- as one approval
+    does. Otherwise ``workflow.approve_complete`` goes through the group by
+    the rule of ``approve/character:<id>`` & co.: an entity with everything
+    is approved, one that lacks something is *skipped* and named with what
+    it lacks, one already approved stays as it is. Answers ``{"approved":
+    [{id, kind, name}], "skipped": [{id, kind, name, missing, lacks}],
+    "refused": str | null}`` -- 200 even when some are skipped: the body says
+    which. Every approved entity's own regenerate jobs awaiting approval are
+    completed, and -- once the group approval is set -- the group's.
+    """
+    kinds = APPROVE_ALL_GROUPS.get(group)
+    if kinds is None:
+        raise HTTPException(status_code=404, detail=f"There is nothing to approve all of in {group!r}: "
+                                                    f"{' or '.join(APPROVE_ALL_GROUPS)}.")
+    stories = _stories()
+    _load(stories, story_id)
+    _refuse_busy(story_id, "approve them once it is done, or cancel it first.")
+    with _answering():
+        done = workflow.approve_complete(stories, story_id, kinds, now=_now())
+    for item in done["approved"]:
+        _complete_awaiting(story_id, f"{item['kind']}:{item['id']}")
+    if _load(stories, story_id)["approvals"].get(group):
+        _complete_awaiting(story_id, group)
+    return done
+
+
 # ----------------------------------------------------------- regenerate
 
 @router.post("/{story_id}/regenerate", status_code=201)

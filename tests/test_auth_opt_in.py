@@ -226,6 +226,19 @@ def test_a_cross_site_write_is_refused_when_open(monkeypatch):
         assert "cross-site" in response.json()["detail"].lower()
 
 
+def test_a_cross_site_approve_all_is_refused_when_open(monkeypatch):
+    """Plan 28 C1: the story's "Approve all" is a write like the others; another
+    website cannot make it, the dashboard (same-origin) and curl still can."""
+    with _client(monkeypatch) as client:
+        for group in ("cast", "places"):
+            response = client.post(f"/api/stories/0123456789ab/approve-all/{group}",
+                                   headers={"Sec-Fetch-Site": "cross-site"})
+            assert response.status_code == 403, group
+        for headers in ({"Sec-Fetch-Site": "same-origin"}, {}):
+            response = client.post("/api/stories/0123456789ab/approve-all/cast", headers=headers)
+            assert response.status_code == 404, headers  # the route, answering: no such story
+
+
 def test_same_origin_and_non_browser_writes_pass_the_guard(monkeypatch):
     """The dashboard is same-origin and curl sends no Sec-Fetch-Site; neither
     may be caught. A bad body answering 4xx from the route proves it got there."""

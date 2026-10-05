@@ -8,6 +8,7 @@ import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
+import ApproveAllGroup from '../ApproveAllGroup'
 import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import { entityBrief, useImageBrief } from './PromptDrawer'
@@ -1056,6 +1057,10 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange: onCha
 
       {anyMissing && (
         <ContinuePlaces storyId={storyId} disabled={busy} onChange={onChange} consistencyMode={consistencyMode} />
+      )}
+
+      {[...places, ...props].some((item) => !item.approved_at) && (
+        <ApproveAllGroup storyId={storyId} group="places" disabled={busy} onChange={onChange} />
       )}
     </div>
   )

@@ -10,6 +10,7 @@ import ScriptPane from './episode/ScriptPane'
 import StoryboardPane from './episode/storyboard/StoryboardPane'
 import PreviewPane from './episode/PreviewPane'
 import ReviewPane from './episode/ReviewPane'
+import EpisodeApproveAll from './episode/EpisodeApproveAll'
 import { handoffLinks, handoffPath } from './episode/HandoffPage'
 import EpisodeStepper, { episodeSteps, stepOfJob } from './episode/EpisodeStepper'
 import { imagesManual } from './ManualUploadSlot'
@@ -543,6 +544,9 @@ export default function EpisodeStudio() {
 
       <EpisodeStepper steps={steps} runningKey={stepOfJob(inFlightJob, steps)} onSelect={selectStep}
         handoffTo={episode.storyboard ? handoffPath(storyId, ep) : null} handoffLinks={handoffNodes} />
+
+      <EpisodeApproveAll storyId={storyId} ep={epNumber} episode={episode} busy={Boolean(inFlightJob)}
+        onChange={refresh} />
 
       {inFlightJob && liveJob ? (
         liveJob.status === 'queued'

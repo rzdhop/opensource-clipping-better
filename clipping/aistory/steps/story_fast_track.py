@@ -250,26 +250,20 @@ class _AgentRun:
         were approved."""
         workflow = _workflow()
         store, story = self.open()
-        count, lacking = 0, []
-        for kind in kinds:
-            for doc in self.call(workflow.list_entities, store, story["story_id"], kind):
-                if doc["approved_at"]:
-                    continue
-                missing = workflow.MISSING[kind](store, story["story_id"], doc)
-                if missing:
-                    labels = ", ".join(workflow.MISSING_LABELS[item] for item in missing)
-                    lacking.append(f"{doc['name']} (missing: {labels})")
-                    continue
-                eid = doc[{CHARACTERS: "char_id", PLACES: "place_id", PROPS: "prop_id"}[kind]]
-                self.approve(f"{workflow.ENTITY_WORDS[kind]} {doc['name']}",
-                             lambda wf, now, k=kind, e=eid: wf.approve_entity(store, story["story_id"], k, e,
-                                                                             now=now, by=AGENT_APPROVED),
-                             "complete")
-                count += 1
-        if lacking:
+
+        def approve_one(kind, eid, doc):
+            self.approve(f"{workflow.ENTITY_WORDS[kind]} {doc['name']}",
+                         lambda wf, now: wf.approve_entity(store, story["story_id"], kind, eid,
+                                                           now=now, by=AGENT_APPROVED),
+                         "complete")
+
+        done = self.call(workflow.approve_complete, store, story["story_id"], kinds, AGENT_APPROVED,
+                         raise_refusals=True, approve_one=approve_one)
+        if done["skipped"]:
+            lacking = [f"{item['name']} (missing: {', '.join(item['lacks'])})" for item in done["skipped"]]
             raise StepFailed(f"The {what} cannot be approved yet: {'; '.join(lacking)}. Make what is missing "
                              "(the step again, or a regenerate in Studio).")
-        return count
+        return len(done["approved"])
 
     # ---------------------------------------------------------------- parts
 

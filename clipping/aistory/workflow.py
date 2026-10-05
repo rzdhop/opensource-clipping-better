@@ -2262,6 +2262,88 @@ def approve_entity(stories, story_id, kind, eid, *, now, by=USER_APPROVED) -> di
     return load(stories, story_id)
 
 
+def approve_complete(stories, story_id, kinds, by=USER_APPROVED, *, now=None, in_cast_order=False,
+                     raise_refusals=False, approve_one=None, report=None) -> dict:
+    """Approve every complete, unapproved entity of *kinds* (the cast: the
+    characters; the places: places and props) by :func:`approve_entity`'s own
+    rule -- the one "approve all" the API's button, the CLI's
+    ``--auto-approve`` and the agent run share.
+
+    Returns ``{"approved": [{"id", "kind", "name"}], "skipped": [{"id",
+    "kind", "name", "missing": [code], "lacks": [label]}], "refused": str |
+    None}``: an entity already approved is left as it is and listed nowhere;
+    one that lacks something is *skipped* with what it lacks
+    (:data:`MISSING_LABELS`) and the others still go on. The first approval
+    re-folds the group's approval, so each entity is read afresh. A conflict
+    met while approving (it lost something meanwhile) is a skip too; any
+    other refusal stops the loop, earlier approvals kept, and is the
+    *refused* sentence -- or is raised when *raise_refusals* (the CLI, the
+    agent run).
+
+    *by*: the human (default) or the agent run. *now*: the stamp (default:
+    the clock). *in_cast_order*: walk the characters leads first
+    (:func:`entities_step.cast_order`). *approve_one(kind, eid, doc)*: how
+    one is approved, when the caller wants to record or word it (default:
+    :func:`approve_entity` with *by*). *report(status, kind, doc, lacks)*:
+    called for every entity in the order met, status ``kept`` / ``approved``
+    / ``skipped``.
+    """
+    _check_approver(by)
+    stamp = now or llm_call.utc_now()
+    done = {"approved": [], "skipped": [], "refused": None}
+
+    def approve(kind, eid, doc):
+        return approve_entity(stories, story_id, kind, eid, now=stamp, by=by)
+
+    approve_one = approve_one or approve
+
+    def say(status, kind, doc, lacks=()):
+        if report is not None:
+            report(status, kind, doc, list(lacks))
+
+    for kind in kinds:
+        id_field = story_store.ENTITY_KINDS[kind].id_field
+        docs = list_entities(stories, story_id, kind)
+        if in_cast_order and kind == CHARACTERS:
+            docs = entities_step.cast_order(docs)
+        for doc in docs:
+            eid = doc[id_field]
+            item = {"id": eid, "kind": ENTITY_WORDS[kind], "name": doc["name"]}
+            if doc["approved_at"]:
+                say("kept", kind, doc)
+                continue
+            missing = MISSING[kind](stories, story_id, doc)
+            try:
+                if not missing:
+                    approve_one(kind, eid, doc)
+            except WorkflowError as exc:
+                if exc.code != CONFLICT:
+                    if raise_refusals:
+                        raise
+                    done["refused"] = str(exc)
+                    return done
+                missing = MISSING[kind](stories, story_id, read_entity(stories, story_id, kind, eid))
+                if not missing:
+                    # Refused for a reason that is not something to make: the sentence is the answer.
+                    if raise_refusals:
+                        raise
+                    done["refused"] = str(exc)
+                    return done
+            except StoryUnreadable as exc:
+                if raise_refusals:
+                    raise
+                done["refused"] = str(exc)
+                return done
+            if missing:
+                lacks = [MISSING_LABELS[code] for code in missing]
+                done["skipped"].append(dict(item, missing=list(missing), lacks=lacks))
+                say("skipped", kind, doc, lacks)
+                continue
+            done["approved"].append(item)
+            say("approved", kind, doc)
+    return done
+
+
 def approve_season(stories, story_id, *, now, by=USER_APPROVED) -> dict:
     """Approve the season arc; returns the story, now ``ready``.
 

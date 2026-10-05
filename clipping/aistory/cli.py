@@ -1233,23 +1233,16 @@ def _approve_complete(stories, story_id, kinds) -> None:
     (``workflow.approve_entity``: the store re-folds the group approval);
     each one that lacks something is named with what it lacks; one already
     approved is left as it is."""
-    for kind in kinds:
-        id_field = story_store.ENTITY_KINDS[kind].id_field
-        docs = workflow.list_entities(stories, story_id, kind)
-        if kind == workflow.CHARACTERS:
-            docs = entities_step.cast_order(docs)
-        for doc in docs:
-            if doc["approved_at"]:
-                print(f"✅ {doc['name']}: already approved.")
-                continue
-            try:
-                workflow.approve_entity(stories, story_id, kind, doc[id_field], now=_now())
-            except workflow.WorkflowError as exc:
-                if exc.code != workflow.CONFLICT:
-                    raise
-                print(f"⏸ {exc}")
-                continue
+    def report(status, kind, doc, lacks):
+        if status == "kept":
+            print(f"✅ {doc['name']}: already approved.")
+        elif status == "skipped":
+            print(f"⏸ {doc['name']} cannot be approved yet; missing: {', '.join(lacks)}.")
+        else:
             print(f"✅ {doc['name']} approved.")
+
+    workflow.approve_complete(stories, story_id, kinds, now=_now(), in_cast_order=True,
+                              raise_refusals=True, report=report)
 
 
 def _generation_refusal(stories, story, units):
