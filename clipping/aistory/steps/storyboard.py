@@ -210,7 +210,10 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
     native = media_policy.native_speech(ec.story)
     if native:
         # Plan 22: one shot a character line, planned at the length its clip sells.
-        plans = speech_plans(ec, script, plans)
+        plan_notes = []
+        plans = speech_plans(ec, script, plans, notes=plan_notes)
+    else:
+        plan_notes = []
     keep = kept_shots(previous, plans, replanned=replanned, replanned_shots=replanned_shots)
     reserved = reserved_shot_ids(assets_doc)
 
@@ -234,6 +237,7 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
             raise
         board, notes = attempt([sid for sid in plans if sid not in stale])
         notes.append(f"stale scene(s) {', '.join(sorted(stale))} left out: their old shots no longer fit")
+    notes = plan_notes + notes
     for sid in stale:
         entry = board["scenes"].get(sid)
         if entry is not None and previous is not None and sid in previous["scenes"]:
@@ -242,13 +246,14 @@ def build(ec, script, plans, sources, previous, *, stale, now, env=None, replann
     return board, notes
 
 
-def speech_plans(ec, script, plans) -> dict:
+def speech_plans(ec, script, plans, notes=None) -> dict:
     """*plans* as a native-speech story plans them (plan 22,
     ``shots.speech_shot_plan``): each character line one speaking shot at
     the length its speech link sells, the reactions and narrator shots
     silent on the silent link's lengths, up to the template's
-    ``reaction_shots`` (default 0 to 1) a scene. ``StepFailed`` naming a
-    line no clip can speak, with the fix."""
+    ``reaction_shots`` (default 0 to 1) a scene. A scene's stored line plan
+    sets its clips (plan 24 stage 4); what it could not set is named in
+    *notes*. ``StepFailed`` naming a line no clip can speak, with the fix."""
     speech_lengths, silent_lengths = clips.speech_lengths(ec.story)
     reactions = tuple(ec.template.get("reaction_shots") or (0, 1))
     by_id = {scene["scene_id"]: scene for scene in script["scenes"]}
@@ -260,7 +265,8 @@ def speech_plans(ec, script, plans) -> dict:
             continue
         try:
             out[sid] = shots.speech_shot_plan(scene, scene_plans, language=ec.language, speech_lengths=speech_lengths,
-                                              silent_lengths=silent_lengths, reaction_shots=reactions)
+                                              silent_lengths=silent_lengths, reaction_shots=reactions,
+                                              notes=notes)
         except shots.SpeechLineTooLong as exc:
             raise StepFailed(f"Episode {ec.ep}'s storyboard cannot be planned as speaking clips: {exc}.") from None
     return out
@@ -336,6 +342,9 @@ def expected_scene_seconds(ec, script, scene) -> float:
     What :func:`beat_shot_count` reads: one clip must cover the shot once the
     voices are real, not only on the estimate."""
     seconds = scene_seconds(ec, script, scene)
+    entries = shots.planned_line_entries(scene)
+    if any(entries):
+        return _planned_scene_seconds(ec, seconds, scene, entries)
     for line in scene["lines"]:
         if shots._measured_for_its_words(line):
             continue
@@ -347,6 +356,30 @@ def expected_scene_seconds(ec, script, scene) -> float:
         if over > 1.0:
             seconds += timing.estimate_line(line["text"], ec.language) * (over - 1.0)
     return round(seconds, 3)
+
+
+def _planned_scene_seconds(ec, seconds, scene, entries) -> float:
+    """:func:`expected_scene_seconds` of a scene with a stored line plan
+    (plan 24 stage 4, D-2): every line not measured yet speaks for the
+    seconds its plan entry gives it -- the plan already carries its voice's
+    overrun (``timing.scene_plan``), so nothing is added -- in place of the
+    estimate; a measured line is what was measured, a line with no entry
+    keeps today's estimate and overrun. The pauses and the tail around the
+    lines are those of *seconds* (:func:`scene_seconds`)."""
+    spoken = sum(timing.line_duration(line, ec.language)[0] for line in scene["lines"])
+    total = max(0.0, seconds - spoken)
+    for line, entry in zip(scene["lines"], entries):
+        own = timing.line_duration(line, ec.language)[0]
+        if shots._measured_for_its_words(line):
+            total += own
+        elif entry is not None:
+            total += float(entry["seconds"])
+        elif timing.estimate_carries_overrun(line):
+            total += own
+        else:
+            over = voices.speech_overrun(voice_lines.speaker_voice(ec, line["speaker"]))
+            total += own + (timing.estimate_line(line["text"], ec.language) * (over - 1.0) if over > 1.0 else 0.0)
+    return round(total, 3)
 
 
 def max_shot_s(ec, env=None):

@@ -2691,8 +2691,48 @@ def _listener(scene, index, speaker):
 _SPEECH_FRAMING_OVER = {"wide_establishing": "medium_two_shot", "insert_prop": "medium_single"}
 
 
+def planned_line_entries(scene, notes=None) -> list:
+    """The stored line plan's entry (``timing.scene_plan``'s ``lines[i]``;
+    plan 24 stage 4, D-2) for each of *scene*'s written lines, in order:
+    an entry matches its line by kind (narrator or character) and speaker.
+    ``[None] * n`` for a scene with no stored plan (today's path, no note);
+    for a plan whose line count differs from the written lines, one note
+    appended to *notes* and no entry at all; a line whose kind or speaker
+    differs from its entry's gets None, with a note."""
+    lines = scene["lines"]
+    plan = scene.get("line_plan")
+    entries = (plan or {}).get("lines") or []
+    if not entries:
+        return [None] * len(lines)
+    sid = scene["scene_id"]
+    if len(entries) != len(lines):
+        if notes is not None:
+            notes.append(f"scene {sid}: its line plan has {len(entries)} line(s) and the script {len(lines)}: "
+                         "the plan is ignored, each line is planned by its own words")
+        return [None] * len(lines)
+    out = []
+    for n, (line, entry) in enumerate(zip(lines, entries), 1):
+        kind = "narrator" if line["speaker"] == "narrator" else "character"
+        if entry.get("kind") == kind and entry.get("speaker") == line["speaker"]:
+            out.append(entry)
+            continue
+        out.append(None)
+        if notes is not None:
+            notes.append(f"scene {sid} line {n}: its plan entry is for the {entry.get('kind')} "
+                         f"{entry.get('speaker')}, not {line['speaker']}: planned by its own words")
+    return out
+
+
+def _planned_clip(entry):
+    """*entry*'s ``clip_s`` as an int, or None (no entry, or a plan made
+    for a story that is not native: no clip)."""
+    if not entry or entry.get("clip_s") is None:
+        return None
+    return int(entry["clip_s"])
+
+
 def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPEECH_LENGTHS,
-                     silent_lengths=native_speech.SPEECH_LENGTHS, reaction_shots=(0, 1)) -> list:
+                     silent_lengths=native_speech.SPEECH_LENGTHS, reaction_shots=(0, 1), notes=None) -> list:
     """A native-speech story's plans for *scene* (plan 22) from its beat
     *plans* (T1 v2's, or a fast plan; framing, action, camera and staging
     are theirs): one shot a character line, ``speaks: true``, the speaker
@@ -2705,8 +2745,18 @@ def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPE
     a scene with no line at all, one silent shot at its target length.
     Every plan carries ``speaks`` and ``clip_s``. Idempotent: the plans it
     returns, given back, give the same plans. :class:`SpeechLineTooLong`
-    for a character line no length can speak."""
+    for a character line no length can speak.
+
+    Plan 24 stage 4 (D-2): a scene that carries its line plan
+    (``planned_line_entries``) plans each line at the plan's ``clip_s`` --
+    the shots are the plan -- when the written line still fits it (a
+    character line's words within ``native_speech.capacity``, a narration
+    within the clip less its lead) and the clip is one of the story's
+    lengths; a line that no longer fits keeps the rule above and is
+    named in *notes* (a list the caller owns). A scene with no plan is
+    planned exactly as before."""
     lines = scene["lines"]
+    entries = planned_line_entries(scene, notes)
     lo, hi = (list(reaction_shots) + [0, 1])[:2] if reaction_shots else (0, 1)
     place_tags = [tag for plan in plans for tag in plan["subjects"] if not tag.startswith("@")]
     place_tags = list(dict.fromkeys(place_tags)) or [f"#{scene['place_id']}:{scene['time_variant']}"]
@@ -2722,11 +2772,25 @@ def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPE
         speaker = line["speaker"]
         if speaker == "narrator":
             seconds = timing.line_duration(line, language)[0]
-            return from_plan(plan, lines=[n], speaks=False,
-                             clip_s=native_speech.narrator_clip_s(seconds, silent_lengths))
+            clip_s = native_speech.narrator_clip_s(seconds, silent_lengths)
+            planned = _planned_clip(entries[n - 1])
+            if planned is not None and planned in silent_lengths:
+                if planned >= clip_s:
+                    clip_s = planned
+                elif notes is not None:
+                    notes.append(f"scene {scene['scene_id']} line {n}: the narration needs a {clip_s} s clip, "
+                                 f"its plan gave {planned} s")
+            return from_plan(plan, lines=[n], speaks=False, clip_s=clip_s)
         clip_s = native_speech.speech_clip_s(line["text"], speech_lengths)
         if clip_s is None:
             raise SpeechLineTooLong(native_speech.line_refusal(line, speech_lengths))
+        planned = _planned_clip(entries[n - 1])
+        if planned is not None and planned in speech_lengths:
+            if native_speech.words_of(line["text"]) <= native_speech.capacity(planned):
+                clip_s = planned
+            elif notes is not None:
+                notes.append(f"scene {scene['scene_id']} line {n}: {native_speech.words_of(line['text'])} words "
+                             f"do not fit its planned {planned} s clip: planned at {clip_s} s")
         listener = _listener(scene, n - 1, speaker)
         if speaker in characters:
             others = [tag for tag in plan["subjects"] if not tag.startswith("@")] or place_tags

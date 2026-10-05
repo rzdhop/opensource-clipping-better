@@ -179,6 +179,35 @@ def test_a_scene_is_measured_longer_than_its_estimate_when_its_voices_are_gemini
         assert storyboard.expected_scene_seconds(ec, script, scene) == storyboard.scene_seconds(ec, script, scene)
 
 
+def test_a_scene_with_a_line_plan_is_expected_to_last_the_plans_seconds(store):
+    """Plan 24 stage 4, fail-first: with a stored line plan, every unmeasured
+    line speaks for its plan entry's seconds (the pauses and tail around the
+    lines are the scene's), whatever the estimate or the voices' overrun
+    say; a measured line stays what was measured; a scene without a plan is
+    as it was. The beat count reads it."""
+    story_id = amb._v2_storyboard_story(store)
+    _gemini_voices(store, story_id)
+    ec = storyboard.episode_common.load_context(store, story_id, 1)
+    script = eps._script(store, story_id)
+    scene = script["scenes"][0]
+    before = storyboard.expected_scene_seconds(ec, script, scene)
+    estimates = [timing.estimate_line(line["text"], "fr") for line in scene["lines"]]
+    around = storyboard.scene_seconds(ec, script, scene) - sum(estimates)
+
+    scene["line_plan"] = {"allowed_speech_s": 9.0, "max_words": 30, "min_words": 15, "lines": [
+        {"kind": "narrator" if line["speaker"] == "narrator" else "character", "speaker": line["speaker"],
+         "seconds": 3.0 + k, "max_words": 10} for k, line in enumerate(scene["lines"])]}
+    planned_sum = sum(3.0 + k for k in range(len(scene["lines"])))
+    assert storyboard.expected_scene_seconds(ec, script, scene) == pytest.approx(around + planned_sum, abs=0.002)
+    assert storyboard.beat_shot_count(ec, script, scene, limit_s=around + planned_sum - 0.01) == (2, 2)
+
+    other = script["scenes"][1]
+    assert storyboard.expected_scene_seconds(ec, script, other) == storyboard.expected_scene_seconds(
+        ec, {**script, "scenes": [other]}, other)
+    del scene["line_plan"]
+    assert storyboard.expected_scene_seconds(ec, script, scene) == before
+
+
 def test_the_storyboard_step_plans_two_beat_shots_where_the_voices_will_run_past_the_clip(store):
     """On seedance (12 s) with Gemini voices, T1 v2 is asked two beat shots
     for every scene whose voices will run past 12 s though its estimate

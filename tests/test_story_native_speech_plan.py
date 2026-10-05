@@ -174,6 +174,74 @@ def test_each_character_line_is_one_speaking_shot_and_a_narrator_line_a_silent_o
     assert shots.speech_shot_plan(scene, planned, language="fr") == planned
 
 
+def _with_plan(scene, entries):
+    """*scene* carrying a stored line plan (plan 24 stage 1's shape) of *entries*
+    ``(kind, speaker, clip_s)``."""
+    scene["line_plan"] = {"allowed_speech_s": 12.0, "max_words": 20, "min_words": 10,
+                          "lines": [{"kind": kind, "speaker": speaker, "seconds": float(clip) - 0.7, "clip_s": clip,
+                                     "max_words": 12} for kind, speaker, clip in entries]}
+    return scene
+
+
+def test_the_shots_are_the_scenes_line_plan_when_it_has_one():
+    """Plan 24 stage 4, fail-first. A character line of 7 words would be a 4 s
+    clip and a one-word narration a 4 s one; the stored plan says 6 s and 6 s,
+    so the two shots are exactly 6 s then 6 s, in line order."""
+    from clipping.aistory import shots
+
+    lines = [("char_a", "Tu caches la clé depuis lundi."), ("narrator", "Personne ne bouge.")]
+    plans = [_beat([1]), _beat([2], framing="wide_establishing")]
+    today = shots.speech_shot_plan(_scene(lines), plans, language="fr")
+    assert [plan["clip_s"] for plan in today] == [4, 4]
+
+    notes = []
+    scene = _with_plan(_scene(lines), [("character", "char_a", 6), ("narrator", "narrator", 6)])
+    planned = shots.speech_shot_plan(scene, plans, language="fr", notes=notes)
+    assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [([1], True, 6), ([2], False, 6)]
+    assert notes == []
+    assert shots.speech_shot_plan(scene, planned, language="fr") == planned
+
+
+def test_a_written_line_that_outgrew_its_planned_clip_keeps_the_smallest_clip_that_holds_it_and_is_named():
+    from clipping.aistory import shots
+
+    long_line = "Rends-la moi tout de suite parce que je dois partir ce soir."
+    scene = _with_plan(_scene([("char_a", long_line)]), [("character", "char_a", 4)])
+    notes = []
+    planned = shots.speech_shot_plan(scene, [_beat([1])], language="fr", notes=notes)
+    assert [plan["clip_s"] for plan in planned] == [6]
+    assert len(notes) == 1 and "s02 line 1" in notes[0] and "planned 4 s" in notes[0]
+
+
+def test_a_scene_with_no_plan_is_planned_as_it_always_was_and_says_nothing():
+    """The guard: the plan of ``test_each_character_line_is_one_speaking_shot...`` with the
+    optional keys absent or empty -- same clips, no note."""
+    from clipping.aistory import shots
+
+    lines = [("char_a", "Tu caches la clé depuis lundi, je le sais."),
+             ("char_b", "Rends-la moi tout de suite parce que je dois partir avant que la nuit tombe sur nous."),
+             ("narrator", "Personne ne bouge.")]
+    plans = [_beat([1, 2]), _beat([], framing="close_up"), _beat([3], framing="wide_establishing")]
+    notes = []
+    bare = shots.speech_shot_plan(_scene(lines), plans, language="fr", notes=notes)
+    assert [plan["clip_s"] for plan in bare] == [6, 8, 4, 4] and notes == []
+    empty = _scene(lines)
+    empty["line_plan"] = {"lines": []}
+    assert shots.speech_shot_plan(empty, plans, language="fr", notes=notes) == bare and notes == []
+
+
+def test_a_plan_whose_line_count_differs_from_the_written_lines_is_ignored_and_logged_once():
+    from clipping.aistory import shots
+
+    lines = [("char_a", "Tu caches la clé depuis lundi."), ("narrator", "Personne ne bouge.")]
+    plans = [_beat([1]), _beat([2], framing="wide_establishing")]
+    scene = _with_plan(_scene(lines), [("character", "char_a", 8)])
+    notes = []
+    planned = shots.speech_shot_plan(scene, plans, language="fr", notes=notes)
+    assert [plan["clip_s"] for plan in planned] == [4, 4]
+    assert len(notes) == 1 and "ignored" in notes[0]
+
+
 def test_a_line_longer_than_the_longest_clip_is_refused_with_the_fix():
     from clipping.aistory import shots
 
