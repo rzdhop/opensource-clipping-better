@@ -3,8 +3,8 @@
 - **In-progress header:** phase = DOCUMENT / close-out. Checkpoint commit = main `f7fcfa4` (+ this docs commit), clean
   tree. **Live:** deployed 11:02 UTC from b0d85ee (bundle index-DU7H2ro8.js), restarted at 0 jobs from 10defae
   (stage 5 + the prompts.py hotfix): health 200, the container imports the trim pass and the `character_line` flag,
-  361 jobs. CI: green through 8962c37; red on b0d85ee/26d88c7 (the prompts purity pin, fixed in 5e0e892); the runs on
-  613b88c / 10defae / b4a47a1 / f7fcfa4 were still in progress at the last read — **a fresh session reads them first**.
+  361 jobs. CI: green through 8962c37; red on b0d85ee/26d88c7 (the prompts purity pin, fixed in 5e0e892); CI GREEN again on
+  613b88c, 10defae (the deployed code), b4a47a1 and ee0e105 (the close-out); f7fcfa4 (docs) was still running.
 - **Shipped today:** plan 23 follow-through (CI's golden keys; the hidden route-test red found by the A-096 replica and
   fixed; follow-ups A8, D7, B8, A5, D5 merged; the C2 probe tool merged, its paid attempt refused by fal) and plan 24
   stages 1–7 (DEC-298/300): one speech clock, a per-line plan per scene, the writer told seconds + hard caps, hard
