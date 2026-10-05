@@ -235,7 +235,7 @@ def test_every_text_validator_asks_the_brand_gate():
     assert cast.count("universes.brand_gate(story, reply)") == 2
     assert places.count("universes.brand_gate(story, reply)") == 4
     for call in ("schemas.k1_errors(reply, character[\"name\"]) or universes.brand_gate",
-                 "schemas.d2_errors(reply, names) or universes.brand_gate"):
+                 "schemas.d2_errors(reply, names, species_world=world is not None) or universes.brand_gate"):
         assert call in cast
     for call in ("schemas.p1_errors(reply) or universes.brand_gate", "schemas.r1_errors(reply) or universes.brand_gate",
                  "schemas.d3_errors(reply, variants, prop_names, names) or universes.brand_gate",

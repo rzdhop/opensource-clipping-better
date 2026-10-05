@@ -1003,8 +1003,11 @@ def _upload_notes_block(upload_notes) -> str:
 
 
 def build_k1(pack, *, character, cast_so_far, upload_notes=None, regenerate=None):
-    """One character from its cast-sketch entry (spec 4.2, row K1)."""
-    user = _data_block(pack, ("bible", "style", "character_design_rules"))
+    """One character from its cast-sketch entry (spec 4.2, row K1). In a
+    species world (plan 26 stage 7b) the pack carries the species block
+    (``universes.cast_species_block``), rendered after the design rule; a
+    pack without one gives the prompt it always gave."""
+    user = _data_block(pack, ("bible", "style", "character_design_rules", "universe"))
     user += _cast_section(cast_so_far)
     user += _character_sketch_block(character) + "\n\n"
     if upload_notes:
@@ -1389,6 +1392,13 @@ _D2_ASK = (
     "names or copyrighted characters."
 )
 
+_D2_TAIL = "\n\nStay consistent with the descriptor and the signature items."
+_D2_SPECIES_LINE = (
+    "\n- species: the one fruit or vegetable this character's head is, at most 4 words, e.g. \"pear\" -- "
+    "one whole fruit or vegetable, never a human head; open the face with it (\"<species> head, ...\") "
+    "and never write \"human\" in the face or the skin_material"
+)
+
 
 def _heights_section(others) -> str:
     others = list(others)[:D2_OTHERS_MAX]
@@ -1409,18 +1419,28 @@ def _character_to_draw_block(character) -> str:
     ])
 
 
-def build_d2(pack, *, character, others, rendering, regenerate=None):
+def _d2_ask(species) -> str:
+    """The D2 ask; in a species world (plan 26 stage 7b) it also asks for the
+    head's ``species`` and the head in the face, before the closing lines."""
+    if not species:
+        return _D2_ASK
+    return _D2_ASK.replace(_D2_TAIL, _D2_SPECIES_LINE + _D2_TAIL, 1)
+
+
+def build_d2(pack, *, character, others, rendering, regenerate=None, species=False):
     """One character's look (phase 7, D2): K1's text and the other
     characters' build and height (*others*: ``[{name, build, height_cm}]``,
-    the looks written so far) so the heights share one scale."""
-    user = _data_block(pack, ("bible", "style", "character_design_rules"))
+    the looks written so far) so the heights share one scale. With *species*
+    (a species world, plan 26 stage 7b: the pack carries the species block)
+    the reply also names the head's species, which the schema then requires."""
+    user = _data_block(pack, ("bible", "style", "character_design_rules", "universe"))
     user += f"Rendering: {rendering}\n\n"
     user += _heights_section(others)
     user += _character_to_draw_block(character) + "\n\n"
     if regenerate is not None:
         user += _regenerate_block(regenerate)
-    user += _D2_ASK
-    return _system(pack), user, schemas.d2_schema()
+    user += _d2_ask(species)
+    return _system(pack), user, schemas.d2_schema(species=species)
 
 
 _D3_ASK = (

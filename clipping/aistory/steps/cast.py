@@ -293,13 +293,33 @@ def _k1_character(story, character) -> dict:
     """What K1 is told about the character it writes: its sketch entry's
     archetype and signature hint when it came from one."""
     entry = sketch_entry(story, character) or {}
-    return {
+    told = {
         "name": character["name"],
         "role": character["role"],
         "archetype": character["archetype"] or _text_or_none(entry.get("archetype")),
         "one_line": character["one_line"],
         "signature_hint": _text_or_none(entry.get("signature_hint")),
     }
+    species = _text_or_none(entry.get("species"))
+    if species:
+        told["species"] = species  # the concept's own pick (plan 26 stage 7b); said only in a species world
+    return told
+
+
+def _species_world_text(story, lock, character, told, others):
+    """The species block K1 and D2 are given (plan 26 stage 7b), and the
+    world it came from: ``(text, world)``, or ``(None, None)`` when the story
+    is not in a species world (a human-cast style: nothing is added). The
+    species already taken are the other characters' (``look.species``, else
+    the head their face names, else their concept sketch's)."""
+    world = media_policy.species_world(story, lock)
+    if world is None:
+        return None, None
+    sketched = [_text_or_none((sketch_entry(story, doc) or {}).get("species"))
+                for doc in others if not (doc.get("look") or {}).get("species")]
+    taken = universes.taken_species(others, sketches=[species for species in sketched if species])
+    own = (told or {}).get("species") or (character.get("look") or {}).get("species")
+    return universes.cast_species_block(world, taken=taken, own=own), world
 
 
 def _cast_line(doc) -> dict:
@@ -387,13 +407,16 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
               if doc["char_id"] != char_id]
     written = [_cast_line(doc) for doc in others if doc["descriptor"]]
 
-    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    told = _k1_character(story, character)
+    species_text, _world = _species_world_text(story, lock, character, told, others)
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
+                              universe=species_text)
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = None
     if regenerate:
         regen = {"field": "text", "current": current_text(character, others), "note": pack.note}
     system, user, schema = prompts.build_k1(
-        pack, character=_k1_character(story, character), cast_so_far=written,
+        pack, character=told, cast_so_far=written,
         upload_notes=uploads_mod.upload_notes(character), regenerate=regen,
     )
 
@@ -532,19 +555,22 @@ def write_look(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
         raise StepFailed(f"{character['name']}: write the character first -- D2 reads its descriptor.")
     cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
     others = [_look_line(doc) for doc in cast if doc["char_id"] != char_id and doc.get("look")]
-    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note)
+    k1 = dict(_k1_character(story, character), descriptor=character["descriptor"],
+              signature_items=list(character["signature_items"]))
+    species_text, world = _species_world_text(story, lock, character, k1,
+                                              [doc for doc in cast if doc["char_id"] != char_id])
+    pack = context.build_pack(language=story["language"], story=story, template=lock, note=note,
+                              universe=species_text)
     llm_call.announce_trimmed(ctx, pack, set() if announced is None else announced)
     regen = None
     if regenerate and character.get("look"):
         regen = {"field": "look", "current": character["look"], "note": pack.note}
-    k1 = dict(_k1_character(story, character), descriptor=character["descriptor"],
-              signature_items=list(character["signature_items"]))
     system, user, schema = prompts.build_d2(pack, character=k1, others=others, rendering=lock["rendering"],
-                                            regenerate=regen)
+                                            regenerate=regen, species=world is not None)
     names = [doc["name"] for doc in cast]
 
     def validate(reply):
-        errors = schemas.d2_errors(reply, names) or universes.brand_gate(story, reply)
+        errors = schemas.d2_errors(reply, names, species_world=world is not None) or universes.brand_gate(story, reply)
         if errors:
             return errors
         trial = copy.deepcopy(character)
@@ -553,6 +579,10 @@ def write_look(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
 
     reply = llm_call.call_json(ctx, "D2", system, user, schema, validator=validate,
                                runner=tools.runner, time_fn=tools.time_fn)
+    species = (reply.get("species") or "").strip()
+    if world is not None and species.lower() not in {name.lower() for name in world["species"]}:
+        # The pool is advice (a "dragon fruit" is no entry of the fruits): noted, never refused.
+        ctx.on_log(f"ℹ️ {character['name']}: species {species!r} is outside the {world['id']} pool; kept.")
     return entities.write_character(store, ctx.story_id, char_id, lambda doc: apply_d2(doc, reply),
                                     now=llm_call.utc_now())
 

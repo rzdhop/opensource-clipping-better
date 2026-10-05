@@ -344,7 +344,7 @@ def _d2(height):
             "hair": "short brown fuzz", "skin_material": "fuzzy brown kiwi skin", "height_cm": height,
             "palette": ["brown", "green"],
             "wardrobe_sets": [{"id": "daily", "context": "every day", "items": "white linen shirt, gold chain"}],
-            "season_change": ""}
+            "season_change": "", "species": "kiwi"}  # fruit_drama is a species world: D2 names the head (plan 26 stage 7b)
 
 
 def _story(store, *, v2):

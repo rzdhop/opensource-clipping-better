@@ -12,6 +12,7 @@ Stdlib plus the package's own ``schemas``/``templates`` (DEC-012).
 from __future__ import annotations
 
 import hashlib
+import re
 
 from . import media_policy, schemas, templates
 
@@ -74,6 +75,55 @@ def species_block(universe, *, batch_species, position) -> str:
         "brief's; otherwise the lead is this species and every other character takes a different species "
         "of the pool. Give each character its species."
     )
+
+
+# The head a look's ``face`` opens with ("pear head, ..."): the species an
+# earlier look already took when it carries no ``species`` of its own.
+_FACE_HEAD = re.compile(r"^\s*(?:(?:an?|the|one|whole)\s+)*([a-z][a-z' -]*?)\s+head\b", re.IGNORECASE)
+
+
+def taken_species(characters, *, sketches=()) -> list:
+    """The species the *characters* (character documents) already have, in
+    cast order, each once, lower case (plan 26 stage 7b): ``look.species``,
+    else the head word their ``look.face`` opens with, else the species their
+    concept sketch gave (*sketches*: those species, as strings, for the
+    characters that have no look yet)."""
+    taken = []
+    for doc in characters:
+        look = doc.get("look") or {}
+        species = look.get("species") if isinstance(look.get("species"), str) else ""
+        if not species.strip():
+            found = _FACE_HEAD.match(look.get("face") or "")
+            species = found.group(1) if found else ""
+        if species.strip() and species.strip().lower() not in taken:
+            taken.append(species.strip().lower())
+    for species in sketches:
+        if isinstance(species, str) and species.strip() and species.strip().lower() not in taken:
+            taken.append(species.strip().lower())
+    return taken
+
+
+def cast_species_block(world, *, taken=(), own=None) -> str:
+    """The data block the cast writers (K1, D2) are given in a species world
+    (plan 26 stage 7b, ``media_policy.species_world``): the universe, its pool,
+    the species the rest of the cast already has, and the rule -- every head
+    is one whole fruit or vegetable, one species each, distinct. The pool is
+    advice: a species outside it is allowed. *own* is the species the
+    concept gave this character, kept when it did."""
+    label = world["label"]
+    label = label.get("en") if isinstance(label, dict) else label
+    kind = world.get("head_kind") or "fruit or vegetable"
+    taken = list(taken)
+    lines = [
+        f"Species world: {label} -- every character is {world['subject_phrase']}.",
+        f"Species pool: {', '.join(world['species'])}.",
+        f"Species already taken by the other characters: {', '.join(taken) if taken else 'none yet'}.",
+        f"Every character's head is one whole {kind} at human head scale; never a human head. "
+        "Give each character one species, distinct from the ones taken.",
+    ]
+    if own:
+        lines[-1] += f" The concept already made this character a {own}: keep it."
+    return "\n".join(lines)
 
 
 def brand_gate(story, reply) -> list:

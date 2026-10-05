@@ -25,6 +25,8 @@ Stdlib only (DEC-012).
 
 from __future__ import annotations
 
+import re
+
 from clipping.providers import budget as budget_mod
 from clipping.providers import gating
 from clipping.providers import generation as gen
@@ -239,6 +241,48 @@ def universe(story, style_id=None, *, explicit=False):
         if fallback in defaults.UNIVERSES:
             return fallback
     return None
+
+
+# Plan 26 stage 7b: what names a head that is a whole fruit, vegetable or creature.
+_HEAD_KIND = re.compile(r"\b(fruit|vegetable|creature)s?\b", re.IGNORECASE)
+_HEAD_RULE = re.compile(r"\bhead is one\b[^.;]*?\b(fruit|vegetable|creature)s?\b", re.IGNORECASE)
+
+
+def species_world(story, lock=None):
+    """The universe entry of *story* when its cast has fruit, vegetable or
+    creature heads (plan 26 stage 7b), else None.
+
+    The entry is the story's own universe (``templates/universes.json``) or,
+    when it chose none, its style's default -- the cast writers must know the
+    world even for a story that never picked one (the concepts' species block
+    stays explicit-only: :func:`universe`). It counts as a species world when
+    the universe's subject phrase names a fruit, a vegetable or a creature,
+    or when the style lock's ``character_design_rules`` (*lock*'s, else the
+    style template's) say the head is one. The copy returned carries
+    ``head_kind`` ("fruit", "vegetable", "creature" or "fruit or vegetable"),
+    the noun the cast prompts use. A human-cast style (no universe) is None.
+    """
+    style_id = (lock or {}).get("template_id") or (story or {}).get("style_template_id")
+    chosen = universe(story, style_id, explicit=False)
+    if not chosen:
+        return None
+    try:
+        entry = templates.universe(chosen)
+    except KeyError:
+        return None
+    rules = (lock or {}).get("character_design_rules")
+    if rules is None and style_id:
+        try:
+            rules = templates.load_style(style_id).get("character_design_rules")
+        except KeyError:
+            rules = None
+    subject = _HEAD_KIND.search(entry.get("subject_phrase") or "")
+    ruled = _HEAD_RULE.search(rules or "")
+    if subject is None and ruled is None:
+        return None
+    kinds = {match.group(1).lower() for match in (subject, ruled) if match}
+    entry["head_kind"] = next(iter(kinds)) if len(kinds) == 1 else "fruit or vegetable"
+    return entry
 
 
 def is_manual_link(label) -> bool:

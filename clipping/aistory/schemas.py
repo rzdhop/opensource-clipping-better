@@ -5389,12 +5389,16 @@ def _name_leaks(errors, haystacks, names) -> None:
                 errors.append(f"{path}: must not mention a name ({name!r})")
 
 
-def d2_schema() -> dict:
+def d2_schema(species=False) -> dict:
     """The D2 output schema: one character's look (``CHARACTER_LOOK_SCHEMA``'s
     fields; ``season_change`` an empty string when the look does not change).
     ``presentation`` (A3) and ``bearing`` (stage F2) are optional -- the
     model may leave them out entirely, not just send them empty -- so they
-    are not in the ``required`` list."""
+    are not in the ``required`` list.
+
+    Plan 26 stage 7b: with *species* True (a species world) the reply also
+    names the head's ``species`` (required); ``"optional"`` accepts one
+    without asking for it; the default is the schema it always was."""
     wardrobe = _llm_obj({
         "id": {"type": "string", "description": "lowercase slug, e.g. daily, night_out"},
         "context": {"type": "string", "description": "English, when it is worn, at most 8 words"},
@@ -5417,7 +5421,11 @@ def d2_schema() -> dict:
                     "description": "English, posture and how they carry themselves, e.g. 'stands very straight, "
                                    "chin up', at most 10 words"},
     }
-    return _llm_obj(properties, required=[key for key in properties if key not in ("presentation", "bearing")])
+    if species:
+        properties["species"] = {"type": "string",
+                                 "description": "English, the one fruit or vegetable the head is, at most 4 words"}
+    optional = ("presentation", "bearing") + (("species",) if species == "optional" else ())
+    return _llm_obj(properties, required=[key for key in properties if key not in optional])
 
 
 def d2_look(doc) -> dict:
@@ -5438,17 +5446,33 @@ def d2_look(doc) -> dict:
     bearing = (doc.get("bearing") or "").strip()
     if bearing:
         look["bearing"] = bearing
+    species = (doc.get("species") or "").strip()
+    if species:
+        look["species"] = species
     return look
 
 
-def d2_errors(doc, names) -> list:
+_HUMAN_WORD = re.compile(r"\bhuman\b", re.IGNORECASE)
+
+
+def d2_errors(doc, names, *, species_world=False) -> list:
     """Post-validation for a D2 response: the stored look's own rules
     (``character_look_errors``) and no name of *names* (the story's
-    characters, places and props) in any visual field."""
-    errors = validate(doc, d2_schema())
+    characters, places and props) in any visual field.
+
+    Plan 26 stage 7b: in a *species_world* the reply must name the head's
+    ``species`` and neither the face nor the skin_material may say "human"
+    (the head is a whole fruit or vegetable, told why on a retry)."""
+    errors = validate(doc, d2_schema(species=True if species_world else "optional"))
     if errors:
         return errors
     errors = character_look_errors(d2_look(doc), "$")
+    if species_world:
+        if not (doc.get("species") or "").strip():
+            errors.append("$.species: a species world needs the head's fruit or vegetable")
+        for key in ("face", "skin_material"):
+            if _HUMAN_WORD.search(doc[key]):
+                errors.append(f"$.{key}: a species world needs a fruit or vegetable head, not a human one")
     haystacks = [(f"$.{key}", doc[key]) for key, _cap in _LOOK_TEXT_FIELDS]
     haystacks += [(f"$.palette[{i}]", colour) for i, colour in enumerate(doc["palette"])]
     haystacks += [(f"$.wardrobe_sets[{i}].items", item["items"]) for i, item in enumerate(doc["wardrobe_sets"])]
