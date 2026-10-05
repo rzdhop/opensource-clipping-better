@@ -35,7 +35,9 @@ def test_every_link_target_lives_under_a_mode_or_is_shared():
     for path in jsx_files():
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for match in LINK.finditer(line):
-                target = match.group(1)
+                # The route alone: a fragment or query ("/settings#budget" opens
+                # the Budget tab, plan 23 stage A6) does not leave the mode.
+                target = match.group(1).split("#", 1)[0].split("?", 1)[0]
                 if target.startswith(MODE_ROOTS) or target in SHARED:
                     continue
                 offenders.append(f"{path.relative_to(ROOT)}:{line_no}: {target}")
