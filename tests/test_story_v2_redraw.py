@@ -21,7 +21,7 @@ pytest (DEC-012).
 
 from __future__ import annotations
 
-from clipping.aistory import schemas, steps
+from clipping.aistory import prompting, schemas, steps
 from clipping.aistory.store import StoryStore
 from clipping.cancel import CancelToken
 from test_story_look import (  # noqa: F401 -- hermetic is a fixture
@@ -202,7 +202,8 @@ def test_legacy_places_and_props_moved_to_v2_are_counted_then_redrawn_from_their
     places.run(ctx, runner=llm, time_fn=lambda: 100.0, adapters={("image", "local"): image})
 
     assert events == ["D3", "image:variant_day", "R1v2", "image:image"]
-    assert image.requests[0].prompt.split("\n\n")[-1].startswith("Establishing wide shot of an empty set, day")
+    assert image.requests[0].prompt.split("\n\n")[-1].startswith(
+        prompting.PLATE_EMPTY + " Establishing wide shot of an empty set, day")
     place = store.read_entity(story_id, "places", place_id)
     # The night variant was made from the old plate: made again on demand from the new one (a shot falls
     # back to the day plate meanwhile).

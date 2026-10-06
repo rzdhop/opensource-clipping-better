@@ -23,7 +23,7 @@ import os
 
 import pytest
 
-from clipping.aistory import defaults, prompts, schemas, shots, steps, stylelock, templates
+from clipping.aistory import defaults, prompting, prompts, schemas, shots, steps, stylelock, templates
 from clipping.aistory.store import StoryStore
 from clipping.cancel import CancelToken
 from clipping.providers.generation import GenResult
@@ -507,15 +507,17 @@ def test_v2_places_run_p1_d3_plate_then_r1_r1v2_prop_image(tmp_path, hermetic):
 
     assert events == ["P1", "D3", "image:variant_day", "R1", "R1v2", "image:image"]
     plate, prop_image = (request.prompt for request in image.requests)
-    # Plan 26 H1: the core last, after the series, the style and the place.
-    assert plate.split("\n\n")[-1].startswith("Establishing wide shot of an empty set, day, no people, no characters:")
+    # Plan 26 H1: the core last, after the series, the style and the place; plan 29 stage 2: it opens on the
+    # empty set in positive words, then the establishing head.
+    assert plate.split("\n\n")[-1].startswith(
+        prompting.PLATE_EMPTY + " Establishing wide shot of an empty set, day, no people, no characters:")
     assert "on the left palm-leaf huts" in plate and "hard tropical sun" in plate
     assert "Plage" not in plate and "Coco" not in plate
     # A1 (phase 7 quality overhaul): the reference image carries no scale phrase (it invited a hand
     # holding the object for a size reference) -- "fits in one hand" stays out of this prompt, even
     # though R1v2 wrote it as the prop's scale_phrase; render_prop keeps it for a keyframe instead.
     assert prop_image.split("\n\n")[-1].startswith(
-        "Reference image of the object alone on a plain surface, nothing holding it")
+        prompting.PROP_ALONE + " Reference image of the object alone on a plain surface, nothing holding it")
     assert "fits in one hand" not in prop_image and "a hollow coconut with a curly cord and a brass dial" in prop_image
     # Kiwilo's height went to R1v2; D3's prop and R1v2's names became ids.
     assert "Owner: Kiwilo (lean human body; 175 cm tall)" in llm.of("R1v2")[0]["user"]

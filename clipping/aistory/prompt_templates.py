@@ -351,9 +351,12 @@ def _layout(look, place) -> str:
     return _bare(place.get("layout_notes"))
 
 
-def _place_parts(place, who, *, variant=None) -> tuple:
+def _place_parts(place, who, *, variant=None, empty=False) -> tuple:
     """``(essential, detail)``: a place's descriptor and light (of *variant*,
-    else every one it has); its layout, scale and the props usually there."""
+    else every one it has); its layout, scale and the props usually there.
+    *empty* (the place's own plate, plan 29 stage 2): the scale said as an
+    empty set's (``prompting.empty_scale``: built for several people, shown
+    with no one in it)."""
     look = place.get("look") or {}
     lighting = look.get("lighting") if isinstance(look.get("lighting"), dict) else {}
     parts = [_sentence(place.get("descriptor") or place.get("one_line"))]
@@ -362,7 +365,8 @@ def _place_parts(place, who, *, variant=None) -> tuple:
     elif lighting:
         parts += [_labelled(f"Light ({name})", text) for name, text in lighting.items() if _bare(text)]
     here = [who.prop(pid) for pid in look.get("props_here") or () if pid in who.entities["props"]]
-    detail = [_labelled("Layout", _layout(look, place)), _labelled("Scale", look.get("scale_note")),
+    scale = prompting.empty_scale(_bare(look.get("scale_note"))) if empty else look.get("scale_note")
+    detail = [_labelled("Layout", _layout(look, place)), _labelled("Scale", scale),
               _labelled("Props usually here", _join(here))]
     return [part for part in parts if part], [part for part in detail if part]
 
@@ -387,7 +391,7 @@ def _prop_text(prop, who, *, present=False, for_reference=False) -> str:
 
 # ------------------------------------------------------------------ the master
 
-def _series_sections(story, style_lock, *, language, image, droppable=False):
+def _series_sections(story, style_lock, *, language, image, droppable=False, empty=False):
     world = story.get("world") or {}
     universe = style_lock.get("universe") or {}
     parts = []
@@ -396,7 +400,8 @@ def _series_sections(story, style_lock, *, language, image, droppable=False):
     parts += [_labelled("Logline", story.get("logline")), _labelled("Tone", story.get("tone")),
               _labelled("Genre", _join(story.get("genre_tags"))),
               _labelled("Setting", world.get("setting_summary")), _labelled("Time period", world.get("time_period"))]
-    if universe:
+    # A set's plate or a prop's picture (*empty*, plan 29 stage 2) is not told what every character is.
+    if universe and not empty:
         label = universe.get("label")
         label = label.get("en") if isinstance(label, dict) else label
         phrase = _bare(universe.get("subject_phrase"))
@@ -451,6 +456,22 @@ def medium_of(style_lock) -> str:
     return MEDIUM.get(str(key), "")
 
 
+# The medium of a set's plate or a prop's picture (plan 29 stage 2): under a 3D medium that draws its characters
+# (``_FRUIT_PEOPLE``, ``_CGI``) the film alone; under another, its own medium with no clause about a character
+# (``prompting.set_rendering``) -- then what the picture is, with no one in it.
+_SET_CGI = ("a fully computer-animated 3D CGI film, smooth CGI surfaces; no live-action footage, no real people, "
+            "no photographs")
+SET_MEDIUM = {"place": "This is one of its sets, shown empty: no character stands in it",
+              "prop": "This is a single object from it, shown alone: no character holds it"}
+
+
+def set_medium_of(style_lock, kind) -> str:
+    """The ART STYLE medium of a *kind* (``place`` or ``prop``) image: :data:`SET_MEDIUM` after the film."""
+    medium = medium_of(style_lock)
+    film = _SET_CGI if medium in (_FRUIT_PEOPLE, _CGI) else prompting.set_rendering(medium)
+    return f"{_bare(film)}. {SET_MEDIUM[kind]}" if _bare(film) else SET_MEDIUM[kind]
+
+
 def rendering_of(style_lock) -> str:
     """The lock's rendering sentence as every prompt says it: under an animated medium (:func:`medium_of`) its
     "photorealistic" reads "stylised, high-end" -- it would pull the generator back to a photograph."""
@@ -461,19 +482,21 @@ def rendering_of(style_lock) -> str:
     return rendering
 
 
-def _style_sections(style_lock, *, image):
+def _style_sections(style_lock, *, image, empty=None):
     """``style`` (the rendering sentence, the palette line, the forbidden colours: never dropped), ``style_rules``
     (character design and environment rules, the quality tail, the motion and voice direction: the last rung of
-    the ladder), the palette hexes and the camera and light, in that order."""
+    the ladder), the palette hexes and the camera and light, in that order. *empty* (``place`` or ``prop``: that
+    entity's own image, plan 29 stage 2): the set's medium (:func:`set_medium_of`), the rendering without its
+    characters (``prompting.set_rendering``) and no character design rules."""
     palette = style_lock.get("palette") or {}
     forbidden = _join(palette.get("forbidden"), " or ")
-    medium = medium_of(style_lock)
-    rendering = rendering_of(style_lock)
+    medium = set_medium_of(style_lock, empty) if empty else medium_of(style_lock)
+    rendering = prompting.set_rendering(rendering_of(style_lock)) if empty else rendering_of(style_lock)
     # The medium and the palette line never drop; the lock's rendering sentence is the very last rung, so a small
     # cap (seedream, 461 words) still says the medium and the present looks before the core.
     style = [_labelled("Medium", medium), _labelled("Palette", palette.get("palette_line"))]
     rendering_part = [_sentence(rendering), _sentence(f"Never use {forbidden}") if forbidden else ""]
-    rules = [_labelled("Character design rules", style_lock.get("character_design_rules")),
+    rules = [_labelled("Character design rules", None if empty else style_lock.get("character_design_rules")),
              _labelled("Environment rules", style_lock.get("environment_rules")),
              _labelled("Finish", style_lock.get("quality_tail"))]
     if not image:
@@ -895,8 +918,10 @@ def entity_prompt(story, style_lock, kind, doc, core, *, limit_words, fits=None,
     roster = {k: dict((entities or {}).get(k) or {}) for k in _KINDS}
     roster[plural][eid] = doc
     who = _Who(roster)
-    sections = _series_sections(story, style_lock, language=story.get("language"), image=True, droppable=True)
-    style = _style_sections(style_lock, image=True)
+    empty = kind if kind in ("place", "prop") else None
+    sections = _series_sections(story, style_lock, language=story.get("language"), image=True, droppable=True,
+                                empty=bool(empty))
+    style = _style_sections(style_lock, image=True, empty=empty)
     sections += style
     label = _bare(doc.get("name")) or eid
     if kind == "character":
@@ -910,7 +935,7 @@ def entity_prompt(story, style_lock, kind, doc, core, *, limit_words, fits=None,
                                 _paragraph("PERSONALITY", [_personality_text(doc, handle, traits_only=True)]),
                                 _rank("personality")))
     elif kind == "place":
-        parts, detail = _place_parts(doc, who, variant=variant)
+        parts, detail = _place_parts(doc, who, variant=variant, empty=True)
         sections.append(Section(f"places:{eid}", label, _paragraph("PLACE", parts + detail), None))
     else:
         sections.append(Section(f"props:{eid}", label, _prop_text(doc, who, for_reference=for_reference), None))

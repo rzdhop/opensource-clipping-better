@@ -319,6 +319,57 @@ _CONSTRAINTS_NO_PEOPLE = "Clean frame: no captions, lettering, logos or watermar
 _CONSTRAINTS_OBJECT = ("Clean frame: no captions, lettering, logos or watermarks; no people, no hands; "
                        "objects have no faces.")
 
+# Plan 29 stage 2 (DEC-308): a plate or a prop picture opens on who is NOT there, in positive words -- the image
+# links take no negative prompt (A-111), and two short negations lost to the ~440 words of fruit people around
+# them. The core's very first sentence; the closing clause stays.
+PLATE_EMPTY = ("A completely empty, unoccupied set with nobody in it: no people, no characters, no figures, no "
+               "creatures, no fruit people, no fruit or food lying about; only the set itself, its furniture, "
+               "fixtures and light.")
+PROP_ALONE = ("The object alone on a plain surface: no hands, no people, no characters, no fruit people, nothing "
+              "else in frame.")
+# A clause of a style's rendering (or medium) that draws its characters: dropped from a set's or an object's text.
+_PEOPLE_WORDS = re.compile(r"anthropomorph|character|puppet|\bheads?\b|\bfaces?\b|\bhuman|\bbod(?:y|ies)\b|outfit|"
+                           r"\bskin\b|fruit|vegetable|\beyes?\b|\bbrows?\b|\bmouths?\b|\bpores\b|\bfuzz\b|"
+                           r"proportion|expression|\bposes?\b|\bhands?\b(?!-)", re.IGNORECASE)
+# "comfortably fitting several people": a scale note that seats people in the room, said as what it is built for.
+_OCCUPANCY = re.compile(r"\b(?:(?:that|which) )?(?:comfortably |easily )?"
+                        r"(?:fitting|fits|fit|holding|holds|hold|seating|seats|seat|"
+                        r"accommodating|accommodates|accommodate|housing|houses|with room for|room for|"
+                        r"(?:big|large) enough for|enough for)\s+(?=(?:up to )?(?:[\w-]+ ){0,2}?"
+                        r"(?:people|persons|person|guests|diners|customers|workers|staff|students|dancers|"
+                        r"a crowd)\b)", re.IGNORECASE)
+_PEOPLE_COUNT = re.compile(r"\b(?:people|persons?|guests|diners|customers|workers|staff|students|dancers|crowds?)\b",
+                           re.IGNORECASE)
+_SCALE_SENTENCE = re.compile(r"(Scale: )([^.]*)(\.)")
+EMPTY_SCALE_TAIL = "shown with no one in it"
+
+
+def set_rendering(text: str) -> str:
+    """*text* (a style's rendering or medium) without its clauses about the characters -- a clause (cut at ',' and
+    ';' outside parentheses) naming a head, a face, a body, an outfit, a fruit... -- but every "no ..." / "never ..."
+    clause kept: what a set's plate or a prop's picture says of the style (plan 29 stage 2). Empty when nothing is
+    left."""
+    kept = [piece for piece in _pieces(_collapse_ws(text or ""), ",;")
+            if piece.lower().startswith(("no ", "never ")) or _PEOPLE_WORDS.search(piece) is None]
+    return " ".join(kept).rstrip(",;. ")
+
+
+def empty_scale(note: str) -> str:
+    """A place's scale note as an empty set's (plan 29 stage 2): "fitting several people" reads "built for several
+    people", and a note that counts people ends ", shown with no one in it"."""
+    note = _strip_trailing_period(_collapse_ws(note or ""))
+    if not note:
+        return note
+    note = _OCCUPANCY.sub("built for ", note)
+    if _PEOPLE_COUNT.search(note) and EMPTY_SCALE_TAIL not in note:
+        note = f"{note}, {EMPTY_SCALE_TAIL}"
+    return note
+
+
+def _empty_scale_in(place_text: str) -> str:
+    """*place_text* (``shots.render_place``'s) with its "Scale: ..." sentence said as :func:`empty_scale`'s."""
+    return _SCALE_SENTENCE.sub(lambda m: m.group(1) + empty_scale(m.group(2)) + m.group(3), place_text, count=1)
+
 
 def _word_count(text: str) -> int:
     return len(text.split())
@@ -571,17 +622,20 @@ def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=P
     rendering and palette -- at most *budget* words (``PLATE_V2_MAX_WORDS``,
     or the link's own, stage F2). The style's ``environment_rules``, as one
     sentence, when the budget has room for it whole after the rendering.
-    The frame is *aspect*'s (plan 23 stage B7; 9:16 unless said)."""
+    The frame is *aspect*'s (plan 23 stage B7; 9:16 unless said). Plan 29
+    stage 2: it opens on :data:`PLATE_EMPTY`, the scale reads as an empty
+    set's (:func:`empty_scale`) and the rendering is said without its
+    characters (:func:`set_rendering`)."""
     if not isinstance(variant, str) or re.fullmatch(schemas.TIME_VARIANT_PATTERN, variant) is None:
         raise ValueError(f"not a time variant name: {variant!r}")
     head = f"Establishing wide shot of an empty set, {variant.replace('_', ' ')}, no people, no characters:"
     after = (f"Camera: wide, eye level, 24mm equivalent, deep focus. "
              f"Palette: {_strip_trailing_period(palette_line(style_lock))}. {_frame_phrase(aspect)}. "
              f"{_CONSTRAINTS_NO_PEOPLE}")
-    room = budget - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
-    place = _fit(place_text, room)
-    before = f"{head} {place}." if place else f"{head[:-1]}."
-    return _styled(budget, before=before, after=after, rendering=style_lock["rendering"],
+    room = budget - _word_count(PLATE_EMPTY) - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
+    place = _fit(_empty_scale_in(place_text), room)
+    before = f"{PLATE_EMPTY} {head} {place}." if place else f"{PLATE_EMPTY} {head[:-1]}."
+    return _styled(budget, before=before, after=after, rendering=set_rendering(style_lock["rendering"]),
                    rules=as_sentence(style_lock["environment_rules"]))
 
 
@@ -590,14 +644,16 @@ def prop_prompt_v2(style_lock: dict, *, prop_text: str, budget=PROP_V2_MAX_WORDS
     look, no scale -- A1, a scale phrase here invited a hand holding the
     object for a size reference), the object alone on a plain surface,
     nothing holding it -- at most *budget* words (``PROP_V2_MAX_WORDS``, or
-    the link's own, stage F2)."""
+    the link's own, stage F2). Plan 29 stage 2: it opens on
+    :data:`PROP_ALONE`, and the rendering is said without its characters
+    (:func:`set_rendering`)."""
     head = "Reference image of the object alone on a plain surface, nothing holding it, centred"
     after = (f"Plain {style_lock['sheet_background']} background, even soft studio light. "
              f"{_CONSTRAINTS_OBJECT}")
-    room = budget - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2
+    room = budget - _word_count(PROP_ALONE) - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2
     prop = _fit(prop_text, room)
-    before = f"{head}: {prop}." if prop else f"{head}."
-    return _styled(budget, before=before, after=after, rendering=style_lock["rendering"])
+    before = f"{PROP_ALONE} {head}: {prop}." if prop else f"{PROP_ALONE} {head}."
+    return _styled(budget, before=before, after=after, rendering=set_rendering(style_lock["rendering"]))
 
 
 # ============================================================ phase 7 (v2 keyframes and clips, stage 3b)
