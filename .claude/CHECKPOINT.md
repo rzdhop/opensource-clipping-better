@@ -1,3 +1,36 @@
+## CURRENT STATE — DEC-310 (RunPod Serverless video link) MERGED + DEPLOYED with plan 29 (2026-10-06, local session)
+
+- **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
+  commit; `FETCH_HEAD` untracked). **Merged:** PR #1 `feat/runpod-serverless-comfyui` → main as merge commit
+  b306472 (704289c the feature + afc3315 the review fix). **Review findings:** one real — `docker-compose.yml`
+  forwards the container's environment name by name and the three RUNPOD_* names were not in it (the key in the
+  host .env could never reach the adapter; the LLM_CUSTOM_* names were lost the same way once) — fixed in
+  afc3315 with a pinning test (`tests/test_runpod_comfyui.py::test_docker_compose_forwards_the_runpod_names…`);
+  the docs' "in .env or Settings" corrected to .env (the chains and the ids are not Settings fields). The
+  adapter, the table rows, the `runpod` GenProvider, the tests, docs, DEC-310, A-194…A-196 read clean against
+  DEC-012 / DEC-151/152/153 and the hosted shape; the design untouched (link = template name, not in the
+  shipped chain, the ledger keeps the table estimate). Tests: the 10-file selection 205 local / 277 CI-like,
+  the full local suite 8983 passed 2 skipped exit 0, CI green on afc3315 (compile + test).
+- **DEPLOYED 2026-10-06 ~11:30 UTC: main b306472** (DEC-310 + every plan 29 stage) on the A1 (this box; the
+  rzc-backend container was absent at arrival, only last night's image existed): 3.11 in-image compile 0 bad;
+  `rm -sfv` + `up -d --build` (420 s build); health 200; bundle index-Cwg0Wcdm.js; 390 jobs intact; the
+  container sees RUNPOD_API_KEY (len 50), RUNPOD_COMFY_ENDPOINT_ID=e14bceyj7rrdxl, RUNPOD_GPU_USD_PER_HOUR=1.75
+  and VIDEO_CHAIN=local/comfyui,runpod/i2v_wan22_14b_lightning,fal/…,gemini/veo-3.1-lite,fal/ltx-2.5-fast
+  (.env on the A1, not committed; backup in ~/.env.bak-*).
+- **Verified live:** `POST /api/settings/check-video-keys` → verdict ready; the runpod row: "runpod/
+  i2v_wan22_14b_lightning: RunPod accepted RUNPOD_API_KEY and endpoint e14bceyj7rrdxl answers (workers ready 0,
+  idle 0, running 0, throttled 3); whether the models are on its volume shows only on a request." The video
+  chain test (call-free, RC-V8) prices the runpod row at est $0.10 for the default 5-s clip = $0.02 a second;
+  the per-episode estimate of the existing tier-2 stories (04feb539840f, 979c8376e43e, d0ee5ebd745d) lists the
+  runpod link as `keyed` but keeps each episode's recorded fal link (sticky link, by design). No episode rendered.
+- **OPEN:** (1) the Lightning LoRA files on the `comfy-models` volume still carry their lightx2v names (runbook
+  §2.5): a runpod job fails with "LoRA not found" until the human renames them on the pod — do that first;
+  (2) then the first real episode on the link: measure the 480×832 clip's GPU seconds (A-196), confirm the
+  `executionTime + delayTime` bill against the RunPod balance (A-194) and the base64 `.mp4` under `images`
+  (A-195); (3) plan 29's walk (below) is also still the human's; (4) the Settings key fields do not know the
+  RUNPOD names (the .env is the only place; a follow-up if the human wants them in Settings).
+- **Open questions:** none blocking.
+
 ## CURRENT STATE — plan 29 (empty sets drawn right, Regenerate visible, ~100-word descriptions, approve anyway) IN PROGRESS (2026-10-06, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out; the deploy next. Checkpoint commit = main (this commit;
@@ -6,8 +39,8 @@
   notes + plate pricing (b291616) · the collision fix (3aa1913) · 5 approve anyway (f00962a) · 4a descriptions server
   (5204cae) · 4b the Description on the tiles + PATCH (9ace939) · 6 docs (5908202). 3.11 compile of the final tree:
   0 bad. CI: red on b070ea3 and f2ae180 (the stage 2+3 test collision, fixed in 3aa1913); 3aa1913 and 8e2e2e7 in
-  progress at the write; 5a85d1d/3121d1d queued. NOT deployed. Next action = CI green on the final commit → deploy
-  (`rm -sfv` + rebuild at 0 jobs: the dashboard changed) → the human's walk: Regenerate a plate on 51dbc4213738 and
+  progress at the write; 5a85d1d/3121d1d queued; CI GREEN on d76820f. DEPLOYED 2026-10-06 ~11:30 UTC inside
+  b306472 (with DEC-310, see above). Next action = the human's walk: Regenerate a plate on 51dbc4213738 and
   see it change; Places → the day plates drawn empty; a tile's Description after Regenerate (≈ 100 words); a failed
   picture → "Approve anyway" → "Approved by you despite: …".
 - **Tier 2 (deferred to the human's walk, listed above). Tier 3 per stage:** 1 none (no JS harness) · 2
