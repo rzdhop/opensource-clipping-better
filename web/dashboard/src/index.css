@@ -2288,6 +2288,13 @@ button.activity-group-head:focus-visible {
   margin-bottom: 4px;
 }
 
+.story-field-count {
+  margin-left: 8px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .story-field-value {
   font-size: 13px;
   color: var(--text-primary);

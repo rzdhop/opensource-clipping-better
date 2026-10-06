@@ -7,7 +7,7 @@ import {
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
-import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
+import { DescriptionField, EditableText, EditableList, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
 import ApproveAllGroup from '../ApproveAllGroup'
 import MoreFold from '../MoreFold'
@@ -858,6 +858,10 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
     await patchCharacter(storyId, character.char_id, { descriptor: value })
     onChange()
   }
+  const saveDescription = async (value) => {
+    await patchCharacter(storyId, character.char_id, { description: value })
+    onChange()
+  }
   const saveSignatureItems = async (value) => {
     await patchCharacter(storyId, character.char_id, { signature_items: value })
     onChange()
@@ -945,6 +949,7 @@ function CharacterCard({ storyId, character, info, pickVoiceIds, disabled, onCha
         <div className="story-field-label">Descriptor (English)</div>
         <EditableText value={character.descriptor} onSave={saveDescriptor} disabled={cardBusy} rows={3} />
       </div>
+      <DescriptionField value={character.description} onSave={saveDescription} disabled={cardBusy} />
       <EditableList
         label="Signature items"
         value={character.signature_items}

@@ -127,6 +127,34 @@ export function EditableText({ label, value, placeholder, rows = 3, onSave, disa
 }
 
 /**
+ * The written description of a character, a place or a prop (plan 29 stage
+ * 4b): about 100 words a painter could work from, said first in every picture
+ * prompt. A label with the word count, a hint, then an EditableText of five
+ * rows. `onSave` receives the trimmed text, or null when it was emptied (the
+ * server's way to clear it).
+ */
+export function DescriptionField({ value, onSave, disabled }) {
+  const text = (value || '').trim()
+  const words = text ? text.split(/\s+/).length : 0
+  return (
+    <div className="story-field">
+      <div className="story-field-label">
+        Description
+        {words > 0 && <span className="story-field-count">{words} {words === 1 ? 'word' : 'words'}</span>}
+      </div>
+      <p className="form-hint">About 100 words a painter could work from. Used first in every picture prompt.</p>
+      <EditableText
+        value={value}
+        onSave={(next) => onSave(next || null)}
+        disabled={disabled}
+        rows={5}
+        emptyText="Not written yet — Regenerate writes it."
+      />
+    </div>
+  )
+}
+
+/**
  * A read/edit toggle for a list of short strings, one per line. `onSave`
  * receives the trimmed, non-empty lines as an array.
  */

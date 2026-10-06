@@ -6,7 +6,7 @@ import {
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
-import { EditableText, RegenerateControl, StepError } from '../fields'
+import { DescriptionField, EditableText, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
 import ApproveAllGroup from '../ApproveAllGroup'
 import MoreFold from '../MoreFold'
@@ -433,6 +433,10 @@ function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMod
     await patchPlace(storyId, place.place_id, { descriptor: value })
     onChange()
   }
+  const saveDescription = async (value) => {
+    await patchPlace(storyId, place.place_id, { description: value })
+    onChange()
+  }
   const saveLayoutNotes = async (value) => {
     await patchPlace(storyId, place.place_id, { layout_notes: value })
     onChange()
@@ -559,6 +563,7 @@ function PlaceCard({ storyId, place, missing, disabled, onChange, consistencyMod
         <div className="story-field-label">Descriptor (English)</div>
         <EditableText value={place.descriptor} onSave={saveDescriptor} disabled={cardBusy} rows={3} />
       </div>
+      <DescriptionField value={place.description} onSave={saveDescription} disabled={cardBusy} />
       <EditableText
         label="Layout notes"
         value={place.layout_notes}
@@ -669,6 +674,10 @@ function PropCard({ storyId, prop, characters, disabled, onChange, isV2, names }
     await patchProp(storyId, prop.prop_id, { descriptor: value })
     onChange()
   }
+  const saveDescription = async (value) => {
+    await patchProp(storyId, prop.prop_id, { description: value })
+    onChange()
+  }
   const saveOwner = async (value) => {
     setOwnerError('')
     try {
@@ -748,6 +757,7 @@ function PropCard({ storyId, prop, characters, disabled, onChange, isV2, names }
         <div className="story-field-label">Descriptor (English)</div>
         <EditableText value={prop.descriptor} onSave={saveDescriptor} disabled={cardBusy} rows={2} />
       </div>
+      <DescriptionField value={prop.description} onSave={saveDescription} disabled={cardBusy} />
       <RegenerateControl disabled={cardBusy} onRegenerate={regenerateText} />
       {isV2 && (
         <details className="story-profile">

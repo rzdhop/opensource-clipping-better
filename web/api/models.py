@@ -859,6 +859,7 @@ class CharacterPatchRequest(BaseModel):
     archetype: Optional[str] = None
     one_line: Optional[str] = None
     descriptor: Optional[str] = None
+    description: Optional[str] = None
     signature_items: Optional[list[str]] = None
     personality: Optional[dict] = None
     voice_direction: Optional[str] = None
@@ -877,6 +878,7 @@ class PlacePatchRequest(BaseModel):
     name: Optional[str] = None
     one_line: Optional[str] = None
     descriptor: Optional[str] = None
+    description: Optional[str] = None
     layout_notes: Optional[str] = None
     look: Optional[dict] = None
 
@@ -889,6 +891,7 @@ class PropPatchRequest(BaseModel):
     name: Optional[str] = None
     one_line: Optional[str] = None
     descriptor: Optional[str] = None
+    description: Optional[str] = None
     owner_char_id: Optional[str] = None
     look: Optional[dict] = None
 

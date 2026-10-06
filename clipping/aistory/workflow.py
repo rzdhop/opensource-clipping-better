@@ -1275,11 +1275,11 @@ KNOWLEDGE_PARAMS = ()
 # ``look`` and ``dossier`` (phase 7 stage 7, A19): the optional blocks the v2
 # writers produce (D1, D2, D3, R1v2), edited on a v2 story only.
 CHARACTER_PATCH_FIELDS = (
-    "name", "role", "archetype", "one_line", "descriptor", "signature_items", "personality",
+    "name", "role", "archetype", "one_line", "descriptor", "description", "signature_items", "personality",
     "voice_direction", "sample_line", "rate", "pitch", "look", "dossier",
 )
-PLACE_PATCH_FIELDS = ("name", "one_line", "descriptor", "layout_notes", "look")
-PROP_PATCH_FIELDS = ("name", "one_line", "descriptor", "owner_char_id", "look")
+PLACE_PATCH_FIELDS = ("name", "one_line", "descriptor", "description", "layout_notes", "look")
+PROP_PATCH_FIELDS = ("name", "one_line", "descriptor", "description", "owner_char_id", "look")
 PATCH_FIELDS_BY_KIND = {CHARACTERS: CHARACTER_PATCH_FIELDS, PLACES: PLACE_PATCH_FIELDS, PROPS: PROP_PATCH_FIELDS}
 # The v2 blocks among them: each merged onto the entity's current block, as
 # ``personality`` is.
@@ -2654,7 +2654,8 @@ _BLOCK_FIELDS = {CHARACTERS: ("descriptor", "signature_items"), PLACES: ("descri
 # The fields that change what the voice sample says or how it sounds.
 _SAMPLE_FIELDS = ("sample_line", "rate", "pitch")
 # Text fields kept without their surrounding spaces, as the steps write them.
-_STRIPPED = ("name", "archetype", "one_line", "descriptor", "layout_notes", "voice_direction", "sample_line")
+_STRIPPED = ("name", "archetype", "one_line", "descriptor", "description", "layout_notes", "voice_direction",
+             "sample_line")
 
 
 def _merge_block(doc, name, value, word) -> None:
@@ -2667,7 +2668,7 @@ def _merge_block(doc, name, value, word) -> None:
 
 
 def _apply_character(doc, values) -> None:
-    for name in ("name", "role", "archetype", "one_line", "descriptor", "signature_items"):
+    for name in ("name", "role", "archetype", "one_line", "descriptor", "description", "signature_items"):
         if name in values:
             doc[name] = values[name]
     if "personality" in values:
@@ -2757,7 +2758,9 @@ def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
     Nothing sent, nothing written. A field outside the kind's
     ``*_PATCH_FIELDS`` is ``invalid``; a document the kind's rules refuse is
     ``invalid`` with ``{"message", "errors"}`` (a name another entity of the
-    kind already has among them). A character's ``voice_direction`` and
+    kind already has among them). ``description`` (plan 29 stage 4b) is a
+    string of 60-160 words, or null to clear it; a place's or a prop's never
+    mentions a person (``schemas.description_errors``). A character's ``voice_direction`` and
     ``sample_line`` go into its pinned voice and its voice brief (``conflict``
     without either), ``rate`` and ``pitch`` into its pinned voice (``conflict``
     without one); ``personality`` is merged onto the current one. A change to
@@ -2801,6 +2804,10 @@ def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
     errors = validator(trial)
     if blocks and not errors:
         errors = _block_reference_errors(stories, story_id, kind, eid, trial, blocks, cast_ids)
+    if "description" in values and kind != CHARACTERS and not errors:
+        # A set or an object is shown empty: an edited description may not bring a person back (as the writer's
+        # reply is held to), which the stored check alone would let through.
+        errors = schemas.description_errors(values["description"], empty=True)
     if "name" in values and isinstance(values["name"], str):
         id_field = story_store.ENTITY_KINDS[kind].id_field
         key = entities_step.name_key(values["name"])
