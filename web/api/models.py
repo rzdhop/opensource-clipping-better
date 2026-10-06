@@ -999,9 +999,11 @@ class StoryboardPatchRequest(BaseModel):
 
 class StoryApproveRequest(BaseModel):
     """POST /api/stories/{id}/approve/{doc}'s optional body. ``approve_anyway``
-    (``script:<ep>`` and, phase 7 stage 6b, ``keyframes:<ep>`` only)
-    approves a script whose consistency or first-watch check found issues,
-    or a v2 episode's keyframes whose check (J2) failed or did not run; the
+    (``script:<ep>``, phase 7 stage 6b ``keyframes:<ep>`` and, plan 29 stage
+    5, ``character:<id>`` / ``place:<id>`` / ``prop:<id>`` only) approves a
+    script whose consistency or first-watch check found issues, a v2
+    episode's keyframes whose check (J2) failed or did not run, or an entity
+    whose image the sheet judge failed (never one it has not checked); the
     approval records it.
 
     ``direction`` (phase 5, ``feedback:<ep>`` only, required there -- 0, 1, 2

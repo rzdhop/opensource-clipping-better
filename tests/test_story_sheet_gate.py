@@ -13,6 +13,10 @@ consistency problems, and all details"): a sheet judge on the cast step.
 - An image with no check yet is never approved; an image made before the
   rule keeps its approval and is never judged; the human's own image is
   judged and warned about, never refused.
+- Plan 29 stage 5 (DEC-307, the human: "I can approve what I want, you
+  only warn of the risk"): a failed image is approved anyway once the human
+  asks after its sentence, and the entity keeps what it went over while that
+  very image is there; an image with no check yet never is.
 - Two characters of a species world never share a species.
 
 Stdlib + pytest (DEC-012); the cast is ``tests/test_story_look.py``'s v2
@@ -249,7 +253,11 @@ def test_a_failed_portrait_is_drawn_again_twice_then_refused_in_a_plain_sentence
     with pytest.raises(workflow.WorkflowError) as caught:
         _approve(store, story_id, "char_kiwilo")
     assert str(caught.value) == f"Kiwilo cannot be approved yet. {sentence}"
+    # Plan 29 stage 5, re-pinned on purpose: without the human's "approve anyway" it is still refused.
+    kiwilo = store.read_entity(story_id, "characters", "char_kiwilo")
+    assert kiwilo["approved_at"] is None and "approved_anyway" not in kiwilo
     _approve(store, story_id, "char_mangella")  # the other character passed: approved
+    assert "approved_anyway" not in store.read_entity(story_id, "characters", "char_mangella")
     # The fast track's and the CLI's Approve all stop on the same sentence.
     with pytest.raises(workflow.WorkflowError) as caught:
         workflow.approve_complete(store, story_id, ("characters",), raise_refusals=True, now=tsl.NOW)
@@ -275,11 +283,131 @@ def test_an_image_with_no_check_yet_is_never_approved_and_the_step_again_checks_
         "Kiwilo cannot be approved yet. Kiwilo's portrait has no check yet: run the cast step again (it checks it, "
         "free). Kiwilo's turnaround sheet has no check yet: run the cast step again (it checks it, free). Kiwilo's "
         "expressions sheet has no check yet: run the cast step again (it checks it, free).")
+    # Plan 29 stage 5, re-pinned on purpose: "approve anyway" never goes over an image not checked yet.
+    with pytest.raises(workflow.WorkflowError) as anyway:
+        workflow.approve_entity(store, story_id, "characters", "char_kiwilo", now=tsl.NOW, anyway=True)
+    assert str(anyway.value) == str(caught.value)
+    assert store.read_entity(story_id, "characters", "char_kiwilo")["approved_at"] is None
     vision = SheetVision()
     events.clear()
     _cast(store, story_id, tsl.FakeLLM(events), events, vision=vision)
     assert events == [] and len(vision.requests) == 6  # judged, nothing drawn
     _approve(store, story_id, "char_kiwilo")
+
+
+def test_a_failed_image_is_approved_anyway_by_the_human_and_the_approval_keeps_what_it_went_over(
+        tmp_path, hermetic, unpaced):
+    from clipping.aistory import workflow
+
+    store, story_id = _cast_story(tmp_path)
+    events = tsl.Events()
+    _cast(store, story_id, _llm(events), events, vision=SheetVision(failing("Kiwilo's portrait")))
+    kiwilo = store.read_entity(story_id, "characters", "char_kiwilo")
+    portrait_hash = kiwilo["sheet_checks"]["portrait"]["image_hash"]
+
+    story = workflow.approve_entity(store, story_id, "characters", "char_kiwilo", now=tsl.NOW, anyway=True)
+    kiwilo = store.read_entity(story_id, "characters", "char_kiwilo")
+    assert kiwilo["approved_at"] == tsl.NOW
+    assert kiwilo["approved_anyway"] == {"at": tsl.NOW,
+                                         "slots": {"portrait": {"issues": [HUMAN_HEAD], "image_hash": portrait_hash}}}
+    assert story["approvals"].get("cast") is None  # Mangella is still to approve
+    # Approve all counts it approved, and approves the other one.
+    done = workflow.approve_complete(store, story_id, ("characters",), now=tsl.NOW)
+    assert [item["id"] for item in done["approved"]] == ["char_mangella"] and done["refused"] is None
+    assert workflow.load(store, story_id)["approvals"]["cast"]
+    # Unapproved for another reason, that very image is approved again without asking twice.
+    kiwilo = store.read_entity(story_id, "characters", "char_kiwilo")
+    kiwilo["approved_at"] = None
+    store.write_entity(story_id, "characters", kiwilo, now=tsl.NOW)
+    _approve(store, story_id, "char_kiwilo")
+    assert store.read_entity(story_id, "characters", "char_kiwilo")["approved_anyway"]["slots"]["portrait"][
+        "image_hash"] == portrait_hash
+
+
+def test_a_regenerated_image_after_an_approve_anyway_is_refused_again(tmp_path, hermetic, unpaced):
+    from clipping.aistory import workflow
+    from clipping.aistory.steps import judge
+
+    store, story_id = _cast_story(tmp_path)
+    events = tsl.Events()
+    _cast(store, story_id, _llm(events), events, vision=SheetVision(failing("Kiwilo's portrait")))
+    workflow.approve_entity(store, story_id, "characters", "char_kiwilo", now=tsl.NOW, anyway=True)
+
+    # What a regenerate leaves: a new file, judged and failed again, the approval cleared.
+    kiwilo = store.read_entity(story_id, "characters", "char_kiwilo")
+    name = kiwilo["refs"]["portrait"]["name"]
+    with open(store.media_path(story_id, "characters", "char_kiwilo", name), "ab") as fh:
+        fh.write(b"a new drawing")
+    fresh = _sha(store, story_id, "characters", "char_kiwilo", name)
+    assert fresh != kiwilo["approved_anyway"]["slots"]["portrait"]["image_hash"]
+    kiwilo["sheet_checks"]["portrait"] = dict(kiwilo["sheet_checks"]["portrait"], image_hash=fresh,
+                                              issues=["two heads"])
+    kiwilo["approved_at"] = None
+    store.write_entity(story_id, "characters", kiwilo, now=tsl.NOW)
+
+    story = workflow.load(store, story_id)
+    assert judge.approved_anyway(kiwilo, "portrait", kiwilo["sheet_checks"]["portrait"]) is False
+    assert judge.sheet_refusal(store, story, "characters", kiwilo) == (
+        "Kiwilo's portrait does not match: two heads. Regenerate it, or upload your own.")
+    with pytest.raises(workflow.WorkflowError) as caught:
+        _approve(store, story_id, "char_kiwilo")
+    assert str(caught.value) == ("Kiwilo cannot be approved yet. Kiwilo's portrait does not match: two heads. "
+                                 "Regenerate it, or upload your own.")
+    # The human may go over the new one too: the record follows the new image.
+    workflow.approve_entity(store, story_id, "characters", "char_kiwilo", now="2026-10-06T10:00:00Z", anyway=True)
+    record = store.read_entity(story_id, "characters", "char_kiwilo")["approved_anyway"]
+    assert record == {"at": "2026-10-06T10:00:00Z",
+                      "slots": {"portrait": {"issues": ["two heads"], "image_hash": fresh}}}
+
+
+def _approve_route(store, monkeypatch):
+    pytest.importorskip("pydantic")
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from web.api import store as job_store
+    from web.api import worker
+    from web.api.routes import stories
+
+    monkeypatch.setattr(job_store, "_jobs", {})
+    monkeypatch.setattr(job_store, "PERSIST_PATH", str(store.outputs_dir) + "-jobs.json")
+    monkeypatch.setattr(worker, "OUTPUTS_ROOT", str(store.outputs_dir))
+    app = FastAPI()
+    app.include_router(stories.router)
+    return TestClient(app)
+
+
+def test_the_approve_route_takes_approve_anyway_for_a_place_whose_plate_failed(tmp_path, hermetic, unpaced,
+                                                                               monkeypatch):
+    store, story_id = _cast_story(tmp_path)
+    owner = tsl._character("char_kiwilo", "Kiwilo", "a fuzzy kiwi", ["gold chain", "linen shirt"],
+                           look=tsl._d2_look(175))
+    store.write_entity(story_id, "characters", owner, now=tsl.NOW)
+    events = tsl.Events()
+    fault = "the bonfire is on the left"
+    vision = SheetVision(lambda request: json.dumps({"passed": False, "issues": [fault]})
+                         if "Image 1 is the set" in request.prompt else PASS)
+    _places_run(store, story_id, events, tsl.FakeImage(events), vision)
+    place = store.list_entities(story_id, "places")[0]
+    assert place["sheet_checks"]["day"]["passed"] is False
+
+    with _approve_route(store, monkeypatch) as client:
+        url = f"/api/stories/{story_id}/approve/place:{place['place_id']}"
+        refused = client.post(url)
+        assert refused.status_code == 409, refused.text
+        assert "does not match: the bonfire is on the left. Regenerate it, or upload your own." in (
+            refused.json()["detail"])
+        approved = client.post(url, json={"approve_anyway": True})
+        assert approved.status_code == 200, approved.text
+        # Any other document but a script, keyframes or an entity still answers 400.
+        other = client.post(f"/api/stories/{story_id}/approve/bible", json={"approve_anyway": True})
+        assert other.status_code == 400 and "place:<id>" in other.json()["detail"]
+    place = store.read_entity(story_id, "places", place["place_id"])
+    assert place["approved_at"]
+    assert place["approved_anyway"]["slots"] == {"day": {"issues": [fault],
+                                                         "image_hash": place["sheet_checks"]["day"]["image_hash"]}}
 
 
 def test_an_image_made_before_the_rule_keeps_its_approval_and_is_never_judged(tmp_path, hermetic, unpaced):
@@ -516,7 +644,14 @@ def test_the_cast_and_places_tiles_say_each_image_s_verdict_in_plain_words():
     cast = (src / "steps" / "CastStep.jsx").read_text(encoding="utf-8")
     places = (src / "steps" / "PlacesStep.jsx").read_text(encoding="utf-8")
     assert "<SheetCheckBadge entity={character} slots={IMAGE_SLOTS} />" in cast
-    assert "<SheetCheckLine entity={character} slot={slot} />" in cast
     assert "<SheetCheckBadge entity={place} slots={Object.keys(place.time_variants)} />" in places
     assert "<SheetCheckBadge entity={prop} slots={['image']} />" in places
-    assert "<SheetCheckLine entity={place} slot={variantKey} />" in places
+    # Plan 29 stage 5, re-pinned on purpose: each line knows its approval, for "Approve anyway".
+    assert ("<SheetCheckLine entity={character} slot={slot} storyId={storyId} doc={`character:${character.char_id}`}"
+            in cast)
+    assert "<SheetCheckLine entity={place} slot={variantKey} storyId={storyId} doc={`place:${place.place_id}`}" in places
+    assert '<SheetCheckLine entity={prop} slot="image" storyId={storyId} doc={`prop:${prop.prop_id}`}' in places
+    for words in ("Approve anyway", "approveStoryDoc(storyId, doc, { approve_anyway: true })",
+                  "Approved by you despite: ${issues}", "Approved despite the check",
+                  "record.image_hash === entry.image_hash"):
+        assert words in check, words

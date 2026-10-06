@@ -241,7 +241,8 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange, consist
         <span className="story-cast-image-label">{SLOT_LABELS[slot]}</span>
         <ConsistencyChip consistency={ref && ref.consistency} />
       </div>
-      <SheetCheckLine entity={character} slot={slot} />
+      <SheetCheckLine entity={character} slot={slot} storyId={storyId} doc={`character:${character.char_id}`}
+        disabled={disabled} onChange={onChange} />
       <RegenerateControl
         storyId={storyId}
         disabled={disabled}

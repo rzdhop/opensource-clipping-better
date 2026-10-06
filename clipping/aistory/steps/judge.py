@@ -911,6 +911,13 @@ CHARACTERS, PLACES, PROPS = "characters", "places", "props"
 # What each sheet state is: no entry (made before the rule), the human's own,
 # not judged yet (or its image changed since), passed, failed.
 SHEET_NONE, SHEET_OWN, SHEET_UNJUDGED, SHEET_PASSED, SHEET_FAILED = "none", "own", "unjudged", "passed", "failed"
+# Plan 29 stage 5 (DEC-307, DEC-308 point 5: "I can approve what I want, you
+# only warn of the risk"): the human approved an app-made image the judge
+# failed, after reading its sentence. Kept on the entity as ``{at, slots:
+# {<slot>: {issues, image_hash}}}``; a slot counts as approved anyway only
+# while its verdict is still on that very file (:func:`approved_anyway`), so
+# a regenerate makes it refusable again. An unjudged image never is.
+APPROVED_ANYWAY = "approved_anyway"
 _STEP_OF = {CHARACTERS: "cast", PLACES: "places", PROPS: "places"}
 
 
@@ -1012,22 +1019,49 @@ def own_verdict(stories, story, kind, doc, slot, ref):
     return entry if file_sha(path) == entry.get("image_hash") else None
 
 
+def approved_anyway(doc, slot, entry) -> bool:
+    """True while the human approved *slot*'s failed image anyway and the
+    verdict *entry* is still the one on that image (the same ``image_hash``;
+    :func:`sheet_state` checked that hash against the file on disk)."""
+    record = ((doc.get(APPROVED_ANYWAY) or {}).get("slots") or {}).get(slot)
+    found = (entry or {}).get("image_hash")
+    return bool(record and found and record.get("image_hash") == found)
+
+
+def failed_slots(stories, story, kind, doc) -> dict:
+    """``{slot: entry}`` of each app-made image of a v2 story whose check
+    failed on that very file (approved anyway or not); empty otherwise."""
+    if not media_policy.is_v2(story):
+        return {}
+    failed = {}
+    for slot, ref in sheet_slots(story, kind, doc):
+        state, entry = sheet_state(stories, story, kind, doc, slot, ref)
+        if state == SHEET_FAILED:
+            failed[slot] = entry
+    return failed
+
+
 def doc_id(kind, doc) -> str:
     return doc[{CHARACTERS: "char_id", PLACES: "place_id", PROPS: "prop_id"}[kind]]
 
 
-def sheet_refusal(stories, story, kind, doc):
+def sheet_refusal(stories, story, kind, doc, *, anyway=False):
     """Why *doc* cannot be approved for its images (plan 28 F3), in plain
     sentences, or None: each app-made image whose check failed
     (:func:`sheet_sentence`) or has not run on that very image
     (:func:`unjudged_sentence`). A legacy story, an image made before the
-    rule and the human's own image are never refused."""
+    rule and the human's own image are never refused. Plan 29 stage 5: a
+    failed image is not refused when *anyway* (the human approves over the
+    judge's sentence) or while it is the image they approved anyway
+    (:func:`approved_anyway`); an unjudged image always is."""
     if not media_policy.is_v2(story):
         return None
     sentences = []
     for slot, ref in sheet_slots(story, kind, doc):
         state, entry = sheet_state(stories, story, kind, doc, slot, ref)
         if state == SHEET_FAILED:
+            if anyway or approved_anyway(doc, slot, entry):
+                continue
             sentences.append(sheet_sentence(story, kind, doc, slot, entry.get("issues") or []))
         elif state == SHEET_UNJUDGED:
             sentences.append(unjudged_sentence(story, kind, doc, slot))

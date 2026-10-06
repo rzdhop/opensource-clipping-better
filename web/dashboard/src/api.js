@@ -698,7 +698,9 @@ export async function runStoryStep(storyId, step, body = {}) {
  * page). `body` is only sent for `script:<ep>` (`{approve_anyway}`, to
  * approve over a consistency report with issues) and -- phase 7 stage 6b --
  * `keyframes:<ep>` (`{approve_anyway}`, over a failed or missing keyframe
- * check); every other caller keeps posting with no body, exactly as before.
+ * check) and -- plan 29 stage 5 -- `character:<id>` / `place:<id>` /
+ * `prop:<id>` (`{approve_anyway}`, over an image the sheet check failed);
+ * every other caller keeps posting with no body, exactly as before.
  */
 export async function approveStoryDoc(storyId, doc, body) {
   const res = await request(`/stories/${storyId}/approve/${doc}`, {

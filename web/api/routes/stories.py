@@ -1902,8 +1902,11 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     unknown one; 409 while a step of its group (``cast``/``places``) or a
     regenerate of it is queued or running, or listing what it still lacks (a
     character: text, portrait, turnaround, expressions, a pinned voice, a
-    voice sample; a place: text, day plate; a prop: text, image); then its
-    ``approved_at`` is set, the store re-folds ``approvals.cast`` /
+    voice sample; a place: text, day plate; a prop: text, image), or -- plan
+    28 F3 -- while an app-made image's sheet check failed or did not run on
+    it (body ``{approve_anyway: true}``, plan 29 stage 5: the human goes over
+    a failed image, never over an unchecked one; the entity records it as
+    ``approved_anyway``); then its ``approved_at`` is set, the store re-folds ``approvals.cast`` /
     ``approvals.places``, its own regenerate jobs awaiting approval are
     completed, and -- once the group approval is set -- the cast / places
     jobs awaiting it. ``season``: 409 while a season step is in flight,
@@ -1973,8 +1976,10 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
 
     word, sep, eid = doc.partition(":")
     anyway = bool(req is not None and req.approve_anyway)
-    if anyway and word not in ("script", workflow.KEYFRAMES_APPROVAL):
-        raise HTTPException(status_code=400, detail="approve_anyway applies to script:<ep> and keyframes:<ep> only.")
+    # Plan 29 stage 5 (DEC-307): a character, place or prop goes over its failed images too.
+    if anyway and word not in ("script", workflow.KEYFRAMES_APPROVAL, *workflow.ENTITY_KINDS_BY_WORD):
+        raise HTTPException(status_code=400, detail="approve_anyway applies to script:<ep>, keyframes:<ep>, "
+                                                    "character:<id>, place:<id> and prop:<id> only.")
     if sep and eid and word in workflow.EPISODE_APPROVALS:
         with _answering():
             ep = workflow.episode_bounds(stories, story, eid)
@@ -2018,7 +2023,7 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
         _entity(stories, story_id, kind, eid)
         _refuse_busy(story_id, f"approve {doc} once it is done, or cancel it first.", docs=(group, doc))
         with _answering():
-            story = workflow.approve_entity(stories, story_id, kind, eid, now=_now())
+            story = workflow.approve_entity(stories, story_id, kind, eid, now=_now(), anyway=anyway)
         _complete_awaiting(story_id, doc)
         if story["approvals"].get(group):
             _complete_awaiting(story_id, group)

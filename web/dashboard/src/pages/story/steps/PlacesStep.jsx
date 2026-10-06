@@ -321,7 +321,8 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
         <span className="story-places-image-label">{variantKey}</span>
         <ConsistencyChip consistency={imageRef && imageRef.consistency} />
       </div>
-      <SheetCheckLine entity={place} slot={variantKey} />
+      <SheetCheckLine entity={place} slot={variantKey} storyId={storyId} doc={`place:${place.place_id}`}
+        disabled={disabled} onChange={onChange} />
       <RegenerateControl
         storyId={storyId}
         disabled={slotDisabled}
@@ -637,7 +638,8 @@ function PropImage({ storyId, prop, disabled, onChange }) {
       <div className="story-places-image-meta">
         <ConsistencyChip consistency={prop.image && prop.image.consistency} />
       </div>
-      <SheetCheckLine entity={prop} slot="image" />
+      <SheetCheckLine entity={prop} slot="image" storyId={storyId} doc={`prop:${prop.prop_id}`}
+        disabled={disabled} onChange={onChange} />
       <RegenerateControl
         storyId={storyId}
         disabled={disabled}

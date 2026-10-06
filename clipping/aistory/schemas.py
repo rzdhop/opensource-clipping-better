@@ -1957,6 +1957,29 @@ def sheet_checks_errors(checks, path="$.sheet_checks") -> list:
     return errors
 
 
+# Plan 29 stage 5 (DEC-307): the failed images the human approved anyway,
+# after the judge's sentence -- when, and per slot what the judge saw and the
+# sha256 of the very file approved (stale once the image is made again).
+_APPROVED_ANYWAY_SLOT_SCHEMA = _document({
+    "issues": {"type": "array", "items": _NON_EMPTY_STRING, "maxItems": SHEET_CHECK_ISSUES_MAX},
+    "image_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+})
+
+
+def approved_anyway_errors(record, path="$.approved_anyway") -> list:
+    """An entity's ``approved_anyway`` (plan 29 stage 5): ``{at, slots}``,
+    each slot keyed by its name, :data:`_APPROVED_ANYWAY_SLOT_SCHEMA`'s shape."""
+    errors = validate(record, _document({"at": _NON_EMPTY_STRING, "slots": {"type": "object"}}), path)
+    if errors:
+        return errors
+    for key, entry in record["slots"].items():
+        if not (isinstance(key, str) and _search(_SHEET_CHECK_SLOT, key)):
+            errors.append(f"{path}.slots: {key!r} is not an image slot")
+            continue
+        errors.extend(validate(entry, _APPROVED_ANYWAY_SLOT_SCHEMA, f"{path}.slots.{key}"))
+    return errors
+
+
 CHARACTER_SCHEMA = _document({
     "$schema": {"type": "string", "const": CHARACTER_SCHEMA_NAME},
     "char_id": {"type": "string", "pattern": CHAR_ID_PATTERN},
@@ -2009,6 +2032,8 @@ CHARACTER_SCHEMA = _document({
     "voice_reference": VOICE_REFERENCE_SCHEMA,
     # Plan 28 F3: the sheet judge's verdict on each image (sheet_checks_errors).
     "sheet_checks": {"type": "object"},
+    # Plan 29 stage 5: the failed images the human approved anyway (approved_anyway_errors).
+    "approved_anyway": {"type": "object"},
 })
 
 
@@ -2058,6 +2083,8 @@ def character_errors(doc) -> list:
         errors.extend(character_dossier_errors(doc["dossier"], doc["char_id"]))
     if "sheet_checks" in doc:
         errors.extend(sheet_checks_errors(doc["sheet_checks"]))
+    if "approved_anyway" in doc:
+        errors.extend(approved_anyway_errors(doc["approved_anyway"]))
     seen = set()
     for i, variant in enumerate(doc.get("variants") or ()):
         errors.extend(variant_errors(variant, f"$.variants[{i}]"))
@@ -2094,6 +2121,8 @@ PLACE_SCHEMA = _document({
     "approved_by": _AGENT_APPROVED_SCHEMA,
     # Plan 28 F3: the sheet judge's verdict on each plate (sheet_checks_errors).
     "sheet_checks": {"type": "object"},
+    # Plan 29 stage 5: the failed images the human approved anyway (approved_anyway_errors).
+    "approved_anyway": {"type": "object"},
 })
 
 
@@ -2132,6 +2161,8 @@ def place_errors(doc) -> list:
         errors.extend(place_look_errors(doc["look"]))
     if "sheet_checks" in doc:
         errors.extend(sheet_checks_errors(doc["sheet_checks"]))
+    if "approved_anyway" in doc:
+        errors.extend(approved_anyway_errors(doc["approved_anyway"]))
     return errors
 
 
@@ -2159,6 +2190,8 @@ PROP_SCHEMA = _document({
     "approved_by": _AGENT_APPROVED_SCHEMA,
     # Plan 28 F3: the sheet judge's verdict on its picture (sheet_checks_errors).
     "sheet_checks": {"type": "object"},
+    # Plan 29 stage 5: the failed images the human approved anyway (approved_anyway_errors).
+    "approved_anyway": {"type": "object"},
 })
 
 
@@ -2179,6 +2212,8 @@ def prop_errors(doc) -> list:
         errors.extend(prop_look_errors(doc["look"]))
     if "sheet_checks" in doc:
         errors.extend(sheet_checks_errors(doc["sheet_checks"]))
+    if "approved_anyway" in doc:
+        errors.extend(approved_anyway_errors(doc["approved_anyway"]))
     return errors
 
 

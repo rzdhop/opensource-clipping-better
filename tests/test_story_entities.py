@@ -292,10 +292,13 @@ PHASE5_OPTIONAL = {
     # Plan 28 F3 (DEC-305 section 5), re-pinned on purpose: the sheet judge's
     # verdicts (``sheet_checks``) are optional on each entity, absent on every
     # entity whose images were made before the rule.
-    ("CHARACTER_SCHEMA", "$"): {"look", "dossier", "approved_by", "variants", "voice_reference", "sheet_checks"},
+    # Plan 29 stage 5 (DEC-307), re-pinned on purpose: the failed images the
+    # human approved anyway (``approved_anyway``), absent on every other entity.
+    ("CHARACTER_SCHEMA", "$"): {"look", "dossier", "approved_by", "variants", "voice_reference", "sheet_checks",
+                                "approved_anyway"},
     ("CHARACTER_SCHEMA", "$.properties.variants.items.properties.refs"): {"turnaround", "expressions"},
-    ("PLACE_SCHEMA", "$"): {"look", "approved_by", "sheet_checks"},
-    ("PROP_SCHEMA", "$"): {"look", "approved_by", "sheet_checks"},
+    ("PLACE_SCHEMA", "$"): {"look", "approved_by", "sheet_checks", "approved_anyway"},
+    ("PROP_SCHEMA", "$"): {"look", "approved_by", "sheet_checks", "approved_anyway"},
     # Fix A3 (phase 7 quality overhaul): apparent age and gender presentation,
     # optional on the character look -- absent on every look written before it;
     # phase 7 follow-up, stage F2: the bearing (posture), the same way; plan 26

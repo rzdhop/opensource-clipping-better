@@ -2287,7 +2287,7 @@ def parse_variant_approval(doc):
 
 # ---------------------------------------------------------------- approvals
 
-def approve_entity(stories, story_id, kind, eid, *, now, by=USER_APPROVED) -> dict:
+def approve_entity(stories, story_id, kind, eid, *, now, by=USER_APPROVED, anyway=False) -> dict:
     """Approve one character, place or prop; returns the story.
 
     ``not_found`` for an unknown one; ``conflict`` listing what it still
@@ -2297,6 +2297,12 @@ def approve_entity(stories, story_id, kind, eid, *, now, by=USER_APPROVED) -> di
     *now* (the character re-read and written under the uploads' lock), and
     the store re-folds ``approvals.cast`` / ``approvals.places``. *by* (plan
     21): the human (default) or the agent run, recorded on the entity.
+
+    Plan 29 stage 5 (DEC-307): *anyway* -- the human, after the judge's
+    sentence -- approves over each failed image (never over one not judged
+    yet), and every failed image the approval goes over is kept as
+    ``approved_anyway`` (``{at, slots: {slot: {issues, image_hash}}}``); an
+    approval over no failed image drops it.
     """
     _check_approver(by)
     story = load(stories, story_id)
@@ -2307,13 +2313,22 @@ def approve_entity(stories, story_id, kind, eid, *, now, by=USER_APPROVED) -> di
         raise WorkflowError(CONFLICT, f"{doc['name']} cannot be approved yet; missing: {labels}.")
     # Plan 28 F3 (DEC-305 section 5): an image made from now on is approved only once the sheet judge passed
     # it; the human's own image and one made before the rule never stop it (judge.sheet_refusal).
-    refusal = judge_step.sheet_refusal(stories, story, kind, doc)
+    refusal = judge_step.sheet_refusal(stories, story, kind, doc, anyway=anyway)
     if refusal:
         raise WorkflowError(CONFLICT, f"{doc['name']} cannot be approved yet. {refusal}")
+    # Plan 29 stage 5: what the approval goes over -- each failed image, approved anyway now or before.
+    over = {slot: {"issues": list(entry.get("issues") or []), "image_hash": entry["image_hash"]}
+            for slot, entry in judge_step.failed_slots(stories, story, kind, doc).items()}
 
     def approve(current):
         current["approved_at"] = now
         _mark_doc_approval(current, by)
+        if over:
+            before = current.get(judge_step.APPROVED_ANYWAY) or {}
+            current[judge_step.APPROVED_ANYWAY] = {"at": now if anyway else (before.get("at") or now),
+                                                   "slots": over}
+        else:
+            current.pop(judge_step.APPROVED_ANYWAY, None)
 
     try:
         entities_step.write_entity(stories, story_id, kind, eid, approve, now=now)
