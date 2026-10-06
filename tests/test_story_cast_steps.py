@@ -1204,3 +1204,259 @@ def test_the_registry_runs_the_cast_step(store):
     assert type(caught.value).__name__ == "StepFailed", repr(caught.value)
     assert str(caught.value) == "Approve the style first."
     assert json.loads(json.dumps(steps.RUNNERS["season"].__name__)) == "run_season"
+
+
+# ========================= one frozen cloned voice per character (plan 32 stage 6)
+
+CLONE_SETTINGS = dict(SETTINGS, RUNPOD_API_KEY="rpa_fake", RUNPOD_COMFY_ENDPOINT_ID="vid1", ALLOW_PAID="1")
+KIWI_TEXT = ("Écoute-moi bien, mon cœur : je gagne toujours, même quand tout le monde vote contre moi, parce que "
+             "je connais les secrets de chacun sur cette île et je sais très bien quand les dire.")
+MANGO_TEXT = ("Tu crois que tu peux me remplacer comme ça, chéri ? Je suis la reine de cette villa, et personne ne "
+              "me vole ma couronne, ni ce soir ni jamais, tu m'entends bien ?")
+FIG_TEXT = ("Oh non, encore un vote ce soir, et je vois tout ce qui se passe derrière les palmiers, mais personne ne "
+            "m'écoute jamais quand je dis la vérité à voix haute.")
+
+
+def _clone(reply, pick, text):
+    return dict(reply, voice_pick=pick, voice_sample_text=text)
+
+
+def _clone_llm():
+    return FakeLLM(K1=[_clone(K1_KIWI, "Puck", KIWI_TEXT), _clone(K1_MANGO, "Kore", MANGO_TEXT),
+                       _clone(K1_FIG, "Leda", FIG_TEXT)])
+
+
+def _clone_story(store):
+    """The cast story on the fruit_drama recipe: each character gets one frozen cloned voice."""
+    story_id = _story(store)
+    store.update(story_id, lambda doc: doc.update(recipe="fruit_drama"), now=NOW)
+    return story_id
+
+
+def _wav(path, seconds=12.0, rate=24000):
+    import wave
+
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(b"\x00\x00" * int(seconds * rate))
+    return str(path)
+
+
+class FakeSpeech:
+    """A TTS adapter writing a WAV and its line_timing_v1 sidecar (what
+    ``voices.synthesize_line`` keeps), recording ``(link, voice, text, seed,
+    references)``."""
+
+    def __init__(self):
+        self.requests = []
+
+    def estimate(self, link, request):
+        return None
+
+    def probe(self, link, **_):
+        return True, "ok"
+
+    def generate(self, link, request, *, credentials, on_log, transport=None, **_):
+        self.requests.append((f"{link.provider}/{link.model}", request.voice, request.text, request.seed,
+                              tuple(request.references)))
+        name = (request.extra or {}).get("name") or "line"
+        audio = _wav(os.path.join(request.out_dir, f"{name}.wav"), 12.0)
+        timing = os.path.join(request.out_dir, f"{name}.json")
+        with open(timing, "w", encoding="utf-8") as fh:
+            json.dump({"$schema": "line_timing_v1", "provider": link.provider, "voice": request.voice,
+                       "duration_s": 12.0, "source": "audio_duration_only", "words": []}, fh)
+        return GenResult(provider=link.provider, model=link.model, paths=(audio, timing), meta={"duration_s": 12.0})
+
+
+def _fake_tools(argv, **_kwargs):
+    """ffprobe and ffmpeg for ``voice_reference.accept_voice_reference``: a 12 s
+    audio stream, re-encoded into a mono 24 kHz WAV."""
+    if argv[0] == "ffprobe":
+        out = json.dumps({"streams": [{"codec_type": "audio"}], "format": {"duration": "12.0"}})
+        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+    _wav(argv[-1], 12.0)
+    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+
+class CloneFakes(Fakes):
+    @property
+    def adapters(self):
+        return {**super().adapters, ("tts", "gemini"): self.speech, ("tts", "runpod"): self.speech}
+
+
+def _clone_fakes():
+    return CloneFakes(t2i=FakeImage(), editor=FakeImage(), paid_editor=FakeImage(), tts=FakeTTS(),
+                      speech=FakeSpeech())
+
+
+@pytest.fixture
+def clone_tools(monkeypatch):
+    """The fake ffprobe/ffmpeg, and no RunPod name of the machine (a loaded .env) reaching a test."""
+    from clipping.aistory import voice_clone
+
+    for name in list(os.environ):
+        if name.startswith("RUNPOD_"):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(voice_clone, "TOOL_RUN", _fake_tools)
+    return voice_clone
+
+
+def test_a_clone_story_asks_k1_for_a_voice_and_its_text_and_freezes_one_reference_each(store, clone_tools):
+    from clipping.aistory import voice_reference
+    from clipping.providers import tts
+
+    story_id = _clone_story(store)
+    fakes = _clone_fakes()
+    summary, log, llm = _cast(store, story_id, fakes, settings=CLONE_SETTINGS, llm=_clone_llm())
+
+    # K1 is asked for the two fields, with room for them, and told the voices already taken.
+    first, second, _third = llm.of("K1")
+    assert "- voice_pick: the voice it is made from, one of Kore (female, adult, firm), Puck" in first["user"]
+    assert "voice_sample_text: 25 to 40 words" in first["user"] and "taken" not in first["user"].split("voice_pick")[1]
+    assert "prefer one no other character has (Puck is taken)" in second["user"]
+    assert {"voice_pick", "voice_sample_text"} <= set(first["schema"]["required"])
+    assert first["schema"]["properties"]["voice_pick"]["enum"][0] == "Kore"
+    assert all(call["max_tokens"] == 950 for call in llm.of("K1"))
+
+    chars = _chars(store, story_id)
+    for cid, pick, text in (("char_kiwilo", "Puck", KIWI_TEXT), ("char_mangella", "Kore", MANGO_TEXT),
+                            ("char_figuette", "Leda", FIG_TEXT)):
+        doc = chars[cid]
+        assert (doc["voice"]["provider"], doc["voice"]["voice_id"]) == ("runpod", "reference")
+        assert voice_reference.is_clone_voice(doc["voice"])
+        assert doc["voice_reference"]["name"] == "voice_reference.wav" and doc["voice_reference"]["consent"] is True
+        assert clone_tools.read_plan(store, story_id, cid)["voice_pick"] == pick
+        assert clone_tools.read_plan(store, story_id, cid)["seed"] == tts.voice_seed(cid)
+        # The reference: the picked Gemini voice speaking the written text; the sample: the clone on the seed.
+        reference = store.media_path(story_id, "characters", cid, "voice_reference.wav")
+        assert ("gemini/flash-lite-tts", pick, text, None, ()) in fakes.speech.requests
+        assert ("runpod/tts_chatterbox", "reference", doc["voice"]["sample_line"], tts.voice_seed(cid),
+                (reference,)) in fakes.speech.requests
+    assert summary["voices"] == {cid: "runpod/reference" for cid in IDS}
+    assert summary["samples"] == {cid: "voice_sample.wav" for cid in IDS}
+    assert fakes.tts.requests == []  # the catalogue's Gemini fake never speaks a sample
+    assert any("Kiwilo: voice runpod/reference (cloned on your GPU from gemini/Puck" in line for line in log)
+    assert any("Kiwilo: voice reference made from gemini/Puck (12.0 s), frozen" in line for line in log)
+
+    # Run again: nothing is missing, nothing is called, the references stay frozen.
+    before = list(fakes.speech.requests)
+    _cast(store, story_id, fakes, params={}, settings=CLONE_SETTINGS, llm=FakeLLM())
+    assert fakes.speech.requests == before
+
+
+def test_a_story_off_the_gate_is_asked_exactly_what_it_always_was(store):
+    from clipping.aistory import voice_clone
+
+    story_id = _story(store)
+    summary, log, llm = _cast(store, story_id, _fakes())
+    for call in llm.of("K1"):
+        assert "voice_pick" not in call["user"] and "voice_pick" not in call["schema"]["properties"]
+        assert call["max_tokens"] == 750
+    assert not voice_clone.applies(store.get(story_id), SETTINGS)
+    assert all(voice_clone.read_plan(store, story_id, cid) is None for cid in IDS)
+
+
+def test_the_gate_is_the_recipe_or_a_tts_chain_that_starts_with_the_clone(clone_tools):
+    from clipping.aistory import defaults, voice_clone
+
+    own_gpu = {"generation_profile": {**defaults.quality_generation_profile(), "budget_profile": "own_gpu"}}
+    quality = {"generation_profile": {**defaults.quality_generation_profile(), "budget_profile": "quality"}}
+    assert voice_clone.applies(own_gpu, {}) and voice_clone.tts_chain(own_gpu) == ["runpod/tts_chatterbox",
+                                                                                  "gemini/flash-lite-tts"]
+    assert not voice_clone.applies(quality, {"TTS_CHAIN": "gemini/flash-lite-tts"})
+    assert voice_clone.applies(quality, {"TTS_CHAIN": "runpod/tts_chatterbox,gemini/flash-lite-tts"})
+    assert voice_clone.applies(dict(quality, recipe="fruit_drama"), {"TTS_CHAIN": "gemini/flash-lite-tts"})
+    # Which link a character is pinned on: the clone when RunPod has its keys, the Gemini voice behind it when
+    # only Gemini has one, the clone when neither does (the voices step then names what is missing).
+    runpod = {"RUNPOD_API_KEY": "k", "RUNPOD_COMFY_ENDPOINT_ID": "e"}
+    assert voice_clone.pin_choice(own_gpu, dict(runpod, GOOGLE_API_KEY="g")) == "runpod"
+    assert voice_clone.pin_choice(own_gpu, {"GOOGLE_API_KEY": "g"}) == "gemini"
+    assert voice_clone.pin_choice(own_gpu, {}) == "runpod"
+
+
+def _written(store, story_id, cid, name, reply, role="lead"):
+    m = _new()
+    doc = m.cast.new_character(cid, name, role, "Un fruit.", archetype=None, source="custom", now=NOW)
+    m.cast.apply_k1(doc, reply, others=[], lock=_lock())
+    store.write_entity(story_id, "characters", doc, now=NOW)
+    return doc
+
+
+def test_without_a_gemini_key_the_pick_and_text_wait_for_the_voices_step_and_the_cast_does_not_fail(store,
+                                                                                                    clone_tools):
+    m = _new()
+    story_id = _clone_story(store)
+    _written(store, story_id, "char_kiwilo", "Kiwilo", K1_KIWI)
+    clone_tools.write_plan(store, story_id, "char_kiwilo", pick="Puck", text=KIWI_TEXT, now=NOW)
+    settings = {"RUNPOD_API_KEY": "rpa_fake", "RUNPOD_COMFY_ENDPOINT_ID": "vid1", "ALLOW_PAID": "1"}
+    ctx, log = _ctx(store, story_id, step="cast", settings=settings)
+    run = m.cast._Run(ctx)
+    fakes = _clone_fakes()
+    tools = m.entities.Tools(adapters=fakes.adapters)
+
+    m.cast._pin_voices(run, ctx, store, store.get(story_id))
+    m.cast._clone_references(run, ctx, store, {"adapters": fakes.adapters})
+    m.cast._samples(run, ctx, store, tools)
+
+    doc = _chars(store, story_id)["char_kiwilo"]
+    assert (doc["voice"]["provider"], doc["voice"]["voice_id"]) == ("runpod", "reference")
+    assert "voice_reference" not in doc and run.failures == [] and run.samples == {}
+    assert fakes.speech.requests == []
+    assert any("the reference recording is made at the first voices step, once a Gemini key" in line
+               for line in log)
+    # The voices step's maker says the same in a sentence while the key is missing.
+    from clipping.aistory import voices
+
+    gates = voices.LineGates(store, story_id, env=settings)
+    with pytest.raises(clone_tools.VoiceCloneError) as waiting:
+        clone_tools.make_reference(store, story_id, "char_kiwilo", gates=gates, on_log=log, cancel=CancelToken(),
+                                   now=NOW, adapters=fakes.adapters)
+    assert "waits for a Gemini key (GOOGLE_API_KEY is not set)" in str(waiting.value)
+    # Once the key is there, the same maker freezes it from the recorded pick and text -- after the cast was
+    # approved, the approval stays: nothing was ever spoken with an older reference.
+    doc = _chars(store, story_id)["char_kiwilo"]
+    doc["approved_at"] = NOW
+    store.write_entity(story_id, "characters", doc, now=NOW)
+    gates = voices.LineGates(store, story_id, env=dict(settings, GOOGLE_API_KEY="test-gemini-key"))
+    entry = clone_tools.make_reference(store, story_id, "char_kiwilo", gates=gates, on_log=log, cancel=CancelToken(),
+                                       now=NOW, adapters=fakes.adapters)
+    assert entry["duration_s"] == 12.0 and fakes.speech.requests == [("gemini/flash-lite-tts", "Puck", KIWI_TEXT,
+                                                                      None, ())]
+    doc = _chars(store, story_id)["char_kiwilo"]
+    assert doc["approved_at"] == NOW and doc["voice_reference"]["sha256"] == entry["sha256"]
+
+
+def test_runpod_keyless_pins_the_gemini_voice_behind_and_an_unplanned_character_gets_its_own_words(store,
+                                                                                                    clone_tools):
+    m = _new()
+    story_id = _clone_story(store)
+    _written(store, story_id, "char_kiwilo", "Kiwilo", K1_KIWI)
+    _written(store, story_id, "char_mangella", "Mangella", K1_MANGO)
+    clone_tools.write_plan(store, story_id, "char_kiwilo", pick="Kore", text=KIWI_TEXT, now=NOW)
+    ctx, log = _ctx(store, story_id, step="cast", settings=dict(SETTINGS))
+    run = m.cast._Run(ctx)
+
+    m.cast._pin_voices(run, ctx, store, store.get(story_id))
+
+    chars = _chars(store, story_id)
+    assert (chars["char_kiwilo"]["voice"]["provider"], chars["char_kiwilo"]["voice"]["voice_id"]) == ("gemini", "Kore")
+    # Mangella was written before the gate: a pick not taken, and her own words as the text.
+    plan = clone_tools.read_plan(store, story_id, "char_mangella")
+    assert plan["voice_pick"] != "Kore" and plan["voice_pick"] in clone_tools.voice_names()
+    assert plan["sample_text"].startswith("Je ne perds jamais, chéri. Gagner le vote de la semaine.")
+    assert chars["char_mangella"]["voice"]["voice_id"] == plan["voice_pick"]
+    assert any("RunPod has no key, so the voice it was made from speaks the lines" in line for line in log)
+
+
+def test_a_k1_reply_without_the_two_fields_is_refused_and_told_why(store, clone_tools):
+    story_id = _clone_story(store)
+    fakes = _clone_fakes()
+    llm = FakeLLM(K1=[dict(K1_KIWI, voice_pick="Nobody", voice_sample_text="Trop court."),
+                      _clone(K1_KIWI, "Puck", KIWI_TEXT), _clone(K1_MANGO, "Kore", MANGO_TEXT),
+                      _clone(K1_FIG, "Leda", FIG_TEXT)])
+    summary, log, llm = _cast(store, story_id, fakes, settings=CLONE_SETTINGS, llm=llm)
+    retry = llm.of("K1")[1]["user"]
+    assert "$.voice_pick: 'Nobody' is not one of Kore" in retry and "$.voice_sample_text: 2 words" in retry
+    assert clone_tools.read_plan(store, story_id, "char_kiwilo")["voice_pick"] == "Puck"

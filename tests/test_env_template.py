@@ -71,3 +71,12 @@ def test_the_elevenlabs_key_is_documented_as_paid_and_shipped_empty():
     text = TEMPLATE.read_text(encoding="utf-8")
     assert re.search(r"^ELEVENLABS_API_KEY=\s*$", text, re.MULTILINE)
     assert "PAID per character" in text[:text.index("ELEVENLABS_API_KEY=")][-600:]
+
+
+def test_the_runpod_audio_names_are_documented_empty_and_say_they_bill():
+    """Plan 32 stage 6: the app's runpod/tts_chatterbox link reads the MCP's three audio names; shipped empty."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    for name in ("RUNPOD_AUDIO_ENDPOINT_ID", "RUNPOD_AUDIO_API_KEY", "RUNPOD_AUDIO_GPU_USD_PER_HOUR"):
+        assert re.search(rf"^{name}=\s*$", text, re.MULTILINE), name
+    before = text[:text.index("RUNPOD_AUDIO_ENDPOINT_ID=")][-700:]
+    assert "runpod/tts_chatterbox" in before and "PAID" in before

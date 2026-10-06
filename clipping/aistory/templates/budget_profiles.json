@@ -183,6 +183,10 @@
         ]
       },
       "tts": "free_or_local",
+      "tts_chain": [
+        "runpod/tts_chatterbox",
+        "gemini/flash-lite-tts"
+      ],
       "animate": "all_shots",
       "video_link_policy": "first_in_chain",
       "video_resolution": "720p",

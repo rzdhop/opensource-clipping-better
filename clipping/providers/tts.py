@@ -15,6 +15,16 @@
   and the subtitles are exact. The voice id travels as ``request.voice``.
   Like Gemini it cannot apply a rate, a pitch or a spoken direction: they are
   recorded on the result (``meta["not_applied"]``) with a warning line.
+* ``runpod/tts_chatterbox`` (plan 32 stage 6) is PAID: the line cloned from the
+  character's frozen reference (``GenRequest.references[0]``, a mono 24 kHz
+  WAV) by Chatterbox Multilingual on the RunPod worker, through the
+  ``tts_chatterbox`` workflow template, on a fixed per-character seed
+  (``GenRequest.seed``; :func:`voice_seed`). The worker answers FLAC, which is
+  converted here to a mono 24 kHz 16-bit WAV with ffmpeg (``KEPT_EXTENSIONS``
+  of the voices module are mp3 and wav). The endpoint is
+  ``RUNPOD_AUDIO_ENDPOINT_ID``, else ``RUNPOD_IMAGE_ENDPOINT_ID``, else
+  ``RUNPOD_COMFY_ENDPOINT_ID`` (``mcp_server/config.py``'s order), billed at
+  the serving endpoint's GPU price.
 * ``local/piper``, ``local/kokoro`` and ``local/chatterbox`` are probed with
   ``importlib`` and imported only inside the call that synthesises; they are
   the ``[local-tts]`` extras of ``pyproject.toml``. Never XTTS: its licence is
@@ -45,13 +55,21 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.parse
 import wave
+import zlib
 
 from . import generation, pricing, tts_tail
 from .errors import ProviderError
+from .gencache import RequestFailed
 from .generation import TTS, GenResult, register_adapter
+from .local_comfyui import load_template, render_template
 from .registry import describe
+from .runpod_comfyui import (
+    ENV_API_KEY, ENV_ENDPOINT, ENV_RATE, RunPodComfyAdapter, RunPodError, auth_headers, endpoint_url, gpu_seconds,
+    inline_image,
+)
 from .transport import DEFAULT_TIMEOUT, HttpStatusError, request_json, urllib_transport, write_output
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -584,6 +602,275 @@ class LocalTtsAdapter(_Adapter):
                          meta={"duration_s": duration, "source": SOURCE_DURATION})
 
 
+# ------------------------------------------------------------------- runpod
+
+# Plan 32 stage 6: the one TTS template a runpod link names (the link's model).
+RUNPOD_TTS_TEMPLATES = ("tts_chatterbox",)
+# mcp_server/config.py's audio names, mirrored app-side (this module must not
+# import mcp_server): an endpoint of its own for the voice lines, else the
+# image endpoint, else the video one; the audio key, else the account key; the
+# serving endpoint's GPU price.
+ENV_AUDIO_ENDPOINT = "RUNPOD_AUDIO_ENDPOINT_ID"
+ENV_AUDIO_KEY = "RUNPOD_AUDIO_API_KEY"
+ENV_AUDIO_RATE = "RUNPOD_AUDIO_GPU_USD_PER_HOUR"
+ENV_IMAGE_ENDPOINT = "RUNPOD_IMAGE_ENDPOINT_ID"
+ENV_IMAGE_RATE = "RUNPOD_IMAGE_GPU_USD_PER_HOUR"
+# The Chatterbox knobs when the request names none (the node's own defaults;
+# ``mcp_server.runpod_jobs.TTS_DEFAULTS``).
+RUNPOD_TTS_DEFAULTS = {"exaggeration": 0.5, "cfg_weight": 0.5}
+# The worker's FLAC becomes what the voices module keeps and a reference is.
+RUNPOD_TTS_RATE = 24000
+RUNPOD_TTS_AUDIO = (".flac", ".wav", ".mp3", ".ogg")
+# A line is seconds warm; a cold start loads 3.2 GB of Chatterbox weights.
+RUNPOD_TTS_POLL_BUDGET_SECONDS = 600.0
+FFMPEG_INSTALL = "install ffmpeg (apt-get install ffmpeg)"
+_FFMPEG_TIMEOUT_S = 120
+
+
+def voice_seed(key: str) -> int:
+    """The fixed seed a character's cloned lines are spoken on: CRC32 of its
+    id (*key*), a positive 31-bit int -- the same for every line, every run."""
+    return zlib.crc32(str(key).encode("utf-8")) & 0x7FFFFFFF
+
+
+def _audio_serving(credentials: dict) -> str:
+    """Which configured endpoint serves the voice lines: ``audio``, ``image``
+    or ``video`` (``mcp_server.config.Settings.serving_kind``)."""
+    if credentials.get(ENV_AUDIO_ENDPOINT):
+        return "audio"
+    if credentials.get(ENV_IMAGE_ENDPOINT):
+        return "image"
+    return "video"
+
+
+def audio_endpoint(credentials: dict) -> str:
+    """The endpoint id that speaks the lines; "" when none is configured."""
+    return {"audio": credentials.get(ENV_AUDIO_ENDPOINT), "image": credentials.get(ENV_IMAGE_ENDPOINT),
+            "video": credentials.get(ENV_ENDPOINT)}[_audio_serving(credentials)] or ""
+
+
+def audio_key(credentials: dict) -> str:
+    """The audio endpoint's own key when one is set, else the account key
+    (``mcp_server.config.Settings.key``)."""
+    return credentials.get(ENV_AUDIO_KEY) or credentials.get(ENV_API_KEY) or ""
+
+
+def audio_rate(credentials: dict):
+    """The GPU price (USD an hour, as text) of the endpoint that serves the
+    lines, or None: a kind without an endpoint of its own is billed at its
+    fallback's rate (``mcp_server.config.Settings.rate``)."""
+    return credentials.get({"audio": ENV_AUDIO_RATE, "image": ENV_IMAGE_RATE,
+                            "video": ENV_RATE}[_audio_serving(credentials)]) or None
+
+
+def _to_wav_argv(src, dest) -> list:
+    """FLAC (or any audio) to the WAV the voices module keeps: mono, 24 kHz,
+    16-bit PCM, no metadata."""
+    return ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", os.fspath(src), "-map", "0:a:0",
+            "-map_metadata", "-1", "-ac", "1", "-ar", str(RUNPOD_TTS_RATE), "-c:a", "pcm_s16le",
+            "-f", "wav", os.fspath(dest)]
+
+
+def _convert_to_wav(label, src, dest, *, run=None) -> None:
+    """*src* converted to *dest* by ffmpeg (*run*: ``subprocess.run``, the
+    seam the tests replace); ``ProviderError`` naming what went wrong."""
+    runner = run or subprocess.run
+    try:
+        result = runner(_to_wav_argv(src, dest), capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                        timeout=_FFMPEG_TIMEOUT_S)
+    except FileNotFoundError:
+        raise ProviderError(f"{label}: the line came back as FLAC and ffmpeg is not installed to convert it: "
+                            f"{FFMPEG_INSTALL}") from None
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProviderError(f"{label}: the line could not be converted to WAV ({exc})") from None
+    if result.returncode != 0 or not os.path.isfile(dest) or os.path.getsize(dest) == 0:
+        detail = (getattr(result, "stderr", "") or "").strip()[:200]
+        raise ProviderError(f"{label}: ffmpeg could not convert the line to WAV{': ' + detail if detail else ''}")
+
+
+def _wav_duration(path):
+    """Seconds of a PCM WAV from its header, else ffprobe's, else None."""
+    try:
+        with wave.open(path, "rb") as wav:
+            return round(wav.getnframes() / float(wav.getframerate() or 1), 3)
+    except (OSError, EOFError, wave.Error):
+        return audio_duration(path)
+
+
+class RunPodTtsAdapter(RunPodComfyAdapter):
+    """One line cloned from the character's reference on the RunPod worker
+    (``runpod/tts_chatterbox``): the template rendered with the line, the
+    reference uploaded inline like a keyframe, the job queued, followed and
+    journaled like a clip (``RunPodComfyAdapter``'s poll), the FLAC it
+    answers converted to WAV, the ``line_timing_v1`` sidecar written."""
+
+    provider = "runpod"
+    poll_budget_seconds = RUNPOD_TTS_POLL_BUDGET_SECONDS
+
+    def estimate(self, link, request):
+        if not generation.is_paid(link):
+            return None
+        return pricing.estimate(link, len(_text(request)))
+
+    def probe(self, link, *, credentials, transport=None, **_):
+        creds = dict(credentials, **{ENV_ENDPOINT: audio_endpoint(credentials), ENV_API_KEY: audio_key(credentials)})
+        return super().probe(link, credentials=creds, transport=transport)
+
+    @staticmethod
+    def plan(link, request):
+        """``(name, template, values, inline)`` after every check a line must
+        pass before anything is sent; ``ValueError`` names what is wrong."""
+        label = describe(link)
+        name = link.model
+        if name not in RUNPOD_TTS_TEMPLATES:
+            _unknown_model(link, RUNPOD_TTS_TEMPLATES)
+        text = _text(request)
+        _out_dir(request)
+        references = tuple(request.references or ())
+        if not references:
+            raise ValueError(f"{label} clones a voice: the character's reference recording is missing "
+                             "(GenRequest.references)")
+        reference = references[0]
+        if not os.path.isfile(reference):
+            raise ValueError(f"{label}: the reference recording {reference} is not there")
+        if os.path.splitext(reference)[1].lower() != ".wav":
+            raise ValueError(f"{label}: the reference recording must be a .wav file, not {reference}")
+        template = load_template(name)
+        inline = inline_image(reference)  # any file travels as a data URL, under a content-addressed .wav name
+        seed = request.seed if request.seed is not None else voice_seed(inline["name"])
+        extra = request.extra or {}
+        values = {"prompt": text, "seed": int(seed), "audio_path": inline["name"]}
+        for knob, default in RUNPOD_TTS_DEFAULTS.items():
+            given = extra.get(knob)
+            values[knob] = float(default if given is None else given)
+        return name, template, values, inline
+
+    def _endpoint(self, link, credentials):
+        """``(endpoint, headers)``; ``ProviderError`` in a plain sentence when
+        the key or every endpoint is missing (nothing is sent)."""
+        label = describe(link)
+        key = audio_key(credentials)
+        if not key:
+            raise ProviderError(f"{label}: no RunPod key is set; put {ENV_API_KEY} (or {ENV_AUDIO_KEY}) in .env "
+                                "to speak the lines on your own GPU.")
+        endpoint = audio_endpoint(credentials)
+        if not endpoint:
+            raise ProviderError(f"{label}: no RunPod endpoint is configured; set {ENV_AUDIO_ENDPOINT}, "
+                                f"{ENV_IMAGE_ENDPOINT} or {ENV_ENDPOINT} in .env.")
+        return endpoint, auth_headers(key)
+
+    def generate(self, link, request, *, credentials, on_log, transport=None, sleep_fn=time.sleep,
+                 time_fn=time.monotonic, on_submit=None, run=None, **_):
+        name, template, values, inline = self.plan(link, request)  # refused here, before any call
+        endpoint, headers = self._endpoint(link, credentials)
+        _warn_unsupported_rate_pitch(request, link, on_log)
+        _warn_unsupported_direction(request, link, on_log)
+        transport = transport or urllib_transport
+        body = {"input": {"workflow": render_template(template, values), "images": [inline]}}
+        # Billed from here on (once a worker takes it), whatever happens next.
+        answer = request_json(transport, "POST", endpoint_url(endpoint, "run"), headers=headers, json_body=body,
+                              timeout=DEFAULT_TIMEOUT)
+        job_id = answer.get("id")
+        if not job_id:
+            raise RunPodError(f"{describe(link)}: /run answered without a job id: {str(answer)[:200]}")
+        status_url = endpoint_url(endpoint, f"status/{job_id}")
+        queued = {"request_id": job_id, "status_url": status_url, "response_url": status_url, "endpoint": endpoint}
+        on_log(f"   🔁 RunPod: queued {name} ({len(values['prompt'])} characters, seed {values['seed']}, "
+               f"reference {inline['name']}) as job {job_id} on endpoint {endpoint}")
+        if on_submit is not None:
+            # Journaled between RunPod's answer and the first poll (DEC-151).
+            on_submit(dict(queued))
+        status = self._poll(link, queued, headers=headers, transport=transport, on_log=on_log, sleep_fn=sleep_fn,
+                            time_fn=time_fn)
+        return self._finish_line(link, request, credentials, queued, status, name, values, on_log, run=run)
+
+    def resume(self, link, request, entry, *, credentials, on_log, transport=None, sleep_fn=time.sleep,
+               time_fn=time.monotonic, run=None, **_):
+        """Follow the job a journal *entry* holds until its line is there;
+        never a new ``/run``."""
+        name, _template, values, _inline = self.plan(link, request)
+        transport = transport or urllib_transport
+        queued = dict(entry.get("request") or {})
+        if not queued.get("request_id"):
+            raise RunPodError(f"{describe(link)}: the journal holds no job to resume")
+        queued.setdefault("endpoint", audio_endpoint(credentials))
+        headers = auth_headers(audio_key(credentials))
+        on_log(f"   ↩️ RunPod: following job {queued['request_id']} on endpoint {queued['endpoint']} (not submitted again)")
+        status = self._poll(link, queued, headers=headers, transport=transport, on_log=on_log, sleep_fn=sleep_fn,
+                            time_fn=time_fn)
+        return self._finish_line(link, request, credentials, queued, status, name, values, on_log, run=run)
+
+    @staticmethod
+    def _audio(output: dict):
+        """The first audio file the worker returned: under ``output.audio``
+        (the TTS worker image hands SaveAudio's files back there), else under
+        ``output.images``; None when there is none."""
+        for key in ("audio", "images"):
+            for item in (output or {}).get(key) or []:
+                if os.path.splitext(str(item.get("filename", "")))[1].lower() in RUNPOD_TTS_AUDIO:
+                    return item
+        return None
+
+    def _finish_line(self, link, request, credentials, queued, status, name, values, on_log, *, run=None):
+        label = describe(link)
+        output = status.get("output") or {}
+        item = self._audio(output)
+        if item is None:
+            got = ", ".join(str(f.get("filename")) for key in ("audio", "images")
+                            for f in output.get(key) or []) or "nothing"
+            errors = "; ".join(str(e) for e in output.get("errors") or [])
+            raise RequestFailed(f"{label}: job {queued['request_id']} finished without a line (got {got}"
+                                f"{'; ' + errors if errors else ''}); the template must end in a core SaveAudio "
+                                "node, on the TTS worker image")
+        if item.get("type") != "base64":
+            raise RunPodError(f"{label}: the worker returned a {item.get('type')!r} output; this adapter reads base64 "
+                              "(unset BUCKET_ENDPOINT_URL on the endpoint)")
+        try:
+            data = base64.b64decode(item.get("data") or "")
+        except (ValueError, TypeError) as exc:
+            raise RunPodError(f"{label}: the line's base64 could not be decoded ({exc})") from exc
+        if not data:
+            raise RunPodError(f"{label}: {item.get('filename')} came back empty")
+        out_dir = _out_dir(request)
+        out_name = _name(request, link)
+        ext = os.path.splitext(str(item.get("filename") or ""))[1].lstrip(".").lower() or "flac"
+        answered = write_output(out_dir, f"{out_name}.answer", data, ext)
+        audio_path = os.path.join(out_dir, f"{out_name}.wav")
+        try:
+            _convert_to_wav(label, answered, audio_path, run=run)
+        finally:
+            try:
+                os.unlink(answered)
+            except OSError:
+                pass
+        duration = _wav_duration(audio_path)
+        voice = values["audio_path"]
+        timing_path = _write_timing(out_dir, out_name, duration_s=duration, words=[], source=SOURCE_DURATION,
+                                    provider="runpod", voice=voice)
+        seconds_billed = gpu_seconds(status)
+        rate = audio_rate(credentials)
+        usd = None
+        if rate:
+            try:
+                usd = round(seconds_billed * float(rate) / 3600.0, 4)
+            except (TypeError, ValueError):
+                usd = None
+        on_log(f"   💸 RunPod: job {queued['request_id']} took {seconds_billed:.0f} GPU-s"
+               f"{f' = ${usd:.4f} at ${rate}/h' if usd is not None else ' (set the endpoint GPU price to price it)'}")
+        meta = {"duration_s": duration, "source": SOURCE_DURATION, "voice": voice, "template": name,
+                "seed": values["seed"], "job_id": queued["request_id"], "endpoint": queued["endpoint"],
+                "output": item.get("filename"), "gpu_seconds": seconds_billed, "billed_usd": usd,
+                "execution_ms": status.get("executionTime"), "delay_ms": status.get("delayTime"),
+                "worker_id": status.get("workerId")}
+        extra = request.extra or {}
+        not_applied = {key: value for key, value in (("rate", extra.get("rate")), ("pitch", extra.get("pitch")),
+                                                     ("direction", _direction(request))) if value}
+        if not_applied:
+            meta["not_applied"] = not_applied
+        return GenResult(provider="runpod", model=link.model, paths=(audio_path, timing_path), seed=values["seed"],
+                         meta=meta)
+
+
 # ------------------------------------------------------------------- voices
 
 def load_voices(path=None) -> dict:
@@ -606,8 +893,10 @@ EDGE = EdgeTtsAdapter()
 GEMINI_TTS = GeminiTtsAdapter()
 ELEVENLABS_TTS = ElevenLabsTtsAdapter()
 LOCAL_TTS = LocalTtsAdapter()
+RUNPOD_TTS = RunPodTtsAdapter()
 
 register_adapter(TTS, "edge", EDGE)
 register_adapter(TTS, "gemini", GEMINI_TTS)
 register_adapter(TTS, "elevenlabs", ELEVENLABS_TTS)
 register_adapter(TTS, "local", LOCAL_TTS)
+register_adapter(TTS, "runpod", RUNPOD_TTS)

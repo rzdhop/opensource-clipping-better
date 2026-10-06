@@ -994,3 +994,92 @@ def test_a_line_is_spoken_with_the_reference_it_is_given(store, monkeypatch):
     # Another voice ignores the argument: today's request.
     speak({"provider": "edge", "voice_id": "fr-FR-HenriNeural", "rate": None, "pitch": None}, reference=path)
     assert captured[-1][0].references == ()
+
+
+# --------------------------------- the RunPod clone of the reference (plan 32 stage 6)
+
+CLONE_PIN = {"provider": "runpod", "voice_id": "reference", "rate": None, "pitch": None,
+             "direction": "a voice", "sample_line": "Salut !"}
+CLONE_LINK = Link("runpod", "tts_chatterbox")
+RUNPOD_ENV = {"RUNPOD_API_KEY": "rpa_fake", "RUNPOD_COMFY_ENDPOINT_ID": "vid1", "ALLOW_PAID": "1"}
+
+
+def test_the_clone_pin_is_a_reference_voice_spoken_by_the_runpod_link():
+    from clipping.aistory import voice_reference
+
+    assert voices._chain_link("runpod", "reference") == CLONE_LINK
+    assert voice_reference.is_reference_voice(CLONE_PIN) and voice_reference.is_clone_voice(CLONE_PIN)
+    assert voice_reference.is_reference_voice(REFERENCE_PIN) and not voice_reference.is_clone_voice(REFERENCE_PIN)
+    assert not voice_reference.is_clone_voice({"provider": "gemini", "voice_id": "Kore"})
+
+
+def test_the_clone_sample_carries_the_reference_and_the_characters_fixed_seed(store):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi", voice=dict(CLONE_PIN))
+    path = _put_reference(store, story_id, b"RIFF-first")
+    fake = FakeAdapter(ext="wav", duration_s=2.0)
+
+    result = voices.synthesize_sample(store, story_id, "char_kiwi", env=RUNPOD_ENV, on_log=lambda l: None,
+                                      cancel=CancelToken(), adapters={("tts", "runpod"): fake})
+
+    request = fake.calls[0]
+    assert result["name"] == "voice_sample.wav" and result["provider"] == "runpod"
+    assert request.references == (path,) and request.seed == tts.voice_seed("char_kiwi")
+    entries = __import__("json").loads(open(os.path.join(store.story_dir(story_id), "cost_ledger.json"),
+                                            encoding="utf-8").read())["entries"]
+    assert (entries[0]["provider"], entries[0]["model"], entries[0]["paid"]) == ("runpod", "tts_chatterbox", True)
+
+
+def test_a_clone_line_is_spoken_on_the_seed_it_is_given_and_no_other_voice_takes_one(store, monkeypatch):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi", voice=dict(CLONE_PIN))
+    path = _put_reference(store, story_id, b"RIFF-first")
+    gates = voices.LineGates(store, story_id, env={})
+    captured = []
+
+    def fake_chain(kind, chain, request, **kwargs):
+        captured.append((copy.copy(request), list(chain)))
+        raise generation.NoRunnableLink("no link reached", failures=[])
+
+    monkeypatch.setattr(voices.generation, "run_generation_chain", fake_chain)
+
+    def speak(voice, **extra):
+        with pytest.raises(voices.VoiceError):
+            voices.synthesize_line(gates, voice=voice, text="Bonjour", on_log=lambda l: None, cancel=CancelToken(),
+                                   dest_for=lambda ext: str(Path(store.story_dir(story_id)) / f"line.{ext}"), **extra)
+
+    speak(CLONE_PIN, reference=path, seed=4242)
+    request, chain = captured[-1]
+    assert chain == [CLONE_LINK] and request.references == (path,) and request.seed == 4242
+    # The local chatterbox clone and any other voice keep today's request: no seed.
+    speak(REFERENCE_PIN, reference=path, seed=4242)
+    assert captured[-1][0].seed is None and captured[-1][1] == [CHATTERBOX]
+    speak({"provider": "gemini", "voice_id": "Kore", "rate": None, "pitch": None}, seed=4242)
+    assert captured[-1][0].seed is None and captured[-1][0].references == ()
+    # A clone with no reference file is refused in a sentence, nothing built.
+    captured.clear()
+    with pytest.raises(voices.VoiceError, match="recording is missing"):
+        voices.synthesize_line(gates, voice=CLONE_PIN, text="Bonjour", on_log=lambda l: None, cancel=CancelToken(),
+                               dest_for=lambda ext: "x", seed=1)
+    assert captured == []
+
+
+def test_the_clone_lines_are_estimated_at_the_runpod_price_per_character(store):
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    verdict = voices.estimate_lines(store, story_id, [(CLONE_PIN, "x" * 80, "Kiwi"), (CLONE_PIN, "y" * 20, "Kiwi")],
+                                    env=dict(RUNPOD_ENV, ALLOW_PAID=""))
+    row = verdict["voices"][0]
+    assert row["voice"] == "runpod/reference" and row["link"] == "runpod/tts_chatterbox" and row["paid"]
+    assert row["est_usd"] == 0.005 and row["lines"] == 2 and not row["allowed"]
+    assert "allow_paid is off" in row["reason"]
+
+
+def test_a_reference_cannot_be_removed_while_the_clone_speaks_it(store):
+    from clipping.aistory import voice_reference
+
+    story_id = store.create(language="fr", seed_text="x", now=NOW)["story_id"]
+    _write_char(store, story_id, "char_kiwi", name="Kiwi", voice=dict(CLONE_PIN))
+    _put_reference(store, story_id, b"RIFF-first")
+    with pytest.raises(voice_reference.VoiceReferenceError) as refused:
+        voice_reference.delete_voice_reference(store, story_id, "char_kiwi", now=NOW)
+    assert refused.value.code == "pinned"

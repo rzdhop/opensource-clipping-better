@@ -57,7 +57,7 @@ import os
 
 from clipping.providers import tts, tts_tail
 
-from .. import media_policy, schemas, shots, timing, voice_reference, voices, wordtiming
+from .. import media_policy, schemas, shots, timing, voice_clone, voice_reference, voices, wordtiming
 from .. import store as store_mod
 from . import episode_common, llm_call
 from .episode_common import STORYBOARD_DOC
@@ -440,6 +440,22 @@ class LineMeasurement:
             except OSError:
                 pass
 
+    def clone_reference(self, gates, char_id, name):
+        """None once *char_id*'s frozen reference is there -- made now from
+        its recorded pick and text when it is missing (plan 32 stage 6,
+        ``voice_clone.make_reference``) -- else why it is not, in a sentence."""
+        ec, ctx = self.ec, self.ctx
+        if voice_clone.has_reference(ec.store, ec.story_id, char_id):
+            return None
+        ctx.on_log(f"🎙️ {name}: making the voice reference first")
+        try:
+            voice_clone.make_reference(ec.store, ec.story_id, char_id, gates=gates, on_log=ctx.on_log,
+                                       cancel=ctx.cancel, now=llm_call.utc_now(), adapters=self.tools.adapters,
+                                       transport=self.tools.transport)
+        except (voice_clone.VoiceCloneError, voices.VoiceError) as exc:
+            return str(exc)
+        return None
+
     def measure_line(self, gates, line) -> None:
         ec, ctx = self.ec, self.ctx
         line_id, speaker = line["line_id"], line["speaker"]
@@ -460,6 +476,13 @@ class LineMeasurement:
                 extra["take"] = self.voice_take
             if self.voice_direction is not None:
                 extra["direction"] = self.voice_direction
+            reason = None
+            if voice_reference.is_clone_voice(voice) and speaker != "narrator":
+                # Plan 32 stage 6: the character's frozen reference, made here
+                # once when the cast step could not (no Gemini key then), and
+                # every line spoken on the character's own seed.
+                reason = self.clone_reference(gates, speaker, name)
+                extra["seed"] = tts.voice_seed(speaker)
             if voice_reference.is_reference_voice(voice) and speaker != "narrator":
                 # The character's own recording (plan 23 stage B4); None when
                 # the file is gone, which synthesize_line refuses in a sentence.
@@ -467,6 +490,10 @@ class LineMeasurement:
                     extra["reference"] = voice_reference.reference_path(ec.store, ec.story_id, speaker)
                 except KeyError:
                     extra["reference"] = None
+            if reason is not None:
+                self.voice_failed.append((line_id, speaker, reason))
+                ctx.on_log(f"✖ {line_id} {name}: {reason}")
+                return
             try:
                 spoken = voices.synthesize_line(gates, voice=voice, text=line["text"], dest_for=dest_for,
                                                 on_log=ctx.on_log, cancel=ctx.cancel, step=self.measure_step,

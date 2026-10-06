@@ -56,6 +56,12 @@ MEDIA_NAME = "voice_reference.wav"
 # The pin that means "this character's own recording, cloned by chatterbox".
 REFERENCE_PROVIDER = "chatterbox"
 REFERENCE_VOICE_ID = "reference"
+# Plan 32 stage 6: the same reference cloned on the RunPod worker
+# (``runpod/tts_chatterbox``) -- a frozen synthetic reference the cast step
+# made (``voice_clone``), or an uploaded recording. Every rule of this module
+# (the sample dropped on a new reference, no delete while pinned) holds for it.
+CLONE_PROVIDER = "runpod"
+REFERENCE_PINS = frozenset({(REFERENCE_PROVIDER, REFERENCE_VOICE_ID), (CLONE_PROVIDER, REFERENCE_VOICE_ID)})
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
@@ -118,8 +124,14 @@ def _megabytes(size) -> str:
 
 
 def is_reference_voice(voice) -> bool:
-    """Whether a pinned ``voice`` block is the character's own recording."""
-    return bool(voice) and (voice.get("provider"), voice.get("voice_id")) == (REFERENCE_PROVIDER, REFERENCE_VOICE_ID)
+    """Whether a pinned ``voice`` block speaks the character's reference
+    recording: cloned locally by chatterbox, or on the RunPod worker."""
+    return bool(voice) and (voice.get("provider"), voice.get("voice_id")) in REFERENCE_PINS
+
+
+def is_clone_voice(voice) -> bool:
+    """Whether a pinned ``voice`` block is the RunPod clone of the reference."""
+    return bool(voice) and (voice.get("provider"), voice.get("voice_id")) == (CLONE_PROVIDER, REFERENCE_VOICE_ID)
 
 
 def reference_path(stories, story_id, char_id):
@@ -257,7 +269,7 @@ def _reencode(src, dest, *, run=None) -> None:
 # ------------------------------------------------------------------- accept
 
 def accept_voice_reference(stories, story_id, char_id, source, *, consent, now, run=None,
-                           max_bytes=MAX_UPLOAD_BYTES) -> dict:
+                           max_bytes=MAX_UPLOAD_BYTES, first_frozen=False) -> dict:
     """Accept a voice reference for the character, replacing the previous
     one; returns the new ``voice_reference`` entry ``{name, sha256,
     duration_s, uploaded_at, consent: true}``.
@@ -268,6 +280,11 @@ def accept_voice_reference(stories, story_id, char_id, source, *, consent, now, 
     (``no_consent``, ``too_large``, ``not_audio``, ``bad_duration``,
     ``storage``, ``unavailable``). A refusal leaves the character, and its
     folder, as they were.
+
+    *first_frozen* (plan 32 stage 6, ``voice_clone``): the app's first
+    synthetic reference of a cloned voice. When the character had none before,
+    nothing was ever spoken with an older one, so its approval and sample stay
+    (the voices step may make it after the cast was approved).
     """
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
         raise ValueError(f"max_bytes must be a positive number of bytes, not {max_bytes!r}")
@@ -298,8 +315,9 @@ def accept_voice_reference(stories, story_id, char_id, source, *, consent, now, 
             except (KeyError, ValueError) as exc:
                 raise VoiceReferenceError(f"The recording could not be stored ({exc}).", code="storage") from None
             current = stories.read_entity(story_id, KIND, char_id)
+            first = first_frozen and not current.get("voice_reference")
             current["voice_reference"] = dict(entry)
-            if is_reference_voice(current.get("voice")):
+            if is_reference_voice(current.get("voice")) and not first:
                 # Spoken with the old recording: its sample is stale, and the
                 # cast must be approved again (``regenerate`` clears both).
                 current["approved_at"] = None

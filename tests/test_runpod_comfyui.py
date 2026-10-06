@@ -286,5 +286,7 @@ def test_docker_compose_forwards_the_runpod_names_into_the_container():
     RUNPOD_* line in the host's .env that is not forwarded here never reaches
     the backend (the LLM_CUSTOM_* names were lost that way once)."""
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    for name in ("RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID", "RUNPOD_GPU_USD_PER_HOUR"):
+    # Plan 32 stage 6: the voice lines' three names too (runpod/tts_chatterbox).
+    for name in ("RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID", "RUNPOD_GPU_USD_PER_HOUR", "RUNPOD_AUDIO_ENDPOINT_ID",
+                 "RUNPOD_AUDIO_API_KEY", "RUNPOD_AUDIO_GPU_USD_PER_HOUR"):
         assert f"- {name}=${{{name}:-}}" in compose, f"{name} is not forwarded by docker-compose.yml"

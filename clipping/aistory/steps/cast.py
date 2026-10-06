@@ -42,7 +42,13 @@ Then the step **fills what is missing**, for every character of the story
    consistency, and its other sheet is not tried;
 4. once every character's text is there, one voice per unpinned character
    (``voices.propose`` over the cast; the voices already pinned are taken),
-   pinned; a character left with none is recorded "pick a voice";
+   pinned; a character left with none is recorded "pick a voice". On a
+   story whose characters each get one frozen cloned voice (plan 32 stage 6,
+   ``voice_clone.applies``: its TTS chain starts with runpod/tts_chatterbox,
+   or the fruit_drama recipe), K1 also picks the Gemini voice it is made from
+   and writes its ~12 s sample text, the voice is pinned to the RunPod clone,
+   and 4c. its reference is made once from them (a missing Gemini key defers
+   it to the first voices step, never a failure);
 5. the voice sample of every pinned voice that has none
    (``voices.synthesize_sample``: that voice alone, never another).
 
@@ -83,6 +89,8 @@ import time
 
 from .. import context, media_policy, prompting, prompts, refimages, schemas, series_memory, universes, voices
 from .. import store as store_mod
+from .. import voice_clone
+from .. import voice_reference
 from .. import uploads as uploads_mod
 from . import entities, episode_common, llm_call, pacing, sheet_gate, voice_lines
 from . import judge as judge_step
@@ -421,26 +429,41 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
         pack, character=told, cast_so_far=written,
         upload_notes=uploads_mod.upload_notes(character), regenerate=regen,
     )
+    # Plan 32 stage 6: a story whose characters each get one frozen cloned
+    # voice asks K1 for the voice it is made from and the text it says; any
+    # other story is asked exactly what it always was.
+    clone = voice_clone.applies(story, ctx.settings_env)
+    max_tokens = None
+    if clone:
+        user, schema = voice_clone.extend_k1(
+            user, schema, taken=voice_clone.taken_picks(store, ctx.story_id, exclude=char_id))
+        max_tokens = prompts.MAX_TOKENS["K1"] + voice_clone.K1_EXTRA_TOKENS
 
     def validate(reply):
-        errors = schemas.k1_errors(reply, character["name"]) or universes.brand_gate(story, reply)
+        core = voice_clone.k1_part(reply) if clone else reply
+        errors = schemas.k1_errors(core, character["name"]) or universes.brand_gate(story, reply)
+        if clone:
+            errors = list(errors) + voice_clone.reply_errors(reply)
         if errors:
             return errors
         trial = copy.deepcopy(character)
-        apply_k1(trial, reply, others=others, lock=lock)
+        apply_k1(trial, core, others=others, lock=lock)
         return schemas.character_errors(trial)
 
     reply = llm_call.call_json(ctx, "K1", system, user, schema, validator=validate,
-                               runner=tools.runner, time_fn=tools.time_fn)
+                               runner=tools.runner, time_fn=tools.time_fn, max_tokens=max_tokens)
 
     dropped = []
 
     def write(doc):
-        dropped.extend(apply_k1(doc, reply, others=others, lock=lock))
+        dropped.extend(apply_k1(doc, voice_clone.k1_part(reply) if clone else reply, others=others, lock=lock))
 
     saved = entities.write_character(store, ctx.story_id, char_id, write, now=llm_call.utc_now())
     for name in dropped:
         ctx.on_log(f"ℹ️ {character['name']}: relationship with {name!r} dropped -- no character of that name.")
+    if clone and voice_clone.keep_plan(store, ctx.story_id, char_id, reply, now=llm_call.utc_now()):
+        ctx.on_log(f"🎙️ {character['name']}: voice made from gemini/{reply[voice_clone.PICK]}, its sample text "
+                   "written")
     return saved
 
 
@@ -738,6 +761,87 @@ def _images(run, ctx, store, char_id, tools) -> None:
             return  # the other sheet needs the same editor
 
 
+def _pin_clones(run, ctx, store, story, unpinned) -> None:
+    """Part 4 on a story whose characters each get one frozen cloned voice
+    (plan 32 stage 6, ``voice_clone``): every unpinned written character is
+    pinned to the RunPod clone of its reference -- or, RunPod keyless and
+    Gemini keyed, to the Gemini voice it picked (the link behind the clone).
+    A character written before the gate gets its pick and text here
+    (``voice_clone.fallback_plan``: its own words, no call)."""
+    choice = voice_clone.pin_choice(story, ctx.settings_env)
+    for doc in unpinned:
+        plan = voice_clone.read_plan(store, ctx.story_id, doc["char_id"])
+        if plan is None:
+            pick, text = voice_clone.fallback_plan(
+                doc, taken=voice_clone.taken_picks(store, ctx.story_id, exclude=doc["char_id"]))
+            plan = voice_clone.write_plan(store, ctx.story_id, doc["char_id"], pick=pick, text=text,
+                                          now=llm_call.utc_now())
+            ctx.on_log(f"🎙️ {doc['name']}: voice made from gemini/{pick}, its sample text taken from its own words")
+        if choice == voice_clone.CLONE_LINK.provider:
+            voice = voices.Voice(provider=voice_reference.CLONE_PROVIDER, voice_id=voice_reference.REFERENCE_VOICE_ID,
+                                 lang="multi", gender="any", age="any", style_tags=(), link=voice_clone.CLONE_LINK,
+                                 paid=True)
+        else:
+            voice = voices.Voice(provider="gemini", voice_id=plan[voice_clone.PICK], lang="multi", gender="any",
+                                 age="any", style_tags=(), link=voice_clone.GEMINI_LINK)
+        pinned = {}
+
+        def pin(current, voice=voice):
+            if current["voice"]:
+                return  # pinned meanwhile: kept
+            # A cloned voice carries no rate or pitch: the engine applies neither (recorded, not applied).
+            current["voice"] = voices.pin(current, voice)
+            current["approved_at"] = None
+            pinned.update(current["voice"])
+
+        try:
+            entities.write_character(store, ctx.story_id, doc["char_id"], pin, now=llm_call.utc_now())
+        except KeyError:
+            if entities.exists(store, ctx.story_id, CHARACTERS, doc["char_id"]):
+                raise
+            ctx.on_log(f"ℹ️ {doc['name']} was removed while the step ran; skipped.")
+            continue
+        if pinned:
+            label = f"{pinned['provider']}/{pinned['voice_id']}"
+            run.voices[doc["char_id"]] = label
+            if choice == voice_clone.CLONE_LINK.provider:
+                ctx.on_log(f"👤 {doc['name']}: voice {label} (cloned on your GPU from gemini/"
+                           f"{plan[voice_clone.PICK]}, seed {plan['seed']})")
+            else:
+                ctx.on_log(f"👤 {doc['name']}: voice {label} (RunPod has no key, so the voice it was made from "
+                           "speaks the lines)")
+
+
+def _clone_references(run, ctx, store, gates_box) -> None:
+    """Part 4c (plan 32 stage 6): the frozen reference of every character
+    pinned to the RunPod clone that has none yet, made once from its recorded
+    pick and text (``voice_clone.make_reference``). Without a Gemini key the
+    reference waits for the first voices step, said -- never a failure of
+    the cast; any other refusal is the character's "voice reference" failure."""
+    for doc in entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS)):
+        if not voice_reference.is_clone_voice(doc["voice"]) or voice_clone.has_reference(store, ctx.story_id,
+                                                                                        doc["char_id"]):
+            continue
+        ctx.cancel.check()
+        if voice_clone.keys_missing(voice_clone.GEMINI_LINK, ctx.settings_env):
+            ctx.on_log(f"🎙️ {doc['name']}: the voice is picked and its text written; the reference recording is "
+                       "made at the first voices step, once a Gemini key (GOOGLE_API_KEY) is set.")
+            continue
+        ctx.on_log(f"👤 {doc['name']}: voice reference")
+        try:
+            if gates_box.get("gates") is None:
+                gates_box["gates"] = voices.LineGates(store, ctx.story_id, env=ctx.settings_env)
+            voice_clone.make_reference(store, ctx.story_id, doc["char_id"], gates=gates_box["gates"],
+                                       on_log=ctx.on_log, cancel=ctx.cancel, now=llm_call.utc_now(),
+                                       adapters=gates_box.get("adapters"), transport=gates_box.get("transport"))
+        except (voice_clone.VoiceCloneError, voices.VoiceError) as exc:
+            run.fail(doc, "voice reference", str(exc), entities.target(CHARACTERS, doc["char_id"], "voice"))
+        except KeyError:
+            if entities.exists(store, ctx.story_id, CHARACTERS, doc["char_id"]):
+                raise
+            ctx.on_log(f"ℹ️ {doc['name']} was removed while the step ran; skipped.")
+
+
 def _pin_voices(run, ctx, store, story) -> None:
     """Part 4: one voice for every written character that has none."""
     cast = entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS))
@@ -745,6 +849,9 @@ def _pin_voices(run, ctx, store, story) -> None:
     if not unpinned:
         return
     ctx.cancel.check()
+    if voice_clone.applies(story, ctx.settings_env):
+        _pin_clones(run, ctx, store, story, unpinned)
+        return
     taken = {(doc["voice"]["provider"], doc["voice"]["voice_id"]) for doc in cast if doc["voice"]}
     proposal = voices.propose(unpinned, story["language"], env=ctx.settings_env, taken=taken,
                               on_log=ctx.on_log, v2=media_policy.is_v2(story))
@@ -821,6 +928,9 @@ def _samples(run, ctx, store, tools) -> None:
     for doc in entities.cast_order(store.list_entities(ctx.story_id, CHARACTERS)):
         if not doc["voice"] or entities.has_sample(store, ctx.story_id, doc["char_id"]):
             continue
+        if voice_reference.is_clone_voice(doc["voice"]) and not voice_clone.has_reference(store, ctx.story_id,
+                                                                                         doc["char_id"]):
+            continue  # plan 32 stage 6: the clone speaks once its reference is made (said by part 4c)
         ctx.cancel.check()
         ctx.on_log(f"👤 {doc['name']}: voice sample")
         try:
@@ -1102,6 +1212,8 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
     if not media_policy.no_voices(story):
         _pin_voices(run_, ctx, store, story)
         _pin_narrator(run_, ctx, store, story)
+        if voice_clone.applies(story, ctx.settings_env):
+            _clone_references(run_, ctx, store, {"adapters": tools.adapters, "transport": tools.transport})
         _samples(run_, ctx, store, tools)
     _pace(run_, ctx, store, tools, budget)
 

@@ -248,6 +248,11 @@ def _profile_errors(name, profile) -> list:
             errors.append(f"profile {name!r}: {key} must be one of {', '.join(known)}, not {profile[key]!r}")
     if "keyframe_fix" in profile:
         errors.extend(_keyframe_fix_errors(name, profile["keyframe_fix"]))
+    chain = profile.get("tts_chain")
+    if chain is not None and (not isinstance(chain, list) or not chain or not all(_is_link(link) for link in chain)):
+        # Plan 32 stage 6: the TTS links a story on this profile is voiced on, in order (the cast step pins the
+        # first that can run); checked for their shape only, like the speech links.
+        errors.append(f"profile {name!r}: tts_chain must be a non-empty list of provider/model links")
     errors.extend(_speech_errors(name, profile))
     return errors
 

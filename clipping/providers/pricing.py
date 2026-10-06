@@ -96,6 +96,12 @@ PRICES = {
     # is not used, and the flat per-character rate is what an estimate checked against a cap needs.
     "elevenlabs/flash": Price("char", 0.00004, "eleven_flash_v2_5: $0.04 per 1k characters; read 2026-10-04 at elevenlabs.io/pricing/api"),
     "elevenlabs/multilingual-v2": Price("char", 0.00008, "eleven_multilingual_v2: $0.08 per 1k characters; read 2026-10-04 at elevenlabs.io/pricing/api"),
+    # Plan 32 stage 6: a line cloned by Chatterbox Multilingual on the RunPod worker (tts_chatterbox), billed by the
+    # GPU second. Priced per character like every TTS link (the voices module books TTS as unit "char", qty the
+    # line's length): about $0.004 for a typical 80-character line -- a few GPU-seconds warm on an RTX 5090
+    # ($1.58/h), with a share of the 3.2 GB cold start kept in. Not measured; what RunPod really billed is logged
+    # per line from executionTime + delayTime.
+    "runpod/tts_chatterbox": Price("char", 0.00005, "Chatterbox Multilingual voice clone on a RunPod worker: about $0.004 an 80-character line (seconds warm, a cold start shared by the episode); not measured, a high figure kept"),
     # --- text and vision (appendix D)
     "gemini/flash-lite": Price("token", 0.0, "free tier"),
     "gemini/flash": Price("token", 0.0000003, "not in the appendix: Flash-class input tokens at about $0.30 per million on ai.google.dev pricing -- verify before relying on it"),

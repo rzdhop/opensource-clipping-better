@@ -194,9 +194,12 @@ GEN_PROVIDERS = {
         base_url="https://api.runpod.ai/v2",
         notes="Your own ComfyUI workflows (the local templates) on a RunPod Serverless GPU, billed per second "
               "while a clip or an image renders; the models live on a network volume (runbook 11-INFRA). "
-              "Images run on RUNPOD_IMAGE_ENDPOINT_ID when set (DEC-312), else on the video endpoint.",
+              "Images run on RUNPOD_IMAGE_ENDPOINT_ID when set (DEC-312), else on the video endpoint. "
+              "Voice lines (runpod/tts_chatterbox, plan 32) run on RUNPOD_AUDIO_ENDPOINT_ID, else the image "
+              "endpoint, else the video one.",
         optional_keys=("RUNPOD_GPU_USD_PER_HOUR", "RUNPOD_IMAGE_ENDPOINT_ID", "RUNPOD_IMAGE_API_KEY",
-                       "RUNPOD_IMAGE_GPU_USD_PER_HOUR"),
+                       "RUNPOD_IMAGE_GPU_USD_PER_HOUR", "RUNPOD_AUDIO_ENDPOINT_ID", "RUNPOD_AUDIO_API_KEY",
+                       "RUNPOD_AUDIO_GPU_USD_PER_HOUR"),
     ),
     # Documented extension point (spec 8.1): in the table with a price, not in a default chain.
     "gcloud": GenProvider(
@@ -225,7 +228,7 @@ KIND_PROVIDERS = {
     IMAGE: ("cloudflare", "pollinations", "local", "runpod", "fal", "openai", "gemini", "manual"),
     IMAGE_EDIT: ("local", "runpod", "gemini", "fal", "openai", "manual"),
     VIDEO: ("local", "runpod", "fal", "gemini", "manual"),
-    TTS: ("edge", "gemini", "local", "gcloud", "openai", "elevenlabs"),
+    TTS: ("edge", "gemini", "local", "gcloud", "openai", "elevenlabs", "runpod"),
     VISION: ("gemini", "openrouter", "local"),
     LIPSYNC: ("fal",),
 }

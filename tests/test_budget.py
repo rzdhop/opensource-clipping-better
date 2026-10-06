@@ -399,3 +399,20 @@ def test_old_reader_keeps_extra_keys_on_add(tmp_path):
     for key in ("extra", "grants", "zone"):
         assert after[key] == before[key]
     assert after["days"][spend.today()] == 0.2
+
+
+def test_the_own_gpu_profile_voices_on_the_runpod_clone_first_with_gemini_behind(tmp_path):
+    """Plan 32 stage 6: own_gpu names its TTS chain -- the RunPod clone of each
+    character's frozen reference, the Gemini voice it was made from behind --
+    and no other shipped profile names one. A tts_chain is checked for its shape."""
+    profiles = load_profiles()["profiles"]
+    assert profiles["own_gpu"]["tts_chain"] == ["runpod/tts_chatterbox", "gemini/flash-lite-tts"]
+    assert [name for name, profile in profiles.items() if "tts_chain" in profile] == ["own_gpu"]
+    path = tmp_path / "budget_profiles.json"
+    for chain in ([], "runpod/tts_chatterbox", ["runpod tts"], [3]):
+        broken = load_profiles()
+        broken["profiles"]["own_gpu"]["tts_chain"] = chain
+        path.write_text(json.dumps(broken), encoding="utf-8")
+        with pytest.raises(ValueError) as excinfo:
+            load_profiles(str(path))
+        assert "profile 'own_gpu': tts_chain must be a non-empty list of provider/model links" in str(excinfo.value)

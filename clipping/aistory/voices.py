@@ -187,6 +187,11 @@ def _chain_link(provider: str, voice_id: str) -> Link:
         return Link("elevenlabs", model)
     if provider in tts.LOCAL_ENGINES:
         return Link("local", provider)
+    if provider == voice_reference.CLONE_PROVIDER:
+        # Plan 32 stage 6: the character's reference cloned on the RunPod
+        # worker; the template is the model, the reference travels as
+        # ``GenRequest.references`` and the character's seed as ``seed``.
+        return Link(voice_reference.CLONE_PROVIDER, tts.RUNPOD_TTS_TEMPLATES[0])
     raise VoiceError(f"{provider!r} is not a TTS provider this module knows how to build a chain link for.")
 
 
@@ -597,6 +602,8 @@ def synthesize_sample(stories, story_id, char_id, *, env, on_log, cancel, adapte
             raise VoiceError(f"{name}'s voice is its own recording, but the file is missing; upload it again.",
                              alternates=alts())
         request.references = (path,)
+        if voice_reference.is_clone_voice(voice):
+            request.seed = tts.voice_seed(char_id)  # plan 32 stage 6: the character's fixed seed
 
     if adapters is None:
         adapters_mod.load_all()
@@ -851,7 +858,7 @@ def prosody_for(voice: dict, line: dict) -> tuple:
 
 def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASURE_STEP, adapters=None,
                     transport=None, cache=None, take=None, direction=None, line=None, v2=False,
-                    language=None, reference=None) -> dict:
+                    language=None, reference=None, seed=None) -> dict:
     """*text* spoken by the pinned *voice* (a character's ``voice`` block,
     or the narrator's) through a single-link chain built from that voice
     ALONE (DEC-122: never another provider, never another voice, never
@@ -915,6 +922,12 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
     ``chatterbox/reference`` and joins the request as ``references``; the
     cache's key follows the file's bytes, so a new recording speaks the lines
     again. None for that voice is a ``VoiceError``; any other voice ignores it.
+    A voice pinned to ``runpod/reference`` (plan 32 stage 6) needs it too.
+
+    *seed* (plan 32 stage 6: ``tts.voice_seed`` of the character's id) joins
+    the request as ``seed`` for a voice pinned to the RunPod clone, so every
+    line of the character is spoken on one seed; None, and any other voice,
+    leave the request exactly what it was.
     """
     label = voice_label(voice)
     if label is None:
@@ -938,6 +951,8 @@ def synthesize_line(gates, *, voice, text, dest_for, on_log, cancel, step=MEASUR
             raise VoiceError(f"{spoken} cannot speak: the character's voice recording is missing; upload it "
                              "again.")
         request.references = (reference,)
+        if seed is not None and voice_reference.is_clone_voice(voice):
+            request.seed = int(seed)
     if adapters is None:
         adapters_mod.load_all()
     journaled = {} if cache is None else {"cache": cache}
