@@ -63,6 +63,12 @@ CLIP_LENGTHS: dict[str, tuple[int, ...]] = {
     # 8 s forced at 1080p (ai.google.dev, read 2026-10-04).
     "gemini/veo-3.1-fast": (4, 6, 8),
     "gemini/veo-3.1": (4, 6, 8),
+    # DEC-310: the local templates on RunPod Serverless. The lengths are the
+    # templates' own ``frame_rule.lengths`` (tests/test_runpod_comfyui.py pins
+    # them to the JSON): Wan 2.2 makes 2-5 s, LTX-2 2-4 s at its 121-frame cap.
+    "runpod/i2v_wan22_5b": (2, 3, 4, 5),
+    "runpod/i2v_wan22_14b_lightning": (2, 3, 4, 5),
+    "runpod/i2v_ltx2": (2, 3, 4),
 }
 
 # Links kept parseable (an existing .env) and priced, but never sent: no silent swap.
@@ -84,6 +90,11 @@ AUDIO = {
     # CLIP_LENGTHS: the plan's lengths are targets (native_speech.SPEECH_LENGTHS),
     # the clip's real length is the shot's.
     "manual/upload": "optional",
+    # DEC-310: the templates render a silent clip (the local adapter says has_audio False; i2v_ltx2 keeps
+    # no audio node), so no runpod link ever carries the model's own sound.
+    "runpod/i2v_wan22_5b": "never",
+    "runpod/i2v_wan22_14b_lightning": "never",
+    "runpod/i2v_ltx2": "never",
 }
 # Plan 23 stage B7: the frames each link makes (``GenRequest.extra["aspect"]``,
 # absent = 9:16). Veo makes 9:16 and 16:9 (ai.google.dev; Higgsfield's Veo 3.1
@@ -102,6 +113,10 @@ ASPECTS = {
     "gemini/veo-3.1-fast": ("9:16", "16:9"),
     "gemini/veo-3.1": ("9:16", "16:9"),
     "manual/upload": ("9:16", "16:9"),
+    # DEC-310: the same 9:16-only workflow templates as local/comfyui, run on RunPod.
+    "runpod/i2v_wan22_5b": ("9:16",),
+    "runpod/i2v_wan22_14b_lightning": ("9:16",),
+    "runpod/i2v_ltx2": ("9:16",),
 }
 LOCAL_ASPECTS = ("9:16",)
 # Why a link cannot make a frame, by the kind of link.
@@ -110,10 +125,12 @@ _ASPECT_REASONS = {
     "ltx": "LTX makes 9:16 and 16:9 clips only",
     "manual": "Google Flow (the shot brief's platform) makes 9:16 and 16:9 clips only",
     "local": "a local ComfyUI workflow renders 9:16 clips only (v1)",
+    "runpod": "the ComfyUI workflow templates render 9:16 clips only (v1), on RunPod as locally",
 }
 
 # Only seedance takes a seed; kling and LTX (2.3, 2.5) have no field, Veo is "not deterministic".
-SEED_HONOURED = frozenset({"fal/seedance-1-pro-fast"})
+SEED_HONOURED = frozenset({"fal/seedance-1-pro-fast", "runpod/i2v_wan22_5b", "runpod/i2v_wan22_14b_lightning",
+                           "runpod/i2v_ltx2"})
 
 FAL_VIDEO_POLL_BUDGET_SECONDS = 600.0
 
@@ -213,7 +230,7 @@ def aspect_refusal(link, aspect) -> str | None:
         return None
     label = _label(link)
     provider, _, model = label.partition("/")
-    kind = "ltx" if model.startswith("ltx") else provider
+    kind = "ltx" if model.startswith("ltx") and provider != "runpod" else provider
     reason = _ASPECT_REASONS.get(kind, f"{label} makes 9:16 clips only")
     return f"{label} cannot make {aspect} clips: {reason}"
 
@@ -539,6 +556,14 @@ def _check_key(link, credentials, *, transport) -> dict:
         url = f"{images.GEMINI_BASE}/models/{endpoint}"
         headers = {"x-goog-api-key": credentials["GEMINI_PAID_API_KEY"]}
         key_name = "GEMINI_PAID_API_KEY"
+    elif link.provider == "runpod":
+        # DEC-310: the endpoint's /health (free): 401 is a refused key, 404 an endpoint id that is not
+        # this account's; the answer counts the workers (ready / idle / throttled), never a job.
+        from . import runpod_comfyui  # noqa: PLC0415 - sibling module; imported here to keep video.py's imports flat
+        endpoint = credentials["RUNPOD_COMFY_ENDPOINT_ID"]
+        url = runpod_comfyui.endpoint_url(endpoint, "health")
+        headers = runpod_comfyui.auth_headers(credentials["RUNPOD_API_KEY"])
+        key_name = "RUNPOD_API_KEY"
     else:
         raise ValueError(f"{label}: no key check for this video link")
     result = {"status": "failed", "text": "", "endpoint": endpoint, "price": None}
@@ -570,6 +595,14 @@ def _check_key(link, credentials, *, transport) -> dict:
         unit = f" per {price['unit']}" if price.get("unit") else ""
         result.update(status="ok", price=price, text=(f"{label}: fal accepted FAL_KEY; {endpoint} is live at "
                                                       f"{price['unit_price']} {price['currency']}{unit}."))
+        return result
+    if link.provider == "runpod":
+        workers = answer.get("workers") if isinstance(answer, dict) else None
+        counts = ", ".join(f"{k} {workers[k]}" for k in ("ready", "idle", "running", "throttled")
+                           if isinstance(workers, dict) and k in workers)
+        result.update(status="ok", text=(f"{label}: RunPod accepted RUNPOD_API_KEY and endpoint {endpoint} answers"
+                                         f"{' (workers ' + counts + ')' if counts else ''}; whether the models are "
+                                         "on its volume shows only on a request."))
         return result
     methods = answer.get("supportedGenerationMethods") if isinstance(answer, dict) else None
     result.update(status="ok", text=(f"{label}: Google accepted GEMINI_PAID_API_KEY and lists {endpoint}"

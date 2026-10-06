@@ -1706,7 +1706,7 @@ sent.
 | `fal/ltx-2.3-fast`, `fal/ltx-2.5-fast` | yes | yes | no |
 | Veo 3.1 (`lite`, `fast`, standard) | yes | yes | no |
 | Your own clips: Google Flow, Higgsfield | yes | yes | no |
-| Local ComfyUI clips | yes | no | no |
+| Local ComfyUI clips, and the same templates on RunPod (`runpod/…`) | yes | no | no |
 
 (Kling follows its keyframe's shape; seedance and LTX take `aspect_ratio`, Veo
 `aspectRatio`.) The form disables a frame a profile cannot make, with the
@@ -3643,8 +3643,10 @@ fal/kling-2.5-turbo-std, gemini/veo-3.1-lite, fal/ltx-2.5-fast
 | `fal/kling-2.5-turbo-std` | $0.21 for 5 s, then $0.042/extra s | 5 or 10 s |
 | `gemini/veo-3.1-lite` | $0.05/s at 720p; $0.08/s at 1080p (8 s only) | 4, 6 or 8 s |
 | `fal/ltx-2.5-fast` | $0.09/s at 720p; $0.16/s at 1080p | 6 to 20 s, even |
+| `runpod/i2v_wan22_14b_lightning` (not shipped; see "A rented GPU by the second") | $0.02/s, the templates' 480×832; GPU seconds billed, logged per clip | 2–5 s |
+| `runpod/i2v_wan22_5b`, `runpod/i2v_ltx2` (not shipped) | $0.012/s, $0.03/s (unmeasured, highest plausible) | 2–5 s, 2–4 s |
 
-Prices as of 2026-09-30 (LTX-2.5: 2026-10-04). Seedance's 720p price only
+Prices as of 2026-09-30 (LTX-2.5: 2026-10-04; RunPod: measured 2026-10-06). Seedance's 720p price only
 applies when 720p is requested explicitly — left unset, it defaults to 1080p
 at $0.049/s.
 Seedance and kling send no negative prompt; kling and veo take no seed.
@@ -4021,14 +4023,59 @@ an hourly GPU is not set up.
   `i2v_wan22_14b_lightning` for 16–24 GB, `i2v_ltx2` for 24 GB and more,
   silent), and each workflow's model files are named when missing.
 
-All three templates are still unverified against a real ComfyUI (the
-paragraph above): the first run on your machine is their first test, and
-`i2v_ltx2` makes silent clips only. **LTX-2.5** would make speaking clips
+`i2v_wan22_14b_lightning` ran on a real GPU on 2026-10-06 (the RunPod
+section below: an RTX 5090 pod, then an L40S serverless worker); the other
+two templates are still unverified against a real ComfyUI: the first run on
+your machine is their first test, and `i2v_ltx2` makes silent clips only. **LTX-2.5** would make speaking clips
 locally: its open weights carry native audio and need 16 GB of VRAM at least
 (24–32 GB for comfort), and Lightricks' licence is free below ten million
 dollars of annual revenue (read it before you rely on that). It would need a
 new template, `i2v_ltx25`, with the audio decode that `i2v_ltx2` lacks. That
 template is not written, because it cannot be tested until the box exists.
+
+### A rented GPU by the second (RunPod Serverless)
+
+Instead of a GPU box, the same three templates run on **RunPod Serverless**
+(DEC-310): a `runpod/worker-comfyui` endpoint with the model files on a
+RunPod network volume, billed per second only while a clip renders — idle
+costs nothing, and the A1 stays the app's host. It is a **paid** video link
+like fal or Veo, not a local one: every clip is booked, `allow_paid` must be
+on, the budget caps apply, and the planner prices it per second of output
+from the table (`runpod/i2v_wan22_14b_lightning` $0.02 a second, the highest
+figure measured). What RunPod really billed — the worker's GPU seconds, a
+cold start included — is logged per clip (`💸 RunPod: job … took 186 GPU-s =
+$0.082 at $1.58/h`) and kept in the clip's meta (`gpu_seconds`,
+`billed_usd`) when `RUNPOD_GPU_USD_PER_HOUR` is set.
+
+- The link names the template: `runpod/i2v_wan22_14b_lightning`,
+  `runpod/i2v_wan22_5b` or `runpod/i2v_ltx2`. None is in the shipped
+  `VIDEO_CHAIN`; name the one your volume carries in `.env` (the chains and
+  the RunPod ids are `.env` values, not Settings fields), for
+  example `VIDEO_CHAIN=local/comfyui,runpod/i2v_wan22_14b_lightning,fal/seedance-1-pro-fast`.
+- `RUNPOD_API_KEY` (a key restricted to Serverless) and
+  `RUNPOD_COMFY_ENDPOINT_ID` key the link; Settings' key check asks the
+  endpoint's `/health` (free) and reports its workers.
+- The keyframe travels inline (base64) with the rendered graph in one
+  `POST /run`; the job id is journaled the moment RunPod answers, polled on
+  `/status` and resumed by the next run if the poll budget (30 min) runs out
+  — never submitted twice. A job that ends `FAILED` is settled; a job RunPod
+  no longer knows (404 on its status) is voided and sent once more.
+- The clip comes back base64-encoded under the worker's `images` output,
+  because `worker-comfyui` only collects that key of the ComfyUI history —
+  which the core `SaveVideo` node reports under. A template ending in
+  `VHS_VideoCombine` returns nothing (`gifs`) and the run says so.
+- The volume's folders are the worker's: diffusion models under
+  `models/unet/`, text encoders under `models/clip/`, LoRAs under
+  `models/loras/`, VAEs under `models/vae/` — the names the templates'
+  `requires` list. Deploying the endpoint, filling the volume from a dev pod
+  and the measured costs are in the project runbook
+  (`11-INFRA-runpod-serverless-comfyui-runbook`).
+- Measured on 2026-10-06, a 720×1280 × 81-frame Wan 2.2 14B Lightning
+  clip: 186 GPU-s warm on an L40S (≈ $0.09), 300–340 GPU-s on a cold worker
+  (the 35 GB of weights read from the volume); the templates' 480×832
+  default is about 2.5× fewer pixels. An RTX 5090 worker is about twice as
+  fast when the datacenter has one free. `tools/runpod_smoke.py` sends one
+  clip through the adapter from the command line and prints the bill.
 
 ## Where your story lives on disk
 

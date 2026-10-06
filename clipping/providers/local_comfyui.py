@@ -17,9 +17,11 @@ a ``requires`` list of model files, and the reference slots (image edit) or a
 against the loader node's choices; a miss is refused with the list of what to
 install -- never a silent fallback to a hosted API.
 
-The video templates and :class:`ComfyUIVideoAdapter` (phase 6, stage 4) have
-never run on a GPU: they are proven against a fake ComfyUI only (A-035 stays
-open), and every template says so with ``"verified_live": false``.
+The video templates and :class:`ComfyUIVideoAdapter` (phase 6, stage 4) are
+proven against a fake ComfyUI; ``"verified_live"`` on each template says
+whether its graph has also run on a GPU. ``i2v_wan22_14b_lightning`` has
+(2026-10-06, on an RTX 5090 pod and through the RunPod adapter, DEC-310);
+the other two have not (A-035 stays open for them).
 """
 
 from __future__ import annotations

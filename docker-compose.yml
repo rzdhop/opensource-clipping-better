@@ -94,6 +94,12 @@ services:
       - VISION_CHAIN=${VISION_CHAIN:-}
       - LOCAL_COMFYUI_URL=${LOCAL_COMFYUI_URL:-}
       - LOCAL_OLLAMA_URL=${LOCAL_OLLAMA_URL:-}
+      # RunPod Serverless ComfyUI (DEC-310): the runpod/<template> video links.
+      # Listed here on purpose: a name missing from this block never reaches
+      # the container, whatever the host .env says (see LLM_CUSTOM_* above).
+      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
+      - RUNPOD_COMFY_ENDPOINT_ID=${RUNPOD_COMFY_ENDPOINT_ID:-}
+      - RUNPOD_GPU_USD_PER_HOUR=${RUNPOD_GPU_USD_PER_HOUR:-}
       - ALLOW_PAID=${ALLOW_PAID:-}
       - PER_EPISODE_CAP_USD=${PER_EPISODE_CAP_USD:-}
       - DAILY_CAP_USD=${DAILY_CAP_USD:-}
