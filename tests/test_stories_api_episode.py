@@ -116,6 +116,7 @@ def api(monkeypatch, tmp_path):
     from web.api.routes import jobs, stories
 
     monkeypatch.setenv("WEB_SETTINGS_FILE", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("SPEND_PATH", str(tmp_path / "spend.json"))  # never the checkout's real data/spend.json
     monkeypatch.setattr(worker, "_settings_env", dict(SETTINGS))
     monkeypatch.setattr(job_store, "_jobs", {})
     monkeypatch.setattr(job_store, "PERSIST_PATH", str(tmp_path / "jobs.json"))
