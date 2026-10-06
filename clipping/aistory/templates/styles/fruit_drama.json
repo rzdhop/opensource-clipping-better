@@ -6,12 +6,12 @@
     "en": "Fruit Drama",
     "fr": "Drame fruité"
   },
-  "rendering": "photorealistic 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render",
+  "rendering": "a stylised 3D cartoon animation in the manner of a Pixar feature — soft rounded forms, clean subsurface-lit fruit skin, big expressive eyes, warm key light and a soft rim, shallow depth of field, clean cinematic 9:16 framing; no photorealism, no live-action textures",
   "camera": "telenovela coverage: medium two-shots for dialogue, tight close-ups for reactions, slow push-in on reveals, 50mm look, shallow depth of field",
   "lighting": "warm key light with a soft cool fill, golden-hour or practical interior lamps, dramatic rim light on reveals",
-  "character_design_rules": "The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit identical in every image.",
+  "character_design_rules": "The head is one recognisable whole fruit or vegetable at human head scale, never a human head, never a mask; the face (big expressive eyes, expressive brows, a mouth) is drawn on its surface, not pasted on. Bodies are cartoon bodies with simple clothes that carry the character's signature items and tell their social status (a torn tee and backpack vs a black suit and tie); four-fingered or gloved hands are fine, never fruit hands. Keep exact fruit species, ripeness, colour and outfit identical in every image.",
   "environment_rules": "sets staged like a reality-TV villa — manor gates, gravel courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, a pool, confessional corners, restaurants, bold set dressing — rendered as a stylised 3D animated set, never photographed, never live-action, props at human scale; exteriors in golden hour, interiors cold blue-grey with warm candle or lamp practicals",
-  "negative_prompt": "cartoon, 2D, flat shading, anime, fruit with stick limbs, fruit bowl, food photography, human head",
+  "negative_prompt": "photorealistic, live action, photo, real human skin, human head, mask, costume, 2D flat, sketch, watermark, text, deformed hands, extra limbs, lowres, blurry",
   "sheet_background": "light grey",
   "quality_tail": "ultra detailed, 8k, sharp focus",
   "palette": {

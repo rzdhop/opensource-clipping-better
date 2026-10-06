@@ -42,7 +42,8 @@ ITEMS = ["thin gold chain", "left-eyebrow scar"]
 
 # The prompt of a Fruit Drama character at the two-view budget (260 words), as the story's cast would
 # ask it: the skeleton, the style's rendering and the style's design rules.
-TWO_VIEW_FRUIT_DRAMA = "315a71c919211ae48ce17e5a08dc2297e451f0c9d0d4535c2d4476d8a8bc5094"
+# re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
+TWO_VIEW_FRUIT_DRAMA = "7aefc750e0b2dc6b9330c796dc9d1409c2755f9c5cbcd382ce25f42812d90ff5"
 
 
 def _sha(text):
@@ -134,7 +135,8 @@ def test_the_two_view_prompt_is_the_creators_template_through_the_sheet_budget()
             "chibi. Vertical 9:16. Clean frame: no captions, lettering, logos or watermarks; the same single "
             "character throughout.") in prompt
     # The style fills what the budget leaves: the rendering, then the design rules.
-    assert "Style: photorealistic 3D render" in prompt and "The head is one recognisable whole fruit" in prompt
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
+    assert "Style: a stylised 3D cartoon animation" in prompt and "The head is one recognisable whole fruit" in prompt
     assert len(prompt.split()) <= prompting.TWO_VIEW_V2_MAX_WORDS
     assert ".," not in prompt and ".." not in prompt and "  " not in prompt
     assert _sha(prompt) == TWO_VIEW_FRUIT_DRAMA, prompt

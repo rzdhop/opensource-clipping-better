@@ -560,11 +560,16 @@ VARIANTS_INPUT_BUDGET = {"N1v2": 4160}
 # 2,125, P1 2,582, R1 2,728, S1 3,152, S1v2 3,568, S2 3,221, D1 3,896, D2
 # 3,004, D3 2,797, R1v2 2,100, D4 2,482, D5 4,058, D6 3,610. K1, S1v2, D1, D5 and D6's
 # budgets pass the spec's 4,000 like J1v3 and E3v3 -- nothing is trimmed to fit.
+# Re-measured for plan 32 stage 3 (DEC-315: fruit_drama's look is a Pixar-style
+# cartoon, a shorter rendering and its block 16 tokens shorter, 613 -> 597): C1v2
+# 2,232, C1J 1,891, B1 1,955, B1v3 2,055, B2 2,360, B3 2,619, K1 3,643, P0 2,109,
+# P1 2,566, R1 2,712, S1 3,136, S1v2 3,551, S2 3,204, D1 3,879, D2 3,072, D3 2,865,
+# R1v2 2,168, D4 2,465, D5 4,042, D6 3,594 (tests/test_story_setup_context.py).
 # Kept beside INPUT_BUDGET for the same reason as the writing-v3 rows (its
 # rows, in order, are pinned by the RC-M1 file).
-SETUP_INPUT_BUDGET = {"C1v2": 2590, "C1J": 2200, "B1": 2270, "B1v3": 2390, "B2": 2740, "B3": 3040,
-                      "K1": 4200, "P0": 2450, "P1": 2970, "R1": 3140, "S1": 3630, "S1v2": 4110, "S2": 3710,
-                      "D1": 4490, "D2": 3540, "D3": 3320, "R1v2": 2520, "D4": 2860, "D5": 4670, "D6": 4160}
+SETUP_INPUT_BUDGET = {"C1v2": 2570, "C1J": 2180, "B1": 2250, "B1v3": 2370, "B2": 2720, "B3": 3020,
+                      "K1": 4190, "P0": 2430, "P1": 2960, "R1": 3120, "S1": 3610, "S1v2": 4090, "S2": 3690,
+                      "D1": 4470, "D2": 3540, "D3": 3300, "R1v2": 2500, "D4": 2840, "D5": 4650, "D6": 4140}
 
 
 def carries_setup(user) -> bool:

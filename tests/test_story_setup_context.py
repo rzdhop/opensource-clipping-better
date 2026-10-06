@@ -45,6 +45,7 @@ FRUIT_STORY = {
 }
 LEGACY_STORY = dict(FRUIT_STORY, generation_profile={"tier": 1})
 
+# re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
 FRUIT_BLOCK = (
     "SERIES SET-UP (binding: everything you write must fit it)\n"
     "SERIES: Title: Cœurs Sous Clé. A serialized vertical drama of 8 episodes, written in French. Logline: Un "
@@ -55,10 +56,10 @@ FRUIT_BLOCK = (
     "stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; "
     "cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands; "
     "only their traits and manners are human. Smooth CGI surfaces; never a human face, never real human skin, never "
-    "a mask or costume on a person; no live-action footage, no real people, no photographs. Rendering: stylised, "
-    "high-end 3D render of anthropomorphic fruits and vegetables with expressive human-like faces (eyes, brows, "
-    "mouths) on realistic fruit heads, human-proportioned bodies in real fabric outfits, subsurface scattering on "
-    "fruit skin, visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-style render. "
+    "a mask or costume on a person; no live-action footage, no real people, no photographs. Rendering: a stylised "
+    "3D cartoon animation in the manner of a Pixar feature — soft rounded forms, clean subsurface-lit fruit skin, "
+    "big expressive eyes, warm key light and a soft rim, shallow depth of field, clean cinematic 9:16 framing; no "
+    "photorealism, no live-action textures. "
     "Palette: saturated natural fruit colours against warm neutral sets. Never use neon green or hot pink "
     "backgrounds.\n"
     "UNIVERSE: Fruits -- every character is an anthropomorphic fruit; each head is one whole fruit at human head "
@@ -237,10 +238,13 @@ def test_the_concepts_step_sends_the_block_to_c1v2_and_c1j_and_fixes_style_fit(t
 # Re-recorded on purpose (plan 29 stage 4, DEC-308 point 4): the look writers' asks gained the description line:
 # D2 3004 -> 3077, D3 2797 -> 2882, R1v2 2100 -> 2185; SETUP_INPUT_BUDGET 3460 -> 3540, 3220 -> 3320, 2420 -> 2520.
 
+# Re-recorded on purpose (plan 32 stage 3, DEC-315): fruit_drama's look is the Pixar-style cartoon, 16 tokens
+# shorter than the photoreal prose in the block (613 -> 597); every figure below fell by that, D2 (the worst of
+# all styles) and K1 (the hexes) by less, and each SETUP_INPUT_BUDGET row follows by the rule above.
 MEASURED_SETUP = {
-    "C1v2": 2249, "C1J": 1908, "B1": 1972, "B1v3": 2072, "B2": 2376, "B3": 2636,
-    "K1": 3646, "P0": 2125, "P1": 2582, "R1": 2728, "S1": 3152, "S1v2": 3568, "S2": 3221,
-    "D1": 3896, "D2": 3077, "D3": 2882, "R1v2": 2185, "D4": 2482, "D5": 4058, "D6": 3610,
+    "C1v2": 2232, "C1J": 1891, "B1": 1955, "B1v3": 2055, "B2": 2360, "B3": 2619,
+    "K1": 3643, "P0": 2109, "P1": 2566, "R1": 2712, "S1": 3136, "S1v2": 3551, "S2": 3204,
+    "D1": 3879, "D2": 3072, "D3": 2865, "R1v2": 2168, "D4": 2465, "D5": 4042, "D6": 3594,
 }
 
 
@@ -434,7 +438,7 @@ def test_the_worst_block_is_the_fruit_style_on_the_confrontation_format():
     block = worst_block(hexes=True)
     assert "ART STYLE: Fruit Drama." in block and "PALETTE COLOURS:" in block
     assert "Each episode is one continuous scene in one place, in real time." in block
-    assert estimate_tokens(block) == 613
+    assert estimate_tokens(block) == 597
 
 
 @pytest.mark.parametrize("prompt_id", list(MEASURED_SETUP))

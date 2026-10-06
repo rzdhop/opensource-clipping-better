@@ -37,6 +37,8 @@ NOW = tas.NOW
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 STORY_SRC = ROOT / "web" / "dashboard" / "src" / "pages" / "story"
 # Every clip prompt of the fixtures' stories as ``main`` built them before this stage (studio).
+# re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315): only the clips'
+# negative prompts and the hashes they feed moved (no prompt text did).
 GOLDEN = ROOT / "tests" / "fixtures" / "aistory_action_prompts" / "studio_prompts.json"
 FAST, LITE, VEO = nsc.FAST, nsc.LITE, "gemini/veo-3.1-lite"
 NOTES = (None, "Slower push-in on the face")

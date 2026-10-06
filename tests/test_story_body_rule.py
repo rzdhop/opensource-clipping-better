@@ -31,12 +31,13 @@ NOW = "2026-10-04T10:00:00+00:00"
 LATER = "2026-10-04T11:00:00+00:00"
 
 # Fruit Drama's character_design_rules, as every locked Fruit Drama style carries them.
+# re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
 FRUIT_DRAMA_RULES = (
-    "The head is one recognisable whole fruit or vegetable at human head scale; the face (eyes, brows, mouth with "
-    "teeth) is carved into its surface, not pasted on. Bodies are human, dressed in realistic contemporary clothes "
-    "that carry the character's signature items and tell their social status (a torn tee and backpack vs a black "
-    "suit and tie). No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit "
-    "identical in every image.")
+    "The head is one recognisable whole fruit or vegetable at human head scale, never a human head, never a mask; "
+    "the face (big expressive eyes, expressive brows, a mouth) is drawn on its surface, not pasted on. Bodies are "
+    "cartoon bodies with simple clothes that carry the character's signature items and tell their social status "
+    "(a torn tee and backpack vs a black suit and tie); four-fingered or gloved hands are fine, never fruit hands. "
+    "Keep exact fruit species, ripeness, colour and outfit identical in every image.")
 MATERIAL = ("the character's own fruit or vegetable flesh with hyper-detailed natural texture, subsurface "
             "scattering, pores, seeds, juice reflections and small imperfections")
 ALL_MATTER = (
@@ -193,8 +194,10 @@ def test_the_all_matter_rules_reach_a_sheet_prompt_when_the_budget_allows_and_th
     for builder, kwargs in ((prompting.two_view_prompt_v2, {}), (prompting.portrait_prompt_v2, {"budget": 220})):
         plain = builder(human, look_text=look, signature_items=["gold chain"], **kwargs)
         made = builder(matter, look_text=look, signature_items=["gold chain"], **kwargs)
-        assert "Bodies are human" in plain and "no human skin anywhere" not in plain
-        assert "is made of the character's own fruit or vegetable flesh" in made and "Bodies are human" not in made
+        # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
+        assert "Bodies are cartoon bodies" in plain and "no human skin anywhere" not in plain
+        assert ("is made of the character's own fruit or vegetable flesh" in made
+                and "Bodies are cartoon bodies" not in made)
     # The three-sheet prompts of a human-bodied style are byte for byte what the template's rules give.
     portrait = prompting.portrait_prompt_v2(human, look_text=look, signature_items=["gold chain"])
     assert portrait == prompting.portrait_prompt_v2(

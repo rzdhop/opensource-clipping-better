@@ -316,9 +316,10 @@ def test_style_template_palette_hexes_match_the_spec(template_id):
 # regex-based extraction above, so a bug in that extraction would not hide a
 # real drift from both tests at once.
 _KEY_PHRASES = {
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
     "fruit_drama": [
-        ("rendering", "subsurface scattering on fruit skin"),
-        ("character_design_rules", "No hands as fruit"),
+        ("rendering", "in the manner of a Pixar feature"),
+        ("character_design_rules", "never a human head, never a mask"),
     ],
     "family_3d": [
         ("character_design_rules", "the environment stays muted"),

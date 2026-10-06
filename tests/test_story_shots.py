@@ -437,26 +437,35 @@ def test_resolve_shot_golden_two_shot_fruit_drama():
     resolved = shots.resolve_shot(plan, scene=scene, entities=ENTITIES, style_lock=FRUIT_DRAMA,
                                   consistency_mode="references")
     expected = (
-        "an anthropomorphic kiwi with fuzzy brown skin and bright green flesh visible at the mouth, wearing "
-        "thin gold chain, white linen shirt, left-eyebrow scar. an anthropomorphic broccoli with tightly "
-        "clustered dark green florets and a sturdy stalk, wearing crystal rhinestone headband, emerald "
-        "velvet gown. the anthropomorphic kiwi speaks, angry, facing the anthropomorphic broccoli. "
-        "Setting: a luxurious turquoise swimming pool surrounded by white wooden "
-        "loungers and glowing tiki torches. Crystal-clear water fills the foreground. Bamboo loungers sit "
-        "to the left. A tiki bar stands to the right. Dense jungle foliage closes the background, day. "
-        "Style: photorealistic 3D render of anthropomorphic fruits and vegetables with expressive "
-        "human-like faces (eyes, brows, mouths) on realistic fruit heads, human-proportioned bodies in "
-        "real fabric outfits, subsurface scattering on fruit skin, visible pores and fuzz, glossy "
-        "highlights, high-end CGI commercial quality, Octane-style render. Palette: saturated natural "
-        "fruit colours against warm neutral sets. The head is one recognisable whole fruit or vegetable "
-        "at human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface, not "
-        "pasted on. Bodies are human, dressed in realistic contemporary clothes that carry the character's "
-        "signature items and tell their social status (a torn tee and backpack vs a black suit and tie). "
-        "No hands as fruit — hands are human. Keep exact fruit species, ripeness, colour and outfit "
-        "identical in every image. Camera: medium two-shot, both characters waist-up, 50mm look, shallow "
-        "depth of field. Lighting: warm key light with a soft cool fill, golden-hour or practical interior "
-        "lamps, dramatic rim light on reveals. Vertical 9:16 composition, subject kept in the central safe "
-        "area (leave the bottom 22% free of faces for subtitles). ultra detailed, 8k, sharp focus"
+        # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
+        "an anthropomorphic kiwi with fuzzy brown skin and bright green flesh "
+        "visible at the mouth, wearing thin gold chain, white linen shirt, "
+        "left-eyebrow scar. an anthropomorphic broccoli with tightly clustered "
+        "dark green florets and a sturdy stalk, wearing crystal rhinestone "
+        "headband, emerald velvet gown. the anthropomorphic kiwi speaks, "
+        "angry, facing the anthropomorphic broccoli. Setting: a luxurious "
+        "turquoise swimming pool surrounded by white wooden loungers and "
+        "glowing tiki torches. Crystal-clear water fills the foreground. "
+        "Bamboo loungers sit to the left. A tiki bar stands to the right. "
+        "Dense jungle foliage closes the background, day. Style: a stylised 3D "
+        "cartoon animation in the manner of a Pixar feature — soft rounded "
+        "forms, clean subsurface-lit fruit skin, big expressive eyes, warm key "
+        "light and a soft rim, shallow depth of field, clean cinematic 9:16 "
+        "framing; no photorealism, no live-action textures. Palette: saturated "
+        "natural fruit colours against warm neutral sets. The head is one "
+        "recognisable whole fruit or vegetable at human head scale, never a "
+        "human head, never a mask; the face (big expressive eyes, expressive "
+        "brows, a mouth) is drawn on its surface, not pasted on. Bodies are "
+        "cartoon bodies with simple clothes that carry the character's "
+        "signature items and tell their social status (a torn tee and backpack "
+        "vs a black suit and tie); four-fingered or gloved hands are fine, "
+        "never fruit hands. Keep exact fruit species, ripeness, colour and "
+        "outfit identical in every image. Camera: medium two-shot, both "
+        "characters waist-up, 50mm look, shallow depth of field. Lighting: "
+        "warm key light with a soft cool fill, golden-hour or practical "
+        "interior lamps, dramatic rim light on reveals. Vertical 9:16 "
+        "composition, subject kept in the central safe area (leave the bottom "
+        "22% free of faces for subtitles). ultra detailed, 8k, sharp focus"
     )
     assert resolved["image_prompt"] == expected
 
@@ -1074,9 +1083,11 @@ def test_build_storyboard_previous_bumps_rev_and_keeps_created_at():
 # indent=2) for the two builds below, as the code before stable shot ids
 # (main 5dfc598) made them -- a storyboard built with no previous board is
 # byte-identical to what it always was (RC-M3).
+# re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315): only each shot's
+# image_prompt and negative_prompt moved (fast ade94e03... -> 5ab6da35..., v2 1b60b21c... -> 0c5b211d...).
 _NO_PREVIOUS_GOLDEN = {
-    "fast": "ade94e03d1b84a2a30edaa585ba95ea0bd895cdc8df96f6493e73722dd40f28e",
-    "v2": "1b60b21c5f5a6e9ce62580e85bfb90f61585a96c5649d06dfb0167722d5c74fc",
+    "fast": "5ab6da35317af74533f88da02dff3f19175697853494b2bd385fc1ca06279e11",
+    "v2": "0c5b211da481fd2e95f661a761090cb951ddcf92b626371eab7a4365473dc1a0",
 }
 
 

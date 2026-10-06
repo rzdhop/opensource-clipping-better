@@ -69,7 +69,8 @@ def test_a_fruit_story_s_plate_and_prop_are_sent_empty_while_its_sheet_keeps_its
     assert "built for two people, shown with no one in it" in plate and "fitting" not in plate
     assert plate.endswith(prompting._CONSTRAINTS_NO_PEOPLE)
 
-    assert fruit_people in sheet and "anthropomorphic" in sheet
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315): the look no longer says "anthropomorphic"; the design rules still draw the fruit head.
+    assert fruit_people in sheet and "one recognisable whole fruit or vegetable" in sheet
     assert prompting.PLATE_EMPTY not in sheet and prompting.PROP_ALONE not in sheet
 
     # A lock that records its universe: the sheet says what every character is, the plate does not.

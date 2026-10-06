@@ -12,7 +12,9 @@ shots fixtures (three-sheet and two-view, with and without the continuity
 slot), and a whole native-speech episode's keyframe request parts (prompt,
 hash, references), clip request parts (prompt, hash), brief references and
 J2 sheets, in references mode with every image on disk. It is never
-re-recorded: a story without variants must give exactly these (a keyframe
+re-recorded for a change in the variants code (re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon
+look of fruit_drama, DEC-315, once -- only the style text in the keyframe prompts and the negatives, and the
+hashes they feed, moved): a story without variants must give exactly these (a keyframe
 hash or a clip hash that moves makes a stored image or clip stale, and a
 gencache key that moves buys it again), so a difference is a bug in the
 change, not a new pin.

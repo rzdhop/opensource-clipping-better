@@ -54,26 +54,28 @@ def test_shot_prompt_fruit_drama_golden():
         framing="medium_two_shot",
     )
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "an anthropomorphic kiwi in a white linen shirt faces a mango in a red "
-        "dress. the kiwi holds up a signed contract. Setting: the manor's gravel courtyard, late afternoon golden "
-        "hour. Style: photorealistic 3D render of anthropomorphic fruits and "
-        "vegetables with expressive human-like faces (eyes, brows, mouths) on "
-        "realistic fruit heads, human-proportioned bodies in real fabric outfits, "
-        "subsurface scattering on fruit skin, visible pores and fuzz, glossy "
-        "highlights, high-end CGI commercial quality, Octane-style render. "
-        "Palette: saturated natural fruit colours against warm neutral sets. "
-        "The head is one recognisable whole fruit or vegetable at human head "
-        "scale; the face (eyes, brows, mouth with teeth) is carved into its "
-        "surface, not pasted on. Bodies are human, dressed in realistic "
-        "contemporary clothes that carry the character's signature items and "
-        "tell their social status (a torn tee and backpack vs a black suit and "
-        "tie). No hands as fruit — hands are human. Keep exact fruit species, "
-        "ripeness, colour and outfit identical in every image. Camera: medium "
-        "two-shot, both characters waist-up, 50mm look, shallow depth of field. "
-        "Lighting: warm key light with a soft cool fill, golden-hour or practical "
-        "interior lamps, dramatic rim light on reveals. Vertical 9:16 composition, "
-        "subject kept in the central safe area (leave the bottom 22% free of "
-        "faces for subtitles). ultra detailed, 8k, sharp focus"
+        "dress. the kiwi holds up a signed contract. Setting: the manor's "
+        "gravel courtyard, late afternoon golden hour. Style: a stylised 3D "
+        "cartoon animation in the manner of a Pixar feature — soft rounded "
+        "forms, clean subsurface-lit fruit skin, big expressive eyes, warm key "
+        "light and a soft rim, shallow depth of field, clean cinematic 9:16 "
+        "framing; no photorealism, no live-action textures. Palette: saturated "
+        "natural fruit colours against warm neutral sets. The head is one "
+        "recognisable whole fruit or vegetable at human head scale, never a "
+        "human head, never a mask; the face (big expressive eyes, expressive "
+        "brows, a mouth) is drawn on its surface, not pasted on. Bodies are "
+        "cartoon bodies with simple clothes that carry the character's "
+        "signature items and tell their social status (a torn tee and backpack "
+        "vs a black suit and tie); four-fingered or gloved hands are fine, "
+        "never fruit hands. Keep exact fruit species, ripeness, colour and "
+        "outfit identical in every image. Camera: medium two-shot, both "
+        "characters waist-up, 50mm look, shallow depth of field. Lighting: "
+        "warm key light with a soft cool fill, golden-hour or practical "
+        "interior lamps, dramatic rim light on reveals. Vertical 9:16 "
+        "composition, subject kept in the central safe area (leave the bottom "
+        "22% free of faces for subtitles). ultra detailed, 8k, sharp focus"
     )
     assert result == expected
 
@@ -113,8 +115,10 @@ def test_negative_prompt_fruit_drama_golden():
         "text, watermark, logo, signature, extra limbs, extra fingers, deformed "
         "hands, duplicated character, cropped face, blurry, low resolution, jpeg "
         "artifacts, out of frame, split screen, collage, frame border, caption, "
-        "cartoon, 2D, flat shading, anime, fruit with stick limbs, fruit bowl, "
-        "food photography, human head"
+        # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
+        "photorealistic, live action, photo, real human skin, human head, mask, "
+        "costume, 2D flat, sketch, watermark, text, deformed hands, extra limbs, "
+        "lowres, blurry"
     )
     assert prompting.negative_prompt(FRUIT_DRAMA) == expected
 
@@ -124,22 +128,24 @@ def test_portrait_prompt_fruit_drama_golden():
         FRUIT_DRAMA, descriptor=DESCRIPTOR, signature_items=SIGNATURE_ITEMS
     )
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "Character portrait, an anthropomorphic kiwi with fuzzy brown skin and "
-        "bright green flesh visible at the mouth, wearing thin gold chain, white "
-        "linen shirt, left-eyebrow scar. Neutral expression, looking at camera, "
-        "three-quarter view, chest-up. photorealistic 3D render of anthropomorphic "
-        "fruits and vegetables with expressive human-like faces (eyes, brows, "
-        "mouths) on realistic fruit heads, human-proportioned bodies in real "
-        "fabric outfits, subsurface scattering on fruit skin, visible pores and "
-        "fuzz, glossy highlights, high-end CGI commercial quality, Octane-style "
-        "render. The head is one recognisable whole fruit or vegetable at human "
-        "head scale; the face (eyes, brows, mouth with teeth) is carved into its "
-        "surface, not pasted on. Bodies are human, dressed in realistic "
-        "contemporary clothes that carry the character's signature items and "
-        "tell their social status (a torn tee and backpack vs a black suit and "
-        "tie). No hands as fruit — hands are human. Keep exact fruit species, "
-        "ripeness, colour and outfit identical in every image. Plain light grey "
-        "background, even soft studio lighting, no props, no text. Vertical 9:16."
+        "bright green flesh visible at the mouth, wearing thin gold chain, "
+        "white linen shirt, left-eyebrow scar. Neutral expression, looking at "
+        "camera, three-quarter view, chest-up. a stylised 3D cartoon animation "
+        "in the manner of a Pixar feature — soft rounded forms, clean "
+        "subsurface-lit fruit skin, big expressive eyes, warm key light and a "
+        "soft rim, shallow depth of field, clean cinematic 9:16 framing; no "
+        "photorealism, no live-action textures. The head is one recognisable "
+        "whole fruit or vegetable at human head scale, never a human head, "
+        "never a mask; the face (big expressive eyes, expressive brows, a "
+        "mouth) is drawn on its surface, not pasted on. Bodies are cartoon "
+        "bodies with simple clothes that carry the character's signature items "
+        "and tell their social status (a torn tee and backpack vs a black suit "
+        "and tie); four-fingered or gloved hands are fine, never fruit hands. "
+        "Keep exact fruit species, ripeness, colour and outfit identical in "
+        "every image. Plain light grey background, even soft studio lighting, "
+        "no props, no text. Vertical 9:16."
     )
     assert result == expected
 
@@ -149,24 +155,25 @@ def test_turnaround_prompt_fruit_drama_golden():
         FRUIT_DRAMA, descriptor=DESCRIPTOR, signature_items=SIGNATURE_ITEMS
     )
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "Character design turnaround sheet of the same character: an "
         "anthropomorphic kiwi with fuzzy brown skin and bright green flesh "
-        "visible at the mouth, thin gold chain, white linen shirt, left-eyebrow "
-        "scar. Four full-body views side by side in one row: front, "
-        "three-quarter, profile, back. Identical proportions and outfit in "
-        "every view. photorealistic 3D render of anthropomorphic fruits and "
-        "vegetables with expressive human-like faces (eyes, brows, mouths) on "
-        "realistic fruit heads, human-proportioned bodies in real fabric "
-        "outfits, subsurface scattering on fruit skin, visible pores and fuzz, "
-        "glossy highlights, high-end CGI commercial quality, Octane-style "
-        "render. The head is one recognisable whole fruit or vegetable at human "
-        "head scale; the face (eyes, brows, mouth with teeth) is carved into its "
-        "surface, not pasted on. Bodies are human, dressed in realistic "
-        "contemporary clothes that carry the character's signature items and "
-        "tell their social status (a torn tee and backpack vs a black suit and "
-        "tie). No hands as fruit — hands are human. Keep exact fruit species, "
-        "ripeness, colour and outfit identical in every image. Plain light grey "
-        "background, flat even lighting, no text, no labels."
+        "visible at the mouth, thin gold chain, white linen shirt, "
+        "left-eyebrow scar. Four full-body views side by side in one row: "
+        "front, three-quarter, profile, back. Identical proportions and outfit "
+        "in every view. a stylised 3D cartoon animation in the manner of a "
+        "Pixar feature — soft rounded forms, clean subsurface-lit fruit skin, "
+        "big expressive eyes, warm key light and a soft rim, shallow depth of "
+        "field, clean cinematic 9:16 framing; no photorealism, no live-action "
+        "textures. The head is one recognisable whole fruit or vegetable at "
+        "human head scale, never a human head, never a mask; the face (big "
+        "expressive eyes, expressive brows, a mouth) is drawn on its surface, "
+        "not pasted on. Bodies are cartoon bodies with simple clothes that "
+        "carry the character's signature items and tell their social status (a "
+        "torn tee and backpack vs a black suit and tie); four-fingered or "
+        "gloved hands are fine, never fruit hands. Keep exact fruit species, "
+        "ripeness, colour and outfit identical in every image. Plain light "
+        "grey background, flat even lighting, no text, no labels."
     )
     assert result == expected
 
@@ -176,17 +183,17 @@ def test_expressions_prompt_fruit_drama_golden():
         FRUIT_DRAMA, descriptor=DESCRIPTOR, signature_items=SIGNATURE_ITEMS
     )
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "Expression sheet of the same character: an anthropomorphic kiwi with "
-        "fuzzy brown skin and bright green flesh visible at the mouth, thin gold "
-        "chain, white linen shirt, left-eyebrow scar. Six head-and-shoulders "
-        "portraits in a 3x2 grid: neutral, happy, angry, shocked, sad, scheming. "
-        "Same face, same outfit, same lighting in every cell. photorealistic 3D "
-        "render of anthropomorphic fruits and vegetables with expressive "
-        "human-like faces (eyes, brows, mouths) on realistic fruit heads, "
-        "human-proportioned bodies in real fabric outfits, subsurface scattering "
-        "on fruit skin, visible pores and fuzz, glossy highlights, high-end CGI "
-        "commercial quality, Octane-style render. Plain light grey background, "
-        "no text."
+        "fuzzy brown skin and bright green flesh visible at the mouth, thin "
+        "gold chain, white linen shirt, left-eyebrow scar. Six "
+        "head-and-shoulders portraits in a 3x2 grid: neutral, happy, angry, "
+        "shocked, sad, scheming. Same face, same outfit, same lighting in "
+        "every cell. a stylised 3D cartoon animation in the manner of a Pixar "
+        "feature — soft rounded forms, clean subsurface-lit fruit skin, big "
+        "expressive eyes, warm key light and a soft rim, shallow depth of "
+        "field, clean cinematic 9:16 framing; no photorealism, no live-action "
+        "textures. Plain light grey background, no text."
     )
     assert result == expected
 
@@ -198,6 +205,7 @@ def test_master_plate_prompt_fruit_drama_golden():
         time_variant="late afternoon golden hour",
     )
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "Establishing wide shot of the manor's gravel courtyard with wrought "
         "iron gates, late afternoon golden hour, no people, no characters. "
         # Re-pinned on purpose (DEC-305, plan 28): fruit_drama's environment_rules said "photographed like a
@@ -210,17 +218,16 @@ def test_master_plate_prompt_fruit_drama_golden():
         "blue-grey with "
         # Re-pinned on purpose (DEC-220, phase 7 stage 1): environment_rules now
         # ends with a period before the rendering text.
-        "warm candle or lamp practicals. photorealistic 3D render of "
-        "anthropomorphic fruits and vegetables with expressive human-like faces "
-        "(eyes, brows, mouths) on realistic fruit heads, human-proportioned "
-        "bodies in real fabric outfits, subsurface scattering on fruit skin, "
-        "visible pores and fuzz, glossy highlights, high-end CGI commercial "
-        "quality, Octane-style render. Palette: saturated natural fruit colours "
-        "against warm neutral sets. Camera: wide, eye level, 24mm equivalent. "
-        "Lighting: warm key light with a soft cool fill, golden-hour or "
-        "practical interior lamps, dramatic rim light on reveals. Vertical "
-        "9:16, horizon in the upper third, foreground detail in the lower "
-        "third. ultra detailed, 8k, sharp focus"
+        "warm candle or lamp practicals. a stylised 3D cartoon animation in "
+        "the manner of a Pixar feature — soft rounded forms, clean "
+        "subsurface-lit fruit skin, big expressive eyes, warm key light and a "
+        "soft rim, shallow depth of field, clean cinematic 9:16 framing; no "
+        "photorealism, no live-action textures. Palette: saturated natural "
+        "fruit colours against warm neutral sets. Camera: wide, eye level, "
+        "24mm equivalent. Lighting: warm key light with a soft cool fill, "
+        "golden-hour or practical interior lamps, dramatic rim light on "
+        "reveals. Vertical 9:16, horizon in the upper third, foreground detail "
+        "in the lower third. ultra detailed, 8k, sharp focus"
     )
     assert result == expected
 
@@ -417,16 +424,17 @@ def test_character_prompt_block_is_pure_and_deterministic():
         FRUIT_DRAMA, descriptor=DESCRIPTOR, signature_items=list(SIGNATURE_ITEMS)
     )
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "an anthropomorphic kiwi with fuzzy brown skin and bright green flesh "
         "visible at the mouth, wearing thin gold chain, white linen shirt, "
         "left-eyebrow scar. The head is one recognisable whole fruit or "
-        "vegetable at human head scale; the face (eyes, brows, mouth with "
-        "teeth) is carved into its surface, not pasted on. Bodies are human, "
-        "dressed in realistic contemporary clothes that carry the character's "
-        "signature items and tell their social status (a torn tee and backpack "
-        "vs a black suit and tie). No hands as fruit — hands are human. Keep "
-        "exact fruit species, ripeness, colour and outfit identical in every "
-        "image."
+        "vegetable at human head scale, never a human head, never a mask; the "
+        "face (big expressive eyes, expressive brows, a mouth) is drawn on its "
+        "surface, not pasted on. Bodies are cartoon bodies with simple clothes "
+        "that carry the character's signature items and tell their social "
+        "status (a torn tee and backpack vs a black suit and tie); "
+        "four-fingered or gloved hands are fine, never fruit hands. Keep exact "
+        "fruit species, ripeness, colour and outfit identical in every image."
     )
     assert result1 == result2 == expected
 
@@ -488,13 +496,13 @@ PROP_DESCRIPTOR = "a small tarnished brass telephone shaped like a hollowed coco
 def test_prop_prompt_block_fruit_drama_golden():
     result = prompting.prop_prompt_block(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR)
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "a small tarnished brass telephone shaped like a hollowed coconut "
-        "shell. photorealistic 3D render of anthropomorphic fruits and "
-        "vegetables with expressive human-like faces (eyes, brows, mouths) "
-        "on realistic fruit heads, human-proportioned bodies in real fabric "
-        "outfits, subsurface scattering on fruit skin, visible pores and "
-        "fuzz, glossy highlights, high-end CGI commercial quality, "
-        "Octane-style render"
+        "shell. a stylised 3D cartoon animation in the manner of a Pixar "
+        "feature — soft rounded forms, clean subsurface-lit fruit skin, big "
+        "expressive eyes, warm key light and a soft rim, shallow depth of "
+        "field, clean cinematic 9:16 framing; no photorealism, no live-action "
+        "textures"
     )
     assert result == expected
 
@@ -522,14 +530,14 @@ def test_place_and_prop_prompt_block_have_no_name_parameter():
 def test_prop_image_prompt_fruit_drama_golden():
     result = prompting.prop_image_prompt(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR)
     expected = (
-        "Product shot of a small tarnished brass telephone shaped like a hollowed "
-        "coconut shell, alone, centered, plain light grey background. "
-        "photorealistic 3D render of anthropomorphic fruits and vegetables with "
-        "expressive human-like faces (eyes, brows, mouths) on realistic fruit "
-        "heads, human-proportioned bodies in real fabric outfits, subsurface "
-        "scattering on fruit skin, visible pores and fuzz, glossy highlights, "
-        "high-end CGI commercial quality, Octane-style render. No people, no "
-        "hands, no text. ultra detailed, 8k, sharp focus"
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
+        "Product shot of a small tarnished brass telephone shaped like a "
+        "hollowed coconut shell, alone, centered, plain light grey background. "
+        "a stylised 3D cartoon animation in the manner of a Pixar feature — "
+        "soft rounded forms, clean subsurface-lit fruit skin, big expressive "
+        "eyes, warm key light and a soft rim, shallow depth of field, clean "
+        "cinematic 9:16 framing; no photorealism, no live-action textures. No "
+        "people, no hands, no text. ultra detailed, 8k, sharp focus"
     )
     assert result == expected
     assert prompting.prop_image_prompt(FRUIT_DRAMA, descriptor=PROP_DESCRIPTOR + ".") == expected
@@ -542,6 +550,7 @@ def test_variant_prompt_fruit_drama_golden():
         variant="golden_hour",
     )
     expected = (
+    # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
         "Establishing wide shot of the manor's gravel courtyard with wrought "
         "iron gates, golden hour, no people, no characters. "
         # Re-pinned on purpose (DEC-305, plan 28): fruit_drama's environment_rules said "photographed like a
@@ -554,17 +563,16 @@ def test_variant_prompt_fruit_drama_golden():
         "blue-grey with "
         # Re-pinned on purpose (DEC-220, phase 7 stage 1): environment_rules now
         # ends with a period before the rendering text.
-        "warm candle or lamp practicals. photorealistic 3D render of "
-        "anthropomorphic fruits and vegetables with expressive human-like faces "
-        "(eyes, brows, mouths) on realistic fruit heads, human-proportioned "
-        "bodies in real fabric outfits, subsurface scattering on fruit skin, "
-        "visible pores and fuzz, glossy highlights, high-end CGI commercial "
-        "quality, Octane-style render. Palette: saturated natural fruit colours "
-        "against warm neutral sets. Camera: wide, eye level, 24mm equivalent. "
-        "Lighting: warm key light with a soft cool fill, golden-hour or "
-        "practical interior lamps, dramatic rim light on reveals. Vertical "
-        "9:16, horizon in the upper third, foreground detail in the lower "
-        "third. ultra detailed, 8k, sharp focus"
+        "warm candle or lamp practicals. a stylised 3D cartoon animation in "
+        "the manner of a Pixar feature — soft rounded forms, clean "
+        "subsurface-lit fruit skin, big expressive eyes, warm key light and a "
+        "soft rim, shallow depth of field, clean cinematic 9:16 framing; no "
+        "photorealism, no live-action textures. Palette: saturated natural "
+        "fruit colours against warm neutral sets. Camera: wide, eye level, "
+        "24mm equivalent. Lighting: warm key light with a soft cool fill, "
+        "golden-hour or practical interior lamps, dramatic rim light on "
+        "reveals. Vertical 9:16, horizon in the upper third, foreground detail "
+        "in the lower third. ultra detailed, 8k, sharp focus"
     )
     assert result == expected
 

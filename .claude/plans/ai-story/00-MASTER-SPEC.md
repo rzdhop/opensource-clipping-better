@@ -562,13 +562,14 @@ Common **master-plate prompt**: `Establishing wide shot of {place_descriptor},
 {palette_line}. Camera: wide, eye level, 24mm equivalent. Lighting: {lighting}. Vertical
 9:16, horizon in the upper third, foreground detail in the lower third. {quality_tail}`
 
-#### 5.1 `fruit_drama` — Fruit Drama (anthropomorphic food, photoreal 3D)
+#### 5.1 `fruit_drama` — Fruit Drama (anthropomorphic food, Pixar-style 3D cartoon)
 
-- **rendering**: "photorealistic 3D render of anthropomorphic fruits and vegetables with
-  expressive human-like faces (eyes, brows, mouths) on realistic fruit heads, human-
-  proportioned bodies in real fabric outfits, subsurface scattering on fruit skin,
-  visible pores and fuzz, glossy highlights, high-end CGI commercial quality, Octane-
-  style render"
+- **rendering**: "a stylised 3D cartoon animation in the manner of a Pixar feature —
+  soft rounded forms, clean subsurface-lit fruit skin, big expressive eyes, warm key
+  light and a soft rim, shallow depth of field, clean cinematic 9:16 framing; no
+  photorealism, no live-action textures"  (re-recorded by DEC-315, plan 32 stage 3: the
+  first wording said "photorealistic 3D render ... Octane-style render", against the
+  style's animated medium; the human chose one Pixar-style cartoon look on 2026-10-06.)
 - **palette**: primary `["#F2C14E","#E4572E","#3A7D44"]`, accents `["#FFFFFF","#1E1E24"]`,
   forbidden `["neon green","hot pink backgrounds"]`; palette_line "saturated natural
   fruit colours against warm neutral sets"
@@ -577,11 +578,12 @@ Common **master-plate prompt**: `Establishing wide shot of {place_descriptor},
 - **lighting**: "warm key light with a soft cool fill, golden-hour or practical interior
   lamps, dramatic rim light on reveals"
 - **character_design_rules**: "The head is one recognisable whole fruit or vegetable at
-  human head scale; the face (eyes, brows, mouth with teeth) is carved into its surface,
-  not pasted on. Bodies are human, dressed in realistic contemporary clothes that carry
-  the character's signature items and tell their social status (a torn tee and backpack
-  vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit
-  species, ripeness, colour and outfit identical in every image."
+  human head scale, never a human head, never a mask; the face (big expressive eyes,
+  expressive brows, a mouth) is drawn on its surface, not pasted on. Bodies are cartoon
+  bodies with simple clothes that carry the character's signature items and tell their
+  social status (a torn tee and backpack vs a black suit and tie); four-fingered or
+  gloved hands are fine, never fruit hands. Keep exact fruit species, ripeness, colour
+  and outfit identical in every image."
 - **environment_rules**: "sets staged like a reality-TV villa — manor gates, gravel
   courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, a pool,
   confessional corners, restaurants, bold set dressing — rendered as a stylised 3D animated
@@ -592,8 +594,9 @@ Common **master-plate prompt**: `Establishing wide shot of {place_descriptor},
 - **episode_defaults**: `hook_style: insert_prop` (a sign, a contract, a phone screen that
   states the premise in ≤ 5 words), `cliffhanger_style: hard_stop`, `shots_per_scene:
   [2, 4]`, `max_places: 2`; **subtitle_mode `word_pop`**, `ai_label: true`
-- **negative** (appended): "cartoon, 2D, flat shading, anime, fruit with stick limbs,
-  fruit bowl, food photography, human head"
+- **negative** (appended): "photorealistic, live action, photo, real human skin, human
+  head, mask, costume, 2D flat, sketch, watermark, text, deformed hands, extra limbs,
+  lowres, blurry"
 - **motion_rules.tier1**: default `push_in` 1.00→1.10 over the shot for dialogue,
   `push_in` 1.00→1.18 on peak/cliffhanger shots, `pan_lr` ±4 % on establishing shots,
   30 fps, ease-in-out; **tier2_prompt_suffix**: "subtle natural head and shoulder

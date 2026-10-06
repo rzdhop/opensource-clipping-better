@@ -585,7 +585,8 @@ def test_memory_section_lists_the_hooks_it_is_handed():
 # Re-measured on purpose (plan 29 stage 4, DEC-308 point 4): each ask gained its description line (80 to 120
 # words a painter could work from): D2 2096 -> 2169, D3 1706 -> 1791, R1v2 1014 -> 1098; prompts.INPUT_BUDGET
 # 2420 -> 2500, 1970 -> 2060, 1170 -> 1270 by the rule above.
-MEASURED_LOOK = {"D2": 2169, "D3": 1791, "R1v2": 1098}
+# re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315): D2 2169 -> 2167 (its INPUT_BUDGET stays 2500).
+MEASURED_LOOK = {"D2": 2167, "D3": 1791, "R1v2": 1098}
 ALL_STYLES = [templates.load_style(style_id) for style_id in templates.list_style_ids()]
 _DESCRIPTOR_DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]
 
