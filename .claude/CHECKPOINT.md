@@ -31,8 +31,10 @@
 - **OPEN:** (1) the LoRA rename is DONE; (2) the first real episode on the link (a story with no recorded
   video link, or a new one): measure the 480×832 clip's GPU seconds (A-196), confirm the
   `executionTime + delayTime` bill against the RunPod balance (A-194: the smoke's $0.101 is the figure to
-  find on the balance) and measure a warm clip (A-196); (3) plan 29's walk (below) is also still the human's; (4) the Settings key fields do not know the
-  RUNPOD names (the .env is the only place; a follow-up if the human wants them in Settings).
+  find on the balance) and measure a warm clip (A-196); (3) plan 29's walk (below) is also still the human's; (4) DONE 2026-10-06 ~12:30 UTC: the three RunPod values are Settings fields (3ca581c, Sonnet agent in a
+  worktree; deployed at 0 jobs, bundle index-B_V78T_M.js; GET /api/settings shows runpod_api_key_set true,
+  the endpoint id and 1.75 from .env). Next: the human's "complete new story of a hacker and a sales director"
+  on the live app, its clips on the runpod link (in progress, this session).
 - **Open questions:** none blocking.
 
 ## CURRENT STATE — plan 29 (empty sets drawn right, Regenerate visible, ~100-word descriptions, approve anyway) IN PROGRESS (2026-10-06, local session)
