@@ -524,7 +524,9 @@ def test_a_story_without_variants_gets_the_image_brief_byte_for_byte_as_before(t
     prompt is the image master and scene template before the same core,
     with its ``fit``; stage 4b, each sheet drawn from a look the series,
     the style and its character before the same core, and every entity
-    entry its ``fit``."""
+    entry its ``fit``. Re-recorded by plan 28 (DEC-305) alone, for fruit_drama's environment_rules, which now say a
+    3D animated villa set instead of "photographed like a reality-TV show": only that sentence, each entry's word
+    counts (+13) and the markdown's sha256 moved."""
     counter = iter(range(10))
 
     def factory():

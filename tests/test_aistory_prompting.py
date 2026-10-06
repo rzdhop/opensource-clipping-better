@@ -200,10 +200,14 @@ def test_master_plate_prompt_fruit_drama_golden():
     expected = (
         "Establishing wide shot of the manor's gravel courtyard with wrought "
         "iron gates, late afternoon golden hour, no people, no characters. "
-        "real-world sets — manor gates, gravel courtyards, derelict interiors "
-        "with chandeliers, beach camps, villa kitchens, restaurants — "
-        "photographed like a reality-TV show or a live-action comedy, props at "
-        "human scale; exteriors in golden hour, interiors cold blue-grey with "
+        # Re-pinned on purpose (DEC-305, plan 28): fruit_drama's environment_rules said "photographed like a
+        # reality-TV show or a live-action comedy", against the style's animated medium; now a 3D animated villa set.
+        "sets staged like a reality-TV villa — manor gates, gravel courtyards, "
+        "derelict interiors with chandeliers, beach camps, villa kitchens, a "
+        "pool, confessional corners, restaurants, bold set dressing — rendered "
+        "as a stylised 3D animated set, never photographed, never live-action, "
+        "props at human scale; exteriors in golden hour, interiors cold "
+        "blue-grey with "
         # Re-pinned on purpose (DEC-220, phase 7 stage 1): environment_rules now
         # ends with a period before the rendering text.
         "warm candle or lamp practicals. photorealistic 3D render of "
@@ -447,11 +451,14 @@ def test_place_prompt_block_fruit_drama_golden():
         "a sprawling open-air market square with cracked terracotta tiles and "
         "faded striped awnings. the fruit stalls line the left side, the "
         "stage sits at the back, the fountain anchors the foreground. "
-        "real-world sets — manor gates, gravel courtyards, derelict interiors "
-        "with chandeliers, beach camps, villa kitchens, restaurants — "
-        "photographed like a reality-TV show or a live-action comedy, props "
-        "at human scale; exteriors in golden hour, interiors cold blue-grey "
-        "with warm candle or lamp practicals"
+        # Re-pinned on purpose (DEC-305, plan 28): fruit_drama's environment_rules said "photographed like a
+        # reality-TV show or a live-action comedy", against the style's animated medium; now a 3D animated villa set.
+        "sets staged like a reality-TV villa — manor gates, gravel courtyards, "
+        "derelict interiors with chandeliers, beach camps, villa kitchens, a "
+        "pool, confessional corners, restaurants, bold set dressing — rendered "
+        "as a stylised 3D animated set, never photographed, never live-action, "
+        "props at human scale; exteriors in golden hour, interiors cold "
+        "blue-grey with warm candle or lamp practicals"
     )
     assert result == expected
 
@@ -537,10 +544,14 @@ def test_variant_prompt_fruit_drama_golden():
     expected = (
         "Establishing wide shot of the manor's gravel courtyard with wrought "
         "iron gates, golden hour, no people, no characters. "
-        "real-world sets — manor gates, gravel courtyards, derelict interiors "
-        "with chandeliers, beach camps, villa kitchens, restaurants — "
-        "photographed like a reality-TV show or a live-action comedy, props at "
-        "human scale; exteriors in golden hour, interiors cold blue-grey with "
+        # Re-pinned on purpose (DEC-305, plan 28): fruit_drama's environment_rules said "photographed like a
+        # reality-TV show or a live-action comedy", against the style's animated medium; now a 3D animated villa set.
+        "sets staged like a reality-TV villa — manor gates, gravel courtyards, "
+        "derelict interiors with chandeliers, beach camps, villa kitchens, a "
+        "pool, confessional corners, restaurants, bold set dressing — rendered "
+        "as a stylised 3D animated set, never photographed, never live-action, "
+        "props at human scale; exteriors in golden hour, interiors cold "
+        "blue-grey with "
         # Re-pinned on purpose (DEC-220, phase 7 stage 1): environment_rules now
         # ends with a period before the rendering text.
         "warm candle or lamp practicals. photorealistic 3D render of "

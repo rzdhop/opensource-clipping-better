@@ -582,10 +582,13 @@ Common **master-plate prompt**: `Establishing wide shot of {place_descriptor},
   the character's signature items and tell their social status (a torn tee and backpack
   vs a black suit and tie). No hands as fruit — hands are human. Keep exact fruit
   species, ripeness, colour and outfit identical in every image."
-- **environment_rules**: "real-world sets — manor gates, gravel courtyards, derelict
-  interiors with chandeliers, beach camps, villa kitchens, restaurants — photographed like
-  a reality-TV show or a live-action comedy, props at human scale; exteriors in golden
+- **environment_rules**: "sets staged like a reality-TV villa — manor gates, gravel
+  courtyards, derelict interiors with chandeliers, beach camps, villa kitchens, a pool,
+  confessional corners, restaurants, bold set dressing — rendered as a stylised 3D animated
+  set, never photographed, never live-action, props at human scale; exteriors in golden
   hour, interiors cold blue-grey with warm candle or lamp practicals"
+  (re-recorded by DEC-305, plan 28: the first wording said "photographed like a reality-TV
+  show or a live-action comedy", against the style's animated medium.)
 - **episode_defaults**: `hook_style: insert_prop` (a sign, a contract, a phone screen that
   states the premise in ≤ 5 words), `cliffhanger_style: hard_stop`, `shots_per_scene:
   [2, 4]`, `max_places: 2`; **subtitle_mode `word_pop`**, `ai_label: true`

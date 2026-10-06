@@ -39,8 +39,10 @@ STYLE = {
                                "human, dressed in realistic contemporary clothes. No hands as fruit -- hands are "
                                "human. Keep exact fruit species, ripeness, colour and outfit identical in every "
                                "image."),
-    "environment_rules": ("real-world sets photographed like a reality-TV show or a live-action comedy, props at "
-                          "human scale; interiors cold blue-grey with warm lamp practicals"),
+    # DEC-305 (plan 28): mirrors the shipped rule's wording -- a 3D animated villa set, never photographed.
+    "environment_rules": ("sets staged like a reality-TV villa, rendered as a stylised 3D animated set, never "
+                          "photographed, never live-action, props at human scale; interiors cold blue-grey with "
+                          "warm lamp practicals"),
     "negative_prompt": "cartoon, 2D, flat shading, anime, fruit with stick limbs, fruit bowl, food photography, "
                        "human head",
     "quality_tail": "ultra detailed, 8k, sharp focus",

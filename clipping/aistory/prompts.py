@@ -447,8 +447,10 @@ SCHEMA_NAMES.update({"E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dia
 # 1,070 -- past 85 % of the default 1,200-token pack budget (the same
 # threshold stage 6 used to give E1..T1r their own row), so it gets one too:
 # + 15 %, rounded up to ten.
+# D3 re-measured for DEC-305 (plan 28): fruit_drama's environment_rules now say a 3D animated villa set, +21 and +22 tokens
+# (1,685 -> 1,706 legacy, 2,775 -> 2,797 set-up); both budgets follow the rule (worst + 15 %, rounded up to ten).
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2420, "D3": 1940, "R1v2": 1170, "T1v2": 2190, "T1rv2": 2150, "D1": 3890,
+                "D2": 2420, "D3": 1970, "R1v2": 1170, "T1v2": 2190, "T1rv2": 2150, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
                 "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990, "S1v2": 2650,
                 "C1v2": 1690, "B1v3": 1480, "C1J": 1240}
@@ -548,13 +550,13 @@ VARIANTS_INPUT_BUDGET = {"N1v2": 4160}
 # story's) with the id's legacy budget, exactly as before. Measured:
 # C1v2 2,249, C1J 1,908, B1 1,972, B1v3 2,072, B2 2,376, B3 2,636, K1 3,646, P0
 # 2,125, P1 2,582, R1 2,728, S1 3,152, S1v2 3,568, S2 3,221, D1 3,896, D2
-# 3,004, D3 2,775, R1v2 2,100, D4 2,482, D5 4,058, D6 3,610. K1, S1v2, D1, D5 and D6's
+# 3,004, D3 2,797, R1v2 2,100, D4 2,482, D5 4,058, D6 3,610. K1, S1v2, D1, D5 and D6's
 # budgets pass the spec's 4,000 like J1v3 and E3v3 -- nothing is trimmed to fit.
 # Kept beside INPUT_BUDGET for the same reason as the writing-v3 rows (its
 # rows, in order, are pinned by the RC-M1 file).
 SETUP_INPUT_BUDGET = {"C1v2": 2590, "C1J": 2200, "B1": 2270, "B1v3": 2390, "B2": 2740, "B3": 3040,
                       "K1": 4200, "P0": 2450, "P1": 2970, "R1": 3140, "S1": 3630, "S1v2": 4110, "S2": 3710,
-                      "D1": 4490, "D2": 3460, "D3": 3200, "R1v2": 2420, "D4": 2860, "D5": 4670, "D6": 4160}
+                      "D1": 4490, "D2": 3460, "D3": 3220, "R1v2": 2420, "D4": 2860, "D5": 4670, "D6": 4160}
 
 
 def carries_setup(user) -> bool:

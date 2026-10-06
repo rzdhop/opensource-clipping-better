@@ -580,7 +580,9 @@ def test_memory_section_lists_the_hooks_it_is_handed():
 # 8 words), which grows the input a little; and again for stage F2 (phase 7
 # follow-up): a bearing line (posture, optional, at most 10 words).
 
-MEASURED_LOOK = {"D2": 2096, "D3": 1685, "R1v2": 1014}
+# D3 re-measured on purpose (DEC-305, plan 28): 1685 -> 1706, fruit_drama's environment_rules now say a 3D animated
+# villa set; prompts.INPUT_BUDGET["D3"] 1940 -> 1970 by the rule above.
+MEASURED_LOOK = {"D2": 2096, "D3": 1706, "R1v2": 1014}
 ALL_STYLES = [templates.load_style(style_id) for style_id in templates.list_style_ids()]
 _DESCRIPTOR_DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]
 
