@@ -1,16 +1,13 @@
 ## CURRENT STATE — plan 32 "the fruit drama product through the MCP" IN PROGRESS (2026-10-06, local session)
 
-- **In-progress header:** phase = IMPLEMENT, stage = 1 (MCP unblock) starting; next action = stage 1 (director
-  STEP_MODULES += style / fast-track / story-fast-track; story_estimate; story_create(preset=…) through
-  clipping/aistory/presets.py; story_options presets; docstrings). Branch `feat/fruit-drama-product` from
-  `feat/comfy-tts-chatterbox` at **0de84d1** (plan 31, pushed, NOT yet in main — merge order 31 then 32).
-  Checkpoint commit = this commit (the header only). Plan file `.claude/plans/ai-story/32-fruit-drama-product-plan.md`
-  (10 stages 0–9; the human's answers of 2026-10-06 are decided: Pixar-style 3D cartoon look; -ito/-ita French
-  puns on the species, no brands; 60–90 s, 4–6 scenes, cliffhanger, "Team X ?" question, end card "Partie N
-  demain"; one frozen Gemini-made reference voice per character cloned on the worker with a fixed seed; the
-  Wan2.2-S2V template built, the human runs ONE paid line before it enters the episode; the $2 cap of own_gpu
-  stays; the content guardrail on by default). DEC-315 to write at close-out; A-202… ; untracked `reports/`,
-  `research_notes/`, `FETCH_HEAD` stay untracked.
+- **In-progress header:** phase = IMPLEMENT. Done: stage 0 396a289 · stage 1 aa7252b (MCP: style/fast-track/
+  story-fast-track steps, presets.py, story_estimate, story_make_episode, STORY_CHAT_WRITER, store recipe field) ·
+  stage 3 997fcc3 (the Pixar look, goldens re-pinned) · stage 7 6f5b1de (s2v_wan22 template, symlink, docs — the
+  human's live test is the gate of stage 8). Wave A verified together: local 2229 / CI-like 2081+148s / venv 63.
+  Running now (wave B, disjoint files): stage 2 (recipe record + writers, Opus, worktree), stage 6 (voices on the
+  worker, Opus, worktree), stage 5 (episode_sheet + episode_export, Sonnet, main tree). Next action = cherry-pick
+  2 and 6, verify 5, run the selections, commit, push; then stage 4 (format + render, after 2), then stage 9
+  (skill + docs + close-out); stage 8 waits for the human's "it works" on one S2V line.
 - **Tier 1 baseline (0de84d1, the touched-area selection, 26 files):** local 1306 passed · CI-like 1306 passed ·
   venv (test_mcp_server/director/runpod_jobs) 41 passed — exit 0 everywhere. The selection is in the scratchpad
   (`baseline_sel.txt`): test_aistory_prompting/templates, test_comfyui_video, test_local_comfyui, test_mcp_*,
