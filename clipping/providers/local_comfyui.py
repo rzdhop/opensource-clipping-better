@@ -57,9 +57,12 @@ TEMPLATES = ("t2i_flux2_klein", "edit_flux2_klein_multiref", "edit_qwen_image")
 # Image to video, one per hardware profile (``hardware.VIDEO_WORKFLOWS``).
 VIDEO_TEMPLATES = ("i2v_wan22_5b", "i2v_wan22_14b_lightning", "i2v_ltx2")
 PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
-TYPED = {"seed": int, "width": int, "height": int, "frames": int, "fps": int}
-# Every placeholder a template may use (spec 8.7); ``ref_paths`` fills the edit slots.
-KNOWN_PLACEHOLDERS = frozenset({"prompt", "negative", "image_path", "ref_paths", *TYPED})
+TYPED = {"seed": int, "width": int, "height": int, "frames": int, "fps": int,
+         # text to speech (plan 31): the Chatterbox knobs, floats
+         "exaggeration": float, "cfg_weight": float}
+# Every placeholder a template may use (spec 8.7); ``ref_paths`` fills the edit slots;
+# ``audio_path`` is the reference voice a TTS template reads through LoadAudio.
+KNOWN_PLACEHOLDERS = frozenset({"prompt", "negative", "image_path", "audio_path", "ref_paths", *TYPED})
 WAIT_BUDGET_SECONDS = 600.0
 # A clip on a local GPU takes minutes; past this the prompt stays journaled and a
 # later run follows it again (never queues it twice).
@@ -98,7 +101,8 @@ def load_template(name: str) -> dict:
 def render_template(template: dict, values: dict) -> dict:
     """Fill the placeholders of *template* with *values*; returns the graph to queue.
 
-    Typed placeholders (seed, width, height, frames, fps) become ints. The
+    Typed placeholders (seed, width, height, frames, fps) become ints, the
+    TTS knobs (exaggeration, cfg_weight) floats. The
     reference slots (``ref_nodes``, LoadImage nodes) take ``values["ref_paths"]``
     in order; unused slots repeat the last reference so the graph never needs
     rewiring; more references than slots is an error, not a truncation.
@@ -149,7 +153,9 @@ def _choices(info: dict, field: str):
 def validate_template(template: dict, object_info: dict) -> list:
     """What this ComfyUI lacks to run *template*: nodes and model files, by name,
     each model file with the ComfyUI folder it goes in. A template marked
-    ``core_nodes_only`` names a missing node as a ComfyUI too old for it."""
+    ``core_nodes_only`` names a missing node as a ComfyUI too old for it. A
+    ``requires`` entry with an empty ``field`` is a file the node loads on its
+    own (not a combo input): listed for the install message, never checked here."""
     problems = []
     graph = template["graph"]
     missing = {}
@@ -167,7 +173,10 @@ def validate_template(template: dict, object_info: dict) -> list:
     for req in template.get("requires", []):
         class_type = graph[req["node"]]["class_type"]
         info = object_info.get(class_type)
-        if info is None or req["file"] in reported:
+        if info is None or req["file"] in reported or not req.get("field"):
+            # An empty ``field``: the node loads the file itself from ``dir`` (no
+            # combo to check against; Chatterbox's weights) -- a missing file
+            # shows at run time, by the node's own message.
             continue
         choices = _choices(info, req["field"])
         if choices is None or req["file"] in choices:

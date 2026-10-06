@@ -127,7 +127,9 @@ def test_every_shipped_workflow_parses_and_uses_only_known_placeholders():
         graph = template["graph"]
         for req in template["requires"]:
             assert set(req) >= {"node", "field", "file", "dir"}, (name, req)
-            assert graph[req["node"]]["inputs"][req["field"]] == req["file"], (name, req)
+            assert req["node"] in graph, (name, req)
+            if req["field"]:  # an empty field: the node loads the file itself (plan 31)
+                assert graph[req["node"]]["inputs"][req["field"]] == req["file"], (name, req)
         used = set()
         for node in graph.values():
             for value in node["inputs"].values():
