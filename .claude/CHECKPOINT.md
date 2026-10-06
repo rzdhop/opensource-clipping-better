@@ -1,17 +1,23 @@
-## CURRENT STATE — DEC-311 keyframes warn-only MERGED + DEPLOYED; story df1544f0641f's clips rendering on RunPod (2026-10-06, local session)
+## CURRENT STATE — the first complete RunPod episode is rendered; DEC-310 + DEC-311 live (2026-10-06 ~14:20 UTC, local session)
 
-- **In-progress header:** phase = IMPLEMENT stage 2 (the parked run continued as job b0384394eeda after the deploy;
-  watching it: keyframes approved with their warnings → 12 runpod clips est $1.20 → lip-sync $0.14 → render) →
-  DOCUMENT / close-out. Checkpoint commit = main baa4d4c (merge of fe962f7 "the keyframe check warns, never
-  blocks", Opus agent in a worktree; plan `.claude/plans/ai-story/30-keyframes-warn-only-plan.md`). Tests: the
-  keyframe/fast-track/handoff/dashboard selection (every file naming "keyframe" + auth) 1752 local / 1623 + 129
-  skipped CI-like, exit 0 both; vite bundle index-CH9JjZ51.js; 3.11 in-image compile 0 bad. DEPLOYED 2026-10-06
-  ~14:00 UTC (rm -sfv + up --build at 0 jobs; health 200; the container carries DEC-311). Tier 2 (the human's walk):
-  the Review tab's "Approved for you despite: …" on this story once the run ends. Tier 3: the re-pins listed in
-  the plan + one new hash-match test (tests/test_story_keyframe_hard_gate.py).
-- **The story so far:** pre-production $0.74; 12 keyframes + ≈25 redraws/regenerates $1.50 (episode); caps today
-  episode $1.50/$4, day $3.07/$7, story $2.22/$10 before the clips.
-- **The human's rule (DEC-311):** warn, never block, on keyframes; no more regenerates on this story.
+- **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
+  commit). Story `df1544f0641f` "Code Trop Mûr" (fr, fruit_drama, tier-2 quality profile, agent mode): episode 1
+  rendered — `outputs/stories/df1544f0641f/episodes/ep01/episode_final.mp4`, 58 s, 1080x1920, 34.5 MB — twelve
+  5-s clips on runpod/i2v_wan22_14b_lightning (every shot `current`), Gemini TTS voices, Kling lip-sync,
+  subtitles. The one-click run went through DEC-311: 12 keyframes approved for the human, 6 kept with the
+  check's warning (sh01, sh02, sh04, sh06, sh07, sh10; the Review tab says "Approved for you despite: …").
+- **Money:** booked (table prices) episode $2.70 (seedream-edit keyframes + redraws $1.48, runpod $1.20,
+  writing $0.02; lip-sync booked $0.000 — see the discovery), story $3.42, today $4.27 of the $7 cap the human
+  set (episode cap $4). RunPod's real bill for the episode: $0.434 for 893 GPU-s (one cold clip 216 GPU-s, eleven
+  warm at 61–62 GPU-s = $0.03 each = $0.006 per output second). The table's $0.02/s is 3.3x the warm cost.
+- **Tier 2 (the human):** watch the episode; the Review tab's warning sentences; the Settings RunPod fields.
+- **OPEN / follow-ups:** (1) a DEC on the runpod price (proposal: $0.01/s, cold start amortised ≈ $0.0072); (2)
+  A-194's balance check on RunPod's ledger (the human: about $0.54 for today's 13 jobs); (3) the keyframe prompt
+  cut 2800→280 words and the clip prompt 2755→112 words by the fit ladder on seedream-edit / umt5 — the framing
+  and most of the scene never reach the model (DISCOVERY, not fixed); (4) lip-sync booked $0.000 on the episode
+  ledger while the estimate said $0.14 (DISCOVERY, check pricing/lipsync rounding); (5) a `retime_only`
+  storyboard is not re-timed by the storyboard step nor by the agent continue; (6) plan 28/29's walk; (7) the
+  caps: the human raised episode $4 / daily $7 for this story — lower them back if wanted (Settings → Budget).
 - **Open questions:** none blocking.
 
 ## CURRENT STATE — DEC-310 (RunPod Serverless video link) MERGED + DEPLOYED with plan 29 (2026-10-06, local session)
