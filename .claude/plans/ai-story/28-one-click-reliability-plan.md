@@ -1,6 +1,6 @@
 # Plan 28 — the one-click episode: fits every time, ≤ $2 of API money, strict consistency, no TTS voices, Approve all, generated concepts only, every writer prompt on the plan-26 standard
 
-Status: DRAFT v1, 2026-10-05 (late session) — waiting for the human's answers to the questions in §2 and a "Go".
+Status: SHIPPED 2026-10-06 — approved on the human's "1) me + gen button 2) remove, Go" (DEC-305); every stage merged, documented and deployed (a271439; DEC-306 records the calls made on the way).
 
 ## 1. What happened (the trigger) and the root causes
 
