@@ -76,3 +76,4 @@ web/dashboard/dist/
 
 # One machine's own compose settings, e.g. DISABLE_AUTH (DEC-092). Never shared.
 docker-compose.override.yml
+uv.lock

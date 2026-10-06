@@ -3,7 +3,10 @@ name = "rzdhop-ai"
 version = "3.0.0"
 description = "Clips from long videos and serialized AI Story episodes, on free hosted AI endpoints"
 readme = "README.md"
-requires-python = ">=3.10"
+# Bounded above: the render stack (torch, mediapipe, numpy<2) has no wheels past
+# 3.12, and uv resolves the whole range at once -- an open bound made it try 3.14,
+# where chatterbox-tts wants numpy>=2 and the resolution has no solution.
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "yt-dlp[default]",  # asset fetching only: studio/effects.py, studio/transitions.py, youtube_tracker
     "faster-whisper",
@@ -67,6 +70,11 @@ include = ["clipping*", "web*", "mcp_server*", "youtube_uploader*", "youtube_tra
 
 [tool.setuptools.package-data]
 clipping = ["aistory/templates/*.json", "aistory/templates/**/*.json"]
+
+# uv resolves for every platform the project could run on; the render stack is
+# only ever installed on Linux and Windows, so macOS splits are not resolved.
+[tool.uv]
+environments = ["sys_platform == 'linux'", "sys_platform == 'win32'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
