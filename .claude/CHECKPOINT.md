@@ -1,3 +1,20 @@
+## CURRENT STATE — plan 32 "the fruit drama product through the MCP" in EXPLORE (2026-10-06, local session)
+
+- **In-progress header:** phase = PLAN, awaiting the human's answers and "Go" (plan file
+  `.claude/plans/ai-story/32-fruit-drama-product-plan.md`, 10 stages, DEC-315 proposed). The three maps are in the
+  agents' reports of this session; their facts are summarised in the plan file. Was: phase = EXPLORE. The human (2026-10-06, after the research report
+  `reports/Fruit drama viraux en self hosted.md`): "fait moi le produit parfait, utilisable via le MCP facilement avec
+  Claude, édite les prompts, les idées de noms etc, une vraie énorme amélioration très lourde". Three Explore agents
+  mapping: the story engine's fruit_drama genre/prompts/names; the MCP story tools + the fruit-drama-episode skill
+  (today's chat flow); Wan2.2-S2V (image + voice → talking clip) on the worker + the lipsync step. Next = CLARIFY +
+  PLAN (plan file 32) for the human's Go. Plan 31 (the TTS route) is complete and pushed (see the section below);
+  its PR and GPU steps remain the human's.
+- **Open questions (to the human):** (1) the look = Pixar-style 3D cartoon everywhere; (2) names = French
+  telenovela puns (-ito/-ita) on the species; (3) the format 60–90 s, 4–6 scenes, Team question + end card; (4) one
+  frozen reference voice per character made by Gemini at cast time, cloned on the worker; (5) the S2V bet: build the
+  template, the human runs one paid line before it enters the episode; (6) the $2 episode cap kept; (7) the content
+  guardrail (no sexist/racist tropes) on by default.
+
 ## CURRENT STATE — plan 31 (the Chatterbox TTS route on the RunPod worker; episode 1 of "Accès refusé" voiced through it) CODE + DOCS COMPLETE and PUSHED on `feat/comfy-tts-chatterbox`; the PR to main is the human's click (no gh, no token, the browser pane not signed in); the GPU steps are the human's (2026-10-06, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Branch `feat/comfy-tts-chatterbox`
