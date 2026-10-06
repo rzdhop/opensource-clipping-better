@@ -102,7 +102,9 @@ def test_chain_from_env_falls_back_to_the_default(monkeypatch):
 def test_every_provider_declares_a_key_and_a_timeout():
     for name, provider in registry.PROVIDERS.items():
         assert provider.name == name
-        assert provider.env_key, f"{name} has no env key"
+        # DEC-312: "chat" is the person's own Claude chat through the MCP server --
+        # no key, no sign-up: run_chain skips it, only the director's runner answers it.
+        assert provider.env_key or name == "chat", f"{name} has no env key"
         assert provider.default_timeout > 0, f"{name} has no timeout"
         for level in provider.structured:
             assert level in ("json_schema", "json_object"), f"{name}: {level}"
@@ -399,8 +401,8 @@ def test_nim_is_the_floor_and_something_else_is_primary():
 
 def test_every_hosted_provider_names_where_to_get_its_free_key():
     for name, provider in registry.PROVIDERS.items():
-        if name == "custom":
-            continue  # the user's own endpoint; there is nothing to sign up for
+        if name in ("custom", "chat"):
+            continue  # the user's own endpoint / own chat; there is nothing to sign up for
         assert provider.signup_url.startswith("https://"), name
 
 
@@ -470,7 +472,9 @@ def test_the_anthropic_row():
     assert (row.api, row.free_probe) == ("anthropic", "models")
     assert row.base_url == "https://api.anthropic.com"
     for name, provider in registry.PROVIDERS.items():
-        if name != "anthropic":
+        if name == "chat":
+            assert (provider.api, provider.free_probe, provider.env_key, provider.free_tier) == ("chat", "", "", True)
+        elif name != "anthropic":
             assert (provider.api, provider.free_probe) == ("openai", ""), name
 
 

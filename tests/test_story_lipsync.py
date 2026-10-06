@@ -565,9 +565,10 @@ def test_the_quality_preset_lipsyncs_a_fully_animated_v2_story_unless_the_story_
     profiles = budget.load_profiles()["profiles"]
     # Re-pinned on purpose (plan 22, stage 4): the native-speech profile never lipsyncs;
     # (stage 5) nor does its manual twin.
+    # (DEC-312) nor own_gpu: Kling LipSync is a fal link, and that profile keeps to the author's GPU.
     assert {name: profile.get("lipsync") for name, profile in profiles.items()} == {
         "free": "none", "one_dollar": "none", "quality": "kling", "native_speech": "none",
-        "native_speech_manual": "none"}
+        "native_speech_manual": "none", "own_gpu": "none"}
     story_id = oc._v2_unmade(store, tmp_path)
     story = store.get(story_id)
     assert m.policy.fully_animated(story) and m.policy.lipsync(story)
