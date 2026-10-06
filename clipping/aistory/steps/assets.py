@@ -1153,6 +1153,75 @@ def _outdated_entities(storyboard, entity_docs) -> list:
     return outdated
 
 
+# Plan 28 F6 (DEC-305 section 5, the human: "strict rules to avoid
+# consistency problems, and all details"): a keyframe is drawn on its scene's
+# own plate -- a night scene on the night plate -- never on the day plate in
+# silence (:func:`plate_refusal`); the plates an episode lacks are made before
+# its keyframes (``_Assets.make_missing_plates``). A shot never shows a
+# character in a variant not approved, nor in an outfit its look does not
+# have (:func:`wardrobe_refusal`): refused before any keyframe is bought.
+
+def missing_plate(ec, scene):
+    """``(place document, time variant)`` when *scene*'s place has no plate
+    on disk for the scene's time of day, else None -- and None in
+    ``prompt_only`` mode, where a keyframe sends no plate (its prompt says
+    the time of day)."""
+    if not scene or ec.consistency_mode == PROMPT_ONLY:
+        return None
+    place = ((ec.entities or {}).get("places") or {}).get(scene.get("place_id"))
+    if place is None:
+        return None
+    variant = scene.get("time_variant") or schemas.MASTER_PLATE_VARIANT
+    ref = (place.get("time_variants") or {}).get(variant)
+    if entities.has_file(ec.store, ec.story_id, "places", place["place_id"], ref):
+        return None
+    return place, variant
+
+
+def plate_refusal(ec, scene):
+    """Why a keyframe of *scene* is not drawn, in a plain sentence, or None:
+    its place has no plate for the scene's time of day (plan 28 F6) -- the
+    keyframe is never drawn on another plate."""
+    found = missing_plate(ec, scene)
+    if found is None:
+        return None
+    place, variant = found
+    return (f"{place.get('name') or place['place_id']} has no {variant.replace('_', ' ')} plate, and a keyframe is "
+            "never drawn on another one: run the assets step again (it makes the missing plates first), or make it "
+            f"on the places step (regenerate 'place:{place['place_id']}:image:{variant}')")
+
+
+def wardrobe_refusal(ec, storyboard):
+    """Why *storyboard*'s shots cannot be drawn as planned, in plain
+    sentences, or None (plan 28 F6): a shot that shows a character in an
+    appearance variant it does not have or that is not approved
+    (``shots.variant_refusal``), or in an outfit the story so far gives it
+    (the continuity ledger's wardrobe set) that its look does not have -- it
+    would be drawn in another outfit. A legacy story is never checked."""
+    if not media_policy.is_v2(ec.story):
+        return None
+    characters = (ec.entities or {}).get("characters") or {}
+    ledger = script_step.ledger_of(ec) or {}
+    sentences, seen = [], set()
+    for shot in storyboard.get("shots") or ():
+        refusal = shots_mod.variant_refusal(shot, characters)
+        if refusal:
+            sentences.append(refusal[0].upper() + refusal[1:] + ".")
+        for tag in shot.get("subject_tags") or ():
+            cid = tag[1:]
+            doc = characters.get(cid) if tag.startswith("@") else None
+            sets = ((doc or {}).get("look") or {}).get("wardrobe_sets") or []
+            wanted = ((ledger.get(cid) or {}).get("wardrobe_set")) if sets else None
+            if not wanted or any(entry["id"] == wanted for entry in sets) or (cid, wanted) in seen:
+                continue
+            seen.add((cid, wanted))
+            name = doc.get("name") or cid
+            sentences.append(f"Shot {shot['shot_id']} shows {name} in the outfit '{wanted}' the story so far gives "
+                             f"{name}, but {name}'s look has no such outfit: add it to {name}'s look, or correct "
+                             "the story's continuity -- a shot is never drawn in another outfit.")
+    return " ".join(sentences) or None
+
+
 def require_approved(ec) -> tuple:
     """``(script, storyboard)`` when the script is approved and the storyboard
     approved and current -- it covers the script, no scene is planned from an
@@ -3004,6 +3073,74 @@ class _Assets(voice_lines.LineMeasurement):
 
     # ------------------------------------------------------------ the images
 
+    def make_missing_plates(self) -> list:
+        """Plan 28 F6: the plates the episode's scenes need for their time of
+        day and lack (a night scene with no night plate), made before any
+        keyframe -- only for scenes with a keyframe the app draws -- through
+        ``refimages.place_image`` (booked like any plate, judged by the sheet
+        judge), then the shots of those scenes resolved again so they carry
+        the new plate (the storyboard's approval stands: what it planned is
+        unchanged, the set image it names is the scene's own now). A plate
+        that cannot be made is said, and those keyframes are refused
+        (:func:`plate_refusal`). Returns the ``(place_id, variant)`` made."""
+        ec, ctx = self.ec, self.ctx
+        if not media_policy.is_v2(ec.story):
+            return []
+        doc = _read_assets_doc(ec)
+        drawn = {shot["scene_id"] for shot in app_shots(ec, shots_to_make(ec, self.storyboard, doc=doc), doc)
+                 if image_mode(ec.story, shot, doc) != video_plan.MANUAL}
+        wanted = []
+        for scene in self.script["scenes"]:
+            found = missing_plate(ec, scene) if scene["scene_id"] in drawn else None
+            if found is not None and (found[0]["place_id"], found[1]) not in wanted:
+                wanted.append((found[0]["place_id"], found[1]))
+        if not wanted:
+            return []
+        names = {pid: (ec.entities["places"].get(pid) or {}).get("name") or pid for pid, _variant in wanted}
+        said = _and([f"{names[pid]} ({variant.replace('_', ' ')})" for pid, variant in wanted])
+        ctx.on_log(f"🗺 Before the keyframes: the missing plate{'s' if len(wanted) > 1 else ''} {said}, made now.")
+        from . import sheet_gate  # the sheet judge (plan 28 F3); imported here, as the places step does
+
+        made = []
+        for place_id, variant in wanted:
+            ctx.cancel.check()
+            try:
+                refimages.place_image(ec.store, ec.story_id, place_id, variant, **self.tools.image_kwargs(ctx))
+            except refimages.RefImageError as exc:
+                ctx.on_log(f"✖ {names[place_id]}'s {variant.replace('_', ' ')} plate could not be made: {exc}")
+                continue
+            sheet_gate.review(ctx, ec.store, "places", place_id, tools=self.tools, slots=(variant,))
+            made.append((place_id, variant))
+        if made:
+            self.reresolve_places({place_id for place_id, _variant in made})
+        return made
+
+    def reresolve_places(self, place_ids) -> None:
+        """The shots of the scenes set in *place_ids* resolved again from the
+        places as they are now (their prompts and references name the new
+        plate), and the storyboard's stamps of those places moved with them."""
+        ec = self.ec
+        for place_id in place_ids:
+            ec.entities["places"][place_id] = ec.store.read_entity(ec.story_id, "places", place_id)
+        scenes = {scene["scene_id"]: scene for scene in self.script["scenes"]}
+        board = copy.deepcopy(self.storyboard)
+        for shot in board["shots"]:
+            if (scenes.get(shot["scene_id"]) or {}).get("place_id") not in place_ids:
+                continue
+            resolved = shots_mod.resolve_stored(shot, script=self.script, storyboard=self.storyboard,
+                                                entities=ec.entities, style_lock=ec.style_lock,
+                                                consistency_mode=ec.consistency_mode, ledger=self.ledger_now(),
+                                                budgets=self.budgets())
+            for key in ("image_prompt", "video_action", "negative_prompt", "reference_images", "consistency",
+                        "video_prompt", "prompt_layout"):
+                if key in resolved:
+                    shot[key] = resolved[key]
+        for place_id in place_ids:
+            if place_id in board["resolved_from"]:
+                board["resolved_from"][place_id] = ec.entities["places"][place_id]["updated_at"]
+        self.storyboard = board
+        self.write_board()
+
     def make_image(self, shot, *, seed, note) -> dict:
         """One shot's image through the story's chain and the generation
         cache; returns the fields of its ``assets`` record. ``ShotFailed``
@@ -3014,6 +3151,14 @@ class _Assets(voice_lines.LineMeasurement):
         refusal = shots_mod.variant_refusal(shot, ec.entities["characters"])
         if refusal:
             raise ShotFailed(refusal)
+        if media_policy.is_v2(ec.story):
+            # Plan 28 F6: a keyframe is drawn on its scene's own plate, never on the day plate in silence.
+            script = self.script if self.script is not None else episode_common.read_episode(ec, SCRIPT_DOC)
+            scene = next((item for item in (script or {}).get("scenes") or () if item["scene_id"] == shot["scene_id"]),
+                         None)
+            refusal = plate_refusal(ec, scene)
+            if refusal:
+                raise ShotFailed(refusal)
         # Phase 8 stage B: the previous keyframe of the scene in a v2 shot's continuity slot.
         source, alone = self.continuity_for(shot)
         parts = request_parts(ec, shot, note=note, link=self.link, continuity=source[1] if source else None,
@@ -4814,6 +4959,12 @@ class _Assets(voice_lines.LineMeasurement):
     def run(self) -> dict:
         ec, ctx = self.ec, self.ctx
         self.script, self.storyboard = require_approved(ec)
+        # Plan 28 F6: refused before any keyframe is bought; the missing plates are made before them.
+        refusal = wardrobe_refusal(ec, self.storyboard)
+        if refusal:
+            ctx.on_log(f"✋ {refusal}")
+            raise StepFailed(f"Episode {ec.ep}'s keyframes are not drawn. {refusal}")
+        self.make_missing_plates()
         align = bool((ctx.params or {}).get(ALIGN_PARAM))
         animate = animate_param(ctx.params)
         gates = self.open_asset_gates()

@@ -182,6 +182,32 @@ def keyframe_path(ec, shot):
     return path if os.path.isfile(path) else None
 
 
+def _ledger(ec):
+    """The episode's continuity ledger (``script.ledger_of``), None for a
+    legacy story or without a knowledge base -- or when it cannot be read."""
+    from . import script as script_step  # imported here: the script step pulls in the timing engine
+    from .llm_call import StepFailed
+
+    try:
+        return script_step.ledger_of(ec) if media_policy.is_v2(getattr(ec, "story", None)) else None
+    except (StepFailed, KeyError, ValueError):  # a label note is never worth failing the brief over
+        return None
+
+
+def _outfit_note(ec, char_id, doc, ledger) -> str:
+    """Plan 28 F6: what a character's reference label adds when the outfit
+    it wears in this episode (the continuity ledger's wardrobe set) is not
+    the one its sheet is drawn in -- "; the sheet shows another outfit, here:
+    <items>" -- else ''. A variant's own sheet says its look already."""
+    if not doc or doc.get(shots_mod.VARIANT_KEY):
+        return ""
+    worn = shots_mod.shot_wardrobe(doc, ledger, char_id)
+    drawn = shots_mod.sheet_wardrobe(doc)
+    if worn is None or drawn is None or worn["id"] == drawn["id"]:
+        return ""
+    return f"; the sheet shows another outfit, here: {' '.join(str(worn['items']).split()).rstrip('.')}"
+
+
 def references(ec, script, shot) -> list:
     """*shot*'s reference images in priority order, uncut: its keyframe when
     one is on disk, then the speaker's sheet, the listener's sheet (the
@@ -200,6 +226,7 @@ def references(ec, script, shot) -> list:
         order.remove(line["speaker"])
         order.insert(0, line["speaker"])
     characters = (ec.entities or {}).get("characters") or {}
+    ledger = _ledger(ec)
     for char_id in order:
         # Plan 23 stage D5: the sheet of the appearance variant the shot names, labelled with it.
         doc = shots_mod.variant_view(characters.get(char_id), (shot.get("variants") or {}).get(char_id))
@@ -208,11 +235,12 @@ def references(ec, script, shot) -> list:
         refs_doc = doc.get("refs") or {}
         worn = doc.get(shots_mod.VARIANT_KEY)
         who = f"{names.get(char_id, char_id)} ({worn['label']})" if worn else names.get(char_id, char_id)
+        outfit = _outfit_note(ec, char_id, doc, ledger)  # plan 28 F6
         for which in ("portrait", "turnaround"):
             # Plan 23 stage D4: a two-view story's portrait is its front+back sheet.
             kind_of_sheet = "front and back" if which == "portrait" and media_policy.two_view(ec.story) else which
             entry = _entity_ref(ec, "characters", char_id, refs_doc.get(which),
-                                f"{who} — character sheet ({kind_of_sheet})")
+                                f"{who} — character sheet ({kind_of_sheet}){outfit}")
             if entry is not None:
                 refs.append(dict(entry, kind="sheet"))
                 break

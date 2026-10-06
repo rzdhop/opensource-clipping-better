@@ -4622,7 +4622,10 @@ def approve_storyboard(stories, story_id, ep, *, now) -> dict:
     an entity its prompts were resolved from has changed since (refresh
     them); a v2 story's, while its estimated length with the storyboard is
     outside the template's window (:func:`_refuse_length`, phase 7 stage 6a,
-    never "anyway"). ``approved_at`` becomes *now*; nothing else moves."""
+    never "anyway"); and (plan 28 F6) while a shot shows a character in a
+    variant not approved or an outfit its look does not have
+    (``assets.wardrobe_refusal``). ``approved_at`` becomes *now*; nothing
+    else moves."""
     story = load(stories, story_id)
     ep = episode_bounds(stories, story, ep)
     board = read_episode(stories, story_id, ep, STORYBOARD_DOC)
@@ -4650,6 +4653,11 @@ def approve_storyboard(stories, story_id, ep, *, now) -> dict:
     if outdated:
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s prompts are outdated: refresh them ({_and(outdated)} "
                                        f"changed since they were resolved)."))
+    # Plan 28 F6 (DEC-305 section 5): a shot showing a character in a variant not approved, or in an outfit
+    # its look does not have, is refused here -- before any keyframe is bought.
+    refusal = assets_step.wardrobe_refusal(ec, board)
+    if refusal:
+        raise WorkflowError(CONFLICT, f"Episode {ep}'s storyboard cannot be approved. {refusal}")
     _refuse_length(ec, script, board, "storyboard")
     board["approved_at"] = now
     return _write(episode_common.write_storyboard, "storyboard", ec, board, script, now=now, code=CONFLICT)
