@@ -1086,7 +1086,7 @@ default graphs for each model (export "API format", replace the literal inputs w
 `{{height}}`, `{{frames}}`, `{{fps}}`), and validated at runtime against `GET /object_info`;
 the spec deliberately does not freeze node graphs, only the placeholder contract and the
 model files each template needs (listed in the template's `requires` field: e.g.
-`flux2-klein-4b.safetensors`, `qwen_image_edit_2509_q4.gguf`, `wan2.2_ti2v_5B_fp8.safetensors`,
+`flux-2-klein-4b.safetensors`, `qwen_image_edit_2509_q4.gguf`, `wan2.2_ti2v_5B_fp8.safetensors`,
 `ltx-2-13b.safetensors`).
 
 ### 8.6 Settings additions
