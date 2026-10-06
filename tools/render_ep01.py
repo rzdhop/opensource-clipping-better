@@ -293,6 +293,17 @@ def voice_lines(force=False, fake=False):
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def check_existing_voices(voice_dir):
+    """--use-existing-voices: one lNN.wav per spoken line must already be in
+    *voice_dir* (made elsewhere: tools/voice_ep01_comfy.py on the RunPod worker,
+    or an earlier Gemini run). Nothing is synthesised and no key is needed."""
+    missing = [line["id"] for line in spoken_lines() if not (voice_dir / f"{line['id']}.wav").exists()]
+    if missing:
+        sys.exit(f"Missing voice files in {voice_dir}: {', '.join(missing)}. "
+                 "Run tools/voice_ep01_comfy.py first (or drop the flag to voice with Gemini).")
+    return len(spoken_lines())
+
+
 def voice_filters(first_input):
     """ffmpeg inputs + filters placing every line at its start, trimmed, levelled and fitted to its slot."""
     inputs, filters, labels, report = [], [], [], []
@@ -444,13 +455,25 @@ def build_audio(audio_out, total, with_voices):
          "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", audio_out])
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--no-voices", action="store_true", help="subtitles only, no TTS")
     group.add_argument("--fake-voices", action="store_true", help="offline test voices (ffmpeg flite)")
+    group.add_argument("--use-existing-voices", action="store_true",
+                       help="mix the lNN.wav files already in the voices folder (tools/voice_ep01_comfy.py); "
+                            "no Gemini call, no key needed")
     parser.add_argument("--force-voices", action="store_true", help="re-voice every line")
-    args = parser.parse_args()
+    parser.add_argument("--voices-dir", type=Path, default=None,
+                        help=f"where the lNN.wav files are (default {(EP_DIR / 'voices').relative_to(ROOT)})")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    global VOICE_DIR
+    args = parse_args(argv)
+    if args.voices_dir:
+        VOICE_DIR = Path(args.voices_dir)
 
     if not shutil.which("ffmpeg"):
         sys.exit("ffmpeg is not installed or not on PATH.")
@@ -458,7 +481,9 @@ def main():
     total = sum(d for _, d in SHOTS) + END_CARD_SECONDS
     with_voices = not args.no_voices
 
-    if with_voices:
+    if args.use_existing_voices:
+        check_existing_voices(VOICE_DIR)
+    elif with_voices:
         voice_lines(force=args.force_voices, fake=args.fake_voices)
 
     ass_path = WORK_DIR / "ep01_overlays.ass"
@@ -472,8 +497,9 @@ def main():
     # Lighter copy for chat/phone upload limits.
     run(["ffmpeg", "-y", "-i", FINAL, "-c:v", "libx264", "-preset", "slow", "-crf", "23",
          "-maxrate", "2.6M", "-bufsize", "5M", "-c:a", "copy", "-movflags", "+faststart", SHARE])
-    print(f"Done: {FINAL} and {SHARE} ({total:.1f} s, voices: "
-          f"{'fake' if args.fake_voices else ('gemini' if with_voices else 'none')})")
+    source = ("fake" if args.fake_voices else "existing files" if args.use_existing_voices
+              else "gemini" if with_voices else "none")
+    print(f"Done: {FINAL} and {SHARE} ({total:.1f} s, voices: {source})")
 
 
 if __name__ == "__main__":
