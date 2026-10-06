@@ -77,6 +77,15 @@ def test_each_kind_takes_its_links_budget_bounded_by_its_ceiling_and_todays_numb
     assert pb.plate_words(seedream, live=_live(seedream, 650)) == 100 < prompting.PLATE_V2_MAX_WORDS
     assert not hasattr(pb, "PLATE_CEILING_WORDS") and not hasattr(pb, "PROP_CEILING_WORDS")
     assert (pb.sheet_words(None), pb.plate_words(None), pb.prop_words(None)) == (130, 150, 80)
+    # Plan 29 stage 4 (DEC-308 point 4, amending DEC-247), re-pinned on purpose: an element with its written
+    # description gets 100 words more -- the sheet's ceiling 300, the fixed numbers 230 / 250 / 180 / 360 -- and
+    # the plate and the prop stay the link's own; the numbers above (no description) are unchanged.
+    assert pb.sheet_words(seedream, live=NO_LIVE, described=True) == pb.SHEET_DESCRIBED_CEILING_WORDS == 300
+    assert (pb.sheet_words(None, described=True), pb.plate_words(None, described=True),
+            pb.prop_words(None, described=True), pb.two_view_words(None, described=True)) == (230, 250, 180, 360)
+    assert (prompting.SHEET_V2_DESCRIBED_MAX_WORDS, prompting.PLATE_V2_DESCRIBED_MAX_WORDS,
+            prompting.PROP_V2_DESCRIBED_MAX_WORDS) == (230, 250, 180)
+    assert pb.plate_words(seedream, live=NO_LIVE, described=True) == 461
     # The pair the shots module is given: the numbers and the links they came from.
     budgets = pb.for_links(SEEDREAM_EDIT, VEO, live=NO_LIVE)
     assert budgets == prompting.Budgets(320, 160, SEEDREAM_EDIT, VEO)

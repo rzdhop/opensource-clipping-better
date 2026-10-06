@@ -534,6 +534,7 @@ def apply_d2(doc, reply) -> None:
     look written over a look keeps the images it was drawn from."""
     first = not doc.get("look")
     doc["look"] = schemas.d2_look(reply)
+    schemas.store_description(doc, reply)
     doc["approved_at"] = None
     if first:
         for which in ("portrait",) + SHEETS:

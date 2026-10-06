@@ -54,6 +54,11 @@ KEYFRAME_CEILING_WORDS = 320
 CLIP_CEILING_WORDS = 160
 CLIP_AUDIO_CEILING_WORDS = CLIP_CEILING_WORDS + prompting.CLIP_AUDIO_SHARE_WORDS
 SHEET_CEILING_WORDS = 200
+# Plan 29 stage 4 (DEC-308 point 4, amending DEC-247): a character with its
+# written description gets that much more room in its sheet (300), and its
+# plate, prop and two-view fixed numbers grow the same way
+# (``prompting.DESCRIPTION_ROOM_WORDS``); without one, every budget is the one above.
+SHEET_DESCRIBED_CEILING_WORDS = SHEET_CEILING_WORDS + prompting.DESCRIPTION_ROOM_WORDS
 
 
 def _label(link):
@@ -97,25 +102,35 @@ def speech_clip_words(link, *, live=None) -> int:
                      live=live)
 
 
-def sheet_words(link, *, live=None) -> int:
-    """A v2 character sheet prompt's budget on *link*."""
-    return words_for(link, default=prompting.SHEET_V2_MAX_WORDS, ceiling=SHEET_CEILING_WORDS, live=live)
+def _room(described) -> int:
+    return prompting.DESCRIPTION_ROOM_WORDS if described else 0
 
 
-def two_view_words(link, *, live=None) -> int:
+def sheet_words(link, *, live=None, described=False) -> int:
+    """A v2 character sheet prompt's budget on *link*; *described* (the
+    character has its written description, plan 29 stage 4): 100 words more,
+    to :data:`SHEET_DESCRIBED_CEILING_WORDS`."""
+    ceiling = SHEET_DESCRIBED_CEILING_WORDS if described else SHEET_CEILING_WORDS
+    return words_for(link, default=prompting.SHEET_V2_MAX_WORDS + _room(described), ceiling=ceiling, live=live)
+
+
+def two_view_words(link, *, live=None, described=False) -> int:
     """A v2 two-view character sheet prompt's budget on *link* (plan 23 stage
-    D4): the link's own, no ceiling (plan 26); the fixed number with none."""
-    return words_for(link, default=prompting.TWO_VIEW_V2_MAX_WORDS, live=live)
+    D4): the link's own, no ceiling (plan 26); the fixed number with none
+    (100 more when *described*, as :func:`sheet_words`)."""
+    return words_for(link, default=prompting.TWO_VIEW_V2_MAX_WORDS + _room(described), live=live)
 
 
-def plate_words(link, *, live=None) -> int:
-    """A v2 plate prompt's budget on *link*: the link's own, no ceiling (plan 26)."""
-    return words_for(link, default=prompting.PLATE_V2_MAX_WORDS, live=live)
+def plate_words(link, *, live=None, described=False) -> int:
+    """A v2 plate prompt's budget on *link*: the link's own, no ceiling (plan 26); the fixed number with none
+    (100 more when *described*, as :func:`sheet_words`)."""
+    return words_for(link, default=prompting.PLATE_V2_MAX_WORDS + _room(described), live=live)
 
 
-def prop_words(link, *, live=None) -> int:
-    """A v2 prop reference prompt's budget on *link*: the link's own, no ceiling (plan 26)."""
-    return words_for(link, default=prompting.PROP_V2_MAX_WORDS, live=live)
+def prop_words(link, *, live=None, described=False) -> int:
+    """A v2 prop reference prompt's budget on *link*: the link's own, no ceiling (plan 26); the fixed number
+    with none (100 more when *described*, as :func:`sheet_words`)."""
+    return words_for(link, default=prompting.PROP_V2_MAX_WORDS + _room(described), live=live)
 
 
 # ------------------------------------------------- the whole prompt, unbounded but by its link (plan 26)

@@ -1880,6 +1880,40 @@ def prop_look_errors(look, path="$.look") -> list:
     return errors
 
 
+# Plan 29 stage 4 (DEC-308 point 4; the human: "Each prompt, description etc must be around 100 words each time
+# for each element describing the story element"): one written paragraph on a character, a place or a prop, in
+# English, a painter could work from -- written by D2 / D3 / R1v2 in their own call, first in the entity's master
+# paragraph and in its own image core. Optional (a story written before it renders as it always did); the writer
+# is asked for DESCRIPTION_WRITTEN_WORDS, a stored one (the human may edit it) is held to DESCRIPTION_STORED_WORDS.
+DESCRIPTION_WRITTEN_WORDS = (80, 120)
+DESCRIPTION_STORED_WORDS = (60, 160)
+_DESCRIPTION_SCHEMA = {"type": ["string", "null"]}
+# A place's or a prop's description that says a person draws one: refused in the writer's reply (whole words).
+_DESCRIPTION_PEOPLE = re.compile(r"\b(?:person|persons|people|character|characters|figure|figures|someone)\b",
+                                 re.IGNORECASE)
+
+
+def description_errors(text, path="$.description", *, words=DESCRIPTION_STORED_WORDS, empty=False) -> list:
+    """The errors of an element's ``description`` *text*: None (or absent: the caller passes None) is fine;
+    else a non-empty string of *words* (``(low, high)``) words. *empty* (a place's or a prop's, as the writer
+    replied it): it never mentions a person, character or figure, whole words."""
+    if text is None:
+        return []
+    errors = []
+    if not (isinstance(text, str) and text.strip()):
+        return [f"{path}: must be a non-empty string"]
+    low, high = words
+    count = _words(text)
+    if not low <= count <= high:
+        errors.append(f"{path}: {count} words, expected {low} to {high}")
+    if empty:
+        found = sorted({match.group(0).lower() for match in _DESCRIPTION_PEOPLE.finditer(text)})
+        if found:
+            errors.append(f"{path}: the set or the object is shown empty -- never mention "
+                          f"{', '.join(repr(word) for word in found)}")
+    return errors
+
+
 # Plan 23 stage D5: a character's named appearance variants, each an edit of
 # its base sheet(s) (``refimages.variant_image``) picked per shot by the
 # storyboard (``shots.variant_view``). ``variant_id`` is a slug fixed at
@@ -2034,6 +2068,8 @@ CHARACTER_SCHEMA = _document({
     "sheet_checks": {"type": "object"},
     # Plan 29 stage 5: the failed images the human approved anyway (approved_anyway_errors).
     "approved_anyway": {"type": "object"},
+    # Plan 29 stage 4: D2's written description (description_errors).
+    "description": _DESCRIPTION_SCHEMA,
 })
 
 
@@ -2085,6 +2121,7 @@ def character_errors(doc) -> list:
         errors.extend(sheet_checks_errors(doc["sheet_checks"]))
     if "approved_anyway" in doc:
         errors.extend(approved_anyway_errors(doc["approved_anyway"]))
+    errors.extend(description_errors(doc.get("description")))
     seen = set()
     for i, variant in enumerate(doc.get("variants") or ()):
         errors.extend(variant_errors(variant, f"$.variants[{i}]"))
@@ -2123,6 +2160,8 @@ PLACE_SCHEMA = _document({
     "sheet_checks": {"type": "object"},
     # Plan 29 stage 5: the failed images the human approved anyway (approved_anyway_errors).
     "approved_anyway": {"type": "object"},
+    # Plan 29 stage 4: D3's written description (description_errors).
+    "description": _DESCRIPTION_SCHEMA,
 })
 
 
@@ -2163,6 +2202,7 @@ def place_errors(doc) -> list:
         errors.extend(sheet_checks_errors(doc["sheet_checks"]))
     if "approved_anyway" in doc:
         errors.extend(approved_anyway_errors(doc["approved_anyway"]))
+    errors.extend(description_errors(doc.get("description")))
     return errors
 
 
@@ -2192,6 +2232,8 @@ PROP_SCHEMA = _document({
     "sheet_checks": {"type": "object"},
     # Plan 29 stage 5: the failed images the human approved anyway (approved_anyway_errors).
     "approved_anyway": {"type": "object"},
+    # Plan 29 stage 4: R1v2's written description (description_errors).
+    "description": _DESCRIPTION_SCHEMA,
 })
 
 
@@ -2214,6 +2256,7 @@ def prop_errors(doc) -> list:
         errors.extend(sheet_checks_errors(doc["sheet_checks"]))
     if "approved_anyway" in doc:
         errors.extend(approved_anyway_errors(doc["approved_anyway"]))
+    errors.extend(description_errors(doc.get("description")))
     return errors
 
 
@@ -5556,6 +5599,32 @@ def _name_leaks(errors, haystacks, names) -> None:
                 errors.append(f"{path}: must not mention a name ({name!r})")
 
 
+# Plan 29 stage 4: the description each look writer is asked for (the sent schema requires it; a reply without
+# one -- a link that ignores the strict schema -- is still a look, the element simply has no description).
+_DESCRIPTION_REPLY = {"type": "string",
+                      "description": "English, one paragraph of 80 to 120 words a painter could work from"}
+
+
+def _without_description_required(schema) -> dict:
+    """*schema* (a look writer's) with ``description`` no longer required: what its validator checks."""
+    return dict(schema, required=[key for key in schema["required"] if key != "description"])
+
+
+def _reply_description_errors(doc, *, empty=False) -> list:
+    """A look writer's reply ``description``: absent or 80-120 words (and, *empty*, no person)."""
+    if "description" not in doc:
+        return []
+    return description_errors(doc["description"], words=DESCRIPTION_WRITTEN_WORDS, empty=empty)
+
+
+def store_description(doc, reply) -> None:
+    """A look writer's reply ``description`` into the element *doc* (in place), whitespace collapsed; a reply
+    without one (or an empty one) leaves *doc*'s as it is."""
+    text = " ".join(str(reply.get("description") or "").split())
+    if text:
+        doc["description"] = text
+
+
 def d2_schema(species=False) -> dict:
     """The D2 output schema: one character's look (``CHARACTER_LOOK_SCHEMA``'s
     fields; ``season_change`` an empty string when the look does not change).
@@ -5587,6 +5656,7 @@ def d2_schema(species=False) -> dict:
         "bearing": {"type": "string",
                     "description": "English, posture and how they carry themselves, e.g. 'stands very straight, "
                                    "chin up', at most 10 words"},
+        "description": _DESCRIPTION_REPLY,
     }
     if species:
         properties["species"] = {"type": "string",
@@ -5630,10 +5700,10 @@ def d2_errors(doc, names, *, species_world=False) -> list:
     Plan 26 stage 7b: in a *species_world* the reply must name the head's
     ``species`` and neither the face nor the skin_material may say "human"
     (the head is a whole fruit or vegetable, told why on a retry)."""
-    errors = validate(doc, d2_schema(species=True if species_world else "optional"))
+    errors = validate(doc, _without_description_required(d2_schema(species=True if species_world else "optional")))
     if errors:
         return errors
-    errors = character_look_errors(d2_look(doc), "$")
+    errors = character_look_errors(d2_look(doc), "$") + _reply_description_errors(doc)
     if species_world:
         if not (doc.get("species") or "").strip():
             errors.append("$.species: a species world needs the head's fruit or vegetable")
@@ -5648,6 +5718,8 @@ def d2_errors(doc, names, *, species_world=False) -> list:
         haystacks.append(("$.presentation", doc["presentation"]))
     if doc.get("bearing"):
         haystacks.append(("$.bearing", doc["bearing"]))
+    if doc.get("description"):
+        haystacks.append(("$.description", doc["description"]))
     _name_leaks(errors, haystacks, names)
     return errors
 
@@ -5666,6 +5738,7 @@ def d3_schema(variants, prop_names) -> dict:
         "lighting": lighting,
         "props_here": {"type": "array", "description": f"0-{D3_PROPS_HERE_MAX} props of the story that live here",
                        "items": prop_item},
+        "description": _DESCRIPTION_REPLY,
     })
 
 
@@ -5673,12 +5746,12 @@ def d3_errors(doc, variants, prop_names, names) -> list:
     """Post-validation for a D3 response: the place look's rules on the
     reply, one light per variant exactly, props of the story only (once), no
     name in a visual field."""
-    errors = validate(doc, d3_schema(variants, prop_names))
+    errors = validate(doc, _without_description_required(d3_schema(variants, prop_names)))
     if errors:
         return errors
     look = {"layout_map": doc["layout_map"], "scale_note": doc["scale_note"], "lighting": doc["lighting"],
             "props_here": []}
-    errors = place_look_errors(look, "$")
+    errors = place_look_errors(look, "$") + _reply_description_errors(doc, empty=True)
     if set(doc["lighting"]) != set(variants):
         errors.append(f"$.lighting: expected one light for each of {', '.join(variants)}")
     known = set(prop_names)
@@ -5692,6 +5765,8 @@ def d3_errors(doc, variants, prop_names, names) -> list:
     haystacks = [(f"$.layout_map.{key}", doc["layout_map"][key]) for key in LAYOUT_MAP_KEYS]
     haystacks.append(("$.scale_note", doc["scale_note"]))
     haystacks += [(f"$.lighting.{key}", value) for key, value in doc["lighting"].items()]
+    if doc.get("description"):
+        haystacks.append(("$.description", doc["description"]))
     _name_leaks(errors, haystacks, names)
     return errors
 
@@ -5723,6 +5798,7 @@ def r1v2_schema(cast_names, place_names) -> dict:
         "scale_phrase": {"type": "string", "description": "English, its size in words, at most 10 words"},
         "where_when": {"type": "array", "description": f"0-{R1V2_WHERE_WHEN_MAX} entries: where and with whom it is",
                        "items": entry},
+        "description": _DESCRIPTION_REPLY,
     })
 
 
@@ -5730,17 +5806,19 @@ def r1v2_errors(doc, names) -> list:
     """Post-validation for an R1v2 response: the prop look's rules on the
     reply (``prop_look_errors``, holders and places checked once mapped) and
     no name in a visual field."""
-    errors = validate(doc, r1v2_schema((), ()))
+    errors = validate(doc, _without_description_required(r1v2_schema((), ())))
     if errors:
         return errors
     look = {"scale_cm": doc["scale_cm"], "material": doc["material"], "colour": doc["colour"],
             "scale_phrase": doc["scale_phrase"],
             "where_when": [{"ep": entry["ep"], "holder_char_id": None, "place_id": None, "note": entry["note"]}
                            for entry in doc["where_when"]]}
-    errors = prop_look_errors(look, "$")
+    errors = prop_look_errors(look, "$") + _reply_description_errors(doc, empty=True)
     if len(doc["where_when"]) > R1V2_WHERE_WHEN_MAX:
         errors.append(f"$.where_when: {len(doc['where_when'])} entries, expected at most {R1V2_WHERE_WHEN_MAX}")
     haystacks = [(f"$.{key}", doc[key]) for key in ("material", "colour", "scale_phrase")]
+    if doc.get("description"):
+        haystacks.append(("$.description", doc["description"]))
     _name_leaks(errors, haystacks, names)
     return errors
 

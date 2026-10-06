@@ -306,6 +306,16 @@ def prop_prompt_block(style_lock: dict, *, descriptor: str) -> str:
 SHEET_V2_MAX_WORDS = 130
 PLATE_V2_MAX_WORDS = 150
 PROP_V2_MAX_WORDS = 80
+# Plan 29 stage 4 (DEC-308 point 4, amending DEC-247): an element with its
+# written description (80-120 words, ``schemas.DESCRIPTION_WRITTEN_WORDS``)
+# says it first in its own core, and the core gets that much more room -- the
+# caps above plus DESCRIPTION_ROOM_WORDS (sheet 230, plate 250, prop 180,
+# two-view 360) -- so the rest of the core is cut no more than before. An
+# element without one is built to the caps above, byte for byte as before.
+DESCRIPTION_ROOM_WORDS = 100
+SHEET_V2_DESCRIBED_MAX_WORDS = SHEET_V2_MAX_WORDS + DESCRIPTION_ROOM_WORDS
+PLATE_V2_DESCRIBED_MAX_WORDS = PLATE_V2_MAX_WORDS + DESCRIPTION_ROOM_WORDS
+PROP_V2_DESCRIBED_MAX_WORDS = PROP_V2_MAX_WORDS + DESCRIPTION_ROOM_WORDS
 # The most of the rendering a v2 prompt keeps, and the least it is worth keeping.
 _RENDERING_V2_MAX_WORDS = 30
 _RENDERING_V2_MIN_WORDS = 8
@@ -451,11 +461,29 @@ def _styled(cap: int, *, before: str, after: str, rendering: str, rules: str = "
     return _collapse_ws(" ".join(part for part in parts if part))
 
 
+def _description_sentence(description) -> str:
+    """An element's written description (plan 29 stage 4) as the core says it; '' for none."""
+    return as_sentence(description) if isinstance(description, str) and description.strip() else ""
+
+
+def _sheet_budget(budget, description, two_view=False) -> int:
+    """*budget*, or -- None -- the sheet's fixed one: the described one when there is a *description*."""
+    if budget is not None:
+        return budget
+    base = TWO_VIEW_V2_MAX_WORDS if two_view else SHEET_V2_MAX_WORDS
+    return base + DESCRIPTION_ROOM_WORDS if _description_sentence(description) else base
+
+
 def _sheet_v2(style_lock, *, head, look_text, signature_items, tail, constraints, rules=True,
-              budget=SHEET_V2_MAX_WORDS, cues="") -> str:
+              budget=None, cues="", lead="", description="", two_view=False) -> str:
+    """A v2 sheet: *lead* (the edit's role sentences, never after the description), the written
+    *description* (plan 29 stage 4: first, whole), then *head* and the look, the style, *tail* and
+    *constraints* -- at most *budget* words (None: the fixed one, :func:`_sheet_budget`). Without a
+    description the text is the one it always was."""
     look = _with_items(look_text, signature_items)
-    before = f"{head}: {look}."
+    before = " ".join(part for part in (lead, _description_sentence(description), f"{head}: {look}.") if part)
     after = f"{tail} {constraints}"
+    budget = _sheet_budget(budget, description, two_view)
     return _styled(budget, before=before, after=after, rendering=style_lock["rendering"],
                    rules=style_lock["character_design_rules"] if rules else "", cues=cues)
 
@@ -466,9 +494,11 @@ _PORTRAIT_HEAD = ("Full-body character reference sheet, head to toe, front three
                   "pose, arms relaxed")
 _TURNAROUND_HEAD = ("Turnaround sheet of this character, four full-body views side by side in one row, front, "
                     "three-quarter, profile and back, head to toe in each")
-_EXPRESSIONS_HEAD = ("Every cell shows the same head as image 1, never a different face. Expression sheet of this "
-                     "character, exactly six cells in a 3 by 2 grid, each a head-and-shoulders portrait: neutral, "
-                     "happy, angry, shocked, sad and scheming, same face and outfit in every cell")
+_EXPRESSIONS_PIN = "Every cell shows the same head as image 1, never a different face."
+_EXPRESSIONS_LAYOUT = ("Expression sheet of this character, exactly six cells in a 3 by 2 grid, each a "
+                       "head-and-shoulders portrait: neutral, happy, angry, shocked, sad and scheming, same face and "
+                       "outfit in every cell")
+_EXPRESSIONS_HEAD = f"{_EXPRESSIONS_PIN} {_EXPRESSIONS_LAYOUT}"
 
 
 def _portrait_tail(style_lock) -> str:
@@ -483,51 +513,55 @@ def _expressions_tail(style_lock) -> str:
     return f"Plain {style_lock['sheet_background']} background, even soft light, no labels."
 
 
-def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS,
-                       cues: str = "") -> str:
+def portrait_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=None,
+                       cues: str = "", description: str = "") -> str:
     """A v2 character's base reference: full body, head to toe, front
     three-quarter, neutral pose, from its rendered look (``shots.render_look``)
     -- at most *budget* words (``SHEET_V2_MAX_WORDS``, or the link's own,
     stage F2). A signature item the look does not say yet is added with
     "with". *cues* (stage F2, ``shots.visual_cues``: the character's
-    distinctive marks and bearing) follow the look when they fit."""
+    distinctive marks and bearing) follow the look when they fit. *description*
+    (plan 29 stage 4, the character's written one) opens the prompt, whole;
+    with no *budget*, the sheet then gets :data:`SHEET_V2_DESCRIBED_MAX_WORDS`."""
     return _sheet_v2(
         style_lock,
         head=_PORTRAIT_HEAD,
         look_text=look_text, signature_items=signature_items,
         tail=_portrait_tail(style_lock),
-        constraints=CONSTRAINTS_ONE_CHARACTER, budget=budget, cues=cues,
+        constraints=CONSTRAINTS_ONE_CHARACTER, budget=budget, cues=cues, description=description,
     )
 
 
-def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS,
-                         cues: str = "") -> str:
+def turnaround_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=None,
+                         cues: str = "", description: str = "") -> str:
     """The v2 turnaround, an edit of the portrait (image 1): four full-body
-    views of the same character, at most *budget* words; *cues* as
-    :func:`portrait_prompt_v2`'s."""
+    views of the same character, at most *budget* words; *cues* and
+    *description* as :func:`portrait_prompt_v2`'s (the description after
+    the role sentence)."""
     return _sheet_v2(
         style_lock,
-        head=f"{ROLE_TEXT_PORTRAIT} {_TURNAROUND_HEAD}",
+        lead=ROLE_TEXT_PORTRAIT, head=_TURNAROUND_HEAD,
         look_text=look_text, signature_items=signature_items,
         tail=_turnaround_tail(style_lock),
-        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues,
+        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues, description=description,
     )
 
 
-def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=SHEET_V2_MAX_WORDS,
-                          cues: str = "") -> str:
+def expressions_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=None,
+                          cues: str = "", description: str = "") -> str:
     """The v2 expression sheet, an edit of the portrait (image 1): six
     head-and-shoulders portraits, at most *budget* words; *cues* as
     :func:`portrait_prompt_v2`'s. A2: a sentence right after the role text
     pins every cell to image 1's head, and the grid count is spelled out
     ("exactly six cells") -- one sheet had drifted to a human face in one
-    cell, another came out with five cells."""
+    cell, another came out with five cells. *description* as
+    :func:`portrait_prompt_v2`'s, after the role text and that sentence."""
     return _sheet_v2(
         style_lock,
-        head=f"{ROLE_TEXT_PORTRAIT} {_EXPRESSIONS_HEAD}",
+        lead=f"{ROLE_TEXT_PORTRAIT} {_EXPRESSIONS_PIN}", head=_EXPRESSIONS_LAYOUT,
         look_text=look_text, signature_items=signature_items,
         tail=_expressions_tail(style_lock),
-        constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False, budget=budget, cues=cues,
+        constraints=_CONSTRAINTS_SAME_CHARACTER, rules=False, budget=budget, cues=cues, description=description,
     )
 
 
@@ -552,22 +586,24 @@ TWO_VIEW_ROLE = "Image {number} shows this one character twice, front and back: 
 _TWO_VIEW_ROLE_COMPACT = "image {number} shows {handle} twice, front and back: draw them once"
 
 
-def two_view_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=TWO_VIEW_V2_MAX_WORDS,
-                       cues: str = "") -> str:
+def two_view_prompt_v2(style_lock: dict, *, look_text: str, signature_items, budget=None,
+                       cues: str = "", description: str = "") -> str:
     """A v2 character's two-view sheet (``sheet_mode`` ``two_view``): one
     vertical 9:16 image, the front on the left half and the back on the
     right, head to toe, from its rendered look (``shots.render_look``) --
     built through :func:`_sheet_v2` like the other sheets, at most *budget*
     words (:data:`TWO_VIEW_V2_MAX_WORDS`, or the link's own): the layout, the
     look and the dress rule are the skeleton (never cut), the style's
-    rendering and design rules fill what the *budget* leaves. *cues* as
-    :func:`portrait_prompt_v2`'s."""
+    rendering and design rules fill what the *budget* leaves. *cues* and
+    *description* as :func:`portrait_prompt_v2`'s (no *budget* and a
+    description: :data:`TWO_VIEW_V2_MAX_WORDS` plus
+    :data:`DESCRIPTION_ROOM_WORDS`)."""
     return _sheet_v2(
         style_lock,
         head=TWO_VIEW_HEAD,
         look_text=look_text, signature_items=signature_items,
         tail=_two_view_tail(style_lock),
-        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues,
+        constraints=_CONSTRAINTS_SAME_CHARACTER, budget=budget, cues=cues, description=description, two_view=True,
     )
 
 
@@ -585,19 +621,21 @@ VARIANT_ROLE = "Image 1 is this character's reference: same character, same iden
 
 
 def variant_prompt_v2(style_lock: dict, *, which: str, delta_text: str, look_text: str, signature_items,
-                      budget=SHEET_V2_MAX_WORDS, cues: str = "", two_view: bool = False) -> str:
+                      budget=None, cues: str = "", two_view: bool = False, description: str = "") -> str:
     """The prompt of a character's appearance variant's sheet *which*
     (``portrait``, ``turnaround`` or ``expressions``), an edit of its base
     portrait (image 1): :data:`VARIANT_ROLE` with *delta_text* (what is
     different now, never cut), then the slot's skeleton -- the two-view
     sheet's when *two_view* (the portrait slot of a two-view story), else
     the full-body portrait's, the turnaround's or the expression sheet's --
-    over the character's rendered look, at most *budget* words; *cues* as
-    :func:`portrait_prompt_v2`'s."""
+    over the character's rendered look, at most *budget* words; *cues* and
+    *description* as :func:`portrait_prompt_v2`'s (the description after
+    the role sentence)."""
     delta = _strip_trailing_period(_collapse_ws(delta_text))
     if not delta:
         raise ValueError("variant_prompt_v2: an appearance variant needs its delta text")
     role = VARIANT_ROLE.format(delta=delta[0].lower() + delta[1:] if delta[1:2].islower() else delta)
+    lead = role
     if which == "portrait" and two_view:
         head, tail, constraints, rules = TWO_VIEW_HEAD, _two_view_tail(style_lock), _CONSTRAINTS_SAME_CHARACTER, True
     elif which == "portrait":
@@ -606,16 +644,18 @@ def variant_prompt_v2(style_lock: dict, *, which: str, delta_text: str, look_tex
         head, tail, constraints, rules = (_TURNAROUND_HEAD, _turnaround_tail(style_lock), _CONSTRAINTS_SAME_CHARACTER,
                                           True)
     elif which == "expressions":
-        head, tail, constraints, rules = (_EXPRESSIONS_HEAD, _expressions_tail(style_lock),
+        lead = f"{role} {_EXPRESSIONS_PIN}"
+        head, tail, constraints, rules = (_EXPRESSIONS_LAYOUT, _expressions_tail(style_lock),
                                           _CONSTRAINTS_SAME_CHARACTER, False)
     else:
         raise ValueError(f"variant_prompt_v2: {which!r} is not a character sheet")
-    return _sheet_v2(style_lock, head=f"{role} {head}", look_text=look_text, signature_items=signature_items,
-                     tail=tail, constraints=constraints, rules=rules, budget=budget, cues=cues)
+    return _sheet_v2(style_lock, lead=lead, head=head, look_text=look_text, signature_items=signature_items,
+                     tail=tail, constraints=constraints, rules=rules, budget=budget, cues=cues,
+                     description=description)
 
 
-def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=PLATE_V2_MAX_WORDS,
-                    aspect: str = "9:16") -> str:
+def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=None,
+                    aspect: str = "9:16", description: str = "") -> str:
     """A v2 place's plate for one time variant: the place in words
     (``shots.render_place``: descriptor, layout map, the variant's light,
     the props that live there), no people, a wide camera, the style's
@@ -625,34 +665,46 @@ def plate_prompt_v2(style_lock: dict, *, place_text: str, variant: str, budget=P
     The frame is *aspect*'s (plan 23 stage B7; 9:16 unless said). Plan 29
     stage 2: it opens on :data:`PLATE_EMPTY`, the scale reads as an empty
     set's (:func:`empty_scale`) and the rendering is said without its
-    characters (:func:`set_rendering`)."""
+    characters (:func:`set_rendering`). Plan 29 stage 4: the place's written
+    *description*, whole, right after that opening sentence (no *budget*:
+    :data:`PLATE_V2_DESCRIBED_MAX_WORDS`); none, the text it always was."""
     if not isinstance(variant, str) or re.fullmatch(schemas.TIME_VARIANT_PATTERN, variant) is None:
         raise ValueError(f"not a time variant name: {variant!r}")
+    described = _description_sentence(description)
+    if budget is None:
+        budget = PLATE_V2_DESCRIBED_MAX_WORDS if described else PLATE_V2_MAX_WORDS
+    opening = f"{PLATE_EMPTY} {described}" if described else PLATE_EMPTY
     head = f"Establishing wide shot of an empty set, {variant.replace('_', ' ')}, no people, no characters:"
     after = (f"Camera: wide, eye level, 24mm equivalent, deep focus. "
              f"Palette: {_strip_trailing_period(palette_line(style_lock))}. {_frame_phrase(aspect)}. "
              f"{_CONSTRAINTS_NO_PEOPLE}")
-    room = budget - _word_count(PLATE_EMPTY) - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
+    room = budget - _word_count(opening) - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 1
     place = _fit(_empty_scale_in(place_text), room)
-    before = f"{PLATE_EMPTY} {head} {place}." if place else f"{PLATE_EMPTY} {head[:-1]}."
+    before = f"{opening} {head} {place}." if place else f"{opening} {head[:-1]}."
     return _styled(budget, before=before, after=after, rendering=set_rendering(style_lock["rendering"]),
                    rules=as_sentence(style_lock["environment_rules"]))
 
 
-def prop_prompt_v2(style_lock: dict, *, prop_text: str, budget=PROP_V2_MAX_WORDS) -> str:
+def prop_prompt_v2(style_lock: dict, *, prop_text: str, budget=None, description: str = "") -> str:
     """A v2 prop's reference image (``shots.render_prop(..., for_reference=True)``:
     look, no scale -- A1, a scale phrase here invited a hand holding the
     object for a size reference), the object alone on a plain surface,
     nothing holding it -- at most *budget* words (``PROP_V2_MAX_WORDS``, or
     the link's own, stage F2). Plan 29 stage 2: it opens on
     :data:`PROP_ALONE`, and the rendering is said without its characters
-    (:func:`set_rendering`)."""
+    (:func:`set_rendering`). Plan 29 stage 4: the prop's written
+    *description*, whole, right after that opening sentence (no *budget*:
+    :data:`PROP_V2_DESCRIBED_MAX_WORDS`); none, the text it always was."""
+    described = _description_sentence(description)
+    if budget is None:
+        budget = PROP_V2_DESCRIBED_MAX_WORDS if described else PROP_V2_MAX_WORDS
+    opening = f"{PROP_ALONE} {described}" if described else PROP_ALONE
     head = "Reference image of the object alone on a plain surface, nothing holding it, centred"
     after = (f"Plain {style_lock['sheet_background']} background, even soft studio light. "
              f"{_CONSTRAINTS_OBJECT}")
-    room = budget - _word_count(PROP_ALONE) - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2
+    room = budget - _word_count(opening) - _word_count(head) - _word_count(after) - _RENDERING_V2_MIN_WORDS - 2
     prop = _fit(prop_text, room)
-    before = f"{PROP_ALONE} {head}: {prop}." if prop else f"{PROP_ALONE} {head}."
+    before = f"{opening} {head}: {prop}." if prop else f"{opening} {head}."
     return _styled(budget, before=before, after=after, rendering=set_rendering(style_lock["rendering"]))
 
 

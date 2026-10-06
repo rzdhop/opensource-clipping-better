@@ -582,7 +582,10 @@ def test_memory_section_lists_the_hooks_it_is_handed():
 
 # D3 re-measured on purpose (DEC-305, plan 28): 1685 -> 1706, fruit_drama's environment_rules now say a 3D animated
 # villa set; prompts.INPUT_BUDGET["D3"] 1940 -> 1970 by the rule above.
-MEASURED_LOOK = {"D2": 2096, "D3": 1706, "R1v2": 1014}
+# Re-measured on purpose (plan 29 stage 4, DEC-308 point 4): each ask gained its description line (80 to 120
+# words a painter could work from): D2 2096 -> 2169, D3 1706 -> 1791, R1v2 1014 -> 1098; prompts.INPUT_BUDGET
+# 2420 -> 2500, 1970 -> 2060, 1170 -> 1270 by the rule above.
+MEASURED_LOOK = {"D2": 2169, "D3": 1791, "R1v2": 1098}
 ALL_STYLES = [templates.load_style(style_id) for style_id in templates.list_style_ids()]
 _DESCRIPTOR_DENSITY = LIVE_CHARACTERS["char_kiwilo"]["descriptor"]
 

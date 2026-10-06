@@ -234,11 +234,13 @@ def test_the_concepts_step_sends_the_block_to_c1v2_and_c1j_and_fixes_style_fit(t
 # Budget = the worst case + 15 %, rounded up to ten: prompts.SETUP_INPUT_BUDGET.
 # Re-recorded on purpose (DEC-305, plan 28): D3 2775 -> 2797, fruit_drama's environment_rules now say a 3D animated villa
 # set; prompts.SETUP_INPUT_BUDGET["D3"] 3200 -> 3220 by the rule above.
+# Re-recorded on purpose (plan 29 stage 4, DEC-308 point 4): the look writers' asks gained the description line:
+# D2 3004 -> 3077, D3 2797 -> 2882, R1v2 2100 -> 2185; SETUP_INPUT_BUDGET 3460 -> 3540, 3220 -> 3320, 2420 -> 2520.
 
 MEASURED_SETUP = {
     "C1v2": 2249, "C1J": 1908, "B1": 1972, "B1v3": 2072, "B2": 2376, "B3": 2636,
     "K1": 3646, "P0": 2125, "P1": 2582, "R1": 2728, "S1": 3152, "S1v2": 3568, "S2": 3221,
-    "D1": 3896, "D2": 3004, "D3": 2797, "R1v2": 2100, "D4": 2482, "D5": 4058, "D6": 3610,
+    "D1": 3896, "D2": 3077, "D3": 2882, "R1v2": 2185, "D4": 2482, "D5": 4058, "D6": 3610,
 }
 
 

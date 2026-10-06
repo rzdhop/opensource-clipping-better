@@ -446,7 +446,8 @@ def test_v2_cast_runs_k1_d1_d2_then_the_sheets_and_a_legacy_story_makes_no_d1_or
     # The second D2 is shown the first character's height (one scale for the cast).
     first, second = (call["user"] for call in llm.of("D2"))
     assert "175 cm" not in first and "175 cm" in second
-    assert all(call["max_tokens"] == 380 for call in llm.of("D2"))
+    # Plan 29 stage 4 (DEC-308 point 4): re-pinned on purpose -- D2's reply carries its description (380 -> 580).
+    assert all(call["max_tokens"] == 580 for call in llm.of("D2"))
     # Nothing missing any more: no call left in the estimate, and a rerun calls nothing.
     assert workflow.cast_units(store, store.get(v2_id))["llm_calls"] == 0
     events.clear()
@@ -562,10 +563,13 @@ def test_v2_regenerating_a_characters_text_writes_its_look_again(tmp_path, herme
 
 
 def test_the_largest_look_replies_fit_their_caps():
-    """The plan's caps (D2 380, D3 300, R1v2 220) hold the largest English
-    reply each ask allows: every word and count limit hit, 6 characters a
-    word (chars/4; English fields, no French factor). D3 at P1's most time
-    variants (3) and its reply's props bound; R1v2 at its where-when bound."""
+    """The caps (D2 580, D3 480, R1v2 400) hold the largest English reply
+    each ask allows: every word and count limit hit, 6 characters a word
+    (chars/4; English fields, no French factor). D3 at P1's most time
+    variants (3) and its reply's props bound; R1v2 at its where-when bound.
+    Plan 29 stage 4 (DEC-308 point 4), re-pinned on purpose: each reply
+    carries its 120-word description, and D2's its optional presentation,
+    bearing and species at their caps (575 tokens; 531 without them)."""
     import json
 
     from clipping.providers.pacing import estimate_tokens
@@ -576,14 +580,15 @@ def test_the_largest_look_replies_fit_their_caps():
     d2 = {"build": words(15), "silhouette": words(12), "face": words(15), "hair": words(12),
           "skin_material": words(12), "height_cm": 175, "palette": [words(3)] * 4,
           "wardrobe_sets": [{"id": "night_out", "context": words(8), "items": words(20)}] * 3,
-          "season_change": words(20)}
+          "season_change": words(20), "presentation": words(8), "bearing": words(10), "species": words(4),
+          "description": words(120)}
     d3 = {"layout_map": {key: words(15) for key in schemas.LAYOUT_MAP_KEYS}, "scale_note": words(15),
           "lighting": {variant: words(15) for variant in ("day", "night", "dusk")},
-          "props_here": ["x" * 60] * schemas.D3_PROPS_HERE_MAX}
+          "props_here": ["x" * 60] * schemas.D3_PROPS_HERE_MAX, "description": words(120)}
     r1v2 = {"scale_cm": 12.5, "material": words(8), "colour": words(6), "scale_phrase": words(10),
             "where_when": [{"ep": 12, "holder": "x" * 60, "place": "y" * 60, "note": words(12)}]
-            * schemas.R1V2_WHERE_WHEN_MAX}
-    for prompt_id, reply, cap in (("D2", d2, 380), ("D3", d3, 300), ("R1v2", r1v2, 220)):
+            * schemas.R1V2_WHERE_WHEN_MAX, "description": words(120)}
+    for prompt_id, reply, cap in (("D2", d2, 580), ("D3", d3, 480), ("R1v2", r1v2, 400)):
         needed = estimate_tokens(json.dumps(reply, ensure_ascii=False))
         assert prompts.MAX_TOKENS[prompt_id] == cap
         assert cap // 2 < needed <= cap, (prompt_id, needed)

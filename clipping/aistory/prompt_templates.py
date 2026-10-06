@@ -273,12 +273,13 @@ def _wardrobe(look, set_id):
 
 def _look_parts(doc, style_lock, who, *, wardrobe_id=None, all_outfits=False, speaker=False, image=False):
     """``(essential, detail)``: the sentences of a character's look (no
-    heading) -- what it is made of, its age, build, face, hair, skin and
+    heading) -- its written description first when it has one (plan 29
+    stage 4), what it is made of, its age, build, face, hair, skin and
     outfit; then its silhouette, height, other outfits, signature items,
     bearing, colours and (the speaker's, not in an image) voice."""
     look = doc.get("look") or {}
     human, species = _species(doc, style_lock)
-    parts = [_sentence(f"{who} {species}")]
+    parts = [_sentence(doc.get("description")), _sentence(f"{who} {species}")]
     if not look and doc.get("descriptor") and human:
         parts.append(_labelled("Look", doc["descriptor"]))
     parts += [_labelled("Apparent age and gender", look.get("presentation")), _labelled("Build", look.get("build")),
@@ -352,14 +353,15 @@ def _layout(look, place) -> str:
 
 
 def _place_parts(place, who, *, variant=None, empty=False) -> tuple:
-    """``(essential, detail)``: a place's descriptor and light (of *variant*,
-    else every one it has); its layout, scale and the props usually there.
+    """``(essential, detail)``: a place's written description first when it
+    has one (plan 29 stage 4), its descriptor and light (of *variant*, else
+    every one it has); its layout, scale and the props usually there.
     *empty* (the place's own plate, plan 29 stage 2): the scale said as an
     empty set's (``prompting.empty_scale``: built for several people, shown
     with no one in it)."""
     look = place.get("look") or {}
     lighting = look.get("lighting") if isinstance(look.get("lighting"), dict) else {}
-    parts = [_sentence(place.get("descriptor") or place.get("one_line"))]
+    parts = [_sentence(place.get("description")), _sentence(place.get("descriptor") or place.get("one_line"))]
     if variant and _bare(lighting.get(variant)):
         parts.append(_labelled(f"Light ({variant})", lighting[variant]))
     elif lighting:
@@ -372,11 +374,13 @@ def _place_parts(place, who, *, variant=None, empty=False) -> tuple:
 
 
 def _prop_text(prop, who, *, present=False, for_reference=False) -> str:
-    """A prop's paragraph. *for_reference*: the paragraph of the prop's own reference image -- no size phrase
-    and no owner (nothing in frame to judge a scale against, so a size invited a hand holding the object, and
-    an owner a character; plan 26 stage 4c, A1). "Shown alone" is the v2 core's own sentence, not repeated."""
+    """A prop's paragraph, its written description first when it has one (plan 29 stage 4). *for_reference*:
+    the paragraph of the prop's own reference image -- no size phrase and no owner (nothing in frame to judge a
+    scale against, so a size invited a hand holding the object, and an owner a character; plan 26 stage 4c, A1).
+    "Shown alone" is the v2 core's own sentence, not repeated."""
     look = prop.get("look") or {}
-    parts = [_sentence(prop.get("descriptor") or prop.get("one_line")), _labelled("Material", look.get("material")),
+    parts = [_sentence(prop.get("description")), _sentence(prop.get("descriptor") or prop.get("one_line")),
+             _labelled("Material", look.get("material")),
              _labelled("Colour", look.get("colour"))]
     if not for_reference:
         size = _bare(look.get("scale_phrase"))

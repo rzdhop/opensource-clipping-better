@@ -783,6 +783,12 @@ def _done(on_log, plan, ref, label, est, paid) -> dict:
 
 # ----------------------------------------------------------------- characters
 
+def _description(doc) -> str:
+    """An element's written description (plan 29 stage 4), whitespace collapsed; '' when it has none."""
+    text = doc.get("description")
+    return " ".join(text.split()) if isinstance(text, str) else ""
+
+
 def character_prompt(story, character, which, *, env, lock) -> str:
     """The prompt of a character's image *which*, as :func:`character_image`
     asks it (the shot brief's image part reads it too, plan 22 stage 5)."""
@@ -791,16 +797,19 @@ def character_prompt(story, character, which, *, env, lock) -> str:
         # others edits of it -- text to image too in prompt-only mode, _derived).
         edit = which != "portrait" and story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
         link = _first_link(story, "sheet", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
+        # Plan 29 stage 4: the written description first in the core, with its room.
+        description = _description(character)
         if which == "portrait" and media_policy.two_view(story):
             # Plan 23 stage D4: the portrait slot holds the front+back sheet.
             return prompting.two_view_prompt_v2(lock, look_text=shots.render_look(character),
                                                 signature_items=character["signature_items"],
-                                                budget=prompt_budgets.two_view_words(link),
-                                                cues=shots.visual_cues(character))
+                                                budget=prompt_budgets.two_view_words(link,
+                                                                                     described=bool(description)),
+                                                cues=shots.visual_cues(character), description=description)
         return _CHARACTER_PROMPTS_V2[which](lock, look_text=shots.render_look(character),
                                             signature_items=character["signature_items"],
-                                            budget=prompt_budgets.sheet_words(link),
-                                            cues=shots.visual_cues(character))
+                                            budget=prompt_budgets.sheet_words(link, described=bool(description)),
+                                            cues=shots.visual_cues(character), description=description)
     return _CHARACTER_PROMPTS[which](lock, descriptor=character["descriptor"],
                                      signature_items=character["signature_items"])
 
@@ -937,11 +946,13 @@ def variant_prompt(story, character, variant, which, *, env, lock, names=None) -
     edit = story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
     link = _first_link(story, "sheet", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
     two_view = which == "portrait" and media_policy.two_view(story)
-    budget = prompt_budgets.two_view_words(link) if two_view else prompt_budgets.sheet_words(link)
+    description = _description(character)
+    budget = (prompt_budgets.two_view_words(link, described=bool(description)) if two_view
+              else prompt_budgets.sheet_words(link, described=bool(description)))
     delta = _without_names(variant["delta_text"], names or {})
     return prompting.variant_prompt_v2(lock, which=which, delta_text=delta, look_text=shots.render_look(character),
                                        signature_items=character["signature_items"], budget=budget,
-                                       cues=shots.visual_cues(character), two_view=two_view)
+                                       cues=shots.visual_cues(character), two_view=two_view, description=description)
 
 
 def variant_image(stories, story_id, char_id, variant_id, which, *, env, on_log, cancel, note=None, seed=None,
@@ -1034,9 +1045,10 @@ def place_prompt(stories, story, place, variant, *, env, lock) -> str:
         # Stage F2: the plate fills the budget of its link (a variant is an edit of the master plate).
         edit = variant != MASTER_PLATE and story["generation_profile"]["consistency_mode"] != PROMPT_ONLY
         link = _first_link(story, "plate", gen.IMAGE_EDIT if edit else gen.IMAGE, env)
+        description = _description(place)
         return prompting.plate_prompt_v2(lock, place_text=place_text, variant=variant,
-                                         budget=prompt_budgets.plate_words(link),
-                                         **_frame_kwargs(story))
+                                         budget=prompt_budgets.plate_words(link, described=bool(description)),
+                                         description=description, **_frame_kwargs(story))
     return prompting.variant_prompt(lock, place_descriptor=place["descriptor"], variant=variant,
                                     **_frame_kwargs(story))
 
@@ -1147,8 +1159,11 @@ def prop_prompt(story, prop, *, env, lock) -> str:
     brief's image part reads it too, plan 22 stage 5)."""
     if media_policy.is_v2(story) and prop.get("look"):
         # Stage F2: the prop's reference fills the budget of its link.
+        description = _description(prop)
         return prompting.prop_prompt_v2(lock, prop_text=shots.render_prop(prop, for_reference=True),
-                                        budget=prompt_budgets.prop_words(_first_link(story, "prop", gen.IMAGE, env)))
+                                        budget=prompt_budgets.prop_words(_first_link(story, "prop", gen.IMAGE, env),
+                                                                         described=bool(description)),
+                                        description=description)
     return prompting.prop_image_prompt(lock, descriptor=prop["descriptor"])
 
 

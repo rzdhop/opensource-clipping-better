@@ -317,6 +317,7 @@ def apply_d3(doc, reply, *, props) -> None:
         "props_here": [ids[entities.name_key(name)]["prop_id"] for name in reply["props_here"]
                        if entities.name_key(name) in ids],
     }
+    schemas.store_description(doc, reply)
     doc["approved_at"] = None
 
 
@@ -388,6 +389,7 @@ def apply_r1v2(doc, reply, *, cast, places) -> None:
                         "place_id": mapped(rooms, entry["place"], "place_id"), "note": entry["note"]}
                        for entry in reply["where_when"]],
     }
+    schemas.store_description(doc, reply)
     doc["approved_at"] = None
 
 

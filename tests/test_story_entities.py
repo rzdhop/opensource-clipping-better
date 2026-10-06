@@ -294,11 +294,13 @@ PHASE5_OPTIONAL = {
     # entity whose images were made before the rule.
     # Plan 29 stage 5 (DEC-307), re-pinned on purpose: the failed images the
     # human approved anyway (``approved_anyway``), absent on every other entity.
+    # Plan 29 stage 4 (DEC-308 point 4), re-pinned on purpose: the written description is optional on each,
+    # absent on every entity written before it.
     ("CHARACTER_SCHEMA", "$"): {"look", "dossier", "approved_by", "variants", "voice_reference", "sheet_checks",
-                                "approved_anyway"},
+                                "approved_anyway", "description"},
     ("CHARACTER_SCHEMA", "$.properties.variants.items.properties.refs"): {"turnaround", "expressions"},
-    ("PLACE_SCHEMA", "$"): {"look", "approved_by", "sheet_checks", "approved_anyway"},
-    ("PROP_SCHEMA", "$"): {"look", "approved_by", "sheet_checks", "approved_anyway"},
+    ("PLACE_SCHEMA", "$"): {"look", "approved_by", "sheet_checks", "approved_anyway", "description"},
+    ("PROP_SCHEMA", "$"): {"look", "approved_by", "sheet_checks", "approved_anyway", "description"},
     # Fix A3 (phase 7 quality overhaul): apparent age and gender presentation,
     # optional on the character look -- absent on every look written before it;
     # phase 7 follow-up, stage F2: the bearing (posture), the same way; plan 26

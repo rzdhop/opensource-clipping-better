@@ -110,6 +110,11 @@ C1_CALLS = 10
 # words added, still under the 380 cap, so MAX_TOKENS["D2"] is unchanged), D3
 # ~290 (3 time variants, P1's most, and 3 props of 60-character names), R1v2
 # ~177 (2 where-when entries, the reply's bound; tests/test_story_look.py).
+# Plan 29 stage 4 (DEC-308 point 4): each reply also carries its written
+# description, 120 words at the same 6 characters: D2 575 (with the optional
+# presentation, bearing and species at their caps, which the 380 never
+# counted; 531 without them), D3 475, R1v2 361 -- the caps 580 / 480 / 400
+# (the plan's 560 for D2 held the reply without its optional fields only).
 #
 # D1 (phase 7 stage 5a, DEC-228, DEC-138's method): the plan's 420 cannot hold
 # the dossier's own word caps in French -- every stated limit hit (a 60-word
@@ -178,7 +183,7 @@ MAX_TOKENS = {
     "E1": 1450, "E2": 600, "E3": 720, "E4": 800, "T1": 580, "T1r": 150,
     "M1": 330,
     "S3": 720, "F1": 400, "N1": 1430,
-    "D2": 380, "D3": 300, "R1v2": 220,
+    "D2": 580, "D3": 480, "R1v2": 400,
     "T1v2": 1040, "T1rv2": 520,
     "D1": 1290,
     "D4": 430, "D5": 3330, "D6": 540,
@@ -449,8 +454,11 @@ SCHEMA_NAMES.update({"E1v3": "episode_beat_sheet_v3", "E2v3": "episode_scene_dia
 # + 15 %, rounded up to ten.
 # D3 re-measured for DEC-305 (plan 28): fruit_drama's environment_rules now say a 3D animated villa set, +21 and +22 tokens
 # (1,685 -> 1,706 legacy, 2,775 -> 2,797 set-up); both budgets follow the rule (worst + 15 %, rounded up to ten).
+# Plan 29 stage 4 (DEC-308 point 4): D2/D3/R1v2's asks gained the description line: legacy D2 2,096 -> 2,169,
+# D3 1,706 -> 1,791, R1v2 1,014 -> 1,098; set-up D2 3,004 -> 3,077, D3 2,797 -> 2,882, R1v2 2,100 -> 2,185 --
+# every budget by the same rule.
 INPUT_BUDGET = {"E1": 1820, "E2": 1660, "E3": 2530, "E4": 3900, "T1": 1270, "T1r": 1410, "S3": 3740, "F1": 3950, "N1": 3740,
-                "D2": 2420, "D3": 1970, "R1v2": 1170, "T1v2": 2190, "T1rv2": 2150, "D1": 3890,
+                "D2": 2500, "D3": 2060, "R1v2": 1270, "T1v2": 2190, "T1rv2": 2150, "D1": 3890,
                 "D4": 2270, "D5": 3930, "D6": 3560,
                 "E1v2": 2970, "E2v2": 2520, "E3v2": 3420, "L1": 3920, "J1": 3990, "S1v2": 2650,
                 "C1v2": 1690, "B1v3": 1480, "C1J": 1240}
@@ -556,7 +564,7 @@ VARIANTS_INPUT_BUDGET = {"N1v2": 4160}
 # rows, in order, are pinned by the RC-M1 file).
 SETUP_INPUT_BUDGET = {"C1v2": 2590, "C1J": 2200, "B1": 2270, "B1v3": 2390, "B2": 2740, "B3": 3040,
                       "K1": 4200, "P0": 2450, "P1": 2970, "R1": 3140, "S1": 3630, "S1v2": 4110, "S2": 3710,
-                      "D1": 4490, "D2": 3460, "D3": 3220, "R1v2": 2420, "D4": 2860, "D5": 4670, "D6": 4160}
+                      "D1": 4490, "D2": 3540, "D3": 3320, "R1v2": 2520, "D4": 2860, "D5": 4670, "D6": 4160}
 
 
 def carries_setup(user) -> bool:
@@ -1523,7 +1531,10 @@ _D2_ASK = (
     "thirties\" -- give it whenever the build, face and species of the character would not already make this "
     "clear on their own (a human-shaped character in particular)\n"
     "- bearing (optional, at most 10 words): posture and how they carry themselves, e.g. \"stands very "
-    "straight, chin up\" or \"slouches, hands in pockets\" -- what every shot keeps\n\n"
+    "straight, chin up\" or \"slouches, hands in pockets\" -- what every shot keeps\n"
+    "- description: one paragraph of 80 to 120 words a painter could work from, in English: species or head, "
+    "build, face, hair, skin or surface, the full outfit with its colours and materials, posture and bearing, "
+    "one signature detail; no story, never a name (not this character's, not anyone's)\n\n"
     "Stay consistent with the descriptor and the signature items. Never use real people, brands, studio "
     "names or copyrighted characters."
 )
@@ -1592,7 +1603,11 @@ _D3_ASK = (
     "consistent with the layout notes\n"
     "- scale_note: how big the space is against a person, at most 15 words\n"
     "- lighting: one light for each time variant listed above, each at most 15 words\n"
-    "- props_here: 0 to 3 props of the story above that live in this place, by their exact name\n\n"
+    "- props_here: 0 to 3 props of the story above that live in this place, by their exact name\n"
+    "- description: one paragraph of 80 to 120 words a painter could work from, in English: the whole set as "
+    "seen in a wide shot, its layout from left to right, its materials, colours and light sources, the props "
+    "that belong there, the mood; the set is EMPTY: never write the words person, people, character, figure "
+    "or someone, and never a name\n\n"
     "Never use real people, brands, studio names or copyrighted characters."
 )
 
@@ -1635,7 +1650,11 @@ _R1V2_ASK = (
     "person's height\")\n"
     "- where_when: 0 to 2 entries saying where and with whom it is in the episodes, each with ep "
     "(1-based), holder (a cast member, or null), place (a place of the story, or null) and a note (at "
-    "most 12 words)\n\n"
+    "most 12 words)\n"
+    "- description: one paragraph of 80 to 120 words a painter could work from, in English: the object alone, "
+    "its shape, its size in centimetres or against a table, its material, colour and wear, one distinctive "
+    "detail; nothing else in frame: never a hand, never write the words person, people, character, figure or "
+    "someone, and never a name\n\n"
     "Never use real people, brands, studio names or copyrighted characters."
 )
 

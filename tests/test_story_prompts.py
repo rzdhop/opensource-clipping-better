@@ -273,8 +273,9 @@ def test_max_tokens():
         "E1": 1450, "E2": 600, "E3": 720, "E4": 800, "T1": 580, "T1r": 150,
         "M1": 330,
         "S3": 720, "F1": 400, "N1": 1430,
-        # Phase 7 stage 3a (DEC-226): the look writers.
-        "D2": 380, "D3": 300, "R1v2": 220,
+        # Phase 7 stage 3a (DEC-226): the look writers. Plan 29 stage 4 (DEC-308 point 4): re-pinned on
+        # purpose -- each reply carries its 120-word description (tests/test_story_look.py measures them).
+        "D2": 580, "D3": 480, "R1v2": 400,
         # Phase 7 stage 4 (DEC-227): re-pinned on purpose -- T1 v2 and its re-plan, new ids (v1 rows unchanged).
         "T1v2": 1040, "T1rv2": 520,
         # Phase 7 stage 5a (DEC-228): re-pinned on purpose -- the dossier writer (D1), its French worst case
