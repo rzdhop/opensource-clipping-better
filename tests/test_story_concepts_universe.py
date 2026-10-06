@@ -238,7 +238,9 @@ def test_every_text_validator_asks_the_brand_gate():
     places = (ROOT / "clipping" / "aistory" / "steps" / "places.py").read_text(encoding="utf-8")
     assert cast.count("universes.brand_gate(story, reply)") == 2
     assert places.count("universes.brand_gate(story, reply)") == 4
-    for call in ("schemas.k1_errors(reply, character[\"name\"]) or universes.brand_gate",
+    # Plan 32 stage 6 (DEC-315): K1 validates its own part of the reply (``voice_clone.k1_part`` strips the
+    # voice-clone fields a fruit-drama cast carries); the brand gate still reads the whole reply.
+    for call in ("schemas.k1_errors(core, character[\"name\"]) or universes.brand_gate(story, reply)",
                  "schemas.d2_errors(reply, names, species_world=world is not None) or universes.brand_gate"):
         assert call in cast
     for call in ("schemas.p1_errors(reply) or universes.brand_gate", "schemas.r1_errors(reply) or universes.brand_gate",
