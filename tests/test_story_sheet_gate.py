@@ -86,7 +86,8 @@ def _ctx(store, story_id, *, params=None, log=None, step="cast"):
 
 
 def _adapters(image, vision):
-    table = {("image", "local"): image, ("image_edit", "local"): image, ("tts", "edge"): tsl.FakeTTS()}
+    # Plan 28 B2 (DEC-305): edge is out of the catalogue -- the sample lands on gemini/flash-lite-tts.
+    table = {("image", "local"): image, ("image_edit", "local"): image, ("tts", "gemini"): tsl.FakeTTS()}
     if vision is not None:
         table[("vision", "gemini")] = vision
     return table
