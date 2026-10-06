@@ -1,11 +1,16 @@
-## CURRENT STATE — DEC-311 keyframes warn-only IN PROGRESS; story df1544f0641f waits at the clips (2026-10-06, local session)
+## CURRENT STATE — DEC-311 keyframes warn-only MERGED + DEPLOYED; story df1544f0641f's clips rendering on RunPod (2026-10-06, local session)
 
-- **In-progress header:** phase = EXPLORE (a Sonnet map of the keyframe hard gate running) → PLAN → IMPLEMENT in a
-  worktree (Opus: cross-cutting fast_track/assets/judge/handoff/dashboard) → deploy at 0 jobs → `POST
-  /api/stories/df1544f0641f/steps/story-fast-track` to continue the run (12 runpod clips est $1.20 + lipsync
-  $0.14; no more image spend). Checkpoint commit = main 1c88dd9 (this commit's parent). The story: pre-production
-  done ($0.74), script/storyboard approved by the agent, 12 keyframes on disk, 5 flagged (sh01, sh02, sh06, sh10 +
-  neighbours sh04, sh07 after the regenerates); caps today: episode $1.50/$4, day $3.07/$7, story $2.22/$10.
+- **In-progress header:** phase = IMPLEMENT stage 2 (the parked run continued as job b0384394eeda after the deploy;
+  watching it: keyframes approved with their warnings → 12 runpod clips est $1.20 → lip-sync $0.14 → render) →
+  DOCUMENT / close-out. Checkpoint commit = main baa4d4c (merge of fe962f7 "the keyframe check warns, never
+  blocks", Opus agent in a worktree; plan `.claude/plans/ai-story/30-keyframes-warn-only-plan.md`). Tests: the
+  keyframe/fast-track/handoff/dashboard selection (every file naming "keyframe" + auth) 1752 local / 1623 + 129
+  skipped CI-like, exit 0 both; vite bundle index-CH9JjZ51.js; 3.11 in-image compile 0 bad. DEPLOYED 2026-10-06
+  ~14:00 UTC (rm -sfv + up --build at 0 jobs; health 200; the container carries DEC-311). Tier 2 (the human's walk):
+  the Review tab's "Approved for you despite: …" on this story once the run ends. Tier 3: the re-pins listed in
+  the plan + one new hash-match test (tests/test_story_keyframe_hard_gate.py).
+- **The story so far:** pre-production $0.74; 12 keyframes + ≈25 redraws/regenerates $1.50 (episode); caps today
+  episode $1.50/$4, day $3.07/$7, story $2.22/$10 before the clips.
 - **The human's rule (DEC-311):** warn, never block, on keyframes; no more regenerates on this story.
 - **Open questions:** none blocking.
 
