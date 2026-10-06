@@ -131,7 +131,8 @@ def test_a_keyframe_the_human_uploaded_is_judged_and_warned_about_never_refused(
     """The human's own keyframe is their consistency decision: J2 still
     judges it, its issues are a warning on the shot ("The check saw: ..."),
     and the approval goes through, recording it as flagged."""
-    from PIL import Image
+    # The upload path decodes with PIL, which CI does not install: skip there, as test_api_shot_upload does.
+    Image = pytest.importorskip("PIL.Image")
 
     import test_story_fast_track_one_click as oc
     from clipping.aistory import manual_uploads, workflow
