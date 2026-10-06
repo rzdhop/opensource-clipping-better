@@ -25,7 +25,8 @@ uv run python -m mcp_server --stdio     # for a local client (Claude Code on the
 | `RUNPOD_IMAGE_ENDPOINT_ID` | the **image** endpoint (FLUX.2 klein), same volume; empty = images run on the video endpoint |
 | `RUNPOD_IMAGE_API_KEY` | optional: a key of its own for the image endpoint (else `RUNPOD_API_KEY` opens both) |
 | `RUNPOD_GPU_USD_PER_HOUR`, `RUNPOD_IMAGE_GPU_USD_PER_HOUR` | optional flex prices, so the ledger shows dollars |
-| `MCP_TOKEN` | the bearer token every client must send; empty = no auth, keep it on localhost |
+| `MCP_TOKEN` | the secret: the bearer token Claude Code sends, and what the connector's login page asks for; empty = no auth, keep it on localhost |
+| `MCP_PUBLIC_URL` | the address clients reach the server at (the Funnel URL); set, the server is also the OAuth authorization server the claude.ai connector needs |
 | `RZDHOP_OUTPUTS_DIR` | where files go (default `<repo>/outputs`) |
 
 Two endpoints because a worker that holds the 28 GB of Wan weights has to unload
@@ -47,7 +48,14 @@ on the machine is exposed. Set `MCP_TOKEN` to a long random string first
 Clients:
 
 - **Claude Code** (laptop or the server): `claude mcp add --transport http rzdhop https://<node>.<tailnet>.ts.net/mcp --header "Authorization: Bearer <MCP_TOKEN>"`.
-- **claude.ai web / desktop / mobile** (custom connector): needs OAuth rather than a static header — stage 5 adds a provider; until then, use Claude Code.
+- **claude.ai web / desktop / mobile** (Settings → Connectors → Add custom connector, URL
+  `https://<node>.<tailnet>.ts.net/mcp`, no client id/secret): the connector speaks
+  OAuth, so set `MCP_PUBLIC_URL=https://<node>.<tailnet>.ts.net` and the server is
+  its own authorization server (`mcp_server/auth.py`): dynamic client
+  registration and PKCE as the connector expects, and an **authorize step that
+  shows a login page asking for `MCP_TOKEN`** — nobody who finds the URL gets a
+  token without it. Clients and tokens are kept in `outputs/mcp/oauth.json`
+  (mode 600), so a restart does not log the connector out.
 
 A systemd unit for the server:
 

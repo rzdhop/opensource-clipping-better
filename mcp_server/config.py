@@ -23,6 +23,7 @@ ENV_OUTPUTS = "RZDHOP_OUTPUTS_DIR"
 ENV_HOST = "MCP_HOST"
 ENV_PORT = "MCP_PORT"
 ENV_TOKEN = "MCP_TOKEN"
+ENV_PUBLIC_URL = "MCP_PUBLIC_URL"
 
 KINDS = ("image", "video")
 
@@ -37,6 +38,7 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8787
     token: str = ""
+    public_url: str = ""
 
     def endpoint(self, kind: str) -> str:
         """The endpoint id that serves *kind*; images fall back to the video
@@ -95,4 +97,5 @@ def load_settings(env=None) -> Settings:
         host=env.get(ENV_HOST) or "127.0.0.1",
         port=int(env.get(ENV_PORT) or 8787),
         token=(env.get(ENV_TOKEN) or "").strip(),
+        public_url=(env.get(ENV_PUBLIC_URL) or "").strip().rstrip("/"),
     )

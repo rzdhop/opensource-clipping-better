@@ -15,7 +15,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 
-from . import media, story_tools
+from . import auth as auth_mod, media, story_tools
 from .config import Settings, load_settings
 from .runpod_jobs import JobClient, JobError, list_templates
 
@@ -67,20 +67,16 @@ def _blocks(blocks: list):
     return blocks if len(blocks) > 1 else blocks[0]
 
 
-def _auth(settings: Settings):
-    """Bearer-token auth when ``MCP_TOKEN`` is set (one static token, one
-    client: enough behind Tailscale Funnel for a single user; stage 5 adds
-    OAuth for claude.ai's connector). None = no auth, local use only."""
-    if not settings.token:
-        return None
-    from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
-
-    return StaticTokenVerifier(tokens={settings.token: {"client_id": "rzdhop", "scopes": ["story"]}})
-
-
 def build_server(backend: Optional[Backend] = None) -> FastMCP:
     backend = backend or Backend()
-    mcp = FastMCP("rzdhop-story", instructions=INSTRUCTIONS, version="0.1.0", auth=_auth(backend.settings))
+    settings = backend.settings
+    # MCP_TOKEN opens the bearer door (Claude Code); with MCP_PUBLIC_URL too, the
+    # OAuth door for claude.ai's connector, behind a login page asking the same token.
+    auth, provider = auth_mod.build_auth(token=settings.token, public_url=settings.public_url,
+                                         state_path=os.path.join(settings.outputs_dir, auth_mod.STATE_REL))
+    mcp = FastMCP("rzdhop-story", instructions=INSTRUCTIONS, version="0.1.0", auth=auth)
+    if provider is not None:
+        auth_mod.register_login_routes(mcp, provider)
     client = backend.client
 
     # ------------------------------------------------------------ RunPod

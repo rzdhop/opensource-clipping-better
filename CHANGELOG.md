@@ -47,6 +47,12 @@ All notable changes to the **rzdhop AI** project will be documented in this file
   FLUX.2 klein templates name the file Comfy-Org publishes,
   `flux-2-klein-4b.safetensors`. `deploy/runpod/worker-comfyui.Dockerfile`: a
   worker on a newer ComfyUI, for LTX-2.5.
+- **Stage 5: the claude.ai connector's door.** `mcp_server/auth.py`: with
+  `MCP_PUBLIC_URL` set, the server is its own OAuth 2.1 authorization server
+  (dynamic client registration, PKCE, refresh) whose authorize step shows a
+  login page asking for `MCP_TOKEN`; clients and tokens persist in
+  `outputs/mcp/oauth.json`. The bearer door (Claude Code) stays.
+  `tests/test_mcp_auth.py` drives the whole flow over the HTTP app.
 
 ### The keyframe check warns, it never blocks (DEC-311)
 
