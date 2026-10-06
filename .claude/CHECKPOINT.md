@@ -6,7 +6,7 @@
   worktrees (plan29-s1 tile reload · plan29-s2 empty-set prompts · plan29-s3 redraw notes + plate pricing), then 4
   (descriptions, the riskiest), 5 (approve anyway), 6 (docs). Next action = Tier 1 baseline (the touched-area
   selection, both envs) → spawn the three stage agents.
-- **Tier-1 baseline:** (pending — recorded below once run).
+- **Tier-1 baseline (2026-10-06, on 98f9c4f):** the touched-area selection (12 files: sheet_gate, refimages, look, aistory_prompting, prompt_templates, prompt_budgets, prompts, v2_redraw, gencache, cast_steps, send_layer, aspect_generation) = 542 passed in both envs (local 44 s, CI-like 45 s), exit 0.
 - **Regression contract (plan 29):** sheet/portrait prompts byte-identical (`tests/test_story_look.py`,
   `test_aistory_prompting.py` goldens) · DEC-303 send-layer order, hashes untouched (`test_story_send_layer.py`,
   `test_story_prompt_templates.py`) · the sheet gate: own uploads warned never refused, unjudged never approved, the
