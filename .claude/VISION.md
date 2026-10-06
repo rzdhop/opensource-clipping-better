@@ -32,6 +32,20 @@ to images, image editing, video, TTS and vision, with every paid call gated by a
 budget and every free call counted against its daily limit.
 
 ## Where it stands (2026-09-30)
+- **2026-10-06 — plan 28 (one click, every time, DEC-305):** the human's one-click run of a new French story
+  stopped at the storyboard at 84 s against a 75 s window, after a model that was down had cost two and a half
+  minutes, and its API clips would have cost about $5 against the promised $2. The plan had been impossible from the
+  start and the app only found out after it had spent. Now a new story asks four things (the idea, the language, the
+  look, who makes the clips) and decides the rest; the episode's plan is checked before any writer call and always
+  fits its window, the script and the storyboard are timed on one clock, the one-click run makes one remedy before it
+  stops, a dead model link is skipped for the rest of the job, and the real price is shown before the click, with a
+  Generate button that buys one clip at its shown price. New stories have no narrator and no generated voice (the
+  characters speak in their clips); Approve all approves a cast, the places or an episode in one tap and never goes
+  over a refusal; concepts are only the ones generated for the idea; every set-up writer reads the series, the look,
+  the world and the format; and the consistency rules are gates, not hopes: a keyframe or a sheet that does not match
+  is refused (regenerate or upload your own), the Handoff waits for a passed keyframe, a night scene is never drawn
+  on the day plate, and a story keeps one image provider. The honest limit: API clips cost about $5 an episode, so the
+  $2 promise holds on the human's own clips (about $1 of app cost); the API path shows its price instead of hiding it.
 - **2026-10-05 — plan 26 (rich prompts on every link, DEC-303):** a Gemini render of a Dragon Fruit shot came out
   photoreal with the dragon-fruit hacker as a plain man, because the generator was handed a 200-word core with one
   style line, and the Handoff's Copy buttons did nothing over http on the phone. Now every generation prompt — pasted

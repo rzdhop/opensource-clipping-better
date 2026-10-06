@@ -27,15 +27,315 @@ proposed between episodes, and a re-edit path that changes one line or one
 shot without rebuilding the rest. It is extended as each later phase lands —
 see "Where it stands" below for what is not here yet.
 
+## One click, every time
+
+**Why this exists.** On 2026-10-05 a one-click run of a new French story
+stopped at the storyboard: "Episode 1 runs 84.0 s … 9.0 s over its 55–75 s
+window". Nothing had gone wrong while writing. The plan was impossible from
+the start (the clips it needed added up to more than the format allows), and
+the app only found out after it had made 17 writer calls and lost two and a
+half minutes on a model that was down. Plan 28 (2026-10-05 and 06) is the
+answer: an episode that is started with one click either fits, or is refused
+**before** any writer call and before any money is spent, with one sentence
+that says what to change. This section says what you can count on. The
+sections after it say what changed in each place.
+
+### Four choices, the app decides the rest
+
+A new story asks four things, and only four:
+
+1. **Your idea**: a few words, or nothing.
+2. **The language**: French or English.
+3. **The look**: one card per style, each with a picture.
+4. **Who makes the clips**: **Me, on Flow or Higgsfield** (the app writes the
+   prompts and checks the clips you upload) or **The app** (it makes them and
+   pays for them).
+
+Everything else the form used to ask (how the story is made, the pipeline,
+the tier, where things are made, how characters are kept the same, the
+spending plan, the speech model, the universe, the frame, the episode format)
+is decided by the app from those four answers and sits behind one
+**Advanced** fold, in plain words, for the day you want to change it. The
+button says **Create the story**. The episode format is chosen so the clips
+always fit: the Advanced format list shows only the formats that fit, and a
+format it hides says why ("its opening needs at least 6 s of clips, more than
+the 3.5 s it has."). Asking for a format that cannot fit, in the form or later
+by editing the story, is refused: "This format cannot fit the clips this story
+makes. Let the app choose one."
+
+### What it costs
+
+| Who makes the clips | What the app spends per episode | The ceiling |
+|---|---|---|
+| **Me**, on Flow or Higgsfield | About **$1** of app cost: the writing, the character sheets, the places, the keyframes and the checks. The clips cost the app nothing. | Hard-capped at **$2** per episode. |
+| **The app** | About **$5**: its clips are Veo lite, about $4.80 for 14 clips (Veo fast would be about $7.20) on top of the writing and the images. | The per-episode cap (Settings → Budget) has to allow it. A cap of $2 or $4 refuses before anything is bought, and says so. |
+
+The $2 promise is true on the first row only. A clip from an API costs money
+whatever the app does, so the second row shows its price instead of hiding it.
+
+**The Generate button.** If you chose to make the clips yourself and you want
+the app to make one of them, the Handoff has a button for that. Each of your
+clips that is still missing shows **Generate this clip — $0.60** (the price
+is the real one, from the clip's link and its length), and the episode shows
+**Generate all missing clips — $4.80** when several are missing. A click
+switches those shots to the app, checks the same gates a generated clip is
+checked against and queues the job; if it cannot go ahead it says why in
+plain words (a cap, no key, paid generation off, the keyframes not approved,
+a shot that is not yours) and **nothing is switched and nothing is bought**.
+Before the click the page also warns you of what would make a click fail or
+check less: no speech check key ("No speech check: add a GROQ_API_KEY or
+MISTRAL_API_KEY in Settings (free)": the clip is never checked against its
+line), and a provider that refused the last run for a spent balance
+("fal/seedream-4.5-edit refused the last run: “User is locked. Reason:
+TOP_UP.” Top up that account, or pick another link, before you generate.").
+The one-click estimate prices the clips from the plan before the storyboard
+exists, so the number you confirm is the number that is spent.
+
+### What "every time" rests on
+
+Six things hold up the promise. Each is said first by what it does, then by
+its name for a developer.
+
+- **The plan is checked before any writer call.** Before the first line is
+  written, the app adds up the clips the format's scenes would need on your
+  clips' link (a clip is sold at fixed lengths, and a scene cannot hold less
+  than one). If they cannot fit the format's window it stops at once, at no
+  cost: "Episode 1 cannot fit: its 8 scenes need at least 86 s of clips on this
+  link, more than the 75 s this format allows. Pick a format that fits, or let
+  the app choose one." (A1, `timing.plan_floor_refusal`; the same sum runs
+  again after the beat sheet, and the fast-track estimate stops at the script
+  with it.)
+- **The planner always fits.** The old planner, when a scene's clips did not
+  fit its slot, gave up on the scene and stored the overflowing plan anyway.
+  Now it tries the next shorter arrangement of clips, and, if no arrangement
+  fits, refuses with the same kind of sentence for that part of the episode.
+  Over the whole episode it holds the total inside the window by making the
+  least-watched scenes cheaper first (a narrator-and-character scene keeps the
+  narrator alone, a scene's clips are held a second shorter), and keeps the
+  peak and the turn the longest. A test goes through every format, 30 pairs of
+  links, three look cases, episodes 1 and 2, in French and in English, and
+  every plan comes out inside its window (A2, `timing.fit_episode_plans`, the
+  fit matrix in `tests/test_story_plan_fit.py`).
+- **One clock, and one remedy before a stop.** The Script step used to time
+  the words while the Storyboard step added up the clips, so a script could be
+  "ok" at 56.9 s and its storyboard 84 s. On a story whose characters speak in
+  their own clips, the script is now timed on the clips its plan buys, the same
+  number the storyboard adds up. If an episode is still over its window, the
+  one-click run rewrites only the scenes whose clips changed (the feed says
+  "✂ Fitting episode 1: 2 scenes shortened (s03 and s05)"), checks and approves
+  again, and only then stops with the sentence above. **Continue** runs that
+  remedy again instead of repeating a dead end (A3; see "The timing harness
+  (plan 24)").
+- **Creation refuses an impossible format.** A story whose characters speak
+  in their own clips is only ever created on a format that fits those clips,
+  and the version-1 formats (made for stills) are never offered to it. The
+  check is the same zero-call sum as the first point, run before the story
+  exists (A4, `format_fit`).
+- **A dead model link is skipped for the rest of the job.** The writing chain
+  used to ask a link that was down again on every scene (a 500 on all 24
+  attempts cost 152 s). Now a link that fails its whole retry ladder with an
+  outage (a 5xx, a timeout, a dropped connection) is skipped for the rest of
+  that job and the feed says it once: "⏭ <model>: failed 3 times on B1,
+  skipped for the rest of this job". A rate limit (429), a refused request
+  or a reply that fails its check never counts as an outage. The chain also
+  puts the free Gemini link first and the two Nvidia links last (A5; see
+  "Costs and providers"). Each reply on the OpenAI-compatible links now logs why
+  it ended ("reply ended: finish_reason=length, completion_tokens=…"), so a
+  reply that was cut short is visible.
+- **An honest price before the click.** The one-click estimate prices every
+  clip from the plan (shots × their length × the link's price), shows it with
+  the warnings above, and the paid check refuses the whole episode, naming the
+  numbers, before the first call if it does not fit the caps (A6).
+
+### No generated voices
+
+A story made now has **no narrator and no generated voice**. Its characters
+speak in their own clips, the voice and the lips in one take, so a text-to-speech
+voice is never needed. On such a story there is no voice pin, no voice sample,
+no voice choice on the Cast tiles and no voice cost in any estimate, and the
+narrator cannot be switched on. It is the profile's `generation_profile.voices`
+set to `none`; a story that does not have the key reads as `tts`, exactly what
+it was, so every existing story is untouched (the Dragon Fruit story still
+speaks its three pinned Edge voices, and they still play and render).
+
+`voices: none` is only allowed on a story whose characters speak in their own
+clips, because every other story's renderer needs each line as audio.
+
+A story that still wants generated voices (a legacy story, or any story that
+is not on native speech) uses the voice chain: Gemini's text-to-speech first
+(free), then a local engine (piper, kokoro, chatterbox), and ElevenLabs
+(paid) last, never chosen for you. **Edge is gone** from every default chain
+and from the voice catalogue ("really bad quality"); only a voice already
+pinned keeps working, and **Regenerate voice** on that character proposes from
+the new catalogue.
+
+### Approve all
+
+Three buttons approve in one tap what you would otherwise approve one by one.
+None of them ever approves something the app has refused ("approve anyway" is
+never used by them), and each one names what it left alone, in plain words
+("Gaston still needs a portrait.").
+
+- **Approve all** on the **Cast** step: every character that has everything it
+  needs (a description, its sheets, and its voice only on a story that has voices).
+- **Approve all** on the **Places & props** step: every place and prop that is
+  complete.
+- **Approve all** under the episode's stepper: the script, then the storyboard,
+  then the keyframes, then the assets, one after the other, through the same
+  approvals their own buttons use. It stops at the first one the app refuses
+  and shows that sentence ("Stopped at the keyframes: …").
+
+The first two are one server call (`POST /api/stories/{id}/approve-all/cast`
+or `…/places`, below); the third is the dashboard doing the four approvals in
+order. The one-click run and the CLI approve a cast by the same rule.
+
+### Concepts: generated cards only
+
+The Concepts step no longer lists the fourteen concepts that shipped with the
+app: you see the cards generated for **your** idea and nothing else, and when
+there are none the page says "No concepts yet — tap Generate." **Generate 10
+more** is unchanged, and the titles it is told not to repeat are now the story's
+own earlier cards only. The fourteen files, the command line's `--concept` and
+the tests that use them are kept, so the change can be undone; the API returns
+them only when asked (`GET /api/stories/{id}/concepts?include_library=1`).
+The concept writer also reads the set-up block (next section), which fixed a
+fault where a card could pick a style although the story's look was already
+chosen: the card's style now follows the story's look.
+
+### The set-up block
+
+Every writer that sets a story up used to know only its own small slice, so
+the concepts, the cast and the places did not know the look, the world, the
+audience or the format they were being written for. Now each of them receives
+one short block, called the **series set-up**, in front of its own request:
+
+- **SERIES**: the title, "a serialized vertical drama of N episodes", the
+  language, and the logline, tone and genre once the bible has them.
+- **ART STYLE**: the look's name, its medium, the rendering sentence every
+  image prompt uses, its palette line and the colours never to use.
+- **PALETTE COLOURS**: the palette's colour codes (hexes). Only the writers
+  that describe how a character or a place looks get these.
+- **UNIVERSE**: what the cast is made of (a species world and its head rule,
+  another universe, or a human cast), always said.
+- **AUDIENCE**: the age rating and the platforms, once the bible has them.
+- **FORMAT AND TIMING**: the episode format and its window, the 5–10 s shots of
+  one to four spoken lines when the characters speak in their clips, one place
+  in real time when the format says so, and whether there is a narrator.
+
+It goes to the concepts, the bible, the cast (text, dossier, look), the
+places, the props, the season and the knowledge base (a French story's writers
+also get the French-elision rule they had not had). It is sent
+**only on a v2 story** (and a v3-writing story with a brief); a legacy story's
+prompts are byte for byte what they were. The prompt version is now `s7`. The
+writer that names a native line length now says 5 to 10 seconds instead of "at
+most 8 seconds". (E1/E2; `context.setup_context`.)
+
+### Strict consistency rules
+
+Everyone who watched the first episodes said the same thing: a face that
+changes, a pear that becomes a pineapple, an outfit that is not the character's,
+a night scene on the day set. Plan 28 turns each of those into a check the app
+cannot talk itself past. Every rule below says what it checks first.
+
+**The keyframe check is a hard gate.** Each keyframe is looked at by a free
+vision check that compares it to the character sheets, the place plate and
+the props. A keyframe that does not match cannot be approved, and the one-click
+run stops instead of going over it: "Shot sh04 does not match: Gaston's head is
+a pear, the sheet shows a pineapple. Regenerate it, or upload your own." There is
+no "Approve anyway" on keyframes any more; the way past is a keyframe that passes
+(**Regenerate**, or **Upload** your own). A keyframe with no current check says
+"Shot sh05 has no keyframe check yet: run the assets step again (it checks them,
+free)." The redraws the app makes by itself before it stops are capped at
+**shots × 2 × the price of one image on the story's link** (14 shots at 2 redraws
+at $0.04 is $1.12), clips planned first and the redraws taking what the caps
+leave; the episode's, the day's and the story's own caps still stop it first.
+The keyframes **you** uploaded are judged and **warned** about ("The check saw:
+…"), never refused: your own keyframe is your call. (F1, `judge.keyframe_refusal`.)
+
+**What the keyframe check sees.** It is told to look at the head and the
+species (a pear is never drawn with a pineapple's head, nor a human one), skin and material, the written
+outfit, the place's plate for that time of day and the props the shot shows (up
+to 8 images), and it lists each character that does not match its sheet first
+(F2, check J2 v3).
+
+**The sheet check on the cast, the places and the props.** Every character
+sheet, place plate and prop picture is checked once, free, when it is made: one
+head per figure, the head the species named (never a human head or a mask),
+the outfit and the signature items, the colours the style forbids, both views
+of a two-view sheet, the plate's layout and light, the prop's look. A picture
+that fails is drawn again, up to **2 times**, with what the check saw as the
+note, and checked again. Past the story's ceiling (**its images × 2 × the price of
+one image**) or after the last redraw, the step says "Gaston's portrait does not
+match: the head is a human head, Gaston is a pineapple. Regenerate it, or upload
+your own." and that character, place or prop **cannot be approved** (nor by
+Approve all) until you regenerate it or replace it with your own image, which is
+checked and warned about, never refused. A picture made before this rule has no
+check and is left as it is; a check that cannot run leaves the picture unchecked
+and the next run of the step checks it. In a fruit world, **two characters never
+share a species** (unless the universe allows it): the look writer is refused a
+repeat and told to pick another ("Gaston cannot be a pineapple: Rida is already a
+pineapple, and two characters may not share a species in this world. Give Gaston
+another species.") (F3, `steps/sheet_gate.py`, check J3.)
+
+**The shot plan names everyone it shows.** A shot that carries a line must have
+the speaker among the people in the shot, so the keyframe draws them and the
+clip has their reference; if the writer forgot, the app adds the speaker and
+logs it. Every character of a scene must appear in at least one of its shots
+(otherwise the writer is told why and asks again). A prop's name in a prompt is
+a whole phrase ("the sleek USB drive", never "the sleek USB"), and a character whose look names a species is
+named by its own name in prompts, like any named cast member, instead of being
+swept into the species' generic description (F4).
+
+**One image provider per story.** Pictures of the same story made by two
+different providers do not look like the same story. The first sheet, plate or
+prop a story makes records its image link on the story (`links.image`), and
+every later one is asked of that link alone (its like-for-like model swaps count
+as the same link). If that link cannot serve, the step stops, spends nothing,
+and says so: "The story's image link … cannot serve now: …. A story keeps its
+character sheets, places and props on one link, so no other link was tried:
+nothing was generated or spent. Bring it back and try again, or switch the
+story's image link to …". You switch with `PATCH /api/stories/{id}` and
+`{"links": {"image": "<link>"}}`. A legacy story, or a story whose images are
+your own, is not affected; the episode's keyframe link starts from this one (F5).
+
+**A keyframe is never drawn on another time's plate.** A scene at night is drawn
+on the place's night plate, never silently on its day plate. If the plate for that
+time of day is missing, the assets step **makes the missing plates first** (before
+any keyframe), and a keyframe whose plate still is not there is refused: "The
+Parlor has no night plate, and a keyframe is never drawn on another one: run the
+assets step again (it makes the missing plates first), …" (F6).
+
+**The wardrobe rule.** A shot is refused before any keyframe is bought when it
+shows a character in an appearance variant that is not approved, or in an outfit
+that the story so far gave the character but that the character's look does not
+have: "Shot sh03 shows Gaston in the outfit 'ball gown' the story so far gives
+Gaston, but Gaston's look has no such outfit: add it to Gaston's look, or correct
+the story's continuity -- a shot is never drawn in another outfit." Checked at the
+storyboard and again at the assets step; a legacy story is never checked (F6).
+
+**The Handoff gate.** On the Handoff, each clip row carries the **check line** of
+its keyframe ("The keyframe check passed.", or "The check saw: …", or "The
+keyframe has no check yet: run the assets step again (it checks it, free)."), and
+so does the brief and the zip (in `check.txt`). The **upload of a clip waits** for
+a keyframe that is current and passed: "Shot sh04's keyframe does not match (the
+check saw: …): regenerate it, or upload your own, before its clip." (your own
+keyframe never blocks it). The references the platform is told to attach put
+**identity first** (the characters' sheets, then the plate, then the props), and
+when the platform's model takes fewer images than the shot has, the cut is said:
+"Flow takes 3 images: the plate was left out, the prompt describes it." And the
+**first frame of a clip you upload** is compared with its keyframe (free): "The
+first frame matches its keyframe.", or "The first frame does not match its
+keyframe: …. It is your clip: kept, your call." (F7, checks J4.)
+
 ## Where it stands
 
 | # | Step | What it produces | Status |
 |---|---|---|---|
 | 1 | New story | a draft story (language, optional seed text, optional style) | available |
-| 2 | Concepts | fourteen library concept cards to choose from, or generate ten more | available |
+| 2 | Concepts | concept cards generated for your idea, ten at a time | available |
 | 3 | Bible | logline, premise, tone, world, themes, audience | available |
 | 4 | Style | a locked style (palette, typography, consistency mode) + a preview strip | available |
-| 5 | Cast | characters: reference sheets, voices | available |
+| 5 | Cast | characters: reference sheets, and voices on a story that has them | available |
 | 6 | Places & props | locations and recurring objects | available |
 | 7 | Season arc | the season's episode-by-episode arc | available |
 | 7b | Knowledge base (v2 stories) | world, beat timeline per episode, props registry, starting state; approved before episode 1 | available |
@@ -118,6 +418,19 @@ fails the Script step with one plain sentence. One speech clock serves the
 estimate, the budget and the storyboard, and every timing warning has a Trim
 button ("The timing harness (plan 24)").
 
+**2026-10-06: plan 28 made the one-click episode fit every time.** A one-click
+run stopped at 84 s against a 75 s window, after a model that was down had
+cost two and a half minutes, and the clips would have cost about $5 against a
+promised $2. Now the plan is checked before any writer call, the script and
+the storyboard are timed on the same clock, a dead model link is skipped, a new
+story asks four things and decides the rest, and the money is shown before the
+click ("One click, every time"). On the same walk: no generated voices on a
+new story, an **Approve all** button, concepts that are only generated cards,
+a set-up block every set-up writer reads, and a set of strict consistency
+rules that make a wrong face, a wrong outfit or a wrong plate a refusal, not a
+surprise ("Strict consistency rules"). The screens that show all of it are
+simpler: one button per step, plain words, the rest under Advanced.
+
 ## The quality pipeline (v2)
 
 Phase 7 rebuilt how an episode looks and reads, after the first episodes
@@ -188,18 +501,29 @@ Since plan 23 the sheet, plate and prop roles have a second link:
 link a cast falls to when a fal call is refused (near the daily cap a $0.04
 call can be refused where $0.0336 still fits) or when fal is down. It needs
 `GEMINI_PAID_API_KEY` and is skipped, with the reason shown, while that key is
-missing (the free `GOOGLE_API_KEY` never serves it). Within one cast or places
-job the provider that answered first is tried first for the rest of the job, so
-one job does not mix providers; a later run, or one regenerated image, starts
-from fal again, so a portrait and its sheets can come from different
-providers. Gemini keeps no seed, so a portrait it draws is not reproducible
+missing (the free `GOOGLE_API_KEY` never serves it). **A v2 story keeps all its
+sheets, plates and props on one link** (plan 28): the first one made records
+its link on the story and every later one is asked of that link alone, in the
+same job and in later runs, so a portrait and its sheets are never drawn by
+two providers; a link that cannot serve stops the step with a sentence and
+nothing is spent ("Strict consistency rules", "One image provider per
+story"). Gemini keeps no seed, so a portrait it draws is not reproducible
 by seed. A story can put Gemini first instead (`image_preference:
 gemini_first`, "What else the form decides").
 
 **Writing.** AI Story writes on its own chain (`STORY_LLM_CHAIN`, default:
-NVIDIA NIM nemotron-3 ultra, then super, then OpenRouter mistral-medium-3.1 —
-paid, skipped while `allow_paid` is off — then free Gemini). A reply that
-fails validation twice moves on to the next model.
+free Gemini first, then OpenRouter mistral-medium-3.1 — paid, a few cents,
+skipped while `allow_paid` is off — then NVIDIA NIM nemotron-3 ultra, then
+super, last). The Nvidia links were first until plan 28: they are slow, and one
+that was down was asked again on every scene. A reply that fails validation
+twice moves on to the next model, and a link that fails its whole retry ladder
+with an outage (a 5xx, a timeout, a dropped connection) is skipped for the rest
+of that job, said once in the feed ("⏭ <model>: failed 3 times on B1, skipped
+for the rest of this job"); a rate limit, a refused request or a reply that
+fails its check never counts as an outage. Each reply on an OpenAI-compatible
+link logs why it ended ("reply ended: finish_reason=length,
+completion_tokens=…"), so a reply that was cut short is visible. A chain you
+set yourself in Settings stays as you set it.
 
 **Looks, dossiers and the knowledge base.** Each character gets a dossier
 (backstory, goal, need, fears, secrets, relationships, voice patterns) and a
@@ -230,10 +554,11 @@ prompt's *core*, the part that is hashed; a v2 story sends the series, the
 style, the cast, the place and the props in front of it (see "The master
 prompt and the templates").
 
-**Voices and subtitles.** The narrator is on with its own voice, distinct
-from the cast's; voices are proposed in the story's locale (fr-FR, en-US);
-each line is spoken with a rate and pitch from the character's voice and the
-line's emotion. Subtitles default to two lines, and a word-pop card is never
+**Voices and subtitles.** On a story that has generated voices, the narrator is
+on with its own voice, distinct from the cast's; voices are proposed in the
+story's locale (fr-FR, en-US); each line is spoken with a rate and pitch from
+the character's voice and the line's emotion. (A story made since plan 28 has
+none of this: its characters speak in their clips, "No generated voices".) Subtitles default to two lines, and a word-pop card is never
 shorter than 150 ms.
 
 **Two looks before money goes on clips.**
@@ -283,11 +608,17 @@ shorter than 150 ms.
   flagged keyframe is redrawn by the step itself with a correction taken
   from the verdict, ending with the shot's own framing as an order ("Frame
   this as tight close-up on the face, nothing wider."), and checked again — up
-  to two redraws a shot and $0.40 an episode on the Quality profile, counted
-  in the estimate — so most never reach you. The storyboard's **Keyframes**
-  card lists each verdict and what was fixed; **Approve keyframes** (or
-  **Approve anyway** after a refusal) is the gate: until it is approved and
-  current, no clip is bought, and a changed keyframe makes it stale.
+  to two redraws a shot, inside a ceiling of the episode's shots × 2 × the
+  price of one image (about $1.12 for 14 shots at $0.04; it was a flat $0.40
+  until plan 28), counted in the estimate — so most never reach you. The
+  check also sees the character's head and species, the outfit, the place's
+  plate and the props ("Strict consistency rules"). The storyboard's
+  **Keyframes** card lists each verdict and what was fixed; **Approve
+  keyframes** is the gate, and it is a hard one: a keyframe that failed its
+  check, or has none, cannot be approved ("Shot sh04 does not match: …
+  Regenerate it, or upload your own."), there is no "Approve anyway", and
+  until it is approved and current no clip is bought, and a changed keyframe
+  makes it stale.
   Regenerating one shot image by hand runs the check again on it and on the
   shot after it. Then run the assets step with animate on: it buys the clips.
 - *Generate episode* (the one click, "Fast track" below) follows the same
@@ -296,8 +627,9 @@ shorter than 150 ms.
   passes are spent: then it approves the script anyway over the blocking
   issues they could not fix and names them on the **Review** tab (tick "stop
   at the script" to keep the stop). The keyframes likewise: once they
-  are made, checked and auto-fixed it approves them for you (your click is
-  the consent, the confirm says so; a shot still flagged is named), buys the
+  are made, checked and auto-fixed it approves them for you when every one
+  passed (your click is the consent, the confirm says so; a shot still flagged
+  stops the run with the check's own sentence, it is never approved anyway), buys the
   clips, approves the assets, renders and ends "ready for review" on the
   **Review** tab. Tick "stop at the keyframes" in the confirm to keep the
   stop — approve them on the Review tab, then **Continue**.
@@ -320,7 +652,9 @@ the same numbers.
 on fal and about 60 s of Veo 3.1 lite at $0.05/s with its own sound (clips of
 8 s at most — a fully animated storyboard plans no shot longer than its link
 sells), plus rounding each clip up to whole seconds and up to $0.40 of
-keyframe redraws — inside the default $4 episode cap. Without
+keyframe redraws (a flat figure until plan 28; the ceiling is now the
+episode's shots × 2 × the price of one image, about $0.64 for these 8) —
+inside the default $4 episode cap. Without
 `GEMINI_PAID_API_KEY` the clips go to seedance (silent, $0.022/s, ≈ $1.73 an
 episode) and the estimate says "No ambience". The lipsync of the clips with
 an on-screen line adds about $0.15–0.30 (see "Lips follow the voices"
@@ -499,13 +833,17 @@ again once the balance is topped up.
 Budget numbers (per-episode / daily / per-story); this host's are set to
 **$2 / $4 / $10**. Every native-speech API price is well over the $2
 per-episode cap (Lite ≈ $3.4, Fast ≈ $5.4, Premium ≈ $17.4, for a 50 s
-episode), so the step refuses before buying anything: *"estimated $5.40 over
-the per-episode cap $2.00; raise PER_EPISODE_CAP_USD or use your own
-clips."* To run one story on the automated route anyway, raise
-`per_episode_cap_usd` in Settings before that story's assets step (caps are
-global, so set it back afterwards if you don't want every story reaching
-that high) — or switch the story to the **manual mode** below, which never
-buys a clip at all.
+episode; about $4.80 for 14 Lite clips of a 60 s one), so the step refuses
+before buying anything: *"estimated $5.40 over the per-episode cap $2.00;
+raise PER_EPISODE_CAP_USD or use your own clips."* To run one story on the
+automated route anyway, raise `per_episode_cap_usd` in Settings before that
+story's assets step (caps are global, so set it back afterwards if you don't
+want every story reaching that high) — or switch the story to the **manual
+mode** below, which never buys a clip at all, or keep the manual mode and press
+**Generate** on the clips you want the app to make, each at the price it shows
+("One click, every time", "What it costs"). Since plan 28 the one-click
+estimate prices these clips from the plan before the storyboard exists, so the
+refusal comes at the click, not after the keyframes.
 
 ## Your own clips (the manual mode)
 
@@ -517,9 +855,11 @@ app lets the human be the provider of the clips, of the images, or of both,
 and one screen, the **Handoff**, holds everything that is made outside the
 app: every prompt to paste, the references to attach, the checks to make and
 the place to upload the result. The app still writes the concept, bible,
-cast, places, script and storyboard, voices the narrator, times the
-subtitles and renders the final video; it draws whatever you leave on
-**Auto**.
+cast, places, script and storyboard, voices the narrator (when the story has
+one: a story made since plan 28 has none), times the subtitles and renders the
+final video; it draws whatever you leave on **Auto**. And, since plan 28, it
+can make a clip for you at a price it shows before you click ("Generate a clip
+from the app", below).
 
 ### Why the Handoff exists
 
@@ -582,6 +922,11 @@ A line under the two choices sums them up ("Clips: my own · Images: auto").
 These are the story's **default** for each step. The "Budget profile"
 select stays in the details block and agrees with them. "Mode" on the
 episode page is still Studio or Agent and has nothing to do with this.
+
+Since plan 28 the **new-story form** shows the clips choice as one card,
+**Who makes the clips**: "Me, on Flow or Higgsfield" is My own, and "The app"
+is Auto; the images choice lives under **Advanced** ("One click, every time").
+Everything on this page about the two choices holds as it was.
 
 ### The mode of one shot
 
@@ -739,6 +1084,53 @@ shown selected, so long-press and copy (Ctrl+C or Cmd+C on a computer).
 (markdown)**, **The clip brief (zip)** (the `.md`, the `.json` and every
 reference image) and **The image brief (zip)** (`image_brief.md`,
 `image_brief.json` and its references).
+
+### Generate a clip from the app (plan 28)
+
+A story whose clips are yours can still have the app make one. In the Handoff,
+each of your clips that is still missing shows **Generate this clip — $0.60**
+(the real price of that clip: its length on its link), and the episode shows
+**Generate all missing clips — $4.80** when several are missing. A click does,
+in this order and with nothing bought if any step says no:
+
+1. prices the clip(s) with the clip gate (the same one a generated clip goes
+   through: the link, the caps, the keys, the keyframes held until approved);
+2. refuses in plain words if it cannot ("a cap", no key, paid generation off,
+   the keyframes not approved, a shot that is not yours to make), switching and
+   booking nothing;
+3. switches those shots to **Auto** and queues the job;
+4. if the job's own gate refuses after the switch, switches them back.
+
+The price comes from the Handoff document: each clip carries `generate_price`
+(`{usd, link, allowed, reason}`) and the document carries one for all of them
+(`{usd, count, shot_ids, allowed, reason}`; null when nothing of yours is
+missing, or off native speech). The Handoff also lists **warnings** said before
+any click: "No speech check: add a GROQ_API_KEY or MISTRAL_API_KEY in Settings
+(free)" when no speech-to-text key is set (the take is then never checked
+against its line), and the provider's own refusal of the story's last image or
+clip run ("fal/seedream-4.5-edit refused the last run: “User is locked. Reason:
+TOP_UP.” Top up that account, or pick another link, before you generate."), read
+from the story's activity log. The route is `POST
+/api/stories/{id}/episodes/{ep}/clips/generate` (below).
+
+### The check line on every clip (plan 28)
+
+Each clip row of the Handoff, the brief and the zip (`check.txt`) says what the
+shot's keyframe check found, so you do not paste a prompt into Flow for a clip
+that starts from a wrong face: "The keyframe check passed.", "The check saw:
+Gaston's head is a pear, the sheet shows a pineapple.", "The keyframe has no
+check yet: run the assets step again (it checks it, free).", "The keyframe is
+out of date: make it again first (the assets step).". The clip's **upload waits**
+until the app-made keyframe is current and passed; your own keyframe is warned
+about and never blocks. When the platform's model takes fewer images than the
+shot has references, the cut is said ("Flow takes 3 images: the plate was left
+out, the prompt describes it."), and the references are ordered identity first
+(the characters, then the plate, then the props). An uploaded clip's first frame
+is compared with its keyframe, free, and a mismatch is a warning on the row, never
+a refusal ("Strict consistency rules", "The Handoff gate"). The fields are
+`keyframe_check` (`{state, own, line, upload_refusal}`, state `passed`, `failed`,
+`unjudged`, `stale` or `none`), `references_cut` and `first_frame` on each clip
+row.
 
 ### A shot with several lines
 
@@ -974,7 +1366,7 @@ design).
 
 | Route | What it does | Refusals |
 |---|---|---|
-| `GET /api/stories/{id}/episodes/{ep}/handoff?platform=&model=` | The handoff document (`handoff_v1`): the platform and its models, `counts`, `missing` and `next_missing`, the `master_prompt` of a v2 story (`{text, words, sections}`), per shot `{image, clip}` blocks (mode, state, prompt, its `fit` and, when the records are thin, its `prompt_warning`, negative prompt, size, references and a per-shot zip, upload slot, and for Auto the link, the estimate and the gate's verdict; a speaking clip's `line`, `speaker` and `voice_line`, and, for an exchange of two or more lines, `speakers` (the names in the order they first speak) and `lines` (`[{line_id, speaker, text, voice_line}]`, in turn), with `line` then holding them joined as "A: … / B: …"), the entities (sheets, plates, props, variants) and the export links. With no query it reads what `PATCH …/handoff` remembered. Calls nothing. | 404 unknown story or episode; 400 unknown platform or model; 409 no storyboard, or a frame the platform cannot make |
+| `GET /api/stories/{id}/episodes/{ep}/handoff?platform=&model=` | The handoff document (`handoff_v1`): the platform and its models, `counts`, `missing` and `next_missing`, the `master_prompt` of a v2 story (`{text, words, sections}`), per shot `{image, clip}` blocks (mode, state, prompt, its `fit` and, when the records are thin, its `prompt_warning`, negative prompt, size, references and a per-shot zip, upload slot, and for Auto the link, the estimate and the gate's verdict; a speaking clip's `line`, `speaker` and `voice_line`, and, for an exchange of two or more lines, `speakers` (the names in the order they first speak) and `lines` (`[{line_id, speaker, text, voice_line}]`, in turn), with `line` then holding them joined as "A: … / B: …"), the entities (sheets, plates, props, variants) and the export links. Plan 28 added, per clip row, `keyframe_check`, `references_cut`, `first_frame` and (for a clip of yours still missing) `generate_price`, and on the document `generate_price` for all of them and `warnings`. With no query it reads what `PATCH …/handoff` remembered. Calls nothing. | 404 unknown story or episode; 400 unknown platform or model; 409 no storyboard, or a frame the platform cannot make |
 | `PATCH /api/stories/{id}/episodes/{ep}/handoff` | `{"platform": "flow"\|"higgsfield", "model"?}` into `assets.json`'s `handoff`; answers `{handoff, platform, model}`. | 404; 400 no platform, an unknown one or a model it does not list; 409 while a step is queued or running |
 | `PATCH /api/stories/{id}/episodes/{ep}/shots/{shot_id}/mode` | `{"clip"?, "image"?}`: `"auto"`, `"manual"` or `null`; answers the modes, what became stale and the gate's verdict for an Auto kind (see above). | 404 unknown story, episode or shot; 400 bad value or a mode the story cannot take; 409 while a step runs, or no storyboard |
 | `GET /api/stories/{id}/episodes/{ep}/shots/{shot_id}/references.zip?kind=clip\|image&platform=&model=` | One shot's reference files under `references/` (a clip's, cut to what the platform's model takes; `kind=image` for the keyframe's own). A file not on disk is left out. | 404 unknown story, episode or shot, or a shot kept still (no clip to brief); 400 bad platform, model or kind |
@@ -982,6 +1374,12 @@ design).
 | `GET /api/stories/{id}/image-brief.zip?ep=` | The same as a zip: `image_brief.md`, `image_brief.json` and every reference under `references/`. | as above |
 | `GET /api/stories/{id}/episodes/{ep}/brief?platform=` and `…/brief.zip` | The clip brief (JSON, and the zip with the `.md`, the `.json` and the references), as the Handoff's Export menu gives it. A shot that carries an exchange has `line_ids`, `speakers` and `lines` beside `line`; the markdown lists its lines numbered, in turn, with each speaker's voice once, and its checks read "N lines, the speakers in turn". | 404; 400 unknown platform; 409 no storyboard |
 | `POST /api/stories/{id}/episodes/{ep}/shots/{shot_id}/clip` and `…/keyframe` (the Handoff's upload buttons); `POST /api/stories/{id}/cast/{char_id}/sheet`, `…/places/{place_id}/plate`, `…/props/{prop_id}/image` (the tiles' and the entity cards' uploads) | The uploads, with the checks of step 6 of the walkthrough; a clip or a keyframe of an Auto shot is now refused with the sentences under "The mode of one shot". | 400/409 as in "Limits and troubleshooting" |
+| `POST /api/stories/{id}/episodes/{ep}/clips/generate` | The Generate button (plan 28). `{"shot_id"}` buys that one of your clips still missing, `{}` all of them: priced as the handoff showed, switched to Auto, queued; a job of the story (201). Switches back if the job's own gate refuses. | 404 unknown story or episode; 409 in plain words (a cap, no key, paid generation off, keyframes not approved, not your shot) with nothing switched or bought, and while a step runs; 429 queue full |
+| `POST /api/stories/{id}/approve-all/{cast\|places}` | Approve every complete, unapproved entity of the group (`cast`: the characters; `places`: the places and props) by the rule of one entity's approval. `{"approved": [{id, kind, name}], "skipped": [{id, kind, name, missing, lacks}], "refused": str\|null}`: 200 even when some are skipped (the body names them), one that is already approved stays as it is, never "approve anyway". | 404 unknown story or group; 409 while a step of the story runs |
+| `GET /api/stories/{id}/concepts?include_library=1` | `{"library": [...], "generated": [...]}`. `library` is `[]` unless the flag is sent: the shipped concepts are hidden from the product (plan 28), kept for the CLI and the tests. | 400 unknown language or style |
+| `PATCH /api/stories/{id}` with `{"links": {"image": "<link>"}}` | Switch the story's one image link for its sheets, places and props (plan 28), when the step stopped with "The story's image link … cannot serve now". What is made stays as it is. | 400 when it is not a link the story can use |
+| `POST /api/stories` with `"clips": "me"\|"app"` | The new-story form's "Who makes the clips": with no `generation_profile` sent, the server makes the profile from it (`me`: your own clips; `app`: native speech on the cheapest speaking link); a sent profile is honoured as sent. | 400 for a format that cannot fit those clips ("This format cannot fit the clips this story makes. Let the app choose one.") |
+| `GET /api/stories/new-profile` | What the new-story form starts from. Plan 28 added `clip_makers` (`me` and `app`: the profile, `episode_usd`, `story_usd`, missing keys, a summary), `formats_that_fit` and `formats_hidden` (per maker and language, with the reason each hidden format cannot fit). Calls nothing. | |
 
 ### Human casts
 
@@ -1035,6 +1433,20 @@ stories as cards (title, status, style, language); **New story** starts one.
   *Continue the agent run*, and episode 1 rendered links to its Review tab.
 
 ### 1. New story
+
+**The form asks four things (plan 28).** Your idea, the language, the look (a
+card with a picture per style) and who makes the clips (Me, on Flow or
+Higgsfield, about $1 of app cost an episode; or The app, about $5), then one
+button, **Create the story** ("One click, every time"). The app decides the rest
+from those four, and everything the list below describes sits behind one
+**Advanced** fold, in plain words: the **episode format** (a list of only the
+formats that fit the clips, each hidden one with its reason), the frame, what
+the characters are made of, the images (Auto or My own), the speaking-clips
+quality, character sheets, bodies, the image provider, clip prompts, how the
+story runs (Studio or Agent), the narrator, and the app's setup (story engine,
+movement, where things are made, how characters are kept the same, spending
+plan). Untouched, nothing under Advanced is sent. The list below is what the
+form can set; the walkthrough steps after it are unchanged.
 
 - **Language** — `Français` or `English`. Required: nothing is picked for
   you, so a story is never silently written in the wrong language.
@@ -1226,8 +1638,9 @@ Clips mode (the other mode of the app), and every story that already exists.
 **Episode formats.** Five templates ship, each a story-level choice
 (`episode_template_id`, sent on creation or patched while no episode has a
 script): `serial_60s_v1` (60 s, 55–80) and `serial_90s_v1` (90 s, 75–100)
-for the legacy pipeline; `serial_60s_v2` (6–10 beat shots in 55–75 s, the
-v2 default), `serial_90s_v2` (the same shape at 80–100 s, target 90) and
+for the legacy pipeline; `serial_60s_v2` (5–6 scenes in 55–75 s, four body
+scenes of 10–16 s, the v2 default), `serial_90s_v2` (the same shape at 80–100 s,
+target 90, five body scenes) and
 `narrated_drama_60s_v2` (58–78 s, 5–7 longer scenes) for v2. The narrated
 drama is told by one narrator in a telenovela tone: its template carries the
 narrator's share of the words (60–85 %) and 2–4 short character lines an
@@ -1251,7 +1664,7 @@ words its slot holds ("The timing harness (plan 24)"). The first-watch judge che
 that adds nothing, an incomplete sentence, scenes that do not tell the
 logline), and the script pane shows the spine as "What happens" above the
 scenes. The sixth template, `confrontation_50s_v2`, is a continuous,
-one-place, real-time confrontation of about 50 seconds (4–6 scenes, 9–16
+one-place, real-time confrontation of about 50 seconds (44–59 s, 4–5 scenes, 9–16
 shots of 5–10 s, 95–125 spoken words, lines of 5–17 words, every boundary a
 cut, the narrator only in a later episode's recap, the cliffhanger's last
 line stating the act about to happen). It is the format a new story on a
@@ -1266,13 +1679,14 @@ approved; a locked step shows why ("Approve the bible first.").
 
 ### 2. Concepts
 
-Two sources: the **library** (the fourteen shipped concepts, filterable by
-style) and **Generated** (anything you've asked for). Filtered on the Fruit
-Drama style it shows seven: *Tentafruit Island* (a rigged reality-show
-contest), *The Orchard Inheritance*, *Midnight Fridge*, and the four of the
-fruit-drama pack, each a fruit kingdom on its own plot archetype — *The
-Citrus Ball* (infidelity), *The Pineapple Crown* (betrayal), *Seeds of the
-Past* (forgiveness) and *The Kitchen Heir* (a secret child). Each card shows a
+The step lists only the cards **generated for your story**, and when there are
+none it says "No concepts yet — tap Generate." Until plan 28 it listed the
+fourteen concepts that ship with the app before your own (the *Tentafruit
+Island*, *The Orchard Inheritance*, *Midnight Fridge* and the fruit-drama
+pack's *The Citrus Ball*, *The Pineapple Crown*, *Seeds of the Past* and *The
+Kitchen Heir* among them): they are hidden now, not deleted. Their files, the
+command line's `--concept` choice and the tests are kept, and the API still
+returns them for `GET …/concepts?include_library=1`. Each card shows a
 title, logline and "value" (the substance the story carries) up front;
 "Details" expands the world, cast sketch, hook formula and retention
 mechanics. **Pick this concept** chooses it — no separate approval step; the
@@ -1280,9 +1694,11 @@ choice *is* the approval, and it also completes any concepts job left
 awaiting approval.
 
 **Generate 10 more** queues a job of ten LLM calls, one concept each, each
-told not to repeat a title the story already has (library titles first,
-then every one it has generated; up to 24 titles, so a first run never
-drops one). The estimate chip reads something like
+told not to repeat a title the story already has (every one it has generated
+so far; up to 24 titles; the shipped library's titles are no longer in that
+list). The concept writer reads the **series set-up** ("The set-up block"): the
+story's look, world, audience and format, so a card never picks a style when the
+story's own is already chosen. The estimate chip reads something like
 `est. $0.00 · 10 LLM calls`; the route chip next to it names where they'll
 run (see "Estimate and route chips", below). Cards land on disk as each
 call returns, so a couple of failed calls out of the ten still leave you
@@ -1383,8 +1799,10 @@ supports, recurring, guests), in this order: the text (K1 writes a
 **descriptor**, 2–3 **signature items**, a **personality** — traits, wants,
 fears, speech style —, **relationships** with the rest of the cast, and a
 voice brief), then the **portrait**, then the **turnaround** and
-**expressions sheet**. Once every character's text is there, one **voice**
-per character left with none, then a ~3-second **voice sample** of each.
+**expressions sheet**. Once every character's text is there, and on a story that
+has voices only (a story made since plan 28 has none, "No generated voices"),
+one **voice** per character left with none, then a ~3-second **voice sample**
+of each.
 Every field the model writes for image or voice prompts is in **English**;
 what you type yourself (name, one-line) stays in the story's language.
 Everything a run makes is saved as it is made, so a run that fails partway
@@ -1407,6 +1825,15 @@ you do, from here. Every image made this way afterwards is labelled
 in whatever is still missing (a stalled sheet, a voice nobody picked, …);
 with nothing missing it calls nothing.
 
+**The sheet check, and Approve all (plan 28).** Each portrait and sheet is
+checked once, free, when it is made (one head, the species named, the outfit,
+both views of a two-view sheet), redrawn up to twice with what the check saw as
+the note, and a character whose picture still fails says why and cannot be
+approved until you regenerate it or upload your own ("Strict consistency rules").
+In a fruit world two characters never share a species. **Approve all** approves
+every character that has everything it needs in one tap, names the ones it
+left, and never approves one the app refused.
+
 Each character's card shows its **portrait / turnaround / expressions**
 slots (each with its own **Regenerate** — a fresh seed and an optional note,
 its own estimate chip; an empty slot says why: "Write the character first.",
@@ -1417,7 +1844,8 @@ and **sample line** (each saved inline, no job needed), and a
 whole-character **Regenerate** (K1 again, with a note — the images and the
 pinned voice are untouched).
 
-**Voice** shows the pinned voice (`provider/voice_id`) with a player for its
+**Voice** (only on a story that has voices; a story made since plan 28 shows
+none on its tiles) shows the pinned voice (`provider/voice_id`) with a player for its
 sample, or "Pick a voice: no catalogue voice was left for this character."
 when none could be found. **"Other voices"** lists up to 6 alternates
 (gender, age, style tags), best first, never one already pinned by another
@@ -1548,6 +1976,14 @@ the world and the cast — each character's name and signature items, where
 props usually come from — and proposes 2–3 places and a few props; nothing
 is created yet, only listed. Making the places and props themselves needs
 at least one character with its text written.
+
+**Plates, props and Approve all (plan 28).** A place's plates and a prop's
+picture are checked like the cast's sheets (the layout and light of a plate, the
+look of a prop) and a failing one cannot be approved until it is regenerated or
+replaced by your own; **Approve all** approves every place and prop that is
+complete. A scene at night is drawn on the place's **night plate**, so the assets
+step makes any missing plate before the first keyframe ("Strict consistency
+rules"). All of a story's sheets, plates and props are made on one image link.
 
 The proposal is **editable** before anything is made: each place is a name
 and a one-line description (up to 6 places and 6 props, "+ Add place" /
@@ -1795,6 +2231,16 @@ is the truer number. A script already on disk keeps its old estimate until one
 of its lines is rewritten or edited, then the line's estimate carries its
 voice's factor.
 
+**One clock for the clips too (plan 28).** On a story whose characters speak in
+their own clips, the clock above timed the words while the Storyboard step added
+up the clips, and the two disagreed: a script could read "ok" at 56.9 s and its
+storyboard run to 84 s. A native-speech script with stored line plans is now
+timed on the clips its plans buy (`timing.plan_board`), in the Script step's
+length, in the one-click run's script check and in the storyboard's check, so
+the number you read on the Script step is the number the storyboard will sum.
+How the plan always fits, and the one remedy before a stop, are in "A
+plan that always fits" below.
+
 **The line plan.** Before a scene is written, `timing.scene_plan` splits the
 high end of its slot into one slot per line. It pays every pause first (the
 pre-roll, 0.25 s between lines, and the tail floor, raised to the longest
@@ -1823,8 +2269,10 @@ gave it (`shots.planned_line_entries` pairs plan entries with the written
 lines by kind and speaker), so the writer's plan and the shots cannot disagree.
 If the written lines no longer match the plan (a line added or removed, a
 speaker swapped) the plan is ignored for that scene, with one note, and each
-line is planned by its own words as before. Reaction shots (one silent 6 s at
-most a scene) are not part of the plan: they sit on top of its clips.
+line is planned by its own words as before. A scene with no stored plan can
+still get one silent 6 s reaction shot, on top of its clips; **a scene whose
+stored plan names its shots gets none** (plan 28), so its shots are exactly the
+clips its plan bought and the storyboard adds up to what the Script step timed.
 
 **What the writer is told, and what is refused.** The prompt for a body scene
 carries the plan in seconds and words:
@@ -1895,6 +2343,12 @@ keep the meaning and the speaker, cut words." The note names the flagged
 line's cap, or every planned line's when the flag names none, and only the
 slot for a scene with no plan. The button shows "Trimming…" while it runs and
 an error appears under it if the job is refused. No new route is involved.
+On a story whose characters speak in their clips (plan 28) every scene that
+runs over its own slot is flagged ("Scene s03 is over its slot", with the
+seconds), and an episode over its window names the scene to shorten first; the
+Trim button offers both, and the regenerate re-plans that scene inside the
+episode's fit before the writer rewrites it. Until then only the episode as a
+whole was flagged, and the button ignored it.
 
 **What this does not do.**
 
@@ -1907,8 +2361,9 @@ an error appears under it if the job is refused. No new route is involved.
   voice actually measured.
 - The trim calls are outside the Script step's cost estimate (up to 4 more
   calls on the writing chain an episode).
-- Reaction shots are not in the plan: a scene's clips can still add one silent
-  shot on top of what the plan counted.
+- Reaction shots are not in the plan: a scene with no stored plan can still add
+  one silent shot on top of what it counted. Since plan 28 a scene whose stored
+  plan names its shots gets none.
 - It does not fix a script already on disk. Regenerate its scenes (or press
   Trim) to bring them inside a plan.
 
@@ -1935,10 +2390,10 @@ its nearest ones, so no link is left selling nothing.
 | ltx | 6, 8 or 10 s |
 | An uploaded clip, planned | 6 or 8 s (Flow sells 8) |
 
-A silent reaction shot is 6 s. The two v2 templates carry `min_shot_s` 5 and
-`max_shot_s` 10 with the slots recap 5–6 s, hook 5–8 s, body 10–16 s and
-cliffhanger 6–10 s, and the take's trim never cuts a shot below 5 s (the
-template's `min_shot_s`).
+A silent reaction shot is 6 s. Every v2 format carries `min_shot_s` 5 and the
+slots recap 5–6 s, hook 5–8 s, body 10–16 s and cliffhanger 6–10 s (the two
+serial formats since plan 28; see the table under "A plan that always fits"),
+and the take's trim never cuts a shot below 5 s (the template's `min_shot_s`).
 
 **Capacity.** A clip of L seconds speaks `floor((L − 0.7) × 2.4)` words (2.4
 words a second after 0.7 s of breath, the figure until the probe measures it).
@@ -2018,6 +2473,71 @@ forced to a two-shot: the framing the shot writer picks stands, so the second
 speaker can be off frame while talking. The T1v2 shot writer is not told about
 exchanges (the planned ask is); the shot plan still comes from the lines the
 script gives it.
+
+#### A plan that always fits (plan 28)
+
+**Why.** The first one-click run of plan 28's day stopped at 84 s against 75 s.
+Its plan could never have fit: each body scene was a 6 s narrator clip plus a
+6 s character clip (a narrator's line never shares a character's clip), which
+is 12 s inside an 11 s slot, and the old planner, finding nothing that fit, gave
+up on the scene instead of refusing it. Hook 6 s + six scenes at 12 s +
+cliffhanger 8 s was 86 s planned in a 75 s window, and no result of the writing
+could have changed that. Four rules now stand in front of the writer.
+
+1. **Refuse before any spend.** Before the first writer call the app adds up
+   the least the plan could ever cost on your clips' link (`timing.plan_clip_floor_s`,
+   no model call) and compares it with the window. If it cannot fit: "Episode 1
+   cannot fit: its 8 scenes need at least 86 s of clips on this link, more than
+   the 75 s this format allows. Pick a format that fits, or let the app choose
+   one." The same sum runs once more after the beat sheet, and the one-click
+   estimate stops at the script with it. A scene that no clip arrangement fits
+   says so for that part: "Episode 1 cannot fit: its hook needs at least 10 s of
+   clips on this link, more than the 8 s this format gives it. …"
+2. **The planner keeps its contract.** `timing.scene_plan` never stores clips
+   over the scene's slot: it tries the next shorter arrangement (the narrator
+   alone, or the cheapest exchange) and raises `timing.PlanError` when none fits.
+3. **The episode fits as a whole.** Over the episode, `timing.fit_episode_plans`
+   makes the least-watched scenes cheaper until the clips and the end card fit
+   the window: first, on a format that is not a narrated one, a setup or rising
+   scene with a narrator and a character line keeps the narrator alone
+   (`character_line` off; the peak and the turn keep theirs), then a scene's clips
+   are held a second shorter (`clip_cap_s`), the least watched first
+   (setup and rising, then the recap and the hook, the cliffhanger, the peak and
+   the turn last), never under the slot's low end before it has to. What it
+   changed is stored on each scene, so the plan recomputes the same every time.
+   The number of scenes comes from the format and the link's floors, not from
+   the template alone. A test sweeps four formats × 30 pairs of links × three
+   look cases × episodes 1 and 2 × French and English, and every plan fits its
+   window (`tests/test_story_plan_fit.py`).
+4. **One remedy before a stop.** If the script or the storyboard is still over
+   its window, the one-click run does one remedy (`fast_track.fit`): the plans
+   are fitted again, the scenes whose planned clips changed (and, at the
+   storyboard, those over their slot) are written again as a regenerate writes
+   them ("✂ Fitting episode 1: 2 scenes shortened (s03 and s05)", then "✂ Fitting
+   episode 1: s03 and s05 rewritten to their new plan; checked and approved
+   again"), the script is checked and approved again
+   and the rewritten scenes' shots are planned again. A scene that fails to
+   rewrite keeps its lines and the feed says so ("✖ Fitting episode 1: scene s03
+   failed (…); it keeps its lines"). If it is still over, it stops with the
+   sentence of rule 1. **Continue** runs the remedy again; it was a dead end
+   before.
+
+**The formats, re-slotted.** The two serial formats were never moved to the
+5–10 s shots plan 27 gave the others, which made them impossible on clips that
+speak. They are now:
+
+| Format | Window | Scenes | Body scenes (default) | Slots |
+|---|---|---|---|---|
+| `serial_60s_v2` | 55–75 s (target 62) | 5–6 (was 6–10) | 3–4 (4; was 4–7, 6) | recap 5–6, hook 5–8, body 10–16, cliffhanger 6–10 s |
+| `serial_90s_v2` | 80–100 s (target 90) | 7–8 (was 8–12) | 5–6 (5; was 5–9, 8) | the same |
+| `confrontation_50s_v2` | 44–**59** s (was 44–58) | 4–5 (was 4–6) | 2–3 (3) | the same |
+| `narrated_drama_60s_v2` | 58–78 s | 5–8 | 3–5 (4) | the same (unchanged) |
+
+Their shortest shot is now 5 s instead of 3 s (was recap 3–4, hook 3–6, body 5–11
+and cliffhanger 4–10 s on the two serial formats). The confrontation's top moved
+from 58 to 59 s because a plan with a cut to black was 58.6 s. A story already
+written on the old values keeps its stored plans until its scenes are written
+again; the dashboard mirrors the new values (`episodeTemplates.js`).
 
 ### 9. Storyboard
 
@@ -2384,12 +2904,14 @@ auto-approved by that document's own approval rule: a complete script with
 a fresh, passed consistency check inside the template's length window (on a
 v2 story, a fresh first-watch check with nothing blocking — its minor issues
 are named in the feed's approval line and on the Review tab); a storyboard
-that covers it; a complete assets grid. On a v2 story it approves two
-things **anyway**, naming what it went over: the keyframes still flagged
-after their auto-fix, and the script once the script step's two repair
-passes are spent and only blocking issues remain (both checks fresh, the
-length inside the window) — the same issues found again on every pass are
-a judgement for you, not for a third pass. The Review tab's checklist says
+that covers it; a complete assets grid. On a v2 story it approves one
+thing **anyway**, naming what it went over: the script once the script
+step's two repair passes are spent and only blocking issues remain (both
+checks fresh, the length inside the window) — the same issues found again on
+every pass are a judgement for you, not for a third pass. **It never approves
+keyframes anyway** (plan 28): a keyframe still flagged after its auto-fix, or
+with no check, stops the run with the check's own sentence ("Shot sh04 does not
+match: … Regenerate it, or upload your own."). The Review tab's checklist says
 "Approved anyway by Generate episode — still found: s00 (continuity), …"
 and lists each fix. Tick **Stop at the script if its repairs leave issues**
 (`stop_on_script_issues`, CLI `fast-track --stop-on-script-issues`) to keep
@@ -2399,8 +2921,10 @@ is allowed and every cap — the episode's, the day's and the story's — fits,
 naming the numbers.
 
 Pressing it asks you to confirm first, with the estimate's own split (LLM
-calls, images and up to $0.40 of keyframe redraws, voices, every clip,
-render minutes, a total against the caps) and, on a v2 story, "no stop for
+calls, images and the keyframe redraws' ceiling (the shots × 2 × the price of
+one image), voices on a story that has them, every clip priced from the plan,
+render minutes, a total against the caps, and the warnings of "Generate a clip
+from the app") and, on a v2 story, "no stop for
 keyframe review — you review the finished episode" with a checkbox to keep
 that stop. On a v2 story the whole episode is checked against every cap
 before the first call and refused whole when it would not fit. While it
@@ -2415,6 +2939,15 @@ with a check it could not refresh, a plan over a cap, a scene T1
 under-planned — it names
 the sub-step, what happened and what to do next, then **Generate episode**
 again to continue exactly from there.
+
+**What plan 28 changed in the stops.** An episode that cannot fit its format is
+refused before any writer call ("Episode 1 cannot fit: its 8 scenes need at
+least 86 s of clips on this link, more than the 75 s this format allows. Pick a
+format that fits, or let the app choose one."), and one that fits at the plan but
+runs over after writing gets one remedy, the over-long scenes rewritten, before
+it stops ("A plan that always fits"). A keyframe that does not match its sheet
+stops the run at the keyframes, never approved anyway. A model link that is down
+is skipped for the rest of the job, so a down link no longer costs minutes.
 
 ### Agent mode (one job from the idea to episode 1)
 
@@ -2436,7 +2969,7 @@ feed and the job's `sub_step`: the **concept** (the concepts step asked for
 one card from the seed — the idea is the concept — then chosen), the
 **bible**, the **style** (built from the story's style, else the concept's,
 with its preview strip), the **cast** (the concept's cast sketch, at most
-five, voices pinned by the cast step), the **places proposal**, the
+five, and voices pinned by the cast step on a story that has voices), the **places proposal**, the
 **places** (the proposal made), the **season** (eight episodes), the
 **knowledge base** (v2 only; any prop it adds is drawn by the places step
 too) and **episode 1** — handed to the fast track above with its usual
@@ -2449,7 +2982,8 @@ as approved by the agent (`approved_by: "agent"` on story.json's approvals,
 on each character, place and prop, on the season and the knowledge base;
 episode 1's documents say `fast_track`, as the fast track's always do). The
 **style, the portraits and the plates are approved as soon as they are
-complete — nobody looks at them first.** That is the trade-off: one click
+complete — nobody looks at them first** (since plan 28 the free sheet check does,
+and a picture it failed is not approved). That is the trade-off: one click
 instead of a dozen, in exchange for reviewing the looks afterwards. Open the
 story in Studio when it is done: every document stays editable, every
 regenerate stays available, and your own approval replaces the agent's mark.
@@ -2546,7 +3080,9 @@ Keys, chains, caps and `allow_paid` come from the environment (or `.env`);
 add **`--settings`** to any subcommand to read the ones the dashboard's
 Settings stored (`data/settings.json`, or `WEB_SETTINGS_FILE`) over it — the
 run says how many values it read, never a value. A v2 episode's keyframes
-are approved with `approve STORY_ID keyframes:1 [--anyway]`, between an
+are approved with `approve STORY_ID keyframes:1` (`--anyway` is still accepted
+and goes over nothing since plan 28: a keyframe that failed its check is
+regenerated or replaced), between an
 assets run with `--no-animate` (keyframes, voices and their checks) and one
 without (the clips):
 
@@ -2799,6 +3335,18 @@ even if a clip job would happily fall through to one. A paid link left out
 this way is still printed (`⏭ Skipping openrouter/...: paid link, allow_paid
 is off`), never silently dropped, and if the chain's *only* keyed link is
 paid, the step refuses up front and names which free key to add instead.
+
+**The order of the story chain (plan 28).** The shipped story chain puts free
+Gemini first, the paid OpenRouter mistral-medium (a few cents, only with
+`allow_paid`) second and the two Nvidia nemotron links last, where they were
+first before: they are slow and one that was down cost 152 s of retries in one
+job. Within a job, a link that fails a whole retry ladder with an outage (a 5xx,
+a timeout, a dropped connection) is skipped for the rest of that job and the
+feed says it once ("⏭ <model>: failed 3 times on B1, skipped for the rest of
+this job"); a 429, a refused request or an invalid reply never does. Replies on
+the OpenAI-compatible links log why they ended ("reply ended:
+finish_reason=length, completion_tokens=…"). See "The quality pipeline (v2)",
+"Writing".
 
 **The premium writing chain.** Once a paid Gemini key is set
 (`GEMINI_PAID_API_KEY` in Settings → Providers or `.env`, kept apart from
@@ -3626,7 +4174,61 @@ host's are $2 / $4 / $10): every API speech price is over a $2 cap. Raise
 `per_episode_cap_usd` in Settings → Budget for that story's run (caps are
 global; lower it again afterwards if you don't want every story reaching
 that high), or switch the story to **"Native speech — your own clips"**,
-which buys no clip at all.
+which buys no clip at all, and press **Generate** on the clips you want the app
+to make, at the price each shows.
+
+**"Episode 1 cannot fit: its 8 scenes need at least 86 s of clips on this link,
+more than the 75 s this format allows. Pick a format that fits, or let the app
+choose one."** — the plan of the episode's format, on the link that makes your
+clips, adds up to more than the format's window, so the step stopped before any
+writer call (nothing was spent). Pick another format (Advanced → Episode format
+lists only the formats that fit) or let the app choose one. A story whose characters speak in
+their own clips and was created since plan 28 can only be on a format that fits;
+this meets an older story, or a link you changed. See "A plan that always fits".
+
+**"This format cannot fit the clips this story makes. Let the app choose one."**
+— the same check, at the form or when you change the story's format: the format
+you asked for cannot hold the clips this story makes. Leave the format on "the
+app chooses".
+
+**"Shot sh04 does not match: Gaston's head is a pear, the sheet shows a
+pineapple. Regenerate it, or upload your own."** — the keyframe check found the
+keyframe different from the character sheet, and keyframes cannot be approved
+past that (nor by the one-click run). Regenerate the shot's keyframe, or upload
+your own (yours is warned about, never refused). "Shot sh05 has no keyframe check
+yet: run the assets step again (it checks them, free)" means the check has not run
+on the keyframe as it is now.
+
+**"Gaston's portrait does not match: the head is a human head, Gaston is a
+pineapple. Regenerate it, or upload your own."** — the sheet check on the cast,
+the places or the props (after its two redraws or the story's redraw ceiling): the
+picture cannot be approved, and Approve all leaves it. Regenerate it with a note,
+or upload your own image.
+
+**"The story's image link … cannot serve now: …"** — the one link the story's
+character sheets, places and props are made on cannot serve (a spent balance, a
+down provider), so the step stopped and nothing was generated or spent. Bring it
+back and try again, or switch the story's image link as the sentence says
+(`PATCH /api/stories/{id}` with `{"links": {"image": "…"}}`); what is already made
+stays as it is.
+
+**"Shot sh04's keyframe does not match (the check saw: …): regenerate it, or
+upload your own, before its clip."** — the Handoff refuses a clip's upload until
+its app-made keyframe is current and passed. Fix the keyframe first; your own
+keyframe never blocks the clip.
+
+**"⏭ <model>: failed 3 times on B1, skipped for the rest of this job"** — not an
+error: the model's link was down for a whole retry ladder, so the job stopped
+asking it and went on to the next link of the chain. A later job asks it again.
+
+**"No speech check: add a GROQ_API_KEY or MISTRAL_API_KEY in Settings (free)"** — a
+warning before the click: with no speech-to-text key, a clip's take is never checked
+against its line and is never retaken. Add one of the keys in Settings.
+
+**"<link> refused the last run: “User is locked. Reason: TOP_UP.” Top up that
+account, or pick another link, before you generate."** — a warning before the
+click: the provider itself refused the story's last image or clip run (a spent
+balance, a locked account). Top up the account or pick another link.
 
 **"Waiting for N clips — download the brief"** — a manual-mode episode's
 assets step has made every keyframe and narrator voice line it can and is
