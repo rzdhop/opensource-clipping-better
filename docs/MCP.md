@@ -25,6 +25,7 @@ uv run python -m mcp_server --stdio     # for a local client (Claude Code on the
 | `RUNPOD_IMAGE_ENDPOINT_ID` | the **image** endpoint (FLUX.2 klein), same volume; empty = images run on the video endpoint |
 | `RUNPOD_IMAGE_API_KEY` | optional: a key of its own for the image endpoint (else `RUNPOD_API_KEY` opens both) |
 | `RUNPOD_GPU_USD_PER_HOUR`, `RUNPOD_IMAGE_GPU_USD_PER_HOUR` | optional flex prices, so the ledger shows dollars |
+| `RUNPOD_AUDIO_ENDPOINT_ID`, `RUNPOD_AUDIO_API_KEY`, `RUNPOD_AUDIO_GPU_USD_PER_HOUR` | the **voice** endpoint (the `tts_chatterbox` template, see "Voice lines"); empty = the image endpoint says the lines (then the video one), once it runs the TTS worker image |
 | `MCP_TOKEN` | the secret: the bearer token Claude Code sends, and what the connector's login page asks for; empty = no auth, keep it on localhost |
 | `MCP_PUBLIC_URL` | the address clients reach the server at (the Funnel URL); set, the server is also the OAuth authorization server the claude.ai connector needs |
 | `RZDHOP_OUTPUTS_DIR` | where files go (default `<repo>/outputs`) |
@@ -78,10 +79,10 @@ Funnel mapping above keeps working unchanged.
 | Tool | Cost | Does |
 |---|---|---|
 | `runpod_health(kind?)` | free | workers ready/idle/running/throttled and queued jobs per endpoint |
-| `templates_list()` | free | the `templates/workflows/*.json` this server can submit: task, endpoint kind, values, clip lengths, model files |
-| `comfy_submit(template, prompt, …)` | **GPU seconds** | one `POST /run`; returns the `job_id` at once. Several submits run in parallel on the endpoint's workers. Arguments: `negative`, `seed`, `width`/`height`, `seconds` (video), `image_path` (i2v keyframe), `ref_paths` (edit references, up to 4), `name` (file stem), `dest` (folder under `outputs/`), `note` |
+| `templates_list()` | free | the `templates/workflows/*.json` this server can submit: task (t2i, edit, i2v, tts), endpoint kind (image, video, audio), values, clip lengths, model files |
+| `comfy_submit(template, prompt, …)` | **GPU seconds** | one `POST /run`; returns the `job_id` at once. Several submits run in parallel on the endpoint's workers. Arguments: `negative`, `seed`, `width`/`height`, `seconds` (video), `image_path` (i2v keyframe), `ref_paths` (edit references, up to 4), `audio_path` (tts: the reference voice, a 6-30 s WAV), `exaggeration`/`cfg_weight` (tts knobs, 0.5 each by default), `name` (file stem), `dest` (folder under `outputs/`), `note` |
 | `comfy_status(job_id)` | free | one `GET /status`; a job that ended is settled: its files are written to `dest`, its GPU seconds and dollars kept, or its error |
-| `comfy_fetch(job_id, wait_s=240)` | free | waits (bounded) and shows the result: an image as a thumbnail, a clip as a contact sheet of 8 frames plus duration, size and whether it has sound |
+| `comfy_fetch(job_id, wait_s=240)` | free | waits (bounded) and shows the result: an image as a thumbnail, a clip as a contact sheet of 8 frames plus duration, size and whether it has sound, a voice line as its duration, sample rate and size (`comfy_download` hands the file over) |
 | `comfy_cancel(job_id)` | free | cancels a queued or running job |
 | `comfy_jobs(limit, refresh)` | free | the journal, newest first; `refresh` asks RunPod about the unfinished ones |
 | `cost_ledger(since?)` | free | GPU seconds and dollars of the finished jobs, per kind |
@@ -153,9 +154,42 @@ of its own "LTX-2.5 Image to Video" template once the worker's ComfyUI carries
 it; `deploy/runpod/worker-comfyui.Dockerfile` builds a worker on a newer
 ComfyUI when the shipped one is too old.
 
+## Voice lines on RunPod (plan 31)
+
+`tts_chatterbox` (task `tts`, kind `audio`) says one line in French with
+Chatterbox Multilingual (ResembleAI, MIT): core `LoadAudio` reads the reference
+voice, the `FL_ChatterboxMultilingualTTS` node of `ComfyUI_Fill-ChatterBox`
+speaks, core `SaveAudio` writes a FLAC. It needs the worker image of
+[`docker/worker-comfyui-tts/`](../docker/worker-comfyui-tts/README.md): the base
+image has neither the node nor a handler that returns audio (the stock one
+collects only `images`; the patched one returns `audio` the same way, under its
+own key, and this server reads both). The six weight files live on the network
+volume under `models/chatterbox/chatterbox_multilingual/` (the template's
+`requires` entries, with an empty `field`: the node loads them itself).
+
+- `comfy_submit(template="tts_chatterbox", prompt="<the line>", audio_path="<ref>.wav",
+  seed=<one per voice>, name="l03", dest="acces_refuse/ep01/voices")` uploads the
+  reference like a keyframe (a data URL in the worker's `images` list) and the
+  FLAC lands in `dest` as `l03.flac`; `comfy_fetch` reports its duration.
+- Which endpoint: `RUNPOD_AUDIO_ENDPOINT_ID` when set, else the image endpoint,
+  else the video one — point the chosen one at `ghcr.io/rzdhop/worker-comfyui-tts:latest`
+  (the image also runs every existing image and video template). The ledger bills
+  audio at that endpoint's rate (`RUNPOD_AUDIO_GPU_USD_PER_HOUR` when it has its own).
+- Cost: a line is about 8 GPU-seconds warm (≈ $0.004 on the RTX 5090 flex price);
+  a cold worker loads 3.2 GB first (≈ 90 s, ≈ $0.04), so send the lines of an
+  episode one after the other rather than all at once. The first job ever
+  downloads the weights onto the volume (≈ 2 min) unless
+  `docker/worker-comfyui-tts/fetch_weights.sh` ran on the dev pod.
+- The tools around it: `tools/make_voice_refs.py` (the four frozen reference
+  voices of "Accès refusé"), `tools/voice_ep01_comfy.py` (the 18 lines of
+  episode 1 through this template), `tools/render_ep01.py --use-existing-voices`.
+
 ## Tests
 
-`tests/test_mcp_runpod_jobs.py` (the job client, fake transport),
+`tests/test_mcp_runpod_jobs.py` (the job client, fake transport, a voice line
+among the jobs), `tests/test_tts_chatterbox_template.py` (the TTS template renders
+and validates), `tests/test_worker_tts_handler_patch.py` (the worker's handler
+patch),
 `tests/test_mcp_director.py` (steps with the chat as writer, through the real
 `call_json`) and `tests/test_mcp_server.py` (the tools through an in-process MCP
 client, the real `concepts` step included; skipped when `fastmcp` is not

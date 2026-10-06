@@ -101,6 +101,8 @@ def test_the_template_listing_names_every_repo_template_with_its_kind():
     assert rows["i2v_wan22_14b_lightning"]["kind"] == "video"
     assert rows["i2v_wan22_14b_lightning"]["frame_rule"]["lengths"] == [2, 3, 4, 5]
     assert rows["i2v_wan22_14b_lightning"]["verified_live"] is True
+    assert rows["tts_chatterbox"]["task"] == "tts" and rows["tts_chatterbox"]["kind"] == "audio"
+    assert "audio_path" in rows["tts_chatterbox"]["placeholders"]
 
 
 # -------------------------------------------------------------------- submit
@@ -288,3 +290,59 @@ def test_the_journal_survives_a_restart_and_a_corrupt_file(settings, tmp_path):
     assert again.journal.get("job-1")["state"] == "IN_QUEUE"
     pathlib.Path(again.journal.path).write_text("{not json", encoding="utf-8")
     assert Journal(again.journal.path).all() == []
+
+
+# --------------------------------------------------------- voice lines (plan 31)
+
+WAV = b"RIFF" + b"\x00" * 4 + b"WAVEfmt " + b"\x00" * 24
+FLAC = b"fLaC" + b"\x00" * 16
+
+
+@pytest.fixture
+def voice(tmp_path):
+    path = tmp_path / "outputs" / "ref_rida.wav"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(WAV)
+    return path
+
+
+def test_the_audio_endpoint_falls_back_to_the_image_then_the_video_one(tmp_path):
+    env = {"RUNPOD_API_KEY": "k", "RUNPOD_COMFY_ENDPOINT_ID": "vid1", "RUNPOD_GPU_USD_PER_HOUR": "3.49",
+           "RZDHOP_OUTPUTS_DIR": str(tmp_path)}
+    s = load_settings(env)
+    assert s.endpoint("audio") == "vid1" and s.rate("audio") == 3.49
+    s = load_settings({**env, "RUNPOD_IMAGE_ENDPOINT_ID": "img1", "RUNPOD_IMAGE_GPU_USD_PER_HOUR": "1.58"})
+    assert s.endpoint("audio") == "img1" and s.rate("audio") == 1.58
+    s = load_settings({**env, "RUNPOD_IMAGE_ENDPOINT_ID": "img1", "RUNPOD_AUDIO_ENDPOINT_ID": "aud1",
+                       "RUNPOD_AUDIO_API_KEY": "ka", "RUNPOD_AUDIO_GPU_USD_PER_HOUR": "0.9"})
+    assert (s.endpoint("audio"), s.key("audio"), s.rate("audio")) == ("aud1", "ka", 0.9)
+    assert (s.endpoint("image"), s.key("image"), s.rate("image")) == ("img1", "k", None)  # untouched
+    with pytest.raises(RuntimeError, match="RUNPOD_AUDIO_ENDPOINT_ID"):
+        load_settings({"RZDHOP_OUTPUTS_DIR": str(tmp_path)}).endpoint("audio")
+
+
+def test_a_voice_line_uploads_the_reference_and_its_flac_lands_in_dest(settings, voice):
+    client, transport = make_client(settings, [
+        (200, {"id": "job-1", "status": "IN_QUEUE"}),
+        (200, {"id": "job-1", "status": "COMPLETED", "executionTime": 8000, "delayTime": 1000, "workerId": "w-2",
+               "output": {"images": [], "audio": [{"filename": "rzdhop_ai/tts_00001_.flac", "type": "base64",
+                                                   "data": b64(FLAC)}]}}),
+    ])
+    record = client.submit("tts_chatterbox", prompt="Par où ?", seed=11, audio_path="ref_rida.wav",
+                           exaggeration=0.4, name="l03", dest="ep01/voices")
+    assert record["kind"] == "audio" and record["width"] is None
+    assert transport.urls()[0] == ("POST", "https://api.runpod.ai/v2/img1/run")  # no audio endpoint: the image one
+    body = transport.json(0)
+    upload = body["input"]["images"][0]
+    assert upload["name"].startswith("rzdhop_") and upload["name"].endswith(".wav")
+    assert upload["image"].startswith("data:audio/")
+    graph = body["input"]["workflow"]
+    assert graph["1"]["inputs"]["audio"] == upload["name"]
+    assert graph["2"]["inputs"]["text"] == "Par où ?" and graph["2"]["inputs"]["seed"] == 11
+    assert graph["2"]["inputs"]["exaggeration"] == 0.4 and graph["2"]["inputs"]["cfg_weight"] == 0.5
+    settled = client.status("job-1")
+    assert [pathlib.Path(p).name for p in settled["outputs"]] == ["l03.flac"]
+    assert pathlib.Path(settled["outputs"][0]).read_bytes() == FLAC
+    assert settled["billed_usd"] == round(9 * 1.58 / 3600, 4)  # the image endpoint's rate
+    with pytest.raises(JobError, match="audio_path"):
+        client.plan("tts_chatterbox", prompt="x")

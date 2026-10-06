@@ -54,6 +54,8 @@ _EXTRA_MIME = {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
     ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
     ".mp3": "audio/mpeg",
     ".srt": "text/plain",
     ".json": "application/json",

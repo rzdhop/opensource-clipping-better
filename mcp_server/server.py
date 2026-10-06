@@ -21,10 +21,11 @@ from .config import ROOT, Settings, load_settings
 from .runpod_jobs import JobClient, JobError, list_templates
 
 INSTRUCTIONS = """rzdhop story backend. You (Claude) are the writer and director; these tools are the
-muscle: RunPod Serverless ComfyUI for images and clips, the story store on disk, the renderer.
-Jobs are asynchronous: comfy_submit returns a job id at once; comfy_fetch waits (bounded) and
-returns the files, with a thumbnail or a contact sheet you can look at. Every GPU job costs money
-(a few cents); say what you are about to generate before submitting a batch."""
+muscle: RunPod Serverless ComfyUI for images, clips and voice lines, the story store on disk, the
+renderer. Jobs are asynchronous: comfy_submit returns a job id at once; comfy_fetch waits (bounded)
+and returns the files, with a thumbnail or a contact sheet you can look at (a voice line: its
+duration). Every GPU job costs money (a few cents); say what you are about to generate before
+submitting a batch."""
 
 
 class Backend:
@@ -58,6 +59,8 @@ def _look(path: str, max_px: int):
         sheet = media.contact_sheet(path, probe=info)
         return [Image(data=sheet, format="jpeg"), {"path": path, "contact_sheet": "8 frames, left to right, "
                                                   "top row then bottom row, evenly spaced across the clip", **info}]
+    if media.is_audio(path):
+        return [{"path": path, **media.probe_audio(path), "note": "a sound file: comfy_download hands it over"}]
     return [{"path": path, "size_bytes": os.path.getsize(path), "note": "not an image or a video"}]
 
 
@@ -85,13 +88,13 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
     @mcp.tool
     def runpod_health(kind: Optional[str] = None) -> dict:
         """Free. The RunPod endpoints' state: workers ready/idle/running/throttled and jobs queued,
-        per kind ('image', 'video'); one kind when given. A throttled count means the datacenter is
+        per kind ('image', 'video', 'audio'); one kind when given. A throttled count means the datacenter is
         short of that GPU; a cold start (30-120 s) follows any job sent while no worker is idle."""
         return client.health(kind)
 
     @mcp.tool
     def templates_list() -> list:
-        """Free. The ComfyUI workflow templates this server can submit: name, task (t2i, edit, i2v, ...),
+        """Free. The ComfyUI workflow templates this server can submit: name, task (t2i, edit, i2v, tts),
         the endpoint kind that runs it, the values it takes, its clip lengths (video), the model files
         it needs and whether it was verified live. Use the name as comfy_submit's template."""
         return list_templates()
@@ -100,20 +103,27 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
     def comfy_submit(template: str, prompt: str, negative: str = "", seed: Optional[int] = None,
                      width: Optional[int] = None, height: Optional[int] = None, seconds: Optional[int] = None,
                      image_path: Optional[str] = None, ref_paths: Optional[list[str]] = None,
+                     audio_path: Optional[str] = None, exaggeration: Optional[float] = None,
+                     cfg_weight: Optional[float] = None,
                      name: Optional[str] = None, dest: Optional[str] = None, note: Optional[str] = None) -> dict:
-        """COSTS MONEY (GPU seconds: an image a cent or two, a clip 5-10 cents). Submit one ComfyUI job to
-        RunPod and return at once with its job_id (state IN_QUEUE). Several submits in a row run in
-        parallel on the endpoint's workers. Arguments: template (templates_list), prompt, negative;
-        seed (random when omitted; reuse it to regenerate the same thing); width/height (video: the
-        template's frame; image: 832x1216 portrait by default); seconds (video only, one of the
-        template's lengths); image_path (the keyframe, for i2v templates); ref_paths (1-4 reference
-        images, for edit templates); name (the output file's stem); dest (folder for the outputs,
+        """COSTS MONEY (GPU seconds: an image a cent or two, a clip 5-10 cents, a spoken line about a
+        cent). Submit one ComfyUI job to RunPod and return at once with its job_id (state IN_QUEUE).
+        Several submits in a row run in parallel on the endpoint's workers (a cold worker loads the
+        weights first: send spoken lines one after the other). Arguments: template (templates_list),
+        prompt (the text to draw, or the line to say); negative; seed (random when omitted; reuse it
+        to regenerate the same thing, or fix one per voice); width/height (video: the template's
+        frame; image: 832x1216 portrait by default); seconds (video only, one of the template's
+        lengths); image_path (the keyframe, for i2v templates); ref_paths (1-4 reference images, for
+        edit templates); audio_path (the reference voice, a 6-30 s WAV, for tts templates);
+        exaggeration 0-2 and cfg_weight 0-1 (tts: the voice's intensity and its adherence to the
+        reference, 0.5 each by default); name (the output file's stem); dest (folder for the outputs,
         relative to the outputs dir, default outputs/mcp/<date>); note (free text kept in the journal).
         Paths are on the server: absolute, or relative to the outputs dir or the repo."""
         try:
             return _public(client.submit(template, prompt=prompt, negative=negative, seed=seed, width=width,
                                          height=height, seconds=seconds, image_path=image_path,
-                                         ref_paths=ref_paths, name=name, dest=dest, note=note))
+                                         ref_paths=ref_paths, audio_path=audio_path, exaggeration=exaggeration,
+                                         cfg_weight=cfg_weight, name=name, dest=dest, note=note))
         except JobError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -131,7 +141,8 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
     def comfy_fetch(job_id: str, wait_s: int = 240, max_px: int = media.DEFAULT_MAX_PX):
         """Free. Wait up to wait_s seconds for a job to end, then show its result: for an image its
         thumbnail; for a clip a contact sheet (8 frames across the clip) with duration, size and
-        whether it has sound; plus the record (paths, cost). If it is still running after wait_s,
+        whether it has sound; for a voice line its duration, sample rate and size (comfy_download
+        hands the file over); plus the record (paths, cost). If it is still running after wait_s,
         the record alone comes back (call again). Keep wait_s under ~280 s (the chat's tool timeout);
         a cold clip can take 5 min: fetch twice rather than once with a long wait."""
         try:

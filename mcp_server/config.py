@@ -19,13 +19,20 @@ ENV_VIDEO_ENDPOINT = "RUNPOD_COMFY_ENDPOINT_ID"
 ENV_IMAGE_ENDPOINT = "RUNPOD_IMAGE_ENDPOINT_ID"
 ENV_VIDEO_RATE = "RUNPOD_GPU_USD_PER_HOUR"
 ENV_IMAGE_RATE = "RUNPOD_IMAGE_GPU_USD_PER_HOUR"
+# Audio (text to speech, plan 31): its own endpoint when one runs the TTS worker
+# image alone; empty = the image endpoint (then the video one) serves audio too.
+ENV_AUDIO_ENDPOINT = "RUNPOD_AUDIO_ENDPOINT_ID"
+ENV_AUDIO_KEY = "RUNPOD_AUDIO_API_KEY"
+ENV_AUDIO_RATE = "RUNPOD_AUDIO_GPU_USD_PER_HOUR"
 ENV_OUTPUTS = "RZDHOP_OUTPUTS_DIR"
 ENV_HOST = "MCP_HOST"
 ENV_PORT = "MCP_PORT"
 ENV_TOKEN = "MCP_TOKEN"
 ENV_PUBLIC_URL = "MCP_PUBLIC_URL"
 
-KINDS = ("image", "video")
+KINDS = ("image", "video", "audio")
+# Which configured endpoint serves a kind when it has none of its own, in order.
+FALLBACK = {"image": ("video",), "audio": ("image", "video")}
 
 
 @dataclass
@@ -40,15 +47,24 @@ class Settings:
     token: str = ""
     public_url: str = ""
 
-    def endpoint(self, kind: str) -> str:
-        """The endpoint id that serves *kind*; images fall back to the video
-        endpoint. ``RuntimeError`` names the missing variable."""
+    def serving_kind(self, kind: str) -> str:
+        """The kind whose endpoint serves *kind*: itself when configured, else
+        the first configured fallback (images: video; audio: image, then video)."""
         if kind not in KINDS:
             raise ValueError(f"unknown job kind {kind!r}; one of {', '.join(KINDS)}")
-        endpoint = self.endpoints.get(kind) or self.endpoints.get("video")
+        for candidate in (kind, *FALLBACK.get(kind, ())):
+            if self.endpoints.get(candidate):
+                return candidate
+        return "video"
+
+    def endpoint(self, kind: str) -> str:
+        """The endpoint id that serves *kind*; images fall back to the video
+        endpoint, audio to the image one then the video one. ``RuntimeError``
+        names the missing variable."""
+        endpoint = self.endpoints.get(self.serving_kind(kind))
         if not endpoint:
-            raise RuntimeError(f"no RunPod endpoint configured: set {ENV_VIDEO_ENDPOINT}"
-                               f"{' or ' + ENV_IMAGE_ENDPOINT if kind == 'image' else ''} in .env")
+            names = {"image": f" or {ENV_IMAGE_ENDPOINT}", "audio": f", {ENV_IMAGE_ENDPOINT} or {ENV_AUDIO_ENDPOINT}"}
+            raise RuntimeError(f"no RunPod endpoint configured: set {ENV_VIDEO_ENDPOINT}{names.get(kind, '')} in .env")
         return endpoint
 
     def key(self, kind: str) -> str:
@@ -56,10 +72,9 @@ class Settings:
         return self.keys.get(kind) or self.api_key
 
     def rate(self, kind: str):
-        rate = self.rates.get(kind)
-        if rate is None and kind == "image" and not self.endpoints.get("image"):
-            rate = self.rates.get("video")
-        return rate
+        """The USD-per-hour of the endpoint that serves *kind* (a kind without
+        an endpoint of its own is billed at its fallback's rate)."""
+        return self.rates.get(self.serving_kind(kind) if kind in KINDS else kind)
 
     def kind_of_endpoint(self, endpoint_id: str) -> str:
         for kind, value in self.endpoints.items():
@@ -89,10 +104,13 @@ def load_settings(env=None) -> Settings:
     outputs = env.get(ENV_OUTPUTS) or os.path.join(ROOT, "outputs")
     return Settings(
         api_key=(env.get(ENV_API_KEY) or "").strip(),
-        keys={k: v for k, v in (("image", (env.get(ENV_IMAGE_KEY) or "").strip()),) if v},
+        keys={k: v for k, v in (("image", (env.get(ENV_IMAGE_KEY) or "").strip()),
+                                ("audio", (env.get(ENV_AUDIO_KEY) or "").strip())) if v},
         endpoints={k: v for k, v in (("video", (env.get(ENV_VIDEO_ENDPOINT) or "").strip()),
-                                     ("image", (env.get(ENV_IMAGE_ENDPOINT) or "").strip())) if v},
-        rates={"video": _rate(env.get(ENV_VIDEO_RATE)), "image": _rate(env.get(ENV_IMAGE_RATE))},
+                                     ("image", (env.get(ENV_IMAGE_ENDPOINT) or "").strip()),
+                                     ("audio", (env.get(ENV_AUDIO_ENDPOINT) or "").strip())) if v},
+        rates={"video": _rate(env.get(ENV_VIDEO_RATE)), "image": _rate(env.get(ENV_IMAGE_RATE)),
+               "audio": _rate(env.get(ENV_AUDIO_RATE))},
         outputs_dir=os.path.abspath(outputs),
         host=env.get(ENV_HOST) or "127.0.0.1",
         port=int(env.get(ENV_PORT) or 8787),

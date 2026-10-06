@@ -37,16 +37,23 @@ from clipping.providers.transport import (
 
 from .config import ROOT, Settings
 
-# A template's ``task`` decides which endpoint runs it.
-TASK_KIND = {"t2i": "image", "edit": "image", "i2v": "video", "t2v": "video", "ia2v": "video", "flf2v": "video"}
+# A template's ``task`` decides which endpoint runs it (a template may also say
+# its ``kind`` outright, as the TTS one does).
+TASK_KIND = {"t2i": "image", "edit": "image", "i2v": "video", "t2v": "video", "ia2v": "video", "flf2v": "video",
+             "tts": "audio"}
+# The Chatterbox knobs when the caller leaves them out (the node's own defaults).
+TTS_DEFAULTS = {"exaggeration": 0.5, "cfg_weight": 0.5}
 # Image templates have no frame rule, so a default frame: 9:16 at FLUX's comfortable size.
 IMAGE_DEFAULT = {"width": 832, "height": 1216}
 JOURNAL_REL = os.path.join("mcp", "jobs.json")
 JOURNAL_KEEP = 500
 HEALTH_TIMEOUT = 15.0
 # Everything the worker returns is read from ``output.images`` (DEC-310: the
-# worker collects only that key; a core SaveVideo reports its .mp4 there).
-OUTPUT_KEY = "images"
+# base worker collects only that key; a core SaveVideo reports its .mp4 there)
+# and ``output.audio`` (plan 31: the TTS worker image hands SaveAudio's files
+# back under that key, same item shape), in that order.
+OUTPUT_KEYS = ("images", "audio")
+OUTPUT_KEY = OUTPUT_KEYS[0]
 
 
 class JobError(Exception):
@@ -73,7 +80,7 @@ def list_templates() -> list:
         row = {
             "name": template.get("name") or os.path.splitext(os.path.basename(path))[0],
             "task": task,
-            "kind": TASK_KIND.get(task, "video"),
+            "kind": template.get("kind") or TASK_KIND.get(task, "video"),
             "placeholders": list(template.get("placeholders", [])),
             "verified_live": bool(template.get("verified_live")),
             "ref_slots": int(template.get("ref_slots") or 0),
@@ -88,7 +95,7 @@ def list_templates() -> list:
 
 
 def template_kind(template: dict) -> str:
-    return TASK_KIND.get(template.get("task", ""), "video")
+    return template.get("kind") or TASK_KIND.get(template.get("task", ""), "video")
 
 
 # ------------------------------------------------------------------- journal
@@ -227,7 +234,8 @@ class JobClient:
     # -- submit
 
     def plan(self, template_name: str, *, prompt: str, negative: str = "", seed=None, width=None, height=None,
-             seconds=None, image_path=None, ref_paths=None) -> dict:
+             seconds=None, image_path=None, ref_paths=None, audio_path=None, exaggeration=None,
+             cfg_weight=None) -> dict:
         """Everything a submit needs, checked before anything is sent:
         ``{"template", "kind", "values", "images", "frames", "seconds"}``.
         ``JobError`` names what is wrong."""
@@ -252,9 +260,18 @@ class JobClient:
             frames = frames_for(template, int(seconds))
             values.update({"width": int(width or rule["width"]), "height": int(height or rule["height"]),
                            "frames": frames, "fps": int(rule["fps"])})
-        else:
+        elif kind != "audio":
             values.update({"width": int(width or IMAGE_DEFAULT["width"]),
                            "height": int(height or IMAGE_DEFAULT["height"])})
+        for knob, given in (("exaggeration", exaggeration), ("cfg_weight", cfg_weight)):
+            if knob in placeholders:
+                values[knob] = float(TTS_DEFAULTS[knob] if given is None else given)
+        if "audio_path" in placeholders:
+            if not audio_path:
+                raise JobError(f"{template_name} needs audio_path (the reference voice: a 6-30 s WAV)")
+            item = inline_image(self.resolve_path(audio_path))  # any file travels as a data URL
+            images.append(item)
+            values["audio_path"] = item["name"]
         if "image_path" in placeholders:
             if not image_path:
                 raise JobError(f"{template_name} needs image_path (the keyframe)")
@@ -280,10 +297,12 @@ class JobClient:
                 "graph": graph, "frames": frames, "seconds": int(seconds) if seconds is not None else None}
 
     def submit(self, template_name: str, *, prompt: str, negative: str = "", seed=None, width=None, height=None,
-               seconds=None, image_path=None, ref_paths=None, name=None, dest=None, note=None) -> dict:
+               seconds=None, image_path=None, ref_paths=None, audio_path=None, exaggeration=None, cfg_weight=None,
+               name=None, dest=None, note=None) -> dict:
         """One ``POST /run``; the journal record, state ``IN_QUEUE``."""
         plan = self.plan(template_name, prompt=prompt, negative=negative, seed=seed, width=width, height=height,
-                         seconds=seconds, image_path=image_path, ref_paths=ref_paths)
+                         seconds=seconds, image_path=image_path, ref_paths=ref_paths, audio_path=audio_path,
+                         exaggeration=exaggeration, cfg_weight=cfg_weight)
         endpoint = self.settings.endpoint(plan["kind"])
         body = {"input": {"workflow": plan["graph"], "images": plan["images"]}}
         answer = self._request("POST", endpoint_url(endpoint, "run"), json_body=body, kind=plan["kind"])
@@ -295,8 +314,8 @@ class JobClient:
             "job_id": job_id, "endpoint": endpoint, "kind": plan["kind"], "template": template_name,
             "name": name or f"{template_name}_{values['seed']}", "dest_dir": self.dest_dir(dest),
             "note": note or "", "submitted_at": utc_now(), "state": answer.get("status") or "IN_QUEUE",
-            "prompt": (prompt or "")[:300], "seed": values["seed"], "width": values["width"],
-            "height": values["height"], "seconds": plan["seconds"], "frames": plan["frames"],
+            "prompt": (prompt or "")[:300], "seed": values["seed"], "width": values.get("width"),
+            "height": values.get("height"), "seconds": plan["seconds"], "frames": plan["frames"],
             "fps": values.get("fps"), "inputs": [i["name"] for i in plan["images"]],
             "gpu_seconds": None, "billed_usd": None, "outputs": [], "error": "", "finished_at": None,
             "worker_id": None,
@@ -315,13 +334,13 @@ class JobClient:
     def _save_outputs(self, record: dict, output: dict) -> list:
         """Write every file the worker returned into the record's folder as
         ``<name>_<n>.<ext>`` (``<name>.<ext>`` for a single file)."""
-        files = (output or {}).get(OUTPUT_KEY) or []
+        files = [item for key in OUTPUT_KEYS for item in ((output or {}).get(key) or [])]
         if not files:
             errors = "; ".join(str(e) for e in (output or {}).get("errors") or [])
-            keys = ", ".join(sorted(k for k in (output or {}) if k != OUTPUT_KEY))
+            keys = ", ".join(sorted(k for k in (output or {}) if k not in OUTPUT_KEYS))
             raise JobError(f"job {record['job_id']} finished without a file"
                            f"{' (output keys: ' + keys + ')' if keys else ''}{'; ' + errors if errors else ''}; "
-                           "a template must end in a core SaveImage/SaveVideo node")
+                           "a template must end in a core SaveImage/SaveVideo/SaveAudio node")
         paths = []
         for n, item in enumerate(files, 1):
             if item.get("type") != "base64":

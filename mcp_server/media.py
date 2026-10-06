@@ -1,4 +1,5 @@
-"""What Claude can look at: a downscaled image, a contact sheet of a clip.
+"""What Claude can look at: a downscaled image, a contact sheet of a clip,
+the duration and shape of a voice line.
 
 A tool answer travels inside the chat, so an image is sent small (JPEG,
 ``max_px`` on its longer side) and a clip as one sheet of evenly spaced
@@ -18,6 +19,7 @@ import tempfile
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 VIDEO_EXTS = (".mp4", ".mov", ".webm", ".mkv")
+AUDIO_EXTS = (".wav", ".flac", ".mp3", ".ogg", ".m4a")
 DEFAULT_MAX_PX = 1024
 SHEET_COLS, SHEET_ROWS = 4, 2
 SHEET_TILE_W = 320
@@ -33,6 +35,10 @@ def is_image(path: str) -> bool:
 
 def is_video(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in VIDEO_EXTS
+
+
+def is_audio(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in AUDIO_EXTS
 
 
 def _ffmpeg(name: str) -> str:
@@ -54,14 +60,30 @@ def thumbnail(path: str, max_px: int = DEFAULT_MAX_PX) -> tuple:
         return buf.getvalue(), im.width, im.height
 
 
-def probe_video(path: str) -> dict:
-    """Duration, frame size, fps and sound of a clip (``ffprobe``)."""
+def _probe(path: str) -> dict:
     out = subprocess.run(
         [_ffmpeg("ffprobe"), "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path],
         capture_output=True, text=True, check=False)
     if out.returncode != 0:
         raise MediaError(f"ffprobe could not read {path}: {out.stderr.strip()[:200]}")
-    info = json.loads(out.stdout or "{}")
+    return json.loads(out.stdout or "{}")
+
+
+def probe_audio(path: str) -> dict:
+    """Duration, sample rate, channels and codec of a sound file (``ffprobe``)."""
+    info = _probe(path)
+    audio = next((s for s in info.get("streams", []) if s.get("codec_type") == "audio"), None)
+    if audio is None:
+        raise MediaError(f"{path} has no audio stream")
+    duration = float((info.get("format") or {}).get("duration") or audio.get("duration") or 0)
+    return {"duration_s": round(duration, 3), "sample_rate": int(audio.get("sample_rate") or 0),
+            "channels": int(audio.get("channels") or 0), "audio_codec": audio.get("codec_name"),
+            "size_bytes": os.path.getsize(path)}
+
+
+def probe_video(path: str) -> dict:
+    """Duration, frame size, fps and sound of a clip (``ffprobe``)."""
+    info = _probe(path)
     video = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), None)
     audio = next((s for s in info.get("streams", []) if s.get("codec_type") == "audio"), None)
     if video is None:

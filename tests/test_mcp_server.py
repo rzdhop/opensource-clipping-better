@@ -153,6 +153,43 @@ def test_a_clip_is_fetched_as_a_contact_sheet(backend, tmp_path):
     assert "8 frames" in info["contact_sheet"]
 
 
+@pytest.mark.skipif(shutil.which("ffprobe") is None, reason="ffprobe not installed")
+def test_a_voice_line_is_fetched_with_its_duration(backend, tmp_path):
+    import wave
+
+    def wav_bytes(seconds):
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(24000)
+            w.writeframes(b"\x00\x00" * int(24000 * seconds))
+        return buf.getvalue()
+
+    ref = tmp_path / "outputs" / "ref_rida.wav"
+    ref.parent.mkdir(parents=True, exist_ok=True)
+    ref.write_bytes(wav_bytes(8))
+    line = base64.b64encode(wav_bytes(1.5)).decode()
+    backend.transport.answers = [
+        (200, {"id": "job-1", "status": "IN_QUEUE"}),
+        (200, {"id": "job-1", "status": "COMPLETED", "executionTime": 8000, "delayTime": 1000, "workerId": "w-1",
+               "output": {"audio": [{"filename": "tts_00001_.wav", "type": "base64", "data": line}]}})]
+    server = build_server(backend)
+    rows = {t["name"]: t for t in payload(call(server, "templates_list"))}
+    assert rows["tts_chatterbox"]["kind"] == "audio"
+    submitted = payload(call(server, "comfy_submit", template="tts_chatterbox", prompt="Par où ?", seed=3,
+                             audio_path=str(ref), name="l03", dest="ep01/voices"))
+    assert submitted["kind"] == "audio" and submitted["state"] == "IN_QUEUE"
+    result = call(server, "comfy_fetch", job_id="job-1", wait_s=0)
+    assert all(type(b).__name__ == "TextContent" for b in result.content)  # nothing to look at: a sound
+    texts = [json.loads(b.text) for b in result.content]
+    if len(texts) == 1 and isinstance(texts[0], list):  # all-text answers travel as one JSON list
+        texts = texts[0]
+    assert texts[0]["path"].endswith("ep01/voices/l03.wav") and texts[0]["duration_s"] == 1.5
+    assert texts[0]["sample_rate"] == 24000 and texts[0]["channels"] == 1 and texts[0]["size_bytes"] > 44
+    assert texts[-1]["state"] == "COMPLETED" and texts[-1]["gpu_seconds"] == 9.0
+
+
 def test_a_still_running_job_comes_back_as_its_record_only(backend):
     backend.transport.answers = [(200, {"id": "job-1", "status": "IN_QUEUE"}),
                                  (200, {"id": "job-1", "status": "IN_PROGRESS"})]
