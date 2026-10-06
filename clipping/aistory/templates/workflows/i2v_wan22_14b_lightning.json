@@ -3,9 +3,9 @@
   "name": "i2v_wan22_14b_lightning",
   "task": "i2v",
   "min_profile": "high",
-  "verified_live": false,
+  "verified_live": true,
   "core_nodes_only": true,
-  "description": "Image to video with Wan 2.2 I2V A14B fp8 (Apache-2.0) and the lightx2v 4-step Lightning LoRAs, 16 fps: the high-noise model takes steps 0-2 of 4, the low-noise model steps 2-4, cfg 1. Authored from ComfyUI's own graph https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/video_wan2_2_14B_i2v.json (read 2026-09-30), its subgraph flattened along the Lightning branch of its switch (LoRA models, 4 steps, cfg 1, split at step 2); frames = 16 x seconds + 1 as its own length expression. Literal inputs replaced by the spec 8.7 placeholders. 480x832 is Wan 2.2 A14B's 480P in 9:16 (the source's square default is 640x640). Only ComfyUI core nodes. Never run on a GPU here (A-035): verified against a fake ComfyUI only.",
+  "description": "Image to video with Wan 2.2 I2V A14B fp8 (Apache-2.0) and the lightx2v 4-step Lightning LoRAs, 16 fps: the high-noise model takes steps 0-2 of 4, the low-noise model steps 2-4, cfg 1. Authored from ComfyUI's own graph https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/video_wan2_2_14B_i2v.json (read 2026-09-30), its subgraph flattened along the Lightning branch of its switch (LoRA models, 4 steps, cfg 1, split at step 2); frames = 16 x seconds + 1 as its own length expression. Literal inputs replaced by the spec 8.7 placeholders. 480x832 is Wan 2.2 A14B's 480P in 9:16 (the source's square default is 640x640). Only ComfyUI core nodes. Run live on 2026-10-06 (DEC-310): this graph, exported from a ComfyUI 0.30 RTX 5090 pod, made a 1280x720 x 81-frame clip there and again through a RunPod L40S serverless worker (186 GPU-s warm); the Lightning LoRAs were loaded under their lightx2v names, the other files under the names listed here.",
   "source": {
     "urls": [
       "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/video_wan2_2_14B_i2v.json",

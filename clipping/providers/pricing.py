@@ -59,6 +59,15 @@ PRICES = {
     "fal/ltx-2.5-fast@1080p": Price("second", 0.16, "fal-ai/ltx-2.5/image-to-video/fast at 1080p, audio included; third-party listings (segmind, aireiter) read on 2026-10-04 say $0.13-0.16, the highest is kept; fal's page shows a \"$0 per compute second\" placeholder (A-151)"),
     "fal/ltx-2.5-fast": Price("second", 0.09, "fal-ai/ltx-2.5/image-to-video/fast at 720p, audio included; read on 2026-10-04 from third-party listings (segmind, aireiter), fal's page shows a \"$0 per compute second\" placeholder, the highest figure seen is kept (an estimate checked against a cap is never low); 6 to 20 s, 6 s the shortest (A-151)"),
     "fal/kling-2.5-turbo-std": Price("second", 0.042, "$0.21 per 5 s, $0.042 per extra second; 5 or 10 s; no audio"),
+    # --- DEC-310: the local workflow templates on RunPod Serverless, billed by the GPU second, priced here
+    # per second of OUTPUT like every video link. Measured 2026-10-06 on the author's endpoint: a 720x1280 x 81-
+    # frame Wan 2.2 14B Lightning clip took 186 GPU-s warm on an L40S at $1.75/h ($0.090, $0.018 a second) and
+    # 300-340 GPU-s cold (the 35 GB of weights read from the volume count); the templates' 480x832 default is
+    # about 2.5x fewer pixels. The highest figure seen is kept (an estimate checked against a cap is never
+    # low); what RunPod really billed is logged per clip from executionTime + delayTime (A-194).
+    "runpod/i2v_wan22_14b_lightning": Price("second", 0.02, "Wan 2.2 14B fp8 + Lightning 4-step on a RunPod L40S/RTX 5090 worker: $0.018 a second measured warm at 720p on 2026-10-06, 480p default; the first clip after an idle also pays the cold start"),
+    "runpod/i2v_wan22_5b": Price("second", 0.012, "Wan 2.2 5B ti2v on a RunPod worker: not measured; about 0.6x the 14B Lightning figure (one 5B pass against two 14B passes at 4 steps); the highest plausible figure is kept"),
+    "runpod/i2v_ltx2": Price("second", 0.03, "LTX-2 fp8 distilled on a RunPod worker: not measured; about 1.5x the 14B Lightning figure (a 22B model at 25 fps); the highest plausible figure is kept"),
     # --- the lipsync post-process of a made clip (DEC-258), per second of
     # input video; the adapter's estimate rounds the clip up to 5 s.
     "fal/kling-lipsync": Price("second", 0.0028, "fal-ai/kling-video/lipsync/audio-to-video: $0.014 per 5 s of input video, rounded up to 5 s; video 2-10 s at 720-1920 px, audio 2-60 s and at most 5 MB; read 2026-10-03"),

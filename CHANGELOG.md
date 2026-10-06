@@ -10,6 +10,34 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### A rented GPU by the second (RunPod Serverless)
+
+The three local ComfyUI video templates now also run on a RunPod Serverless
+endpoint, billed per GPU second while a clip renders and nothing while idle,
+as a paid video link that names the template: `runpod/i2v_wan22_14b_lightning`,
+`runpod/i2v_wan22_5b`, `runpod/i2v_ltx2` (DEC-310). Not in the shipped
+`VIDEO_CHAIN`: name the link in `.env` or Settings once the endpoint and its
+network volume exist (`docs/AI_STORY.md`, "A rented GPU by the second").
+
+#### Added
+
+- **`runpod` provider** keyed by `RUNPOD_API_KEY` and `RUNPOD_COMFY_ENDPOINT_ID`
+  (`RUNPOD_GPU_USD_PER_HOUR` optional, to log what RunPod really billed next
+  to the table's estimate); the Settings key check asks the endpoint's
+  `/health`.
+- **`clipping/providers/runpod_comfyui.py`**: refuses before sending what the
+  template cannot sell, submits the rendered graph with the keyframe inline in
+  one `POST /run`, journals the job id at once, polls `/status`, resumes by id
+  and never submits twice; a job that ends `FAILED` is settled, a job RunPod
+  no longer knows is voided and sent once more.
+- Prices per second of output for the three links; `tools/runpod_smoke.py`
+  sends one clip through the adapter and prints the bill.
+
+#### Changed
+
+- `i2v_wan22_14b_lightning` is marked `verified_live`: its graph ran on an
+  RTX 5090 pod and through an L40S serverless worker on 2026-10-06.
+
 ### Auth becomes opt-in
 
 The backend used to generate and store a token on every first start, which

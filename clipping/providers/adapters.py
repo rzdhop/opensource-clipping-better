@@ -15,6 +15,6 @@ def load_all() -> None:
     global _LOADED
     if _LOADED:
         return
-    from . import images, lipsync, local_comfyui, manual, tts, video, vision  # noqa: F401 - registration on import
+    from . import images, lipsync, local_comfyui, manual, runpod_comfyui, tts, video, vision  # noqa: F401 - registration on import
 
     _LOADED = True

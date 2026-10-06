@@ -153,6 +153,12 @@ TABLE = {
     # (:func:`template_label`), so the prompt builders keep the shot inside it.
     "local/comfyui/i2v_wan22_5b": Limit(window_tokens=512, source=_UMT5, verified=False),
     "local/comfyui/i2v_wan22_14b_lightning": Limit(window_tokens=512, source=_UMT5, verified=False),
+    # DEC-310: the same templates on RunPod are addressed by their link (the template is the model).
+    "runpod/i2v_wan22_5b": Limit(window_tokens=512, source=_UMT5, verified=False),
+    "runpod/i2v_wan22_14b_lightning": Limit(window_tokens=512, source=_UMT5, verified=False),
+    "runpod/i2v_ltx2": Limit(
+        5000, source=f"no API limit (our own ComfyUI workflow on RunPod); assumed equal to {_LTX2}, the cap fal "
+                     "puts on the same model's prompt; its Gemma text encoder reads far more", verified=False),
 }
 
 

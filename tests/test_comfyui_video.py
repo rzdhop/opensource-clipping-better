@@ -92,7 +92,9 @@ def clip_request(tmp_path, **changes):
 def test_each_video_template_takes_the_keyframe_prompt_and_typed_numbers(name, seconds, frames, fps, size):
     template = local_comfyui.load_template(name)
     rule = template["frame_rule"]
-    assert template["verified_live"] is False and template["task"] == "i2v"
+    # DEC-310: i2v_wan22_14b_lightning ran live on 2026-10-06 (an RTX 5090 pod, an L40S RunPod worker); the
+    # other two are still proven against a fake ComfyUI only (A-035 stays open for them).
+    assert template["verified_live"] is (name == "i2v_wan22_14b_lightning") and template["task"] == "i2v"
     assert (rule["fps"], (rule["width"], rule["height"])) == (fps, size)
     assert local_comfyui.frames_for(template, seconds) == frames and (frames - 1) % rule["frame_step"] == 0
     values = {"image_path": "rzdhop/shot_03.png", "prompt": "a kiwi waves", "negative": "flicker", "seed": 7,

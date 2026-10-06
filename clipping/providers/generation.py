@@ -179,6 +179,23 @@ GEN_PROVIDERS = {
         signup_url="", base_url="",
         notes="Your own clips and images, made on your own subscriptions and uploaded: no call, no charge.",
     ),
+    # DEC-310: the local ComfyUI workflow templates on a rented GPU, RunPod
+    # Serverless (``runpod/<template>``: runpod/i2v_wan22_14b_lightning …).
+    # Paid by the GPU second, idle costs nothing; in the table with a price,
+    # not in the shipped VIDEO_CHAIN -- an install that deployed the endpoint
+    # names the link in .env (runbook 11-INFRA). RUNPOD_GPU_USD_PER_HOUR is
+    # optional: the GPU tier's flex price, so the log can say what RunPod
+    # really billed next to the table's estimate.
+    "runpod": GenProvider(
+        name="runpod",
+        env_keys=("RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID"),
+        free_tier=False, rpm=None, rpd=None, probe_timeout=20.0,
+        signup_url="https://console.runpod.io/serverless",
+        base_url="https://api.runpod.ai/v2",
+        notes="Your own ComfyUI workflows (the local templates) on a RunPod Serverless GPU, billed per second "
+              "while a clip renders; the models live on a network volume (runbook 11-INFRA).",
+        optional_keys=("RUNPOD_GPU_USD_PER_HOUR",),
+    ),
     # Documented extension point (spec 8.1): in the table with a price, not in a default chain.
     "gcloud": GenProvider(
         name="gcloud",
@@ -205,7 +222,7 @@ GEN_PROVIDER_NAMES = tuple(GEN_PROVIDERS)
 KIND_PROVIDERS = {
     IMAGE: ("cloudflare", "pollinations", "local", "fal", "openai", "gemini", "manual"),
     IMAGE_EDIT: ("local", "gemini", "fal", "openai", "manual"),
-    VIDEO: ("local", "fal", "gemini", "manual"),
+    VIDEO: ("local", "runpod", "fal", "gemini", "manual"),
     TTS: ("edge", "gemini", "local", "gcloud", "openai", "elevenlabs"),
     VISION: ("gemini", "openrouter", "local"),
     LIPSYNC: ("fal",),
