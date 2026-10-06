@@ -888,3 +888,9 @@ and untested — Stage 11 is where it would be.
 - **A-189** — (plan 28 F1/F3) Every verdict stored before plan 28 is "unchecked": an episode awaiting approval
   (Dragon Fruit's 10 keyframes) needs its assets step run again (free judge; redraws may cost up to the ceiling);
   entities approved before plan 28 keep their approval until regenerated. UNCONFIRMED.
+
+## Plan 29 (2026-10-06)
+- A-190 UNCONFIRMED: fal's seedream-4.5 / -edit endpoints still expose no `negative_prompt` field (A-111 held on 2026-09; not re-probed). Stage 2 writes the exclusion as prose either way.
+- A-191 UNCONFIRMED: the human's Regenerate showed the old picture because of the tile (the log shows a new seed and a passing judge at 06:31); confirmed only once stage 1 is deployed and a regenerate visibly changes the tile.
+- A-192 UNCONFIRMED: a 80–120-word prose description placed first in a Seedream prompt (461-word bound) leaves room for the layout / light lines; if the fit ladder drops them, the plate judge (which reads the layout) may fail more — to watch on the first real plate after stage 4.
+- A-193 UNCONFIRMED: "around 100 words each" means one written paragraph per element (the human picked this option over raising field caps); the short fields stay for the judges.

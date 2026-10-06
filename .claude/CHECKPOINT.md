@@ -1,3 +1,23 @@
+## CURRENT STATE — plan 29 (empty sets drawn right, Regenerate visible, ~100-word descriptions, approve anyway) IN PROGRESS (2026-10-06, local session)
+
+- **In-progress header:** phase = CHECKPOINT → IMPLEMENT. Checkpoint commit = `96f2e33` (clean tree; `FETCH_HEAD`
+  untracked, left alone). Plan file `.claude/plans/ai-story/29-empty-sets-and-full-descriptions-plan.md` (DEC-308,
+  approved: one description per element; warn and let me approve; all six stages). Current stage = 1–3 in parallel
+  worktrees (plan29-s1 tile reload · plan29-s2 empty-set prompts · plan29-s3 redraw notes + plate pricing), then 4
+  (descriptions, the riskiest), 5 (approve anyway), 6 (docs). Next action = Tier 1 baseline (the touched-area
+  selection, both envs) → spawn the three stage agents.
+- **Tier-1 baseline:** (pending — recorded below once run).
+- **Regression contract (plan 29):** sheet/portrait prompts byte-identical (`tests/test_story_look.py`,
+  `test_aistory_prompting.py` goldens) · DEC-303 send-layer order, hashes untouched (`test_story_send_layer.py`,
+  `test_story_prompt_templates.py`) · the sheet gate: own uploads warned never refused, unjudged never approved, the
+  ceiling (`test_story_sheet_gate.py:263/300/342`) · gencache key covers the seed (`test_gencache.py`) · no auth on
+  every new/changed route (`tests/test_no_auth*`) · field-less stories render byte-identically after stage 4
+  (the existing goldens) · the dashboard builds (`npx vite build --outDir <scratchpad>`) — UNVERIFIED by any JS test
+  (none exist): the human's Regenerate on 51dbc4213738 after the deploy is the manual check.
+- **Live:** a271439's code + the docs commits (plan 28); nothing of plan 29 deployed. Story 51dbc4213738's day plate
+  of "Bureau ultramoderne de Clara" is already passed (06:31) — the tile just does not show it.
+- **Open questions:** none blocking.
+
 ## CURRENT STATE — plan 28 (the one-click episode: fits every time, ≤ $2 on the human's clips, strict consistency, no voices, Approve all, generated concepts, set-up prompts, simple screens) CODE + DOCS COMPLETE on main; CI replica running; NOT yet deployed (2026-10-06, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out; the human's walk next. Checkpoint commit = main (this
