@@ -50,10 +50,15 @@ def completed(files):
 
 @pytest.fixture
 def backend(tmp_path):
+    from mcp_server.director import Director
+    from mcp_server.story_tools import StoryBackend
+
     settings = Settings(api_key="rpa_fake", endpoints={"video": "vid1", "image": "img1"},
                         rates={"video": 3.49, "image": 1.58}, outputs_dir=str(tmp_path / "outputs"))
     transport = FakeTransport([])
-    backend = Backend(settings, client=JobClient(settings, transport=transport))
+    outputs = str(tmp_path / "outputs")
+    story = StoryBackend(outputs, director=Director(outputs, settings_env={}, event_wait=5.0), settings_env={})
+    backend = Backend(settings, client=JobClient(settings, transport=transport), story=story)
     backend.transport = transport
     return backend
 
@@ -77,10 +82,17 @@ def tool_names(server):
     return asyncio.run(go())
 
 
-def test_the_stage_1_tools_are_listed(backend):
+def test_the_tools_are_listed(backend):
     server = build_server(backend)
-    assert tool_names(server) == ["comfy_cancel", "comfy_fetch", "comfy_jobs", "comfy_status", "comfy_submit",
-                                  "cost_ledger", "list_files", "runpod_health", "templates_list", "view_file"]
+    names = tool_names(server)
+    for name in ("comfy_cancel", "comfy_fetch", "comfy_jobs", "comfy_status", "comfy_submit", "cost_ledger",
+                 "list_files", "runpod_health", "templates_list", "view_file"):
+        assert name in names, name
+    for name in ("story_list", "story_create", "story_options", "story_get", "story_doc", "story_entities",
+                 "story_entity", "episode_get", "episode_doc", "story_step_start", "story_step_answer",
+                 "story_step_status", "story_step_cancel", "story_runs", "story_approve", "story_approve_all",
+                 "story_choose_concept", "story_patch", "entity_patch", "episode_patch"):
+        assert name in names, name
 
 
 def test_templates_and_health_answer_from_the_endpoints(backend):
@@ -173,3 +185,50 @@ def test_a_bad_submit_is_a_tool_error_with_the_reason(backend):
     assert backend.transport.calls == []
     gone = call(server, "comfy_status", job_id="zzz")
     assert gone.is_error and "not in the journal" in gone.content[0].text
+
+
+# ------------------------------------------------------------- stories
+
+def test_a_story_is_created_read_patched_and_its_approvals_refused_with_the_reason(backend):
+    server = build_server(backend)
+    options = payload(call(server, "story_options"))
+    assert "fruit_drama" in [s["id"] for s in options["styles"]] and "concepts" in options["steps"]
+    story = payload(call(server, "story_create", language="fr", seed_text="Un kiwi détective dans un frigo.",
+                         style="fruit_drama"))
+    sid = story["story_id"]
+    assert story["language"] == "fr" and story["status"] == "draft"
+    listed = payload(call(server, "story_list"))
+    assert [s["story_id"] for s in listed] == [sid]
+    page = payload(call(server, "story_get", story_id=sid))
+    assert page["story"]["story_id"] == sid and page["characters"] == [] and page["list_progress"]["next"]
+    patched = payload(call(server, "story_patch", story_id=sid, fields={"title": "Frigo noir"}))
+    assert patched["title"] == "Frigo noir"
+    doc = payload(call(server, "story_doc", story_id=sid, name="story.json"))
+    assert doc["title"] == "Frigo noir"
+    refused = call(server, "story_approve", story_id=sid, doc="bible")
+    assert refused.is_error and "concept" in refused.content[0].text.lower()
+    nothing = call(server, "story_approve", story_id=sid, doc="moon")
+    assert nothing.is_error
+    missing = call(server, "story_doc", story_id=sid, name="season.json")
+    assert missing.is_error and "does not exist yet" in missing.content[0].text
+    unknown = call(server, "story_get", story_id="000000000000")
+    assert unknown.is_error and "not_found" in unknown.content[0].text
+
+
+def test_the_concepts_step_parks_its_real_prompt_for_the_chat(backend):
+    server = build_server(backend)
+    story = payload(call(server, "story_create", language="en", seed_text="A kiwi detective in a fridge."))
+    sid = story["story_id"]
+    run = payload(call(server, "story_step_start", story_id=sid, step="concepts", params={"count": 5}))
+    assert run["state"] == "waiting", run
+    pending = run["pending"]
+    assert pending["schema_name"] and "kiwi" in pending["user"].lower()
+    assert isinstance(pending["schema"], dict) and pending["max_tokens"] > 0
+    runs = payload(call(server, "story_runs", story_id=sid))
+    assert runs[0]["run_id"] == run["run_id"] and runs[0]["state"] == "waiting"
+    busy = call(server, "story_step_start", story_id=sid, step="bible")
+    assert busy.is_error and "already has a concepts run" in busy.content[0].text
+    cancelled = payload(call(server, "story_step_cancel", run_id=run["run_id"]))
+    assert cancelled["state"] == "cancelled"
+    bad = call(server, "story_step_answer", handle=pending["handle"], answer={"x": 1})
+    assert bad.is_error

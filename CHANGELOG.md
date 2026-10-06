@@ -26,6 +26,17 @@ All notable changes to the **rzdhop AI** project will be documented in this file
   `view_file`, `list_files`. A second endpoint for images
   (`RUNPOD_IMAGE_ENDPOINT_ID`) keeps FLUX off the video workers. Optional
   dependency `pip install .[mcp]`; `docs/MCP.md`.
+- **Stage 2: the story steps with the chat as their writer.** A new LLM
+  provider `chat` (`registry.PROVIDERS["chat"]`, free, keyless, never called by
+  `run_chain`) names the conversation; `mcp_server/director.py` runs any story
+  step in a thread with a runner that parks each `call_json` prompt for the
+  chat (`story_step_start` → `pending {system, user, schema, max_tokens}` →
+  `story_step_answer`), so the app's own prompts, validators, documents and
+  approvals are reused unchanged and nothing is billed for the writing. Tools
+  for the store (`story_create/get/doc/entities/entity`, `episode_get/doc`),
+  the approvals (`story_approve`, `story_approve_all`, `story_choose_concept`)
+  and the edits (`story_patch`, `entity_patch`, `episode_patch`), all through
+  `workflow`.
 
 ### The keyframe check warns, it never blocks (DEC-311)
 

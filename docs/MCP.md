@@ -86,8 +86,41 @@ files land in `outputs/mcp/<date>/` unless `dest` says otherwise (a story's
 folder, from stage 2 on). What RunPod bills (`executionTime + delayTime`, cold
 start included) is kept per job and summed by `cost_ledger`.
 
+## The story tools (stage 2) — the steps, with Claude as the writer
+
+The app's story steps (`clipping/aistory/steps`) write their documents through
+`llm_call.call_json`: build the prompt, send it on the LLM chain, validate the
+reply, ask again on a refusal. The chain runner is injectable, and the MCP uses
+that: a step started from the chat runs in a thread with a runner that, instead
+of calling a provider, **parks the prompt for the conversation** and waits for
+its answer. Claude reads the prompt (system, user, JSON schema, token cap),
+answers it, and the step carries on exactly as with a hosted model — the same
+prompts, validators, documents, approvals, and the web UI shows the result.
+The chain the run sees is `chat/claude` (`registry.PROVIDERS["chat"]`), a free
+link nothing else can call; the dashboard's saved Settings (`data/settings.json`)
+are read underneath it for everything else (image/video chains, keys, budget).
+
+| Tool | Does |
+|---|---|
+| `story_list`, `story_create(language, seed_text?, style?, episode_format?, generation_profile?)`, `story_options` | the store and its catalogue (styles, episode formats, steps) |
+| `story_get(story_id)` | the story at a glance: bible, approvals, style lock, season, knowledge, entity summaries with what each lacks, episodes, recent runs |
+| `story_doc`, `story_entities`, `story_entity`, `episode_get`, `episode_doc` | the full documents |
+| `story_step_start(story_id, step, ep?, params?)` | runs a step; returns its first event: `waiting` with a `pending` prompt, `done` with the result, `failed` with the error, or `running` |
+| `story_step_answer(handle, answer)` | the chat's JSON answer to a pending prompt; returns the next event (the validator's refusal comes back as the same prompt with the reason under it) |
+| `story_step_status`, `story_step_cancel`, `story_runs` | follow, stop, list runs (one per story at a time) |
+| `story_approve(story_id, doc, approve_anyway?, direction?)`, `story_approve_all(story_id, group)` | the app's approvals, by its rules (`workflow.approve_*`) |
+| `story_choose_concept`, `story_patch`, `entity_patch`, `episode_patch` | the app's edits (`workflow.patch_*`) |
+
+Steps that make images or clips (`cast`, `places`, `assets`, `style_preview`)
+spend through the generation chains the Settings name — RunPod once stage 3's
+image adapter is in — so the director says what a step will buy before it runs.
+Do not run the same story from the web UI and from the chat at the same time:
+the MCP does not see the web worker's job queue.
+
 ## Tests
 
-`tests/test_mcp_runpod_jobs.py` (the job client, fake transport) and
-`tests/test_mcp_server.py` (the tools through an in-process MCP client; skipped
-when `fastmcp` is not installed). Nothing leaves the machine; nothing is spent.
+`tests/test_mcp_runpod_jobs.py` (the job client, fake transport),
+`tests/test_mcp_director.py` (steps with the chat as writer, through the real
+`call_json`) and `tests/test_mcp_server.py` (the tools through an in-process MCP
+client, the real `concepts` step included; skipped when `fastmcp` is not
+installed). Nothing leaves the machine; nothing is spent.

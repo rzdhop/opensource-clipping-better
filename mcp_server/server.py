@@ -15,7 +15,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 
-from . import media
+from . import media, story_tools
 from .config import Settings, load_settings
 from .runpod_jobs import JobClient, JobError, list_templates
 
@@ -30,9 +30,11 @@ class Backend:
     """What the tools share: settings and the job client. Built once at
     startup; tests build their own with a fake transport."""
 
-    def __init__(self, settings: Optional[Settings] = None, *, client: Optional[JobClient] = None):
+    def __init__(self, settings: Optional[Settings] = None, *, client: Optional[JobClient] = None,
+                 story: Optional[story_tools.StoryBackend] = None):
         self.settings = settings or load_settings()
         self.client = client or JobClient(self.settings)
+        self.story = story or story_tools.StoryBackend(self.settings.outputs_dir)
 
 
 def _public(record: dict) -> dict:
@@ -205,6 +207,7 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
         rows.sort(key=lambda r: r["modified"], reverse=True)
         return rows[:max(1, int(limit))]
 
+    story_tools.register(mcp, backend.story)
     return mcp
 
 

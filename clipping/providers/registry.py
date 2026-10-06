@@ -192,6 +192,26 @@ PROVIDERS = {
         api="anthropic",
         free_probe="models",
     ),
+    "chat": Provider(
+        # The story MCP server (mcp_server/director.py, DEC-312): the model
+        # driving the chat is the writer. A step run there is given a runner
+        # that hands each prompt to the conversation and takes its reply as
+        # the answer; ``run_chain`` itself never reaches this provider (no
+        # key, so a web or CLI job that names it skips it with a printed
+        # line). Free: nothing is billed for a reply the person's own chat
+        # wrote. The timeout is how long a step may wait for that reply.
+        name="chat",
+        base_url="",
+        env_key="",
+        rpm=None,
+        tpm=None,
+        structured=("json_schema",),
+        default_timeout=3600,
+        notes="The person's own Claude chat, through the MCP server; answers only there.",
+        probe_timeout=1.0,
+        signup_url="",
+        api="chat",
+    ),
     "custom": Provider(
         name="custom",
         base_url="",  # resolved from LLM_CUSTOM_BASE_URL at build time
