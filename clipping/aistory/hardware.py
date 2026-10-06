@@ -197,7 +197,7 @@ _HOST_HINT = ("run ComfyUI and Ollama on the Docker host and point the container
               "LOCAL_COMFYUI_URL=http://host.docker.internal:8188, LOCAL_OLLAMA_URL=http://host.docker.internal:11434 "
               "(docker-compose adds the host-gateway extra host)")
 _LOCAL_TTS = "pip install 'rzdhop-ai[local-tts]'"
-_KLEIN_FILES = ("download flux2-klein-4b.safetensors → ComfyUI/models/diffusion_models, qwen_3_4b.safetensors → "
+_KLEIN_FILES = ("download flux-2-klein-4b.safetensors → ComfyUI/models/diffusion_models, qwen_3_4b.safetensors → "
                 "models/text_encoders, flux2-vae.safetensors → models/vae")
 _UMT5 = "umt5_xxl_fp8_e4m3fn_scaled.safetensors → models/text_encoders"
 

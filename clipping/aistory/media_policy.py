@@ -59,6 +59,8 @@ LOW_QUALITY_LINKS = frozenset({
 # neither this set nor TEXT_ONLY_LINKS (e.g. a nano-banana link) serves
 # gen.IMAGE and gen.IMAGE_EDIT alike.
 EDIT_ONLY_LINKS = frozenset({
+    "runpod/edit_flux2_klein_multiref",
+    "runpod/edit_qwen_image",
     "fal/seedream-4-edit",
     "fal/seedream-4.5-edit",
     "fal/flux-kontext-pro",
@@ -71,6 +73,7 @@ EDIT_ONLY_LINKS = frozenset({
 # already dropped by LOW_QUALITY_LINKS before this filter runs, so listing
 # them again would be dead weight.
 TEXT_ONLY_LINKS = frozenset({
+    "runpod/t2i_flux2_klein",
     "fal/seedream-4.5",
 })
 

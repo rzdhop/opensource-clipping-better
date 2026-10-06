@@ -37,6 +37,16 @@ All notable changes to the **rzdhop AI** project will be documented in this file
   the approvals (`story_approve`, `story_approve_all`, `story_choose_concept`)
   and the edits (`story_patch`, `entity_patch`, `episode_patch`), all through
   `workflow`.
+- **Stage 3: images on RunPod.** `clipping/providers/runpod_images.py`: the
+  image templates as paid image / image-edit links `runpod/t2i_flux2_klein`,
+  `runpod/edit_flux2_klein_multiref`, `runpod/edit_qwen_image` on the image
+  endpoint (`RUNPOD_IMAGE_ENDPOINT_ID`, optional `RUNPOD_IMAGE_API_KEY`, else the
+  video endpoint and key), journaled, resumed, priced per image, the GPU seconds
+  logged. `runpod` joins the image chains' providers; a new budget profile
+  **`own_gpu`** puts those links first in every quality role (fal behind). The
+  FLUX.2 klein templates name the file Comfy-Org publishes,
+  `flux-2-klein-4b.safetensors`. `deploy/runpod/worker-comfyui.Dockerfile`: a
+  worker on a newer ComfyUI, for LTX-2.5.
 
 ### The keyframe check warns, it never blocks (DEC-311)
 

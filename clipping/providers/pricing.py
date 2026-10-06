@@ -44,6 +44,15 @@ PRICES = {
     "fal/seedream-4.5-edit": Price("image", 0.04, "multi-reference edit, up to 10 references, seed honoured; read 2026-10-01 on fal.ai (A-111)"),
     "fal/flux-kontext-pro": Price("image", 0.04, "single-reference edit"),
     "openai/gpt-image-2-low": Price("image", 0.005, "quality low, 1024x1536"),
+    # DEC-312: the local image templates on RunPod Serverless (runpod_images.py), billed by the GPU second and
+    # priced here per image like every image link. Not measured yet: a FLUX.2 klein 4B image at 832x1216 is a
+    # few seconds warm on an RTX 5090 ($1.58/h = $0.00044/s, so under a cent), and the first image after an
+    # idle pays a 1-3 min cold start (about $0.05) that the batch shares. The figures keep a share of that
+    # cold start in (an estimate checked against a cap is never low); what RunPod really billed is logged per
+    # image from executionTime + delayTime.
+    "runpod/t2i_flux2_klein": Price("image", 0.01, "FLUX.2 klein 4B text to image on a RunPod worker: seconds warm, a cold start shared by the batch; not measured, the highest plausible figure is kept"),
+    "runpod/edit_flux2_klein_multiref": Price("image", 0.015, "FLUX.2 klein 4B edit with up to four references on a RunPod worker: about 1.5x the text-to-image figure (the references are encoded); not measured"),
+    "runpod/edit_qwen_image": Price("image", 0.03, "Qwen-Image-Edit on a RunPod worker: a 20B model, about 3x the klein figure; not measured"),
     # --- video, per second of output (appendix B). Re-read on each model's own
     # page on 2026-09-30: no price had moved; the notes carry what was learned.
     # The 1080p clip of the same link (phase 7 stage 4, DEC-227: a v2 story's

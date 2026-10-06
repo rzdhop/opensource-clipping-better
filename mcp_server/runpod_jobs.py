@@ -172,10 +172,11 @@ class JobClient:
 
     # -- helpers
 
-    def _headers(self) -> dict:
-        if not self.settings.api_key:
+    def _headers(self, kind: str = "video") -> dict:
+        key = self.settings.key(kind)
+        if not key:
             raise JobError("RUNPOD_API_KEY is not set in .env")
-        return auth_headers(self.settings.api_key)
+        return auth_headers(key)
 
     def resolve_path(self, path: str) -> str:
         """An input file the caller named: absolute, or relative to the
@@ -194,9 +195,9 @@ class JobClient:
             return os.path.join(self.settings.outputs_dir, "mcp", datetime.now().strftime("%Y-%m-%d"))
         return os.path.abspath(dest if os.path.isabs(dest) else os.path.join(self.settings.outputs_dir, dest))
 
-    def _request(self, method: str, url: str, *, json_body=None, timeout=DEFAULT_TIMEOUT) -> dict:
+    def _request(self, method: str, url: str, *, json_body=None, timeout=DEFAULT_TIMEOUT, kind: str = "video") -> dict:
         try:
-            return request_json(self.transport, method, url, headers=self._headers(), json_body=json_body,
+            return request_json(self.transport, method, url, headers=self._headers(kind), json_body=json_body,
                                 timeout=timeout)
         except HttpStatusError as exc:
             if exc.status_code in (401, 403):
@@ -216,7 +217,7 @@ class JobClient:
         for k in kinds:
             endpoint = self.settings.endpoint(k)
             try:
-                answer = self._request("GET", endpoint_url(endpoint, "health"), timeout=HEALTH_TIMEOUT)
+                answer = self._request("GET", endpoint_url(endpoint, "health"), timeout=HEALTH_TIMEOUT, kind=k)
                 report[k] = {"endpoint": endpoint, "ok": True, "workers": answer.get("workers") or {},
                              "jobs": answer.get("jobs") or {}}
             except JobError as exc:
@@ -285,7 +286,7 @@ class JobClient:
                          seconds=seconds, image_path=image_path, ref_paths=ref_paths)
         endpoint = self.settings.endpoint(plan["kind"])
         body = {"input": {"workflow": plan["graph"], "images": plan["images"]}}
-        answer = self._request("POST", endpoint_url(endpoint, "run"), json_body=body)
+        answer = self._request("POST", endpoint_url(endpoint, "run"), json_body=body, kind=plan["kind"])
         job_id = answer.get("id")
         if not job_id:
             raise JobError(f"/run answered without a job id: {str(answer)[:200]}")
@@ -347,7 +348,8 @@ class JobClient:
         if record["state"] in TERMINAL:
             return record
         try:
-            status = self._request("GET", endpoint_url(record["endpoint"], f"status/{job_id}"))
+            status = self._request("GET", endpoint_url(record["endpoint"], f"status/{job_id}"),
+                                   kind=record.get("kind", "video"))
         except JobError as exc:
             if "404" in str(exc):
                 return self.journal.update(job_id, state="GONE", error="RunPod no longer knows this job",
@@ -385,7 +387,7 @@ class JobClient:
             raise JobError(f"job {job_id} is not in the journal")
         if record["state"] in TERMINAL:
             return record
-        self._request("POST", endpoint_url(record["endpoint"], f"cancel/{job_id}"))
+        self._request("POST", endpoint_url(record["endpoint"], f"cancel/{job_id}"), kind=record.get("kind", "video"))
         return self.journal.update(job_id, state="CANCELLED", finished_at=utc_now(), error="cancelled by request")
 
     def recent(self, limit: int = 20, *, refresh: bool = False) -> list:

@@ -677,6 +677,7 @@ function CreateStoryForm() {
                   <option value="quality">Paid services — every shot animated, voices added</option>
                   <option value="native_speech">The app makes clips that speak (Veo)</option>
                   <option value="native_speech_manual">You make the clips that speak (Flow / Higgsfield)</option>
+                  <option value="own_gpu">Your own GPU (RunPod) — every shot animated</option>
                 </select>
               </div>
             </div>

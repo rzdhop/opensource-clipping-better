@@ -16,7 +16,7 @@
     {
       "node": "10",
       "field": "unet_name",
-      "file": "flux2-klein-4b.safetensors",
+      "file": "flux-2-klein-4b.safetensors",
       "dir": "models/diffusion_models"
     },
     {
@@ -37,7 +37,7 @@
     "10": {
       "class_type": "UNETLoader",
       "inputs": {
-        "unet_name": "flux2-klein-4b.safetensors",
+        "unet_name": "flux-2-klein-4b.safetensors",
         "weight_dtype": "default"
       }
     },

@@ -1442,7 +1442,8 @@ def link_row(label, merged, adapters, *, resolution=None, aspect=None) -> dict:
 
 # Plan 28 stage S2 (DEC-305 section 9): the budget profiles and routes as the human reads them.
 _PLAN_NAMES = {"free": "Free", "one_dollar": "About $1 per episode", "quality": "Quality",
-               "native_speech": "Characters speak in paid clips", "native_speech_manual": "Your own clips"}
+               "native_speech": "Characters speak in paid clips", "native_speech_manual": "Your own clips",
+               "own_gpu": "Quality on your own GPU"}
 _ROUTE_WORDS = {"local": "on this computer", "api": "on paid services", "auto": "automatically"}
 
 

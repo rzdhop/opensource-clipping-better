@@ -137,6 +137,7 @@ const TAB_KEY = 'rzc_settings_tab'
 const SPENDING_PLAN_NAMES = {
   free: 'Free', one_dollar: 'About $1 per episode', quality: 'Quality (paid, every shot animated)',
   native_speech: 'Quality, characters speak in their clips', native_speech_manual: 'Your own clips',
+  own_gpu: 'Quality on your own GPU (RunPod)',
 }
 
 function readTab() {
@@ -1213,6 +1214,7 @@ function Settings() {
                 <option value="free">Free — nothing bought: free services or this computer, pictures with motion</option>
                 <option value="one_dollar">About $1 per episode — reference pictures and a few animated key shots</option>
                 <option value="quality">Quality — paid services, up to $4 per episode, every shot animated with its own sound</option>
+                <option value="own_gpu">Your own GPU — RunPod endpoints for the pictures and the clips, up to $2 per episode</option>
               </select>
             </Field>
             </CardBody>

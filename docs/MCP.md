@@ -11,9 +11,9 @@ says so. The web UI keeps working as a viewer of the same `outputs/` folder.
 ## Install and run
 
 ```bash
-pip install .[mcp]                      # fastmcp + python-dotenv on top of the app
-python -m mcp_server                    # streamable HTTP on 127.0.0.1:8787 (MCP_HOST/MCP_PORT)
-python -m mcp_server --stdio            # for a local client (Claude Code on the same machine)
+uv venv && uv pip install -e ".[mcp]"   # fastmcp + python-dotenv on top of the app (or: pip install .[mcp])
+uv run python -m mcp_server             # streamable HTTP on 127.0.0.1:8787 (MCP_HOST/MCP_PORT)
+uv run python -m mcp_server --stdio     # for a local client (Claude Code on the same machine)
 ```
 
 `.env` (see `.env.example`):
@@ -23,6 +23,7 @@ python -m mcp_server --stdio            # for a local client (Claude Code on the
 | `RUNPOD_API_KEY` | the key the app already uses |
 | `RUNPOD_COMFY_ENDPOINT_ID` | the **video** endpoint (Wan 2.2 / LTX) |
 | `RUNPOD_IMAGE_ENDPOINT_ID` | the **image** endpoint (FLUX.2 klein), same volume; empty = images run on the video endpoint |
+| `RUNPOD_IMAGE_API_KEY` | optional: a key of its own for the image endpoint (else `RUNPOD_API_KEY` opens both) |
 | `RUNPOD_GPU_USD_PER_HOUR`, `RUNPOD_IMAGE_GPU_USD_PER_HOUR` | optional flex prices, so the ledger shows dollars |
 | `MCP_TOKEN` | the bearer token every client must send; empty = no auth, keep it on localhost |
 | `RZDHOP_OUTPUTS_DIR` | where files go (default `<repo>/outputs`) |
@@ -57,7 +58,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=/path/to/opensource-clipping-better
-ExecStart=/path/to/venv/bin/python -m mcp_server
+ExecStart=/path/to/opensource-clipping-better/.venv/bin/python -m mcp_server
 Restart=on-failure
 EnvironmentFile=/path/to/opensource-clipping-better/.env
 
@@ -116,6 +117,33 @@ spend through the generation chains the Settings name — RunPod once stage 3's
 image adapter is in — so the director says what a step will buy before it runs.
 Do not run the same story from the web UI and from the chat at the same time:
 the MCP does not see the web worker's job queue.
+
+## Images and clips on RunPod (stage 3)
+
+`clipping/providers/runpod_images.py` makes the image templates paid links of
+the app's own image chains — `runpod/t2i_flux2_klein` (text to image),
+`runpod/edit_flux2_klein_multiref` (up to four references), `runpod/edit_qwen_image`
+— on the image endpoint, journaled and resumed like a clip, priced per image
+(`pricing.PRICES`), the GPU seconds logged. Two ways to use them:
+
+- a **legacy story**: `IMAGE_CHAIN=runpod/t2i_flux2_klein,…` and
+  `IMAGE_EDIT_CHAIN=runpod/edit_flux2_klein_multiref,…` in `.env` / Settings;
+- a **v2 story** (the quality pipeline): the budget profile **`own_gpu`**
+  ("Quality on your own GPU"), whose sheet/plate/prop/keyframe roles name the
+  RunPod links first and fal behind them (skipped without `FAL_KEY`), the clips
+  on `VIDEO_CHAIN`'s first link, up to $2 an episode. Pick it on the story
+  (`generation_profile.budget_profile`, `story_create`'s `generation_profile`,
+  or the story page).
+
+Model files on the volume, in the worker's folders (`unet/` for diffusion
+models, `clip/` for text encoders): `flux-2-klein-4b.safetensors`,
+`qwen_3_4b.safetensors`, `flux2-vae.safetensors` — the templates' `requires`
+lists are the source of truth, and `validate_template` names what is missing.
+
+The LTX-2.5 clip templates (native audio) are added from a ComfyUI API export
+of its own "LTX-2.5 Image to Video" template once the worker's ComfyUI carries
+it; `deploy/runpod/worker-comfyui.Dockerfile` builds a worker on a newer
+ComfyUI when the shipped one is too old.
 
 ## Tests
 

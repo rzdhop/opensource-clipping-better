@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 ENV_API_KEY = "RUNPOD_API_KEY"
+ENV_IMAGE_KEY = "RUNPOD_IMAGE_API_KEY"
 ENV_VIDEO_ENDPOINT = "RUNPOD_COMFY_ENDPOINT_ID"
 ENV_IMAGE_ENDPOINT = "RUNPOD_IMAGE_ENDPOINT_ID"
 ENV_VIDEO_RATE = "RUNPOD_GPU_USD_PER_HOUR"
@@ -29,6 +30,7 @@ KINDS = ("image", "video")
 @dataclass
 class Settings:
     api_key: str = ""
+    keys: dict = field(default_factory=dict)           # kind -> its own API key, when one is set
     endpoints: dict = field(default_factory=dict)      # kind -> endpoint id
     rates: dict = field(default_factory=dict)          # kind -> USD per GPU hour (float) or None
     outputs_dir: str = ""
@@ -46,6 +48,10 @@ class Settings:
             raise RuntimeError(f"no RunPod endpoint configured: set {ENV_VIDEO_ENDPOINT}"
                                f"{' or ' + ENV_IMAGE_ENDPOINT if kind == 'image' else ''} in .env")
         return endpoint
+
+    def key(self, kind: str) -> str:
+        """The key that opens *kind*'s endpoint: its own, else the account key."""
+        return self.keys.get(kind) or self.api_key
 
     def rate(self, kind: str):
         rate = self.rates.get(kind)
@@ -81,6 +87,7 @@ def load_settings(env=None) -> Settings:
     outputs = env.get(ENV_OUTPUTS) or os.path.join(ROOT, "outputs")
     return Settings(
         api_key=(env.get(ENV_API_KEY) or "").strip(),
+        keys={k: v for k, v in (("image", (env.get(ENV_IMAGE_KEY) or "").strip()),) if v},
         endpoints={k: v for k, v in (("video", (env.get(ENV_VIDEO_ENDPOINT) or "").strip()),
                                      ("image", (env.get(ENV_IMAGE_ENDPOINT) or "").strip())) if v},
         rates={"video": _rate(env.get(ENV_VIDEO_RATE)), "image": _rate(env.get(ENV_IMAGE_RATE))},

@@ -63,7 +63,7 @@ def test_every_shipped_template_is_well_formed(name):
 def test_the_three_templates_of_phase_0_are_shipped():
     assert set(TEMPLATES) == {"t2i_flux2_klein", "edit_flux2_klein_multiref", "edit_qwen_image"}
     assert load_template("edit_flux2_klein_multiref")["ref_slots"] == 4
-    assert any(r["file"] == "flux2-klein-4b.safetensors" for r in load_template("t2i_flux2_klein")["requires"])
+    assert any(r["file"] == "flux-2-klein-4b.safetensors" for r in load_template("t2i_flux2_klein")["requires"])
     assert any(r["file"] == "qwen_image_edit_2509_q4.gguf" for r in load_template("edit_qwen_image")["requires"])
 
 
@@ -297,12 +297,12 @@ def test_the_comfyui_adapter_is_registered_for_image_and_edit():
 
 def test_the_adapter_validates_before_queueing_and_lists_what_to_install(tmp_path):
     template = load_template("t2i_flux2_klein")
-    transport = FakeTransport([(200, object_info_for(template, drop_file="flux2-klein-4b.safetensors"))])
+    transport = FakeTransport([(200, object_info_for(template, drop_file="flux-2-klein-4b.safetensors"))])
     request = GenRequest(kind="image", prompt="a kiwi", out_dir=str(tmp_path))
     with pytest.raises(ComfyUIError) as excinfo:
         local_comfyui.COMFYUI.generate(Link("local", "comfyui"), request, credentials={}, on_log=lambda *a: None,
                                        transport=transport, env={"LOCAL_COMFYUI_URL": "http://127.0.0.1:8188"})
-    assert "flux2-klein-4b.safetensors" in str(excinfo.value)
+    assert "flux-2-klein-4b.safetensors" in str(excinfo.value)
     assert all("/prompt" not in c["url"] for c in transport.calls)
 
 

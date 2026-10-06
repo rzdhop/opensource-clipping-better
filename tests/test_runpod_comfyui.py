@@ -128,7 +128,7 @@ def test_runpod_is_a_paid_video_provider_keyed_by_api_key_and_endpoint_outside_t
     runpod = Link("runpod", "i2v_wan22_14b_lightning")
     assert gen.is_paid(runpod) and gen.missing_keys(runpod, {}) == ["RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID"]
     assert gen.credentials_for(runpod, ENV) == ENV  # the optional GPU price rides along
-    assert "runpod" in gen.KIND_PROVIDERS[gen.VIDEO] and "runpod" not in gen.KIND_PROVIDERS[gen.IMAGE]
+    assert "runpod" in gen.KIND_PROVIDERS[gen.VIDEO] and "runpod" in gen.KIND_PROVIDERS[gen.IMAGE]  # DEC-312: images too
     shipped = [describe(l) for l in parse_generation_chain(gen.VIDEO, gen.DEFAULT_CHAINS[gen.VIDEO])]
     assert not any(label.startswith("runpod/") for label in shipped)
     assert [describe(l) for l in parse_generation_chain(gen.VIDEO, f"local/comfyui,{WAN}")] == ["local/comfyui", WAN]

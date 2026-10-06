@@ -28,7 +28,10 @@ DEFAULT_BUDGET_PROFILE = "free"
 TIERS = (1, 2, 3)
 ROUTES = ("auto", "local", "api")
 CONSISTENCY_MODES = ("references", "prompt_only")
-BUDGET_PROFILES = ("free", "one_dollar", "quality", "native_speech", "native_speech_manual")
+BUDGET_PROFILES = ("free", "one_dollar", "quality", "native_speech", "native_speech_manual", "own_gpu")
+# DEC-312: the quality roles on the author's own RunPod endpoints (FLUX.2 klein
+# for the images, the VIDEO_CHAIN's first link for the clips), fal as fallback.
+OWN_GPU_PROFILE = "own_gpu"
 # Plan 22: the native-speech budget profile (each character line spoken by
 # its own clip, ``media_policy.native_speech``).
 NATIVE_SPEECH_PROFILE = "native_speech"

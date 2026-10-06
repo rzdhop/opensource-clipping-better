@@ -669,7 +669,7 @@ class GenerationProfileModel(BaseModel):
     tier: int = 1
     route: Literal["auto","local","api"] = "auto"
     consistency_mode: Literal["references","prompt_only"] = "references"
-    budget_profile: Literal["free","one_dollar","quality","native_speech","native_speech_manual"] = "free"
+    budget_profile: Literal["free","one_dollar","quality","native_speech","native_speech_manual","own_gpu"] = "free"
     # Optional (phase 7, DEC-221): left out, a story is on the legacy pipeline.
     pipeline: Optional[Literal["v2"]] = None
     # Optional (plan 22): a native-speech story's speaking-clip model; left

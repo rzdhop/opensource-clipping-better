@@ -383,6 +383,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           <option value="quality">Quality (paid) — every shot animated</option>
           <option value="native_speech">Characters speak in their clips (paid, Veo)</option>
           <option value="native_speech_manual">Characters speak in your own clips (Flow / Higgsfield)</option>
+          <option value="own_gpu">Quality on your own GPU (RunPod) — every shot animated</option>
         </select>
       </div>
       {isV2 && (

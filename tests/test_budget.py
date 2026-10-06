@@ -108,8 +108,14 @@ def test_the_shipped_profiles_match_the_spec():
     profiles = load_profiles()
     assert profiles["$schema"] == "budget_profiles_v1"
     # Re-pinned on purpose (plan 22, stage 4): the native-speech profile joins the three;
-    # (stage 5) and its manual twin, every clip the human's own upload.
-    assert set(profiles["profiles"]) == {"free", "one_dollar", "quality", "native_speech", "native_speech_manual"}
+    # (stage 5) and its manual twin, every clip the human's own upload;
+    # (DEC-312) and own_gpu: the quality roles on the author's RunPod endpoints.
+    assert set(profiles["profiles"]) == {"free", "one_dollar", "quality", "native_speech", "native_speech_manual",
+                                         "own_gpu"}
+    own = profiles["profiles"]["own_gpu"]
+    assert own["images"] == "quality_roles" and own["cap_usd"] == 2.0 and own["video_link_policy"] == "first_in_chain"
+    assert own["roles"]["sheet"][:2] == ["runpod/t2i_flux2_klein", "runpod/edit_flux2_klein_multiref"]
+    assert own["roles"]["keyframe"][0] == "runpod/edit_flux2_klein_multiref"
     one = profiles["profiles"]["one_dollar"]
     assert one["cap_usd"] == 1.0
     assert one["animate_priority"] == ["hook", "cliffhanger", "peak", "turn", "longest_dialogue"]
