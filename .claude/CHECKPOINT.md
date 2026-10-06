@@ -2,12 +2,15 @@
 
 - **In-progress header:** phase = IMPLEMENT. Done: stage 0 396a289 · stage 1 aa7252b (MCP: style/fast-track/
   story-fast-track steps, presets.py, story_estimate, story_make_episode, STORY_CHAT_WRITER, store recipe field) ·
-  stage 3 997fcc3 (the Pixar look, goldens re-pinned) · stage 7 6f5b1de (s2v_wan22 template, symlink, docs — the
-  human's live test is the gate of stage 8). Wave A verified together: local 2229 / CI-like 2081+148s / venv 63.
-  Running now (wave B, disjoint files): stage 2 (recipe record + writers, Opus, worktree), stage 6 (voices on the
-  worker, Opus, worktree), stage 5 (episode_sheet + episode_export, Sonnet, main tree). Next action = cherry-pick
-  2 and 6, verify 5, run the selections, commit, push; then stage 4 (format + render, after 2), then stage 9
-  (skill + docs + close-out); stage 8 waits for the human's "it works" on one S2V line.
+  stage 3 997fcc3 (the Pixar look, goldens re-pinned; + a15b6d3 four tier-1 guard goldens) · stage 7 6f5b1de
+  (s2v_wan22 template, symlink, docs — the human's live test gates stage 8) · stage 5 d7a2f0d (episode_sheet,
+  episode_export) · stage 6 647ec44 (runpod TTS provider, frozen reference per character at cast time, own_gpu
+  tts_chain; + the brand-gate guard follow-up) · stage 2 1fb85d9 (the recipe record in the writers, guard test).
+  Wave B verified together: local 3225+1 fixed / CI-like 3056+169s / venv 130. Running now: stage 4 (format
+  fruit_drama_75s_v2 + the end card on hard_stop + hook text, Sonnet, main tree) and stage 9's docs part (skill,
+  docs/MCP.md, docs/AI_STORY.md, CHANGELOG — Sonnet, worktree). Next action = verify 4, cherry-pick 9's docs, one
+  broad local run (both envs), DEC-315 + A-202…, CHECKPOINT rewritten, push, the PR body file. Stage 8 (S2V in
+  the clips step) waits for the human's "it works" on one S2V line.
 - **Tier 1 baseline (0de84d1, the touched-area selection, 26 files):** local 1306 passed · CI-like 1306 passed ·
   venv (test_mcp_server/director/runpod_jobs) 41 passed — exit 0 everywhere. The selection is in the scratchpad
   (`baseline_sel.txt`): test_aistory_prompting/templates, test_comfyui_video, test_local_comfyui, test_mcp_*,
