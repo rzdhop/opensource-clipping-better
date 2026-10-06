@@ -1,3 +1,14 @@
+## CURRENT STATE — DEC-311 keyframes warn-only IN PROGRESS; story df1544f0641f waits at the clips (2026-10-06, local session)
+
+- **In-progress header:** phase = EXPLORE (a Sonnet map of the keyframe hard gate running) → PLAN → IMPLEMENT in a
+  worktree (Opus: cross-cutting fast_track/assets/judge/handoff/dashboard) → deploy at 0 jobs → `POST
+  /api/stories/df1544f0641f/steps/story-fast-track` to continue the run (12 runpod clips est $1.20 + lipsync
+  $0.14; no more image spend). Checkpoint commit = main 1c88dd9 (this commit's parent). The story: pre-production
+  done ($0.74), script/storyboard approved by the agent, 12 keyframes on disk, 5 flagged (sh01, sh02, sh06, sh10 +
+  neighbours sh04, sh07 after the regenerates); caps today: episode $1.50/$4, day $3.07/$7, story $2.22/$10.
+- **The human's rule (DEC-311):** warn, never block, on keyframes; no more regenerates on this story.
+- **Open questions:** none blocking.
+
 ## CURRENT STATE — DEC-310 (RunPod Serverless video link) MERGED + DEPLOYED with plan 29 (2026-10-06, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
