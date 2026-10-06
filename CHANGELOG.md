@@ -10,6 +10,23 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### The story MCP server, stage 1: RunPod jobs as tools (DEC-312)
+
+#### Added
+
+- **`mcp_server/` — the backend as MCP tools for Claude to drive from a chat.**
+  `python -m mcp_server` (streamable HTTP, `MCP_HOST:MCP_PORT`, bearer token
+  `MCP_TOKEN`; `--stdio` for a local client). Stage 1 covers RunPod Serverless
+  ComfyUI for any template, image or video: `comfy_submit` (one `POST /run`,
+  returns the job id at once, several run in parallel), `comfy_status` /
+  `comfy_fetch` (a finished job's files written under `outputs/`, shown as a
+  thumbnail or a contact sheet of 8 frames with duration/size/sound),
+  `comfy_cancel`, `comfy_jobs`, `cost_ledger` (GPU seconds and dollars from the
+  journal `outputs/mcp/jobs.json`), `runpod_health`, `templates_list`,
+  `view_file`, `list_files`. A second endpoint for images
+  (`RUNPOD_IMAGE_ENDPOINT_ID`) keeps FLUX off the video workers. Optional
+  dependency `pip install .[mcp]`; `docs/MCP.md`.
+
 ### The keyframe check warns, it never blocks (DEC-311)
 
 #### Changed
