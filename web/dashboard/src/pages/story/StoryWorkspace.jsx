@@ -8,7 +8,7 @@ import StoryHeader from './StoryHeader'
 import AgentRunCard from './AgentRunCard'
 import StepRail from './StepRail'
 import {
-  IN_FLIGHT, currentStepKey, disabledReason, stepLabel, stepOfJob, stepsFor, statusOf, summaryFor,
+  IN_FLIGHT, currentStepKey, disabledReason, jobLabel, stepLabel, stepOfJob, stepsFor, statusOf, summaryFor,
 } from './storySteps'
 import ConceptsStep from './steps/ConceptsStep'
 import BibleStep from './steps/BibleStep'
@@ -32,6 +32,11 @@ const STATUS_BADGES = {
   disabled: { tone: 'neutral', text: 'Locked' },
 }
 
+const JOB_STATUS_TEXT = {
+  queued: 'waiting to start', running: 'running', completed: 'done', failed: 'stopped', awaiting_approval: 'ready to check',
+  awaiting_uploads: 'waiting for your clips', cancelled: 'cancelled',
+}
+
 function StoryJobActivity({ jobId }) {
   const { job, events, streamState } = useJobFeed(jobId)
   if (!job) return null
@@ -44,7 +49,7 @@ function StoryJobList({ jobs }) {
 
   return (
     <div className="card story-job-list-card">
-      <h3 className="card-title">Step jobs</h3>
+      <h3 className="card-title">What the app did</h3>
       <div className="story-job-list">
         {jobs.slice().reverse().map((job) => (
           <div key={job.id} className="story-job-row">
@@ -54,11 +59,10 @@ function StoryJobList({ jobs }) {
               onClick={() => setOpenId(openId === job.id ? null : job.id)}
             >
               <span className="story-job-row-step">
-                {job.step}
-                {job.params && job.params.target ? ` · ${job.params.target}` : ''}
+                {jobLabel(job)}
               </span>
               <span className="chip">
-                {job.status === 'queued' ? 'queued — waiting for the worker' : job.status}
+                {JOB_STATUS_TEXT[job.status] || job.status}
               </span>
               <span className="story-job-row-time">{new Date(job.updated_at).toLocaleTimeString()}</span>
             </button>

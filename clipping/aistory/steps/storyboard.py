@@ -800,14 +800,14 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, budget=None) -> dict:
     def left():
         rest = [scene["scene_id"] for scene in todo if scene["scene_id"] not in planned
                 and scene["scene_id"] not in {sid for sid, _ in failed}]
-        return f"the shots of scene{'s' if len(rest) > 1 else ''} {', '.join(rest)} (T1)"
+        return f"the shots of scene{'s' if len(rest) > 1 else ''} {', '.join(rest)}"
 
     for scene in todo:
         sid = scene["scene_id"]
         ctx.cancel.check()
         budget.before_call(left)
         ctx.on_log(f"🎞 Scene {script['scenes'].index(scene) + 1} of {total} ({sid}, {scene['function']}): "
-                   "shots (T1)")
+                   "shots")
         try:
             scene_plans = plan_scene(ctx, ec, script, plans, scene, tools=tools, announced=announced, limit_s=limit)
         except StepFailed as exc:

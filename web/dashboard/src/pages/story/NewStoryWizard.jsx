@@ -81,23 +81,31 @@ const FRAMES = [
   { id: '1:1', label: 'Square 1:1' },
 ]
 const FRAME_HINT = ('The character sheets and the style preview stay 9:16 (references, not output). Landscape: a '
-  + 'regular YouTube video, not Shorts. Square: Tier 1, or clips on Seedance or Kling (Veo, LTX, Flow and a local '
+  + 'regular YouTube video, not Shorts. Square: pictures with motion, or clips on Seedance or Kling (Veo, LTX, Flow and a local '
   + 'ComfyUI make no 1:1). The frame cannot change after the story is made.')
 
 /** Why the frame `frame` cannot be picked with this profile, or '' (media_policy.aspect_refusal's rules). */
 export function frameRefusal(frame, { pipeline, tier, route, budgetProfile, reasons }) {
   if (frame === '9:16') return ''
   const said = reasons || {}
-  if (pipeline !== 'v2') return said.pipeline || 'a 16:9 or 1:1 frame is for a story on the v2 pipeline'
+  if (pipeline !== 'v2') return said.pipeline || 'a 16:9 or 1:1 frame is for an animated story (the current format)'
   if (tier < 2) return ''
-  if (route === 'local') return said.local || 'local ComfyUI clips are 9:16 only (v1)'
-  if (budgetProfile === 'free') return said.free || 'the free profile animates on a local ComfyUI only (9:16)'
+  if (route === 'local') return said.local || 'clips made on this computer are 9:16 only'
+  if (budgetProfile === 'free') return said.free || 'the free spending plan animates on this computer only (9:16)'
   if (frame === '1:1' && budgetProfile === 'native_speech') return said.veo_square || 'Veo makes 9:16 and 16:9 only'
   if (frame === '1:1' && budgetProfile === 'native_speech_manual') {
     return said.manual_square || 'Google Flow makes 9:16 and 16:9 only'
   }
   return ''
 }
+
+// Plan 28 stage S2: a key the offer names (its environment name) as the Settings page says it.
+const KEY_NAMES = {
+  GEMINI_PAID_API_KEY: 'the paid Gemini key', GOOGLE_API_KEY: 'the Google key', GROQ_API_KEY: 'the Groq key',
+  FAL_KEY: 'the fal.ai key', ELEVENLABS_API_KEY: 'the ElevenLabs key', OPENAI_API_KEY: 'the OpenAI key',
+  MISTRAL_API_KEY: 'the Mistral key',
+}
+const keyName = (env) => KEY_NAMES[env] || env
 
 /** A price in whole dollars, rounded up (the writing's few cents included): 0.48 -> "$1", 4.08 -> "$5". */
 export function roughUsd(usd) {
@@ -428,13 +436,13 @@ function CreateStoryForm() {
             </div>
             {!clipMaker && <p className="form-hint">Your choices under Advanced decide how the clips are made.</p>}
             {chosenMaker && chosenMaker.missing_keys.length > 0 && (
-              <p className="form-hint">Add {chosenMaker.missing_keys.join(' and ')} in Settings first.</p>
+              <p className="form-hint">Add {chosenMaker.missing_keys.map(keyName).join(' and ')} in Settings first.</p>
             )}
             {chosenMaker && chosenMaker.stt_missing_keys.length > 0 && (
-              <p className="form-hint">To check the clips, add {chosenMaker.stt_missing_keys.join(' or ')} in Settings.</p>
+              <p className="form-hint">To check the clips, add {chosenMaker.stt_missing_keys.map(keyName).join(' or ')} in Settings.</p>
             )}
             {clipMaker === 'app' && offer && !offer.allow_paid && (
-              <p className="form-hint">Paid calls are off in Settings (allow paid): nothing is bought until you turn them on.</p>
+              <p className="form-hint">Paid services are off in Settings: nothing is bought until you turn them on.</p>
             )}
           </div>
 

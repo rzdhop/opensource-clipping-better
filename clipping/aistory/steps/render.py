@@ -292,7 +292,7 @@ def clip_refusal(ec, blocked, *, script=None, doc=None, link=None) -> str:
     them = _plural(blocked, "it", "them")
     return (f"Episode {ep} cannot be rendered: {_and(said)}. To cut {_plural(blocked, 'that shot', 'those shots')} "
             f"from {_plural(blocked, 'its clip', 'their clips')}, {'; '.join(fixes)}. Or render with {FILL_PARAM} "
-            f"on to give {them} Tier-1 motion instead.")
+            f"on to give {them} plain camera motion instead.")
 
 
 def fully_animated_refusal(ec, blocked, unmade, *, action="rendered", script=None, doc=None, link=None) -> str:
@@ -357,7 +357,7 @@ def silent_clip_note(shot) -> str:
     (never a line silenced without a word)."""
     link = (shot["assets"].get("clip") or {}).get("link") or "its link"
     return (f"ℹ️ Shot {shot['shot_id']} keeps its native audio, but its clip (from {link}) has no sound track: "
-            "it is rendered as at tier 2, its lines spoken by their voices.")
+            "it is rendered with its lines spoken by their voices instead.")
 
 
 def silent_ambience_note(shot) -> str:

@@ -17,14 +17,14 @@ function plural(n, word) {
  * The phase-2 generation estimates (cast, places, an image or a voice
  * regenerate) count several units at once — `{llm_calls, images,
  * edit_images, tts_chars}` — and every non-zero one is shown:
- * "5 LLM · 5 images · 10 edits · voice ~180 chars". Phase 6 stage 12: a
+ * "5 writing · 5 images · 10 edits · voice ~180 chars". Phase 6 stage 12: a
  * clip regenerate's estimate (`{clips, seconds}`,
  * `workflow.regenerate_clip_estimate`) joins the same units object, so its
  * two fields are shown here too: "1 clip · 4s video".
  */
 function generationUnitsLabel(units) {
   const parts = []
-  if (units.llm_calls) parts.push(`${units.llm_calls} LLM`)
+  if (units.llm_calls) parts.push(`${units.llm_calls} writing`)
   if (units.images) parts.push(plural(units.images, 'image'))
   if (units.edit_images) parts.push(plural(units.edit_images, 'edit'))
   if (units.tts_chars) parts.push(`voice ~${plural(units.tts_chars, 'char')}`)
@@ -34,7 +34,7 @@ function generationUnitsLabel(units) {
 }
 
 /**
- * "10 LLM calls" / "1 LLM call" / "3 images" / "1 image", from the estimate's
+ * "10 writing steps" / "1 writing step" / "3 images" / "1 image", from the estimate's
  * `units`; a generation estimate (more than one unit) lists each non-zero one.
  */
 export function unitsLabel(units) {
@@ -42,7 +42,7 @@ export function unitsLabel(units) {
   if (Object.keys(units).length > 1) return generationUnitsLabel(units)
   if (units.llm_calls != null) {
     const n = units.llm_calls
-    return `${n} LLM call${n === 1 ? '' : 's'}`
+    return `${n} writing step${n === 1 ? '' : 's'}`
   }
   if (units.images != null) {
     const n = units.images
@@ -53,8 +53,8 @@ export function unitsLabel(units) {
 }
 
 /**
- * One compact chip: "est. $0.00 · 10 LLM calls", or for a cast or places
- * step "est. $0.00 · 5 LLM · 5 images · 10 edits · voice ~180 chars". Warn
+ * One compact chip: "est. $0.00 · 10 writing steps", or for a cast or places
+ * step "est. $0.00 · 5 writing · 5 images · 10 edits · voice ~180 chars". Warn
  * styled when the step is not ready to run (the key gate refuses it,
  * `estimate.ready === false`);
  * `estimate.message` explains why, as the chip's title. Beside it, the

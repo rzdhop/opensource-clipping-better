@@ -342,7 +342,7 @@ def role_chain(role, kind, merged, story) -> list:
     chain = [link for link in chain if describe(link) not in exclude]
     if not chain:
         raise ChainError(f"no quality link is left for the {role} images (draft links, and links that cannot "
-                         f"serve a {kind} request, are never used on a v2 story)")
+                         f"serve a {kind} request, are never used on an animated story)")
     assert not {describe(link) for link in chain} & exclude
     if image_preference(story) == defaults.IMAGE_GEMINI_FIRST:
         # Plan 23 stage A9: a stable re-sort, no link added or removed (DEC-204's pins stay valid).
@@ -417,10 +417,10 @@ def image_size(story, portrait_size=None) -> tuple:
 
 
 # Words of a frame refusal that hold for any profile (the wizard says them too).
-ASPECT_NEEDS_V2 = "a 16:9 or 1:1 frame is for a story on the v2 pipeline"
-ASPECT_LOCAL_ONLY = "local ComfyUI clips are 9:16 only (v1): pick the API route or Tier 1"
-ASPECT_FREE_LOCAL = ("the free profile animates on a local ComfyUI only, whose clips are 9:16 only (v1): pick "
-                     "Tier 1 or a paid profile")
+ASPECT_NEEDS_V2 = "a 16:9 or 1:1 frame is for an animated story (the current format)"
+ASPECT_LOCAL_ONLY = "clips made on this computer are 9:16 only: pick paid services, or pictures with motion"
+ASPECT_FREE_LOCAL = ("the free spending plan animates on this computer only, whose clips are 9:16 only: pick "
+                     "pictures with motion, or a paid plan")
 
 
 def aspect_refusal(profile, chosen=None) -> str | None:
@@ -442,7 +442,7 @@ def aspect_refusal(profile, chosen=None) -> str | None:
         return f"generation_profile.aspect must be one of {list(defaults.ASPECTS)}, not {chosen!r}"
     story = {"generation_profile": dict(profile, aspect=chosen)}
     if not is_v2(story):
-        return ASPECT_NEEDS_V2 + " (pipeline v2)"
+        return ASPECT_NEEDS_V2
     if int(profile.get("tier") or 1) < 2:
         return None
     settings = _profile_of(story)
@@ -1022,7 +1022,7 @@ def preset_estimate(merged=None, *, story=None) -> dict:
         summary += (f"; no ambience: add {' and '.join(missing)} for Veo's sound" if missing
                     else f"; no ambience: {video_label} makes clips with no sound")
     assumptions = (
-        f"An episode: {shots} shots over the v2 template's {seconds:g} s target, each a {video_label} clip at "
+        f"An episode: {shots} shots over the episode format's {seconds:g} s target, each a {video_label} clip at "
         f"{resolution} rounded up to whole seconds ({billed} s billed at ${per_second:g} a second = "
         f"{_usd(video_usd)}) and a keyframe on {describe(keyframe_link)} (${keyframe_usd:g} each = "
         f"{_usd(keyframes_usd)}). Once per story: {PRESET_STORY_CHARACTERS} characters × {1 + edits} "

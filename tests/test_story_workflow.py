@@ -318,7 +318,7 @@ def test_the_regenerate_grammar(wf, target, code):
 def test_the_no_key_message_names_the_primaries_and_where_to_set_them(wf):
     links = registry.parse_chain(registry.DEFAULT_LLM_CHAIN)
     message = wf.no_key_message(links)
-    assert message.startswith("No link in the LLM chain has an API key")
+    assert message.startswith("None of the writing services has an API key")
     assert message.endswith(", in Settings.")
     assert "OPENROUTER_API_KEY (https://openrouter.ai/keys) (paid)" in message
     assert wf.no_key_message(links, where="in the environment").endswith(", in the environment.")

@@ -151,8 +151,8 @@ def test_no_clip_bought_before_keyframes_approved_v2(store, tmp_path, built):
     units = tce._units(store, story_id, SETTINGS, adapters=_adapters())
     video = units["video"]
     assert video["count"] > 1 and video["est_usd"] > 0 and video["ready"] is True
-    assert video["hold"] == ("approve the keyframes first (keyframes:1): no clip of a v2 episode is bought before "
-                             "they are approved")
+    assert video["hold"] == ("approve the keyframes first (keyframes:1): no clip is bought before "
+                             "they are approved")  # DEC-305 section 9: no "v2"
     assert video["message"].endswith(f" Held: {video['hold']}.")
     assert units["est_usd"] == 0.0 and units["ready"] is True
     assert not any(row["kind"] == "video" for row in units["paid_links"])
@@ -163,7 +163,7 @@ def test_no_clip_bought_before_keyframes_approved_v2(store, tmp_path, built):
     summary, log = _run(store, story_id, video=fake_video, vision=vision)
     assert fake_video.requests == [] and tvp._video_rows(store, story_id) == []
     assert summary["video"]["hold"] == video["hold"] and summary["video"]["planned"] == 0
-    assert "🎬 No clip in this run: approve the keyframes first (keyframes:1): no clip of a v2 episode is bought " \
+    assert "🎬 No clip in this run: approve the keyframes first (keyframes:1): no clip is bought " \
            "before they are approved." in log
     assert vision.shots() == shots  # one J2 call per shot, in storyboard order
     verdicts = _doc(store, story_id)["keyframe_verdicts"]
@@ -286,7 +286,7 @@ def test_a_clip_regenerate_is_refused_while_the_keyframes_are_not_approved(store
         wf.check_episode_target(store, store.get(story_id), parsed)
     assert caught.value.code == wf.CONFLICT
     assert str(caught.value) == (f"Cannot regenerate '{target}': approve the keyframes first (keyframes:1): no clip "
-                                 "of a v2 episode is bought before they are approved.")
+                                 "is bought before they are approved.")
     _approve_keyframes(store, story_id)
     wf.check_episode_target(store, store.get(story_id), parsed)  # no refusal once approved
 
@@ -364,7 +364,7 @@ def test_a_stop_mid_check_keeps_every_verdict_judged_so_far(store, tmp_path, bui
     with pytest.raises(steps.StepFailed) as caught:
         tas._run(store, story_id, adapters=_adapters(vision=FakeVision(slow)), settings=SETTINGS, clock=clock,
                  params={"animate": False})
-    assert "the keyframe check (J2) of shots" in str(caught.value)
+    assert "the keyframe check of shots" in str(caught.value)  # DEC-305: no check id
     judged = _doc(store, story_id)["keyframe_verdicts"]
     assert sorted(judged) == sorted(shots[:3])
 

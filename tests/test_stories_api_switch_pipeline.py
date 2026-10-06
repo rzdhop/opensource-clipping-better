@@ -76,9 +76,9 @@ def test_the_patch_answers_a_structured_refusal_naming_the_episodes(api):
     assert response.status_code == 409, response.text
     detail = response.json()["detail"]
     assert detail["code"] == "pipeline_switch_has_scripts" and detail["episodes"] == [1]
-    assert detail["message"].startswith("This story cannot move to the v2 (quality) pipeline: episode 1 already has "
-                                        "a script")
-    assert "Regenerate the episode on the v2 pipeline" in detail["message"]
+    assert detail["message"].startswith("This story cannot move to the animated (quality) format: episode 1 already has "
+                                        "a script")  # DEC-305 section 9: plain words
+    assert "Regenerate the episode on the animated format" in detail["message"]
 
 
 def test_without_regenerating_the_switch_answers_the_same_refusal(api):
@@ -164,7 +164,7 @@ def test_a_next_step_its_gate_refuses_leaves_the_switch_done_and_says_why(api):
     body = response.json()
     assert body["story"]["generation_profile"]["pipeline"] == "v2" and api.store.list_episodes(story_id) == []
     assert body["next_step"]["step"] == "cast" and body["next_step"]["job"] is None
-    assert "No link in the LLM chain has an API key" in body["next_step"]["refused"]
+    assert "None of the writing services has an API key" in body["next_step"]["refused"]
     assert api.submitted == []
 
 

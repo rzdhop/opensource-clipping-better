@@ -491,8 +491,8 @@ def no_key_message(links, *, where="in Settings") -> str:
     (DEC-088). *where* says where keys are set: the dashboard's Settings, or
     the environment for the CLI."""
     return (
-        "No link in the LLM chain has an API key, so this step cannot call a "
-        f"model. Set one of: {llm_call.key_choices(links)}, {where}."
+        "None of the writing services has an API key, so this step cannot write. "
+        f"Set one of: {llm_call.key_choices(links)}, {where}."
     )
 
 
@@ -692,8 +692,8 @@ def build_style(stories, story_id, params, *, now) -> dict:
     if consistency == refimages.PROMPT_ONLY and media_policy.is_v2(story):
         raise WorkflowError(
             INVALID,
-            "consistency_mode must stay references on a v2 story: it never falls back to prompt-only "
-            "consistency (DEC-221).",
+            "consistency_mode must stay references on an animated story: it never falls back to describing "
+            "characters in words only (DEC-221).",
         )
 
     current = style_lock(stories, story_id)
@@ -1141,14 +1141,14 @@ def pipeline_switch_refusal(v2, written) -> WorkflowError:
     them and the two ways out -- regenerate them on the new pipeline
     (:func:`switch_pipeline`, which archives them), or a new story."""
     written = sorted(written)
-    target = "the v2 (quality) pipeline" if v2 else "the legacy pipeline"
-    pipeline = "the v2 pipeline" if v2 else "the legacy pipeline"
+    target = "the animated (quality) format" if v2 else "the older format"
+    pipeline = "the animated format" if v2 else "the older format"
     if len(written) == 1:
         has, regenerate, its = f"episode {written[0]} already has a script", "Regenerate the episode", "its"
     else:
         has = f"episodes {_and(str(ep) for ep in written)} already have a script"
         regenerate, its = "Regenerate those episodes", "their"
-    message = (f"This story cannot move to {target}: {has}, written for the other pipeline's shot layout. "
+    message = (f"This story cannot move to {target}: {has}, written for the other format's shot layout. "
                f"{regenerate} on {pipeline} ({its} script, storyboard, images, clips and render are archived), "
                "or create a new story.")
     return WorkflowError(CONFLICT, {"message": message, "code": PIPELINE_SWITCH_HAS_SCRIPTS,
@@ -2772,8 +2772,8 @@ def patch_entity(stories, story_id, kind, eid, fields, *, now) -> dict:
                                       f"(editable: {', '.join(allowed)})."))
     blocks = [name for name in V2_BLOCK_FIELDS if name in fields]
     if blocks and not media_policy.is_v2(story):
-        raise WorkflowError(CONFLICT, (f"A {' or '.join(blocks)} belongs to a v2 story (the quality pipeline): "
-                                       "this story is on the legacy pipeline, whose prompts never read one."))
+        raise WorkflowError(CONFLICT, (f"A {' or '.join(blocks)} belongs to an animated story: "
+                                       "this story is in the older format, whose prompts never read one."))
     values = {name: (value.strip() if name in _STRIPPED and isinstance(value, str) else copy.deepcopy(value))
               for name, value in fields.items()}
     lock = style_lock(stories, story_id)
@@ -4806,7 +4806,7 @@ def approve_keyframes(stories, story_id, ep, *, approve_anyway=False, now, by=US
     ep = episode_bounds(stories, story, ep)
     if not media_policy.is_v2(story):
         raise WorkflowError(CONFLICT, (f"Episode {ep}'s keyframes have no approval of their own: the keyframe "
-                                       "approval and its check (J2) are a v2 story's. Approve the assets "
+                                       "approval and its check belong to an animated story. Approve the assets "
                                        f"(assets:{ep})."))
     ec = _context(stories, story_id, ep)
     try:
@@ -5632,9 +5632,9 @@ def patch_shot_mode(stories, story_id, ep, shot_id, fields, *, now, env=None) ->
             errors.append(f"{kind}: expected 'auto' or 'manual' (or null to clear), not {fields[kind]!r}")
     if fields.get("clip") is not None and not media_policy.native_speech(story):
         errors.append(f"clip: shot {shot_id}'s clip is made by the app on the episode's one video link: a per-shot "
-                      "mode needs a native-speech story (Native speech, or Native speech — your own clips)")
+                      "mode needs a story whose characters speak in their clips (the spending plans \"Characters speak\")")
     if fields.get("image") is not None and not media_policy.is_v2(story):
-        errors.append(f"image: shot {shot_id}'s keyframe follows the story: a per-shot mode needs a v2 story")
+        errors.append(f"image: shot {shot_id}'s keyframe follows the story: a per-shot mode needs an animated story")
     elif fields.get("image") == video_plan.AUTO and media_policy.images_manual(story):
         errors.append(f"image: shot {shot_id}'s keyframe cannot be set to auto: this story's images are all your "
                       "own uploads (Images: manual); switch the story's images to the app first, then set the shots "
@@ -7175,7 +7175,7 @@ def story_fast_track_estimate(stories, story, *, env, readiness=None, probe_loca
         # one line rather than a second sentence repeating it.
         incl = f" incl. ${text_usd['usd']:.2f} writing" if text_usd["usd"] > 0 else ""
         message = (f"{len(pending)} part{'' if len(pending) == 1 else 's'} to do ({labels}): "
-                   f"{llm_calls} LLM calls on the free links first ($0 here), est {upto}${total:.2f}{incl} -- "
+                   f"{llm_calls} writing steps on the free services first ($0 here), est {upto}${total:.2f}{incl} -- "
                    f"{money}; about {budget['minutes']:g} min. {caps_line}").strip()
         if text_usd["calls"] and not text_usd["usd"]:
             # Calls are still pending but nothing could be priced (no keyed

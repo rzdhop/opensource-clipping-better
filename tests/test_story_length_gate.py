@@ -15,6 +15,9 @@ The fixtures are phase 3's and phase 4's (``tests/test_story_episode_steps.py``,
 ``tests/test_story_render_step.py``); offline and hermetic. The modules are
 imported inside the tests, so on the parent commit each test fails on its own.
 
+Plan 28 stage S2 (DEC-305 section 9): the refusals no longer say "v2" (an episode, a storyboard, the
+assets); every number and every way out is unchanged.
+
 Stdlib + pytest (DEC-012).
 """
 
@@ -88,7 +91,7 @@ def test_v2_render_refused_outside_window_v1_warns(store, tmp_path, built):
     message, fake = trs.refused(store, story_id, tmp_path=tmp_path)
     assert message == (
         "Episode 1 cannot be rendered: it runs 45.1 s with its voices (measured), 9.9 s under its 55–80 s "
-        "window, and a v2 episode is rendered only inside it. To lengthen it, lengthen its script (regenerate or "
+        "window, and an episode is rendered only inside it. To lengthen it, lengthen its script (regenerate or "
         "edit its shortest scenes), approve it and its storyboard again, make and approve the assets again, then "
         "render.")
     assert fake.calls == []
@@ -111,7 +114,7 @@ def test_v2_assets_approval_refused_on_the_measured_length_v1_approves(store, tm
         wf.approve_assets(store, story_id, 1, now=NOW)
     assert caught.value.code == wf.CONFLICT
     assert str(caught.value).startswith("Episode 1 runs 45.1 s with its voices (measured), 9.9 s under its 55–80 s "
-                                        "window: v2 assets are approved only inside it, never anyway.")
+                                        "window: the assets are approved only inside it, never anyway.")
 
 
 def test_a_v2_episode_inside_the_window_renders(store, tmp_path, built):
@@ -135,7 +138,7 @@ def test_the_gate_states_an_over_length_too():
     try:
         gates.episode_length = lambda *_args, **_kwargs: timing
         message = gates.length_refusal(ec, {"scenes": [{}]}, stage="script")
-        assert message == ("Episode 3's script runs 79.3 s (estimated), 4.3 s over its 55–75 s window: a v2 episode "
+        assert message == ("Episode 3's script runs 79.3 s (estimated), 4.3 s over its 55–75 s window: an episode "
                            "is approved only inside it, never anyway. To shorten it, edit or regenerate its longest "
                            "scenes (the timing flags name the lines to trim), then approve.")
         timing.update(total_s=45.1)
@@ -163,7 +166,7 @@ def test_v2_script_approval_refused_outside_the_window_never_anyway(store):
         with pytest.raises(wf.WorkflowError) as caught:
             wf.approve_script(store, story_id, 1, approve_anyway=anyway, now=NOW)
         assert str(caught.value) == (
-            "Episode 1's script runs 42.4 s (estimated), 12.6 s under its 55–80 s window: a v2 episode is approved "
+            "Episode 1's script runs 42.4 s (estimated), 12.6 s under its 55–80 s window: an episode is approved "
             "only inside it, never anyway. To lengthen it, run the script step again (its fill pass rewrites the "
             "shortest scenes), or regenerate or edit the shortest scenes with more lines, then approve.")
     assert eps._script(store, story_id)["approved_at"] is None
@@ -191,7 +194,7 @@ def test_v2_storyboard_approval_refused_outside_the_window(store):
     with pytest.raises(wf.WorkflowError) as caught:
         wf.approve_storyboard(store, v2_id, 1, now=NOW)
     assert str(caught.value).startswith("Episode 1 runs 42.4 s with its storyboard (estimated), 12.6 s under its "
-                                        "55–80 s window: a v2 storyboard is approved only inside it, never anyway.")
+                                        "55–80 s window: a storyboard is approved only inside it, never anyway.")
     assert wf.approve_storyboard(store, legacy_id, 1, now=NOW)["approved_at"] == NOW
 
 

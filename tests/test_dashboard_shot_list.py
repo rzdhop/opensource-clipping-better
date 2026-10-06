@@ -63,7 +63,7 @@ def test_the_studio_routes_the_pane_and_waits_while_clips_are_missing():
     # 2026-10-05 (plan 25 stage 3, DEC-301): the 'shots' tab opens the Handoff route, not the retired pane.
     assert "'shots'" in src and "navigate(handoffPath(storyId, ep))" in src and "id=\"episode-pane-shots\"" in src
     assert "job.status === 'awaiting_uploads'" in src
-    assert "waiting ? waitingLabel(waiting) : 'Generate episode'" in src
+    assert "waiting ? waitingLabel(waiting) : `Make episode ${ep}`" in src
     assert "return `Waiting for ${parts.join(' and ')}`" in src
     assert "budget_profile === MANUAL_PROFILE" in src and "const MANUAL_PROFILE = 'native_speech_manual'" in src
 

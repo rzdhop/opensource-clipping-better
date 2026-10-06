@@ -63,8 +63,9 @@ def test_a_premium_episode_over_the_per_episode_cap_is_refused_before_anything_i
     video = units["video"]
     assert video["speech"]["speech_link"] == "gemini/veo-3.1"
     total = video["est_usd"]
-    assert video["over_cap"] == (f"estimated ${total:.2f} over the per-episode cap $2.00; raise PER_EPISODE_CAP_USD "
-                                 "or use your own clips")
+    # DEC-305 section 9 (plan 28 S2): the plain sentence, the same two numbers and the same two ways out.
+    assert video["over_cap"] == (f"estimated ${total:.2f} is over the per-episode limit of $2.00; raise the "
+                                 "per-episode limit in Settings (Budget tab) or make the clips yourself")
     # the fast track's check before anything is bought (the hold for the keyframes lifted) refuses the whole
     from clipping.aistory.steps import fast_track
 

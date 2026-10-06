@@ -2424,7 +2424,7 @@ def clip_hold(ec, storyboard, doc):
                 f"({judge.KEYFRAMES_APPROVAL}:{ep}) and run it again to buy the clips")
     state = keyframes_state(ec, storyboard, doc)
     if state == "none":
-        return (f"approve the keyframes first ({judge.KEYFRAMES_APPROVAL}:{ep}): no clip of a v2 episode is bought "
+        return (f"approve the keyframes first ({judge.KEYFRAMES_APPROVAL}:{ep}): no clip is bought "
                 "before they are approved")
     if state == "stale":
         return (f"the keyframes changed since they were approved: approve the keyframes first "
@@ -2601,8 +2601,8 @@ def clip_target_refusal(ec, shot, *, doc=_READ, storyboard=None):
     (:func:`clip_hold` over *storyboard*, read unless given; RC-Q3)."""
     tier = clips.tier_of(ec)
     if tier < 2:
-        return (f"the story is at tier {tier}: a shot is animated only at tier 2 or 3 (set its "
-                "generation_profile.tier first).")
+        return (f"this story makes pictures with motion only (video level {tier}): a shot is animated only at video "
+                "level 2 or 3 (set it under How it's made, Advanced, first).")
     entry = open_clip_request(ec, [(shot["assets"].get("clip") or {}).get("cache_key")])
     if entry is not None:
         return still_generating(shot, entry)
@@ -4642,7 +4642,7 @@ class _Assets(voice_lines.LineMeasurement):
 
         def left():
             many = len(remaining) > 1
-            return f"the keyframe check (J2) of shot{'s' if many else ''} {_and(remaining)}"
+            return f"the keyframe check of shot{'s' if many else ''} {_and(remaining)}"
 
         try:
             self.budget.before_call(left, per_call=judge.STORY_VISION_CALL_SECONDS)
@@ -4727,7 +4727,7 @@ class _Assets(voice_lines.LineMeasurement):
         self.ctx.cancel.check()
         if not self.fits(judge.STORY_VISION_CALL_SECONDS):
             raise _FixStopped(f"the step's {int(self.budget.limit // 60)}-minute budget cannot fit the keyframe "
-                              f"check (J2) of {_and(remaining)}")
+                              f"check of {_and(remaining)}")
 
     def fix_link_info(self):
         """The episode's image link as :func:`image_quote` takes it, or None."""

@@ -84,6 +84,6 @@ def test_the_profile_card_shows_the_stories_universe_or_its_styles_default():
     src = _read(CARD)
     assert "fetchUniverses" in src
     assert "const universeId = profile.universe || (styleUniverses ? styleUniverses.default : null)" in src
-    assert "{universeEntry && (" in src and "<span className=\"form-label\">Universe</span>" in src
+    assert "{universeEntry && (" in src and "<span className=\"form-label\">Cast world</span>" in src
     assert "universeEntry.label[story.language] || universeEntry.label.en" in src
     assert "universeEntry.audience_note[story.language] || universeEntry.audience_note.en" in src

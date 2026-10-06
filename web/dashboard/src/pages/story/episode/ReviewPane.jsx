@@ -238,7 +238,7 @@ function ReviewDetail({ storyId, ep, shot, characters, assetsBlocked, busy, onCl
         {shot.warning ? (
           // Plan 28 F1: the human's own keyframe -- the check's issues are a warning, never a refusal.
           <p className="form-hint">Your own keyframe. {shot.warning}</p>
-        ) : shot.verdict.issue && <p className="form-hint">Keyframe check (J2): {shot.verdict.issue}</p>}
+        ) : shot.verdict.issue && <p className="form-hint">Keyframe check: {shot.verdict.issue}</p>}
         {shot.fix && (
           <p className="form-hint">
             Auto-fix: {plural(shot.fix.redraws, 'redraw')}, ${formatUsd(shot.fix.spent_usd)}

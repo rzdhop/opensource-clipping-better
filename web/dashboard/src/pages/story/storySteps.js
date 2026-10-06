@@ -31,6 +31,21 @@ export function stepsFor(story) {
   return STEPS.filter((s) => s.key !== 'knowledge' || v2)
 }
 
+// Plan 28 stage S2: what a story job is called on screen (its step id and target stay in the API).
+const JOB_LABELS = {
+  concepts: 'Concepts', bible: 'Bible', style_preview: 'Style preview', cast: 'Cast',
+  places_proposal: 'Places proposal', places: 'Places & props', season: 'Season', knowledge: 'Knowledge base',
+  script: 'Script', storyboard: 'Storyboard', assets: 'Pictures and clips', render: 'Render', rerender: 'Render',
+  metadata: 'Title and description', regenerate: 'Make again', 'fast-track': 'Make the episode',
+  'story-fast-track': 'Agent run',
+}
+
+/** "Cast", "Make again": a job's step as a person reads it. */
+export function jobLabel(job) {
+  if (!job) return ''
+  return JOB_LABELS[job.step] || String(job.step || 'Step').replace(/[_-]+/g, ' ')
+}
+
 export function stepLabel(key) {
   return (STEPS.find((s) => s.key === key) || { label: key }).label
 }

@@ -1010,7 +1010,7 @@ def test_the_key_gate_comes_before_the_image_gate_and_both_before_the_queue(api)
     story_id = _story(api.store)
     _settings(api, dict(NO_EDITOR, GOOGLE_API_KEY=""))
     response = _post_step(api, story_id, "cast", CAST_PARAMS)
-    assert response.status_code == 400 and "No link in the LLM chain has an API key" in response.json()["detail"]
+    assert response.status_code == 400 and "None of the writing services has an API key" in response.json()["detail"]
     _settings(api, NO_EDITOR)
     api.monkeypatch.setenv("MAX_QUEUED_JOBS", "1")
     _job(api, _story(api.store), "concepts")  # another story's job fills the queue

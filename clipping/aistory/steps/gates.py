@@ -96,15 +96,15 @@ def length_refusal(ec, script, board=None, *, stage):
     fix = (_LENGTHEN if under else _SHORTEN)[stage]
     verb = "lengthen" if under else "shorten"
     if stage == "script":
-        return (f"Episode {ec.ep}'s script runs {total:.1f} s ({how}), {where}: a v2 episode is approved only "
+        return (f"Episode {ec.ep}'s script runs {total:.1f} s ({how}), {where}: an episode is approved only "
                 f"inside it, never anyway. To {verb} it, {fix}.")
     if stage == "storyboard":
-        return (f"Episode {ep} runs {total:.1f} s with its storyboard ({how}), {where}: a v2 storyboard is "
+        return (f"Episode {ep} runs {total:.1f} s with its storyboard ({how}), {where}: a storyboard is "
                 f"approved only inside it, never anyway. To {verb} the episode, {fix}.")
     if stage == "assets":
-        return (f"Episode {ep} runs {total:.1f} s with its voices ({how}), {where}: v2 assets are approved only "
+        return (f"Episode {ep} runs {total:.1f} s with its voices ({how}), {where}: the assets are approved only "
                 f"inside it, never anyway. To {verb} the episode, {fix}.")
-    return (f"Episode {ep} cannot be rendered: it runs {total:.1f} s with its voices ({how}), {where}, and a v2 "
+    return (f"Episode {ep} cannot be rendered: it runs {total:.1f} s with its voices ({how}), {where}, and an "
             f"episode is rendered only inside it. To {verb} it, {fix}.")
 
 

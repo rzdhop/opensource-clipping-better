@@ -1070,7 +1070,7 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     try:
         settings = budget_mod.profile_settings(profile_name)
     except (OSError, ValueError, KeyError) as exc:
-        return stop(f"No clip can be planned: the {profile_name} budget profile cannot be read ({exc}).",
+        return stop(f"No clip can be planned: the {_plan_name(profile_name)} spending plan cannot be read ({exc}).",
                     reason=str(exc))
 
     if all(entry["keep_still"] for entry in flags.values()):
@@ -1121,14 +1121,14 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         if link.startswith("local/"):
             status = local_status() if route != "api" else None
             if status is None:
-                refusal = "it is local and the story's route is api"
+                refusal = "it runs on this computer and the story is set to use paid services only"
             elif not status["ok"]:
                 refusal = status["note"]
             units.update(template=(status or {}).get("template"), profile=(status or {}).get("profile"))
         else:
             row = next((item for item in rows if item["link"] == link), None)
             if route == "local":
-                refusal = "it is hosted and the story's route is local"
+                refusal = "it is a paid service and the story is set to use this computer only"
             elif row is None:
                 refusal = f"it is not a link of {gen.ENV_NAMES[gen.VIDEO]} any more"
             elif row["status"] != "keyed":
@@ -1140,7 +1140,7 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
             return stop(f"Episode {ec.ep}'s video link {link} cannot serve now: {refusal}. An episode keeps its "
                         "clips on one link, so no other link is planned.", reason=refusal)
     elif local_only:
-        status = local_status() if route != "api" else {"ok": False, "note": "the story's route is api"}
+        status = local_status() if route != "api" else {"ok": False, "note": "the story is set to use paid services only"}
         if status["ok"]:
             link, units["source"] = LOCAL_LINK, "policy"
             units.update(template=status["template"], profile=status["profile"])
@@ -1187,14 +1187,14 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         if local_only:
             pinned = [shot["shot_id"] for shot in shots
                       if flags[shot["shot_id"]]["animate"] and not flags[shot["shot_id"]]["keep_still"]]
-            message = (f"No clip is planned: the {profile_name} budget profile animates a shot only on your own "
-                       f"hardware, at $0 ({refusal}).")
+            message = (f"No clip is planned: the {_plan_name(profile_name)} spending plan animates a shot only on your "
+                       f"own computer, at $0 ({refusal}).")
             if not pinned:
                 units.update(still=_still_rows(shots, flags, "mode_none"), message=message)
                 return units
             return stop(f"{message} Pinned shot{_s(len(pinned))} {_and(pinned)} cannot be animated: bring a local "
-                        "ComfyUI, or choose the one_dollar or quality budget profile.", reason=refusal)
-        return stop(f"No clip can be made on route {route}: {refusal}.", reason=refusal)
+                        "ComfyUI, or choose the About $1 or Quality spending plan.", reason=refusal)
+        return stop(f"No clip can be made {_ROUTE_WORDS.get(route, route)}: {refusal}.", reason=refusal)
 
     # --- the plan
     lengths = None
@@ -1362,7 +1362,7 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
     if not count:
         if plan.selected:
             return f"Every planned shot has its current clip on {link}: $0.00{lip}{tail}.{_lipsync_note(units)}"
-        return (f"No clip is planned: the {profile_name} budget profile animates no shot on {link} "
+        return (f"No clip is planned: the {_plan_name(profile_name)} spending plan animates no shot "
                 f"(mode {units['mode']}); pin one to animate it{tail}.")
     clips = f"{count} clip{_s(count)} ({seconds} s) on {link}"
     if units["route_class"] == "local":
@@ -1383,8 +1383,8 @@ def _message(units, plan, current_ids, profile_name, booked_ids=(), *, resolutio
                  "own voice)." if ambience["sound"] else f" {ambience['note']}.")
     elif units["tier"] == 3 and video_providers.AUDIO.get(link) == "never":
         # A-108: before any clip is bought, not only at the render's note.
-        text += (f" Tier 3 keeps a clip's own sound, but {link} makes clips with none: every shot is rendered as at "
-                 "tier 2, its lines spoken.")
+        text += (f" Clips keep their own sound, but {link} makes clips with none: every shot is rendered with its "
+                 "lines spoken by their voices instead.")
     if units["over_cap"]:
         text += f" Over the cap: {units['over_cap']}."
     if units["refused"]:
@@ -1440,11 +1440,22 @@ def link_row(label, merged, adapters, *, resolution=None, aspect=None) -> dict:
     return row
 
 
+# Plan 28 stage S2 (DEC-305 section 9): the budget profiles and routes as the human reads them.
+_PLAN_NAMES = {"free": "Free", "one_dollar": "About $1 per episode", "quality": "Quality",
+               "native_speech": "Characters speak in paid clips", "native_speech_manual": "Your own clips"}
+_ROUTE_WORDS = {"local": "on this computer", "api": "on paid services", "auto": "automatically"}
+
+
+def _plan_name(profile_name) -> str:
+    """A budget profile's id as the spending plan the Settings page names."""
+    return _PLAN_NAMES.get(profile_name, profile_name)
+
+
 def over_cap_sentence(total_usd, cap_usd) -> str:
     """The native-speech plan's refusal over the per-episode cap (plan 22),
     with the numbers and the two ways out."""
-    return (f"estimated ${total_usd:.2f} over the per-episode cap ${cap_usd:.2f}; raise PER_EPISODE_CAP_USD or use "
-            "your own clips")
+    return (f"estimated ${total_usd:.2f} is over the per-episode limit of ${cap_usd:.2f}; raise the per-episode limit "
+            "in Settings (Budget tab) or make the clips yourself")
 
 
 def retake_budget(ec, assets_doc) -> dict:

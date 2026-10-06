@@ -361,7 +361,7 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
       </div>
 
       <div className="form-group">
-        <label className="form-label">Consistency mode</label>
+        <label className="form-label">How characters stay the same from shot to shot</label>
         <div className="story-segmented">
           {['references', 'prompt_only'].map((mode) => (
             <button
@@ -371,13 +371,13 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
               onClick={() => setConsistencyMode(mode)}
               disabled={locked || busy}
             >
-              {mode === 'references' ? 'References' : 'Prompt only'}
+              {mode === 'references' ? 'Reference pictures' : 'Words only'}
             </button>
           ))}
         </div>
         {consistencyMode === 'prompt_only' && (
           <p className="form-hint">
-            A degraded mode: shots are prompted without reference images, so characters
+            A weaker option: shots are described in words only, without reference pictures, so characters
             and places may drift slightly across shots.
           </p>
         )}
@@ -477,7 +477,7 @@ function PreviewStrip({ storyId, stylePreview, estimate, onGenerate, error, erro
 
       {myJob && liveJob && (
         liveJob.status === 'queued'
-          ? <p className="form-hint">queued — waiting for the worker</p>
+          ? <p className="form-hint">Waiting to start…</p>
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
       )}
 

@@ -224,7 +224,7 @@ def test_a_legacy_story_is_never_given_a_look_or_a_dossier(wf, stories):
     for fields in ({"look": LOOK}, {"dossier": DOSSIER}):
         detail = _refused(wf, wf.CONFLICT, wf.patch_entity, stories, story_id, "characters", "char_kiwilo",
                           fields, now=LATER)
-        assert "v2" in detail
+        assert "animated story" in detail  # DEC-305 section 9: plain words
     _refused(wf, wf.CONFLICT, wf.patch_entity, stories, story_id, "places", "place_plage",
              {"look": PLACE_LOOK}, now=LATER)
     _refused(wf, wf.CONFLICT, wf.patch_entity, stories, story_id, "props", "prop_coco",

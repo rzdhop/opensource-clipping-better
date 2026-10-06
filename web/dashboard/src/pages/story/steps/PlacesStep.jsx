@@ -780,10 +780,10 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
 
   const switchToPromptOnly = async () => {
     if (!(await confirm({
-      title: 'Switch this story to prompt-only consistency?',
-      message: 'Shots will be prompted without reference images, so ' +
+      title: 'Describe the characters in words only?',
+      message: 'Shots will be described in words only, without reference pictures, so ' +
         'characters and places may drift slightly across shots. This cannot be undone from here.',
-      confirmLabel: 'Switch to prompt-only',
+      confirmLabel: 'Use words only',
     }))) return
     setSwitching(true)
     setError('')
@@ -802,8 +802,8 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
       <h4 className="card-title">Some time variants need an editor</h4>
       <p>{(editReadiness && editReadiness.message) || 'No editor can make the missing variants right now.'}</p>
       <ul className="story-field-list">
-        <li>Set up local ComfyUI — see Settings → Local hardware.</li>
-        <li>Allow paid generation — see Settings → Budget.</li>
+        <li>Set up ComfyUI on this computer — see Settings → Local hardware.</li>
+        <li>Allow paid services — see Settings → Budget.</li>
       </ul>
       <div className="story-step-actions">
         <button
@@ -812,7 +812,7 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
           onClick={switchToPromptOnly}
           disabled={disabled || switching}
         >
-          {switching ? 'Switching…' : 'Switch this story to prompt-only consistency'}
+          {switching ? 'Switching…' : 'Describe the characters in words only'}
         </button>
       </div>
       <StepError message={error} className="story-step-error" />
@@ -953,7 +953,7 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange: onCha
           : <NoProposalYet storyId={storyId} onChange={onChange} />}
         {myJob && liveJob && (
           liveJob.status === 'queued'
-            ? <p className="form-hint">queued — waiting for the worker</p>
+            ? <p className="form-hint">Waiting to start…</p>
             : <LiveActivity job={liveJob} events={events} streamState={streamState} />
         )}
       </div>
@@ -984,7 +984,7 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange: onCha
 
       {myJob && liveJob && (
         liveJob.status === 'queued'
-          ? <p className="form-hint">queued — waiting for the worker</p>
+          ? <p className="form-hint">Waiting to start…</p>
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
       )}
 

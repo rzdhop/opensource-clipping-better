@@ -94,7 +94,7 @@ function StoryboardHeader({ storyId, ep, episode, busy, onChange }) {
           disabled={Boolean(reason) || runningFast || runningPlan}
           title={reason || undefined}
         >
-          {runningFast ? <><span className="spinner"></span> Building…</> : hasStoryboard ? 'Rebuild fast' : 'Fast (no calls)'}
+          {runningFast ? <><span className="spinner"></span> Building…</> : hasStoryboard ? 'Quick plan again' : 'Quick plan (free)'}
         </button>
         <button
           type="button"
@@ -103,7 +103,7 @@ function StoryboardHeader({ storyId, ep, episode, busy, onChange }) {
           disabled={Boolean(reason) || runningFast || runningPlan}
           title={reason || undefined}
         >
-          {runningPlan ? <><span className="spinner"></span> Planning…</> : hasStoryboard ? 'Plan remaining with T1' : 'Plan shots'}
+          {runningPlan ? <><span className="spinner"></span> Planning…</> : hasStoryboard ? 'Plan the rest' : 'Plan shots'}
         </button>
         <EstimateChip estimate={estimate} />
         {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
@@ -113,7 +113,7 @@ function StoryboardHeader({ storyId, ep, episode, busy, onChange }) {
         <p className="form-hint">
           {toRedo.length === 0
             ? 'Every scene is planned and current.'
-            : `Rebuild fast redoes every scene; Plan remaining with T1 redoes scene${toRedo.length === 1 ? '' : 's'} ${toRedo.join(', ')}.`}
+            : `Quick plan again redoes every scene; Plan the rest redoes scene${toRedo.length === 1 ? '' : 's'} ${toRedo.join(', ')}.`}
         </p>
       )}
       <StepError message={error} errors={errors} className="story-step-error" />
@@ -179,7 +179,7 @@ function SceneHeader({ scene, boardEntry, places }) {
         {place ? place.name : scene.place_id}{scene.time_variant ? ` · ${scene.time_variant}` : ''}
       </span>
       {boardEntry && (
-        <span className="chip" title="How these shots were planned">{boardEntry.source === 't1' ? 'T1' : 'fast'}</span>
+        <span className="chip" title="How these shots were planned">{boardEntry.source === 't1' ? 'Planned by the app' : 'Quick plan'}</span>
       )}
       {boardEntry && boardEntry.stale && <span className="chip chip-warn">stale</span>}
     </div>

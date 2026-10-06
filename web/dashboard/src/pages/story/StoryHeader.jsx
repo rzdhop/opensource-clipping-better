@@ -4,9 +4,19 @@ import { fetchStoryCoverUrl, styleNameOf } from '../../api'
 import { Button, Chip, Spinner } from '../../ui'
 import { ArrowRight, ChevronDown, Film, SlidersHorizontal } from '../../ui/icons'
 import GenerationProfileCard, { pricedEpisode } from './GenerationProfileCard'
-import { stepLabel, stepOfJob, stepsFor } from './storySteps'
+import { jobLabel, stepLabel, stepOfJob, stepsFor } from './storySteps'
 
-const BUDGET_LABELS = { free: 'Free', one_dollar: '$1 / ep.', quality: 'Quality' }
+/**
+ * Plan 28 stage S2 (DEC-305 section 9): who makes the clips, in words -- the summary the header shows
+ * instead of the tier, the route and the budget profile.
+ */
+export function howMadeSummary(profile) {
+  if (profile.budget_profile === 'native_speech_manual') return 'Your own clips'
+  const animated = profile.tier >= 2
+  if (animated && profile.budget_profile === 'one_dollar') return 'Key shots animated'
+  if (animated && (profile.budget_profile === 'quality' || profile.budget_profile === 'native_speech')) return 'App-made clips'
+  return 'Pictures with motion'
+}
 
 /** The style's palette as a gradient, for a story with no portrait yet (as the stories list does). */
 function swatchBackground(styles, templateId) {
@@ -53,8 +63,8 @@ function HeaderCover({ storyId, story, characters, styles }) {
 }
 
 /**
- * The Visual tier card behind a header button: a non-modal popover. It stays
- * mounted while closed, so a refused pipeline switch's "Regenerate on v2"
+ * The "How it's made" card behind a header button: a non-modal popover. It stays
+ * mounted while closed, so a refused switch's "Regenerate"
  * offer and the per-route estimates survive closing it. Escape or a click
  * outside closes it; focus goes back to the button.
  */
@@ -84,7 +94,7 @@ function VisualTierPopover({ storyId, story, nextEp, onChange }) {
     }
   }
 
-  const summary = `Tier ${profile.tier} · ${profile.route} · ${BUDGET_LABELS[profile.budget_profile] || profile.budget_profile}`
+  const summary = howMadeSummary(profile)
 
   return (
     <div className="story-tier" ref={rootRef} onKeyDown={onKeyDown}>
@@ -97,9 +107,9 @@ function VisualTierPopover({ storyId, story, nextEp, onChange }) {
         aria-controls={panelId}
         aria-haspopup="dialog"
         onClick={() => setOpen((value) => !value)}
-        title="Visual tier: tier, route and budget profile"
+        title="How this story is made: who makes the clips and the images"
       >
-        <span className="story-tier-label">Visual tier</span>
+        <span className="story-tier-label">How it's made</span>
         <span className="story-tier-summary">{summary}</span>
       </Button>
       <div
@@ -107,7 +117,7 @@ function VisualTierPopover({ storyId, story, nextEp, onChange }) {
         ref={panelRef}
         className="story-tier-panel"
         role="dialog"
-        aria-label="Visual tier"
+        aria-label="How this story is made"
         tabIndex={-1}
         hidden={!open}
       >
@@ -144,7 +154,7 @@ function useHeaderHeightVar(ref) {
 
 /**
  * The workspace's sticky header: the cover, the title, the story's chips,
- * the Visual tier popover and the one primary action -- the episode page once
+ * the "How it's made" popover and the one primary action -- the episode page once
  * the story is ready, else the step to do next.
  */
 export default function StoryHeader({ storyId, data, styles, allDone, currentKey, activeKey, inFlightJob, onChange }) {
@@ -189,11 +199,11 @@ export default function StoryHeader({ storyId, data, styles, allDone, currentKey
           <Chip>{story.language === 'fr' ? 'Français' : 'English'}</Chip>
           {story.style_template_id && <Chip>{styleNameOf(styles, story.style_template_id)}</Chip>}
           {isV2 && <Chip tone="accent">Animated</Chip>}
-          <Chip>Tier {story.generation_profile.tier}</Chip>
+          <Chip>{howMadeSummary(story.generation_profile)}</Chip>
           {inFlightJob && !runningStep && (
             <Chip tone="warning">
               <Spinner size={12} />
-              {inFlightJob.step} {inFlightJob.status === 'queued' ? 'queued' : 'running'}
+              {jobLabel(inFlightJob)} {inFlightJob.status === 'queued' ? 'waiting' : 'running'}
             </Chip>
           )}
         </div>

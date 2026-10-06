@@ -12,7 +12,8 @@ import test_story_assets_step as tas
 import test_story_clip_estimate as tce
 from test_story_assets_step import hermetic, store  # noqa: F401 -- stage 8's fixtures, used as they are
 
-SILENT = "keeps a clip's own sound, but fal/seedance-1-pro-fast makes clips with none"
+# DEC-305 section 9 (plan 28 S2): "Tier 3 keeps" became "Clips keep"; the same meaning, no tier.
+SILENT = "Clips keep their own sound, but fal/seedance-1-pro-fast makes clips with none"
 
 
 def test_a_tier_3_estimate_on_a_silent_link_says_it_falls_back(store, tmp_path):
@@ -22,7 +23,7 @@ def test_a_tier_3_estimate_on_a_silent_link_says_it_falls_back(store, tmp_path):
     video = tce._units(store, story_id, tce._settings(ALLOW_PAID="1"))["video"]
 
     assert video["link"] == tce.SEEDANCE and video["plan"]
-    assert SILENT in video["message"] and "rendered as at tier 2" in video["message"]
+    assert SILENT in video["message"] and "rendered with its lines spoken by their voices instead" in video["message"]
 
 
 def test_a_tier_2_estimate_says_nothing_of_sound(store, tmp_path):

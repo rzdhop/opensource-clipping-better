@@ -271,11 +271,11 @@ function ShotClipBlock({ storyId, ep, shotId, clip, tier, busy, onChange }) {
             onChange={(e) => toggleNativeAudio(e.target.checked)}
             disabled={busy || actionBusy}
           />
-          Keep native audio
+          Keep the clip's own sound
         </label>
       )}
       {tier === 3 && NO_AUDIO_LINK_RE.test(clip.link || '') && (
-        <p className="form-hint">seedance and kling clips have no sound; the line is kept</p>
+        <p className="form-hint">this clip provider makes clips with no sound; the line is kept</p>
       )}
       <StepError message={actionError} />
       <ClipRegenerate storyId={storyId} ep={ep} clip={clip} disabled={busy || actionBusy || Boolean(regenerateReason)} onChange={onChange} />

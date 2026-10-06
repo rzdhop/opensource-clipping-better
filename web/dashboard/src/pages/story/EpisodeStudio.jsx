@@ -15,6 +15,7 @@ import { handoffLinks, handoffPath } from './episode/HandoffPage'
 import { GenerateClipsButton, GenerateWarnings } from './episode/HandoffCard'
 import EpisodeStepper, { episodeSteps, stepOfJob } from './episode/EpisodeStepper'
 import { imagesManual } from './ManualUploadSlot'
+import { jobLabel } from './storySteps'
 
 // A cap is a round figure: two decimals, as the fast track's own caps line.
 function fmtCap(value) {
@@ -207,27 +208,27 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onCh
     const v2 = Boolean(kf.v2)
     const fix = Number(kf.fix_usd) || 0
     const lines = [
-      `Generate episode ${ep} — the whole thing, up to the finished render?`,
-      `Script: ${plural(est.llm_calls.script, 'LLM call')} · Storyboard: ${plural(est.llm_calls.storyboard, 'T1 call')}` +
-        ` · Metadata: ${plural(est.llm_calls.metadata, 'M1 call')}`,
+      `Make episode ${ep} — the whole thing, up to the finished video?`,
+      `Writing: script ${plural(est.llm_calls.script, 'step')} · shot plan ${plural(est.llm_calls.storyboard, 'step')}` +
+        ` · title and description ${plural(est.llm_calls.metadata, 'step')}`,
       `${v2 ? 'Keyframes' : 'Images'}: ${plural(est.images.count, 'shot image')}, est. $${formatUsd(est.images.est_usd)}` +
-        (v2 ? ` — each checked (J2)${fix > 0
+        (v2 ? ` — each one checked${fix > 0
           ? `, flagged ones redrawn automatically (up to $${formatUsd(fix)} more)`
-          : ', flagged ones redrawn automatically when the profile allows it'}` : ''),
+          : ', flagged ones redrawn automatically when the spending plan allows it'}` : ''),
       `Voices: ${plural(est.tts.lines, 'line')} / ${est.tts.chars} chars, est. $${formatUsd(est.tts.est_usd)}`,
     ]
     if (est.video) {
       lines.push(est.video.count != null
-        ? `Clips: ${plural(est.video.count, 'clip')} (${est.video.seconds} s) on ${est.video.link || 'the video link'}, ` +
+        ? `Clips: ${plural(est.video.count, 'clip')} (${est.video.seconds} s), ` +
           `est. $${formatUsd(est.video.est_usd)}${est.video.basis === 'plan' ? ' (from the plan)' : ''}`
-        : 'Clips: planned once the storyboard is approved; the paid check prices them before any is bought')
+        : 'Clips: planned once the shot plan is approved; their price is checked before any is bought')
     }
     lines.push(`Render: about ${est.render.minutes} min`)
     const caps = capsText(est.paid.caps)
     lines.push(`Total: est. $${formatUsd(est.est_usd)}${caps ? ` — caps: ${caps}` : ''}`)
     if (v2 && kf.tier >= 2) {
       lines.push(stop
-        ? 'It stops once the keyframes are made and checked (J2), for your review; the clips are bought after you approve them.'
+        ? 'It stops once the keyframes are made and checked, for your review; the clips are bought after you approve them.'
         : 'No stop for keyframe review — this click approves the keyframes (when every check passes; a shot that does not match stops it) and the assets for you; you review the finished episode.')
     }
     if (v2) {
@@ -243,9 +244,9 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onCh
   const handleRun = async () => {
     if (!estimate) return
     const confirmed = await confirm({
-      title: `Generate episode ${ep}`,
+      title: `Make episode ${ep}`,
       message: confirmMessage(estimate, stopAtKeyframes, stopOnScriptIssues),
-      confirmLabel: 'Generate episode',
+      confirmLabel: `Make episode ${ep}`,
     })
     if (!confirmed) return
     setRunning(true)
@@ -283,10 +284,10 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onCh
         >
           {generating ? (
             <>
-              <span className="spinner"></span> Generating…
+              <span className="spinner"></span> Making…
               {progress ? ` ${progress.number}/${progress.total} ${progress.label}` : ''}
             </>
-          ) : waiting ? waitingLabel(waiting) : 'Generate episode'}
+          ) : waiting ? waitingLabel(waiting) : `Make episode ${ep}`}
         </button>
         {estimateError ? (
           <span className="chip chip-warn chip-wrap">{estimateError}</span>
@@ -324,7 +325,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onCh
         Stop at the script if its repairs leave issues
       </label>
       <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
-        storyId={storyId} retryLabel="Generate episode" className="story-step-error" />
+        storyId={storyId} retryLabel={`Make episode ${ep}`} className="story-step-error" />
     </div>
   )
 }
@@ -558,14 +559,14 @@ export default function EpisodeStudio() {
 
       {inFlightJob && liveJob ? (
         liveJob.status === 'queued'
-          ? <p className="form-hint">queued — waiting for the worker</p>
+          ? <p className="form-hint">Waiting to start…</p>
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
       ) : stoppedJob && (
         // The stop reason, visible on this first screen without scrolling
         // (phase-4 follow-up, plan 11 stage 11) -- kept until a new step
         // starts (the effect above) or the human dismisses it.
         <div className="card episode-studio-stopped">
-          <StepError message={`${stoppedJob.step || 'The step'} stopped: ${stoppedJob.error}`} />
+          <StepError message={`${jobLabel(stoppedJob)} stopped: ${stoppedJob.error}`} />
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStoppedJob(null)}>
             Dismiss
           </button>
@@ -591,7 +592,7 @@ export default function EpisodeStudio() {
           {episode.storyboard && (
             <p className="episode-studio-handoff" id="episode-pane-shots">
               <Link to={handoffPath(storyId, ep)}>Handoff →</Link>
-              <span className="form-hint"> prompts, modes and uploads, shot by shot</span>
+              <span className="form-hint"> the prompts to copy and the clips to upload, shot by shot</span>
             </p>
           )}
           <section className="episode-studio-pane episode-studio-pane-wide" id="episode-pane-preview">

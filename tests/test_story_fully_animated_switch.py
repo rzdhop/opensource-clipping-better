@@ -70,7 +70,7 @@ def test_a_scripted_story_keeps_its_pipeline(store):
     detail = info.value.detail
     assert detail["code"] == "pipeline_switch_has_scripts" and detail["episodes"] == [1]
     assert "episode 1 already has a script" in detail["message"] and "new story" in detail["message"]
-    assert ("Regenerate the episode on the v2 pipeline (its script, storyboard, images, clips and render are "
+    assert ("Regenerate the episode on the animated format (its script, storyboard, images, clips and render are "
             "archived), or create a new story.") in detail["message"]
     assert str(info.value) == detail["message"]  # what the CLI prints
     assert "pipeline" not in store.get(story_id)["generation_profile"]

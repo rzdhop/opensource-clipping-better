@@ -467,7 +467,7 @@ def test_one_step_at_a_time_then_the_gates_then_the_queue(api, episodes):
     _settings(api, {**tas._settings(), "GOOGLE_API_KEY": ""})
     for step in ("metadata", "fast-track"):
         response = _post_step(api, story_id, step, ep=1)
-        assert response.status_code == 400 and "No link in the LLM chain has an API key" in response.json()["detail"]
+        assert response.status_code == 400 and "None of the writing services has an API key" in response.json()["detail"]
     response = _post_step(api, story_id, "render", ep=1)
     assert response.status_code == 201, response.text
     api.jobs.set_status(response.json()["id"], JobStatus.FAILED)

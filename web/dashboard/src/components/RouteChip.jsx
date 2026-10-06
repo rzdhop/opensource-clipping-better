@@ -31,11 +31,10 @@ export default function RouteChip({ routeClass, link }) {
   return (
     <span
       className={`chip${routeClass === 'blocked' ? ' chip-warn' : ''}`}
-      title={link || undefined}
+      title={link ? `Made on ${link}` : undefined}
     >
       {Icon && <Icon size={12} aria-hidden="true" />}
       {label}
-      {link && <span className="chip-sub" title={link}>{link}</span>}
     </span>
   )
 }

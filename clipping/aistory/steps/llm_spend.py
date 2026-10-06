@@ -242,7 +242,7 @@ class Meter:
                             f"+ {self.cap} out)")
             runnable.append(link)
         if not any(keys.get(link.provider) for link in runnable):
-            reason = "no keyed link of the LLM chain may run: " + "; ".join(why for _label, why in self.refused)
+            reason = "no writing service with a key may run: " + "; ".join(why for _label, why in self.refused)
             raise StepFailed(f"{self.prompt_id}: {reason}", reason=reason)
         return runnable
 

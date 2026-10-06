@@ -331,7 +331,7 @@ export function ActivityConsole({ events, live = false }) {
         ref={boxRef}
         onScroll={onScroll}
         role="region"
-        aria-label="Pipeline output"
+        aria-label="What the app did"
         tabIndex={0}
       >
         {live && (
@@ -447,7 +447,7 @@ export function LiveActivity({ job, events, streamState }) {
       {quiet && (
         <p className="activity-quiet">
           Nothing printed for {formatDuration(sinceSignal)}. This step is a single
-          long call — an AI request on its retry ladder, a model download, or one
+          long call — an AI request that is retrying, a model download, or one
           clip encoding. It is still running.
         </p>
       )}
@@ -455,7 +455,7 @@ export function LiveActivity({ job, events, streamState }) {
       {events.length > 0 && (
         <>
           <div className="activity-console-header">
-            <span>Pipeline output ({events.length} lines)</span>
+            <span>What the app did ({events.length} lines)</span>
             <IconButton icon={Copy} size="sm" aria-label="Copy log" onClick={copyLog} />
           </div>
           <ActivityConsole events={events} live={running} />

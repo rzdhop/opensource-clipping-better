@@ -477,8 +477,8 @@ def new_props_line(created) -> str:
     names = ", ".join(doc["name"] for doc in created)
     count = len(created)
     usd = pricing.PRICES[PROP_IMAGE_LINK].usd * count
-    return (f"🧩 {count} new prop(s) registered: {names}. Their text (R1, R1 v2) and image come with the next places "
-            f"step run: about {count} image(s) on {PROP_IMAGE_LINK}, ≈ ${usd:.2f}. Approve them there (the story is "
+    return (f"🧩 {count} new prop(s) registered: {names}. Their text and image come with the next places "
+            f"step run: about {count} image(s), ≈ ${usd:.2f}. Approve them there (the story is "
             "not ready until they are), then approve the knowledge base.")
 
 

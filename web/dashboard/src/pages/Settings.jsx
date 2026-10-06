@@ -126,11 +126,17 @@ const ENDPOINT_PRESETS = [
 // The four tabs of spec 8.6. The last one opened is remembered per browser.
 const SETTINGS_TABS = [
   { id: 'providers', icon: KeyRound, label: 'Providers' },
-  { id: 'generation', icon: Palette, label: 'Generation' },
+  { id: 'generation', icon: Palette, label: 'Images, video & voices' },
   { id: 'hardware', icon: Cpu, label: 'Local hardware' },
   { id: 'budget', icon: Wallet, label: 'Budget' },
 ]
 const TAB_KEY = 'rzc_settings_tab'
+
+// Plan 28 stage S2: the spending plans (the budget profile ids) as the Budget tab says them.
+const SPENDING_PLAN_NAMES = {
+  free: 'Free', one_dollar: 'About $1 per episode', quality: 'Quality (paid, every shot animated)',
+  native_speech: 'Quality, characters speak in their clips', native_speech_manual: 'Your own clips',
+}
 
 function readTab() {
   // A link to "/settings#budget" (the refusal panel's "Budget settings") opens that tab.
@@ -548,7 +554,7 @@ function Settings() {
       <div className="page-header">
         <div>
           <h2>Settings</h2>
-          <p>Configure API keys and default settings</p>
+          <p>Your keys, how pictures and voices are made, and how much the app may spend</p>
         </div>
       </div>
 
@@ -559,19 +565,19 @@ function Settings() {
           <div className="settings-grid" role="tabpanel" id="settings-panel-providers" aria-labelledby="settings-tab-providers">
           {/* API keys */}
           <Card className="settings-card">
-            <CardHeader icon={KeyRound} title="API keys" subtitle="The analysis chain, voice-over, B-roll and diarization." />
+            <CardHeader icon={KeyRound} title="API keys" subtitle="The keys that let the app analyse your videos, speak and find extra footage." />
             <CardBody>
             <KeyField
               id="settings-groq-key"
               label="Groq API Key"
-              note="first link in the chain"
+              note="tried first"
               isSet={settings?.groq_api_key_set}
               tested={isTested('groq_api_key')}
               value={groqKey}
               onChange={setGroqKey}
               placeholder="Paste your Groq API key"
               hint={<>
-                Free, and by far the fastest tier — analysis finishes in seconds
+                Free, and by far the fastest option — analysis finishes in seconds
                 rather than minutes.{' '}
                 <a href="https://console.groq.com/keys" target="_blank" rel="noopener" style={linkStyle}>Get a key →</a>
               </>}
@@ -580,7 +586,7 @@ function Settings() {
             <KeyField
               id="settings-nvidia-key"
               label="NVIDIA API Key"
-              note="last link, the floor"
+              note="tried last, slow"
               isSet={settings?.nvidia_api_key_set}
               tested={isTested('nvidia_api_key')}
               value={nvidiaKey}
@@ -603,9 +609,9 @@ function Settings() {
                 aria-describedby="settings-allow-slow-chain-hint"
               />
               <span>
-                Run on the slow chain anyway
+                Run on the slow service anyway
                 <span className="form-hint" id="settings-allow-slow-chain-hint">
-                  Lets a job start when NVIDIA is the only keyed link. Expect
+                  Lets a job start when NVIDIA is the only key you added. Expect
                   the analysis to take tens of minutes, and windows to be
                   skipped when the time budget runs out.
                 </span>
@@ -639,25 +645,25 @@ function Settings() {
             <KeyField
               id="settings-openrouter-key"
               label="OpenRouter API Key"
-              note="optional chain link"
+              note="optional"
               isSet={settings?.openrouter_api_key_set}
               tested={isTested('openrouter_api_key')}
               value={openrouterKey}
               onChange={setOpenrouterKey}
-              placeholder="Only needed if your chain names openrouter/..."
-              hint="Not in the default chain. Add it with LLM_CHAIN or --llm-chain."
+              placeholder="Only needed if you use OpenRouter"
+              hint="Not used unless you add it to the list of analysis services."
             />
 
             <KeyField
               id="settings-mistral-key"
               label="Mistral API Key"
-              note="optional chain link"
+              note="optional"
               isSet={settings?.mistral_api_key_set}
               tested={isTested('mistral_api_key')}
               value={mistralKey}
               onChange={setMistralKey}
-              placeholder="Only needed if your chain names mistral/..."
-              hint="Also used by the hosted transcription chain (mistral/voxtral-mini-latest)."
+              placeholder="Only needed if you use Mistral"
+              hint="Also used to turn speech into text, when you choose it."
             />
 
             <KeyField
@@ -673,7 +679,7 @@ function Settings() {
           </Card>
           {/* Chain test */}
           <Card className="settings-card">
-            <CardHeader icon={Brain} title="Provider chain" subtitle="Would a job on these keys work?" />
+            <CardHeader icon={Brain} title="Check my keys" subtitle="Tests that the keys above can really analyse a video." />
             <CardBody>
             <p className="form-hint settings-card-lead">
               Sends every keyed link one small real analysis request (a short
@@ -685,13 +691,13 @@ function Settings() {
             <button type="button" className="btn btn-secondary" onClick={handleTestChain} disabled={testing}>
               {testing
                 ? <><span className="spinner"></span> Testing… {testElapsed}s</>
-                : 'Test provider chain'}
+                : 'Test my keys'}
             </button>
             {testing && testElapsed >= 20 && (
               <p className="form-hint" style={{ marginTop: '8px' }}>
                 Still waiting. Each link may take as long as a job would wait
-                for it (up to 180s on the fast tiers, 280s on NVIDIA, whose
-                free tier queues). Most answer in seconds.
+                for it (up to 3 minutes on the fast services, 5 on NVIDIA, whose
+                free service queues). Most answer in seconds.
               </p>
             )}
             {testError && (
@@ -704,13 +710,13 @@ function Settings() {
           </Card>
           {/* AI Story's premium writing chain (plan 22 stage 1, DEC-273) */}
           <Card className="settings-card">
-            <CardHeader icon={Brain} title="Story premium writing chain"
-              subtitle="Concepts, the bible, the episode script and the first-watch judge." />
+            <CardHeader icon={Brain} title="Better writing for stories"
+              subtitle="Which AI writes the concepts, the bible, the episode script and checks the first watch." />
             <CardBody>
             <p className="form-hint settings-card-lead">
-              The rest of AI Story's writing stays on the provider chain
-              above. Empty uses the paid Gemini project (the key on the
-              Generation tab) first, then today's chain, free links included.
+              The rest of AI Story's writing uses the services above.
+              Left empty, the app uses your paid Gemini key (on the
+              Images, video & voices tab) first, then the free services.
             </p>
             <Field
               label="Premium chain"
@@ -730,19 +736,19 @@ function Settings() {
               />
             </Field>
             <p className="form-hint">
-              Not a secret, and never spent by "Test provider chain" above:
-              that button only probes LLM_CHAIN, never this one.
+              Not a secret, and never spent by "Test my keys" above:
+              that button only tests the services of the analysis list, never this one.
             </p>
             <KeyField
               id="settings-anthropic-key"
               label="Anthropic API key"
-              note="paid, for anthropic/ links"
+              note="paid, to let Claude write"
               isSet={settings?.anthropic_api_key_set}
               tested={isTested('anthropic_api_key')}
               value={anthropicKey}
               onChange={setAnthropicKey}
               placeholder="sk-ant-…"
-              hint="Claude as the writer: add anthropic/claude-sonnet-5-5 (or anthropic/claude-opus-5-5) to the premium chain above. Every request is billed and booked; allow_paid must be on."
+              hint="To let Claude write, add it to the list above. Every request is billed, so paid providers must be allowed on the Budget tab."
             />
             <AnthropicKeyCheck />
             </CardBody>
@@ -751,14 +757,15 @@ function Settings() {
           <Card className="settings-card">
             <CardHeader
               icon={LinkIcon}
-              title="Custom endpoint (optional)"
+              title="Another AI service (optional)"
+              subtitle="Use any other AI service that works like OpenAI's."
               actions={endpointReady
                 ? <Badge tone="success" icon={CircleCheck}>Ready</Badge>
                 : <Badge tone="neutral">Not set up</Badge>}
             />
             <CardBody>
             <p className="form-hint settings-card-lead">
-              Point the analysis step at anything that speaks the OpenAI chat API.
+              Point the analysis step at any service that works like OpenAI's.
               Only worth setting if you already have a key elsewhere — Groq and
               Gemini above are both free.
             </p>
@@ -809,7 +816,7 @@ function Settings() {
             <Field
               label="Model"
               htmlFor="settings-compat-model"
-              hint="The exact model id the endpoint expects. It has to take a long transcript and answer in JSON."
+              hint="The exact model name the service expects. It has to take a long transcript and answer in a fixed format."
             >
               <input
                 id="settings-compat-model"
@@ -832,7 +839,8 @@ function Settings() {
           <Card className="settings-card">
             <CardHeader
               icon={Film}
-              title="B-roll sources"
+              title="Extra footage"
+              subtitle="Where the app finds extra footage to cut into your clips."
               actions={settings?.broll_available
                 ? <Badge tone="success" icon={CircleCheck}>Ready</Badge>
                 : <Badge tone="neutral">No source</Badge>}
@@ -906,16 +914,16 @@ function Settings() {
           <div className="settings-grid" role="tabpanel" id="settings-panel-generation" aria-labelledby="settings-tab-generation">
           {/* Generation providers (AI Story, spec 8.6) */}
           <Card className="settings-card">
-            <CardHeader icon={Palette} title="Generation providers" subtitle="Images, video and voices of the AI Story mode." />
+            <CardHeader icon={Palette} title="Picture, video and voice accounts" subtitle="The accounts the app uses to make pictures, video and voices for stories." />
             <CardBody>
             <p className="form-hint settings-card-lead">
-              Gemini reuses the Google key of the Providers tab; OpenRouter its own.
-              Paid links never run until the Budget tab allows them.
+              Gemini reuses the Google key of the Providers tab.
+              Paid services never run until the Budget tab allows them.
             </p>
             <KeyField
               id="settings-fal-key"
               label="fal.ai key"
-              note="paid: images and video"
+              note="paid: pictures and video"
               isSet={settings?.fal_key_set}
               tested={isTested('fal_key')}
               value={falKey}
@@ -964,7 +972,7 @@ function Settings() {
             <KeyField
               id="settings-gemini-paid-key"
               label="Gemini paid key"
-              note="Veo and the nano-banana images — a separate billing-enabled Google project"
+              note="paid: Veo video and fast pictures — a separate Google project with billing on"
               isSet={settings?.gemini_paid_api_key_set}
               tested={isTested('gemini_paid_api_key')}
               value={geminiPaidKey}
@@ -974,7 +982,7 @@ function Settings() {
             <KeyField
               id="settings-elevenlabs-key"
               label="ElevenLabs key"
-              note="paid per character: voices, with word timestamps"
+              note="paid per character: voices"
               isSet={settings?.elevenlabs_api_key_set}
               tested={isTested('elevenlabs_api_key')}
               value={elevenlabsKey}
@@ -999,11 +1007,11 @@ function Settings() {
           <HardwarePanel hardware={hardware} loading={hwLoading} error={hwError} onRefresh={loadHardware} />
 
           <Card className="settings-card">
-            <CardHeader icon={Server} title="Local servers" subtitle="Where ComfyUI and Ollama answer." />
+            <CardHeader icon={Server} title="Programs on this computer" subtitle="Where the app finds ComfyUI and Ollama, if you run them yourself." />
             <CardBody>
             <p className="form-hint settings-card-lead">
-              Inside Docker the default is host.docker.internal (the host's
-              services); on a host it is 127.0.0.1. Empty = the default.
+              Leave these empty to use the usual address. Only change them if
+              the program runs somewhere else.
             </p>
             <Field label="ComfyUI URL" htmlFor="settings-comfyui-url" hint={hardware?.comfyui?.note || undefined}>
               <input id="settings-comfyui-url" className="form-input" type="url" value={localComfyuiUrl}
@@ -1016,7 +1024,7 @@ function Settings() {
             </CardBody>
           </Card>
           <Card className="settings-card">
-            <CardHeader icon={Monitor} title="System info" />
+            <CardHeader icon={Monitor} title="System info" subtitle="What this computer and the app are set up with." />
             <CardBody>
             <dl className="settings-facts">
               <Row label="GPU" value={settings?.gpu_available
@@ -1042,7 +1050,7 @@ function Settings() {
             <CardHeader
               icon={Wallet}
               title="Budget"
-              subtitle="Paid generation providers are never called unless allowed here, and never past these caps."
+              subtitle="Paid services are never used unless you allow them here, and never past these limits."
               actions={allowPaid
                 ? <Badge tone="warning" icon={CircleDollarSign}>Paid allowed</Badge>
                 : <Badge tone="success">Free only</Badge>}
@@ -1056,14 +1064,14 @@ function Settings() {
                 checked={allowPaid}
                 onChange={e => setAllowPaid(e.target.checked)}
               />
-              <span>Allow paid providers (within the caps)</span>
+              <span>Allow paid services (within the limits)</span>
             </label>
             <div className="settings-table-wrap">
               <table className="settings-caps">
-                <caption className="sr-only">Spending caps, in US dollars, and the spend so far</caption>
+                <caption className="sr-only">Spending limits, in US dollars, and the spend so far</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Cap</th>
+                    <th scope="col">Limit</th>
                     <th scope="col">Limit (USD)</th>
                     <th scope="col">Spent so far</th>
                   </tr>
@@ -1093,7 +1101,7 @@ function Settings() {
                       <span
                         className={`settings-caps-meter${dailyShare >= 90 ? ' settings-caps-meter-high' : ''}`}
                         role="img"
-                        aria-label={`${dailyShare}% of today's cap spent`}
+                        aria-label={`${dailyShare}% of today's limit spent`}
                       >
                         <span style={{ width: `${dailyShare}%` }}></span>
                       </span>
@@ -1124,7 +1132,7 @@ function Settings() {
                 <p className="settings-budget-warning" role="status">
                   <AlertTriangle size={14} aria-hidden="true" />
                   <span>
-                    This cap is below what was already spent today ({formatCents(spentToday)}). Every paid call is
+                    This limit is below what was already spent today ({formatCents(spentToday)}). Every paid call is
                     refused until 00:00 {dayZone} unless you allow more for today.
                   </span>
                 </p>
@@ -1152,15 +1160,15 @@ function Settings() {
                 placeholder="UTC" value={budgetTimezone} onChange={e => setBudgetTimezone(e.target.value)} />
             </Field>
             <Field
-              label="Budget profile"
+              label="Spending plan"
               htmlFor="settings-budget-profile"
-              hint={<>In force now: <strong>{settings?.effective_budget_profile || 'free'}</strong></>}
+              hint={<>In force now: <strong>{SPENDING_PLAN_NAMES[settings?.effective_budget_profile || 'free'] || settings?.effective_budget_profile}</strong></>}
             >
               <select id="settings-budget-profile" className="form-input" value={budgetProfile} onChange={e => setBudgetProfile(e.target.value)}>
-                <option value="">auto — free until paid is allowed, then one_dollar</option>
-                <option value="free">free — $0.00: free chains or local, stills + motion</option>
-                <option value="one_dollar">one_dollar — ≤ $1 per episode: reference images + key shots animated</option>
-                <option value="quality">quality — Quality (billed APIs): ≤ $4 per episode, quality image links, every shot animated with its own ambience</option>
+                <option value="">Automatic — free until paid services are allowed, then about $1 per episode</option>
+                <option value="free">Free — nothing bought: free services or this computer, pictures with motion</option>
+                <option value="one_dollar">About $1 per episode — reference pictures and a few animated key shots</option>
+                <option value="quality">Quality — paid services, up to $4 per episode, every shot animated with its own sound</option>
               </select>
             </Field>
             </CardBody>
@@ -1227,7 +1235,7 @@ function ChainTestResult({ result }) {
                 <span style={{ color: 'var(--text-tertiary)' }}>floor</span>
               )}
               {row.status === 'unused' && (
-                <span style={{ color: 'var(--text-tertiary)' }}>not in chain</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>not used</span>
               )}
             </div>
             {swapped && (
@@ -1291,11 +1299,11 @@ const GEN_VERDICT_STYLE = {
 }
 
 const KIND_LABELS = {
-  image: 'Images (text → image)',
-  image_edit: 'Image edit (with references)',
-  video: 'Video (image → video)',
-  tts: 'Voices (TTS)',
-  vision: 'Vision (describe frames)',
+  image: 'Pictures',
+  image_edit: 'Picture edits (from reference pictures)',
+  video: 'Video clips',
+  tts: 'Voices',
+  vision: 'Picture descriptions',
 }
 
 function linkGlyph(row) {
@@ -1483,6 +1491,15 @@ function AnthropicKeyCheck() {
   )
 }
 
+// Plan 28 stage S2: the one line each generation card opens with.
+const KIND_PURPOSES = {
+  image: 'The services that draw a picture from a description, tried in this order.',
+  image_edit: 'The services that change a picture using reference pictures, tried in this order.',
+  video: 'The services that turn a picture into a video clip, tried in this order.',
+  tts: 'The services that speak a line aloud, tried in this order.',
+  vision: 'The services that look at a picture and describe it, tried in this order.',
+}
+
 const KIND_ICONS = { image: ImageIcon, image_edit: Wand2, video: Film, tts: Mic, vision: Eye }
 
 /** One card per generation chain: its links as the runner sees them, a chain test, a test per paid link. */
@@ -1496,11 +1513,12 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
           <CardHeader
             icon={KIND_ICONS[kind] || Palette}
             title={KIND_LABELS[kind] || kind}
+            subtitle={KIND_PURPOSES[kind] || undefined}
             actions={<code className="settings-env">{chain.env}</code>}
           />
           <CardBody>
           <p className="form-hint settings-card-lead" style={{ wordBreak: 'break-all' }}>
-            {chain.source === 'env' ? 'From the environment' : 'Shipped default'} · <code>{chain.chain}</code>
+            {chain.source === 'env' ? 'Set on this server' : 'App default'} · <code>{chain.chain}</code>
           </p>
           {chain.error && <p className="settings-error" role="alert">{chain.error}</p>}
           <div style={{ fontSize: '13px' }}>
@@ -1509,7 +1527,7 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
                 <span aria-hidden="true">{linkGlyph(row)}</span>
                 <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
                 <span className="link-chip">{row.paid ? `paid · est $${Number(row.est_usd).toFixed(3)}` : 'free'}</span>
-                {!row.adapter && <span className="link-chip">no adapter yet (phase 6)</span>}
+                {!row.adapter && <span className="link-chip">not supported yet</span>}
                 {row.adapter && !row.keyed && (
                   <span className="link-chip">
                     no key: {row.missing_keys.join(', ')}
@@ -1528,10 +1546,10 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
           </div>
           <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-secondary" disabled={testing !== null} onClick={() => onTest(kind)}>
-              {testing === kind ? <><span className="spinner"></span> Testing…</> : 'Test chain'}
+              {testing === kind ? <><span className="spinner"></span> Testing…</> : 'Test these services'}
             </button>
             <span className="form-hint" style={{ margin: 0 }}>
-              Runs the free and local links; a paid link is only reported here — test it from its row, once.
+              Tries the free services and this computer; a paid service is only listed here — test it from its row, once.
             </span>
           </div>
           {error && testing === null && <p className="settings-error" role="alert">{error}</p>}
@@ -1541,10 +1559,10 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
         </Card>
       ))}
       <Card className="settings-card">
-        <CardHeader icon={Gauge} title="Free allowance today" />
+        <CardHeader icon={Gauge} title="Free allowance today" subtitle="How many free requests each service has left today." />
         <CardBody>
         <p className="form-hint settings-card-lead">
-          Calls made today on each free tier, against its published daily limit (UTC day{usage?.day ? ` ${usage.day}` : ''}).
+          Requests made today to each free service, against its daily limit (UTC day{usage?.day ? ` ${usage.day}` : ''}).
         </p>
         <dl className="settings-facts">
           {usageRows.map(([name, row]) => (
@@ -1587,14 +1605,15 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
       <CardHeader
         icon={Cpu}
         title="Local hardware"
+        subtitle="What this computer can make on its own, without paid services."
         actions={(
           <Button size="sm" icon={RefreshCw} disabled={loading} onClick={() => onRefresh(true)}>
-            Probe again
+            Check again
           </Button>
         )}
       />
       <CardBody>
-      {loading && <p className="form-hint" role="status"><span className="spinner"></span> Probing this machine…</p>}
+      {loading && <p className="form-hint" role="status"><span className="spinner"></span> Checking this computer…</p>}
       {error && <p className="settings-error" role="alert">{error}</p>}
       {hardware && (
         <>
@@ -1612,7 +1631,7 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
           </dl>
           {hardware.errors?.length > 0 && (
             <p className="form-hint" style={{ color: 'var(--warning)', wordBreak: 'break-word' }}>
-              Probe errors: {hardware.errors.join(' · ')}
+              Problems found: {hardware.errors.join(' · ')}
             </p>
           )}
           {advice.map((r, index) => (
@@ -1622,7 +1641,7 @@ function HardwarePanel({ hardware, loading, error, onRefresh }) {
               <p className="form-hint" style={{ wordBreak: 'break-word' }}>{r.estimate.assumptions}</p>
               {r.keys?.length > 0 && (
                 <p className="form-hint" style={{ wordBreak: 'break-word' }}>
-                  Keys: {r.keys.join(', ')} (Generation tab). Paid calls also need “Allow paid providers” (Budget tab).
+                  Keys: {r.keys.join(', ')} (Images, video & voices tab). Paid calls also need “Allow paid services” (Budget tab).
                 </p>
               )}
             </div>

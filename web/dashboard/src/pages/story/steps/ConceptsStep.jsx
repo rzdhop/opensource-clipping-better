@@ -150,7 +150,7 @@ export default function ConceptsStep({ storyId, inFlightJob, onChange, onAdvance
 
       {myJob && liveJob && (
         liveJob.status === 'queued'
-          ? <p className="form-hint">queued — waiting for the worker</p>
+          ? <p className="form-hint">Waiting to start…</p>
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
       )}
 

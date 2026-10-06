@@ -169,7 +169,7 @@ function NoCastYet({ storyId, story, onChange }) {
         {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
       </div>
       {estimate && estimate.edit && estimate.edit.ready === false && (
-        <p className="form-hint">Sheets will need an editor or prompt-only consistency.</p>
+        <p className="form-hint">Sheets will need a picture editor, or characters described in words only.</p>
       )}
       <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
         storyId={storyId} retryLabel="Create cast" className="story-step-error" />
@@ -182,7 +182,7 @@ function NoCastYet({ storyId, story, onChange }) {
 function emptySlotReason(info, slot) {
   const missing = (info && info.missing) || []
   if (!missing.includes(slot)) return null
-  if (info.needs_editor && slot !== 'portrait') return 'Needs an editor, or prompt-only consistency.'
+  if (info.needs_editor && slot !== 'portrait') return 'Needs a picture editor, or characters described in words only.'
   if (slot !== 'portrait' && missing.includes('portrait')) return 'Make the portrait first.'
   if (missing.includes('text')) return 'Write the character first.'
   return 'Not made yet.'
@@ -1060,10 +1060,10 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
 
   const switchToPromptOnly = async () => {
     if (!(await confirm({
-      title: 'Switch this story to prompt-only consistency?',
-      message: 'Shots will be prompted without reference images, so ' +
+      title: 'Describe the characters in words only?',
+      message: 'Shots will be described in words only, without reference pictures, so ' +
         'characters and places may drift slightly across shots. This cannot be undone from here.',
-      confirmLabel: 'Switch to prompt-only',
+      confirmLabel: 'Use words only',
     }))) return
     setSwitching(true)
     setError('')
@@ -1082,8 +1082,8 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
       <h4 className="card-title">Some sheets need an editor</h4>
       <p>{(editReadiness && editReadiness.message) || 'No editor can make the missing sheets right now.'}</p>
       <ul className="story-field-list">
-        <li>Set up local ComfyUI — see Settings → Local hardware.</li>
-        <li>Allow paid generation — see Settings → Budget.</li>
+        <li>Set up ComfyUI on this computer — see Settings → Local hardware.</li>
+        <li>Allow paid services — see Settings → Budget.</li>
       </ul>
       <div className="story-step-actions">
         <button
@@ -1092,7 +1092,7 @@ function NeedsEditorBanner({ storyId, editReadiness, disabled, onChange }) {
           onClick={switchToPromptOnly}
           disabled={disabled || switching}
         >
-          {switching ? 'Switching…' : 'Switch this story to prompt-only consistency'}
+          {switching ? 'Switching…' : 'Describe the characters in words only'}
         </button>
       </div>
       <StepError message={error} className="story-step-error" />
@@ -1212,7 +1212,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
         <NoCastYet storyId={storyId} story={story} onChange={onChange} />
         {myJob && liveJob && (
           liveJob.status === 'queued'
-            ? <p className="form-hint">queued — waiting for the worker</p>
+            ? <p className="form-hint">Waiting to start…</p>
             : <LiveActivity job={liveJob} events={events} streamState={streamState} />
         )}
       </div>
@@ -1241,7 +1241,7 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
 
       {myJob && liveJob && (
         liveJob.status === 'queued'
-          ? <p className="form-hint">queued — waiting for the worker</p>
+          ? <p className="form-hint">Waiting to start…</p>
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
       )}
 

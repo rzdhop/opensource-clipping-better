@@ -1038,7 +1038,7 @@ export default function SeasonStep({ data, storyId, inFlightJob, onChange, onSer
         <NoSeasonYet storyId={storyId} onChange={onChange} />
         {myJob && liveJob && (
           liveJob.status === 'queued'
-            ? <p className="form-hint">queued — waiting for the worker</p>
+            ? <p className="form-hint">Waiting to start…</p>
             : <LiveActivity job={liveJob} events={events} streamState={streamState} />
         )}
       </div>
@@ -1049,7 +1049,7 @@ export default function SeasonStep({ data, storyId, inFlightJob, onChange, onSer
     <div className="story-step-body">
       {myJob && liveJob && (
         liveJob.status === 'queued'
-          ? <p className="form-hint">queued — waiting for the worker</p>
+          ? <p className="form-hint">Waiting to start…</p>
           : <LiveActivity job={liveJob} events={events} streamState={streamState} />
       )}
 

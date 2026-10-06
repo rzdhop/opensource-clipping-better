@@ -174,7 +174,7 @@ def test_episode_studio_and_clip_regenerate_keep_error_code_and_detail():
     studio = _read(STORY / "EpisodeStudio.jsx")
     body = _function(studio, "FastTrackHeader")
     assert "setErrorCode(err.code || null)" in body and "setErrorDetail(err.detail || null)" in body
-    assert 'code={errorCode} detail={errorDetail}' in body and 'retryLabel="Generate episode"' in body
+    assert 'code={errorCode} detail={errorDetail}' in body and 'retryLabel={`Make episode ${ep}`}' in body  # DEC-305: plain button name
     # the clip regenerate runs through RegenerateControl, which keeps both and names the story
     clip = _read(STORY / "episode" / "storyboard" / "ClipControls.jsx")
     assert re.search(r"<RegenerateControl\s+storyId=\{storyId\}", clip)
@@ -237,7 +237,8 @@ def test_settings_budget_card_shows_extra_zone_and_below_cap_warning():
     # the day's top stories
     assert "settings?.day_contributors" in src and "Spent today, by story" in src
     # the warning, live while the field is edited and from the server's flag once saved
-    assert "This cap is below what was already spent today ({formatCents(spentToday)})" in src
+    # DEC-305 section 9 (plan 28 S2): "limit" in the human's words, the same figures.
+    assert "This limit is below what was already spent today ({formatCents(spentToday)})" in src
     assert "Every paid call is" in src and "refused until 00:00 {dayZone} unless you allow more for today." in src
     assert "capDraft > 0 && spentToday > capDraft + extraToday" in src
     assert "Boolean(settings?.daily_cap_below_spend) && spentToday > dailyCapNow + extraToday" in src

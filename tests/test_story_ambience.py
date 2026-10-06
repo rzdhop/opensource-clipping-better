@@ -184,7 +184,7 @@ def test_an_ambience_story_buys_its_clips_on_veo_when_its_key_is_set(store, tmp_
     assert video["link"] == VEO and video["price_per_second"] == pricing.PRICES[VEO].usd
     assert video["ambience"] == {"sound": True, "note": None}
     assert "own ambience and sound effects" in video["message"] and "No ambience" not in video["message"]
-    assert "rendered as at tier 2" not in video["message"]
+    assert "rendered with its lines spoken by their voices instead" not in video["message"]
 
 
 def test_without_the_veo_key_the_clips_fall_back_to_the_first_keyed_link_and_say_there_is_no_ambience(
@@ -201,7 +201,7 @@ def test_without_the_veo_key_the_clips_fall_back_to_the_first_keyed_link_and_say
     assert note.startswith("No ambience:") and "GEMINI_PAID_API_KEY" in note and VEO in note
     assert note in video["message"]
     # Not the opt-in's sentence (A-108): no shot's lines were ever to be replaced.
-    assert "rendered as at tier 2" not in video["message"]
+    assert "rendered with its lines spoken by their voices instead" not in video["message"]
 
 
 def test_an_episode_whose_clips_are_on_a_silent_link_keeps_it_and_says_why_there_is_no_ambience(store, tmp_path):
@@ -230,7 +230,7 @@ def test_guard_outside_ambience_mode_the_quality_profile_still_buys_the_first_li
     video = _video(store, story_id, **tas.FAL, **GEMINI)
     assert video["link"] == SEEDANCE and "ambience" not in video
     if tier == 3:
-        assert "rendered as at tier 2" in video["message"]  # A-108's opt-in sentence, as it was
+        assert "rendered with its lines spoken by their voices instead" in video["message"]  # A-108's opt-in sentence (DEC-305: no tier)
 
 
 # ================================================= the audio brief (prompt)

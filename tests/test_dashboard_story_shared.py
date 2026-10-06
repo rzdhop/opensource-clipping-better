@@ -314,5 +314,6 @@ def test_the_estimate_chip_renders_every_unit_of_a_generation_estimate():
     label = src.split("export function unitsLabel(", 1)[1].split("\n}\n", 1)[0]
     assert label.index("generationUnitsLabel(units)") < label.index("units.llm_calls != null")
     # The phase-1 renderings, byte for byte (concepts, bible, style, style_preview, season).
-    assert "return `${n} LLM call${n === 1 ? '' : 's'}`" in label
+    # DEC-305 section 9 (plan 28 S2): "writing steps", not "LLM calls".
+    assert "return `${n} writing step${n === 1 ? '' : 's'}`" in label
     assert "return `${n} image${n === 1 ? '' : 's'}`" in label

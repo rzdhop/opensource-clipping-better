@@ -209,7 +209,7 @@ def test_step_resumes_after_each_call(store):
                                               "injuries": None, "relationship_notes": None}
     assert set(doc["ledger_seed"]) == {eps.KIWILO, eps.MANGELLA, eps.BROCCOLIA}
     line = next(line for line in log if "new prop(s) registered" in line)
-    assert KEY_NAME in line and "next places step run" in line and "fal/seedream-4.5" in line and "$0.04" in line
+    assert KEY_NAME in line and "next places step run" in line and "$0.04" in line  # DEC-305 section 9: no link id in the log line
 
     # Everything written: a third run calls nothing and writes nothing.
     third = _llm()

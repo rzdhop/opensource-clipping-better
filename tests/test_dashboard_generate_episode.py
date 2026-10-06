@@ -49,7 +49,8 @@ def _object_literal_keys(src, const_name):
 def test_the_header_is_generate_episode_with_the_stop_at_keyframes_checkbox_off():
     src = EPISODE_STUDIO.read_text(encoding="utf-8")
     header = _component(src, "FastTrackHeader")
-    assert "'Generate episode'" in header and "'Fast track'" not in header
+    # DEC-305 section 9 (plan 28 S2): the one-click run is "Make episode N".
+    assert "`Make episode ${ep}`" in header and "'Fast track'" not in header
     assert _object_literal_keys(header, "fastTrackParams") == set(fast_track.PARAMS)
     assert f"{fast_track.STOP_PARAM}: stopAtKeyframes" in header
     assert "useState(false)" in header.split("stopAtKeyframes", 1)[1][:80]
@@ -84,9 +85,9 @@ def test_the_confirm_says_what_the_click_does_and_costs():
     for read in ("est.keyframes", "kf.v2", "kf.fix_usd", "kf.tier", "est.video", "est.video.count",
                  "est.render.minutes", "est.est_usd", "est.paid.caps", "est.images.count", "est.tts.lines"):
         assert read in confirm, read
-    assert "up to the finished render" in confirm
+    assert "up to the finished video" in confirm  # DEC-305: plain words
     assert "No stop for keyframe review" in confirm and "review the finished episode" in confirm
-    assert "redrawn automatically" in confirm and "checked (J2)" in confirm
+    assert "redrawn automatically" in confirm and "each one checked" in confirm  # DEC-305: no check id
     assert "stops once the keyframes are made and checked" in confirm
     assert "caps:" in confirm and "Total: est. $" in confirm
     assert "It stops before any paid spending" in confirm
@@ -101,7 +102,7 @@ def test_the_header_shows_the_sub_step_the_feed_names_and_the_studio_ends_on_the
     found = pattern.search(f"⏩ Fast track 3/{len(fast_track.SUB_STEPS)}: {fast_track.LABELS['paid_check']}")
     assert found and found.group(1) == "3" and found.group(3) == "paid check"
     header = _component(src, "FastTrackHeader")
-    assert "Generating…" in header and "progress.number" in header and "progress-bar-fill" in header
+    assert "Making…" in header and "progress.number" in header  # DEC-305: plain words and "progress-bar-fill" in header
     # The review tab, shown for a v2 episode (its review has a keyframe approval), and the switch at the end.
     assert "'review'" in src.split("const TAB_IDS", 1)[1][:120]
     assert "episode.review" in src and "<ReviewPane" in src and 'id="episode-review"' in src

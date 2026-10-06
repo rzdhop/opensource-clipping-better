@@ -697,7 +697,7 @@ def test_the_estimate_refuses_at_the_first_part_that_cannot_run(store):
     body = wf.story_fast_track_estimate(store, store.get(story_id), env=keyless)
 
     assert body["ready"] is False and body["stops_at"]["part"] == "concepts" and body["stops_at"]["number"] == 1
-    assert body["stops_at"]["reason"].startswith("No link in the LLM chain has an API key")
+    assert body["stops_at"]["reason"].startswith("None of the writing services has an API key")
     assert body["message"] == body["stops_at"]["reason"]
 
 

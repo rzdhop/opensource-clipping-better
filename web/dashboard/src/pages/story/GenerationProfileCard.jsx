@@ -12,6 +12,7 @@ import HowMadeControls from './HowMadeControls'
 // opens it as a popover. Same props, same calls, same text.
 
 const ROUTES = ['auto', 'local', 'api']
+const ROUTE_NAMES = { auto: 'automatic', local: 'this computer', api: 'paid services' }
 // Plan 22: a native-speech story's speaking-clip models (generation_profile.speech_model).
 const SPEECH_MODELS = { lite: 'Lite (Veo 3.1 lite)', fast: 'Fast (Veo 3.1 Fast)', premium: 'Premium (Veo 3.1)' }
 // Plan 23 stage D4: how a character's sheets are drawn (generation_profile.sheet_mode; absent = three_sheet).
@@ -75,7 +76,7 @@ function episodesLabel(episodes) {
 }
 
 function pipelineLabel(patch) {
-  return patch.pipeline === 'v2' ? 'v2' : 'the legacy pipeline'
+  return patch.pipeline === 'v2' ? 'the animated format' : 'the older format'
 }
 
 /** The confirm before `switchPipeline` archives *episodes*: what goes, what stays, what runs next. */
@@ -109,7 +110,7 @@ function switchedSummary(result) {
     if (next.job) parts.push(`The ${label} step is queued.`)
     else if (next.refused) parts.push(`The ${label} step could not start: ${next.refused}`)
   }
-  return parts.join(' ') || 'The story is on the new pipeline.'
+  return parts.join(' ') || 'The story is now in the new format.'
 }
 
 /**
@@ -317,12 +318,13 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
 
   return (
     <div className="card story-generation-profile" style={{ marginBottom: '16px' }}>
-      <h3 className="card-title">Visual tier</h3>
+      <h3 className="card-title">How this story is made</h3>
+      <p className="form-hint">Who makes the clips and the images. The rest is under Advanced.</p>
       <HowMadeControls
         clipsOwn={budgetProfile === 'native_speech_manual'}
         imagesOwn={isV2 && imagesOwn}
         imagesDisabled={!isV2}
-        imagesNote="Your own images need the v2 pipeline: switch this story to v2 first."
+        imagesNote="Your own images need the animated format: switch this story to it first."
         disabled={saving}
         onClips={handleClipsOwn}
         onImages={handleImagesOwn}
@@ -333,19 +335,19 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       <div className="form-group">
         {fullyAnimated ? (
           <span className="chip">
-            {nativeSpeech ? 'Native speech: every character line is spoken by its own clip.'
+            {nativeSpeech ? 'Every character line is spoken by its own clip.'
               : 'Fully animated: every shot is a video clip.'}
           </span>
         ) : (
           <>
             <p className="form-hint">
               {canSwitchToV2
-                ? 'This story is not fully animated yet. Switch it to the quality pipeline: 6–10 shots, each a '
+                ? 'This story is not fully animated yet. Switch it to the animated format: 6–10 shots, each a '
                   + 'video clip, with quality images (billed).'
                   + (hasCast ? ' Then run the Cast step and Places & props again: they write each character\'s, '
                     + 'place\'s and prop\'s look and draw again, from it, the images drawn before it (each '
                     + 'estimate shows the cost).' : '')
-                : 'Some shots of this story stay still. Animate every shot with the quality budget profile (billed).'}
+                : 'Some shots of this story stay still. Animate every shot with the Quality spending plan (billed).'}
             </p>
             <button type="button" className="btn btn-sm btn-primary" onClick={makeFullyAnimated} disabled={saving}>
               Animate every shot
@@ -354,30 +356,30 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
         )}
       </div>
       <div className="form-group">
-        <label className="form-label" htmlFor="story-profile-tier">Tier</label>
+        <label className="form-label" htmlFor="story-profile-tier">Video level</label>
         <select id="story-profile-tier" className="form-select" value={tier} onChange={(e) => handleTier(Number(e.target.value))} disabled={saving}>
-          <option value={1}>1 — stills + motion</option>
-          <option value={2}>2 — image-to-video</option>
-          <option value={3}>3 — + native audio (experimental)</option>
+          <option value={1}>1 — pictures with motion</option>
+          <option value={2}>2 — pictures turned into video clips</option>
+          <option value={3}>3 — clips with their own sound (experimental)</option>
         </select>
       </div>
       <div className="form-group">
-        <label className="form-label" htmlFor="story-profile-route">Route</label>
+        <label className="form-label" htmlFor="story-profile-route">Where it is made</label>
         <select id="story-profile-route" className="form-select" value={route} onChange={(e) => handleRoute(e.target.value)} disabled={saving}>
-          <option value="auto">Auto</option>
-          <option value="local">Local</option>
-          <option value="api">API</option>
+          <option value="auto">Automatic</option>
+          <option value="local">This computer</option>
+          <option value="api">Paid services</option>
         </select>
       </div>
       <div className="form-group">
-        <label className="form-label" htmlFor="story-profile-budget">Budget profile</label>
+        <label className="form-label" htmlFor="story-profile-budget">Spending plan</label>
         <select id="story-profile-budget" className="form-select" value={budgetProfile} onChange={(e) => handleBudgetProfile(e.target.value)}
           disabled={saving}>
           <option value="free">Free (no clip bought)</option>
-          <option value="one_dollar">$1 / episode (key shots)</option>
-          <option value="quality">Quality (billed APIs) — every shot animated</option>
-          <option value="native_speech">Native speech (Veo) — characters speak in their clips</option>
-          <option value="native_speech_manual">Native speech — your own clips (Flow / Higgsfield)</option>
+          <option value="one_dollar">About $1 per episode (key shots)</option>
+          <option value="quality">Quality (paid) — every shot animated</option>
+          <option value="native_speech">Characters speak in their clips (paid, Veo)</option>
+          <option value="native_speech_manual">Characters speak in your own clips (Flow / Higgsfield)</option>
         </select>
       </div>
       {isV2 && (
@@ -417,7 +419,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       </div>
       {universeEntry && (
         <div className="form-group">
-          <span className="form-label">Universe</span>
+          <span className="form-label">Cast world</span>
           <p className="story-profile-universe">{universeEntry.label[story.language] || universeEntry.label.en}</p>
           {universeEntry.audience_note && (
             <p className="form-hint">{universeEntry.audience_note[story.language] || universeEntry.audience_note.en}</p>
@@ -450,7 +452,7 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
         <p className="form-hint">
           {STOCK_MATCHING_STYLES.includes(story.style_template_id)
             ? 'At the next assets run, wide establishing shots with no character are filled with free stock footage; an image or a clip already there is never replaced.'
-            : 'Stock footage is live-action: it matches only the cinematic_real style, so on this one the cutaways will look out of place.'}
+            : 'Stock footage is live-action: it matches only the photoreal style, so on this one the cutaways will look out of place.'}
         </p>
       </div>
       {nativeSpeech && !manualClips && (
@@ -473,13 +475,13 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
       {switched && <p className="form-hint">{switchedSummary(switched)}</p>}
       {tier >= 2 && (
         <div className="story-generation-profile-routes">
-          <p className="form-hint">Episode {nextEp}'s video estimate, per route:</p>
+          <p className="form-hint">Episode {nextEp}'s video estimate, by where it is made:</p>
           {ROUTES.map((r) => {
             const est = routeEstimates[r]
             const err = routeErrors[r]
             return (
               <div key={r} className="story-step-actions" style={{ marginBottom: '6px' }}>
-                <span className="chip">{r}</span>
+                <span className="chip">{ROUTE_NAMES[r] || r}</span>
                 {err ? (
                   <span className="chip chip-warn chip-wrap">{err}</span>
                 ) : est && est.video ? (

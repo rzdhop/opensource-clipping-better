@@ -341,7 +341,7 @@ def test_a_series_step_meets_the_key_gate(api, m):
     api.monkeypatch.setattr(api.worker, "_settings_env", {**tas._settings(), "GOOGLE_API_KEY": ""})
     for step in ("memory", "feedback", "propose-next"):
         response = _post_step(api, story_id, step, ep=1)
-        assert response.status_code == 400 and "No link in the LLM chain has an API key" in response.json()["detail"]
+        assert response.status_code == 400 and "None of the writing services has an API key" in response.json()["detail"]
     assert api.jobs.list_jobs() == []
 
 
@@ -591,7 +591,7 @@ def test_the_cast_gate_refuses_an_accept_before_anything_is_decided(api, m):
     response = _decide(api, story_id, 2, "char_1", accept=True)
 
     assert response.status_code == 400
-    assert "No link in the LLM chain has an API key" in response.json()["detail"]
+    assert "None of the writing services has an API key" in response.json()["detail"]
     assert api.store.read_episode_doc(story_id, 2, "proposals.json")["decisions"] == {}
     assert api.jobs.list_jobs() == []
 

@@ -344,7 +344,7 @@ def test_one_step_at_a_time_then_the_key_gate_then_the_queue(api):
     api.jobs.set_status(queued["id"], JobStatus.FAILED)
     _settings(api, {"LLM_CHAIN": "gemini/gemini-test"})
     response = _post_step(api, story_id, "script", ep=1)
-    assert response.status_code == 400 and "No link in the LLM chain has an API key" in response.json()["detail"]
+    assert response.status_code == 400 and "None of the writing services has an API key" in response.json()["detail"]
     _settings(api, SETTINGS)
     api.monkeypatch.setenv("MAX_QUEUED_JOBS", "1")
     _job(api, _ready_story(api.store), "concepts")  # another story's job fills the queue

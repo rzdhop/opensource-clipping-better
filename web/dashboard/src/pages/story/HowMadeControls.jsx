@@ -6,7 +6,7 @@ import { Button } from '../../ui'
 // reads both back from the profile, so the Budget profile select and these controls always agree. They set
 // the step default only; a single shot's own mode is chosen in the Handoff view.
 const CLIPS_HELP = {
-  auto: 'The app generates them on the API links; the caps and the daily cap apply.',
+  auto: 'The app makes them with paid services, within your spending limits.',
   own: 'You paste the prompts into your provider and upload the clips; nothing is billed.',
 }
 // The images' own wording (the keyframes, sheets, plates and props).
@@ -22,7 +22,7 @@ function Choice({ label, name, own, disabled, onChange, help, ownDisabled }) {
       <div className="story-segmented" role="group" aria-label={label}>
         <Button type="button" size="sm" variant={own ? 'secondary' : 'primary'} disabled={disabled}
           aria-pressed={!own} onClick={() => onChange(false)} data-choice={`${name}-auto`}>
-          Auto (API links)
+          The app (paid services)
         </Button>
         <Button type="button" size="sm" variant={own ? 'primary' : 'secondary'} disabled={disabled || ownDisabled}
           aria-pressed={own} onClick={() => onChange(true)} data-choice={`${name}-own`}>
@@ -35,8 +35,8 @@ function Choice({ label, name, own, disabled, onChange, help, ownDisabled }) {
 }
 
 /**
- * "How clips are made" and "How images are made", each Auto (API links) or My own (Flow, Higgsfield…).
- * `imagesDisabled` greys the images' My own (manual images exist on the v2 pipeline only); `imagesNote` says why.
+ * "How clips are made" and "How images are made", each The app (paid services) or My own (Flow, Higgsfield…).
+ * `imagesDisabled` greys the images' My own (manual images exist on an animated story only); `imagesNote` says why.
  */
 export default function HowMadeControls({
   clipsOwn, imagesOwn, imagesDisabled = false, imagesNote = '', disabled = false, onClips, onImages,

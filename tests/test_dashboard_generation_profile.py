@@ -39,6 +39,6 @@ def test_the_card_title_does_not_call_it_the_next_episode():
     """The priced episode is the latest *approved* one, not necessarily the
     next to work on, so the heading must not say "next"."""
     src = _src()
-    match = re.search(r"<p className=\"form-hint\">Episode \{nextEp\}'s ([^<]*), per route:</p>", src)
+    match = re.search(r"<p className=\"form-hint\">Episode \{nextEp\}'s ([^<]*), by where it is made:</p>", src)
     assert match, "the per-route estimate heading is missing"
     assert "next" not in match.group(1).lower(), f"the heading should not say 'next': {match.group(1)!r}"

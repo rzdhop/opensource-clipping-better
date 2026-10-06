@@ -129,7 +129,7 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
           onChange={(e) => setAlignWords(e.target.checked)}
           disabled={busy || running}
         />
-        Align words (forced alignment for lines the voice timed no words for)
+        Time the words exactly (for lines whose voice gave no word timing)
       </label>
       {estimate && !estimateError && alignWords && estimate.alignment.requests > 0 && (
         <p className="form-hint">
@@ -182,7 +182,7 @@ function ImageOfferBanner({ storyId, ep, episode, busy, onChange }) {
 
   const handleSwitch = async () => {
     if (!offer.switch) return
-    if (!(await confirm({ title: 'Switch now?', message: offer.message, confirmLabel: `Switch to ${offer.next_link}` }))) return
+    if (!(await confirm({ title: 'Switch now?', message: offer.message, confirmLabel: 'Switch provider' }))) return
     setSwitching(true)
     setSwitchError('')
     try {
@@ -197,7 +197,7 @@ function ImageOfferBanner({ storyId, ep, episode, busy, onChange }) {
 
   return (
     <Card className="story-assets-header">
-      <CardHeader title="Image link" />
+      <CardHeader title="Image provider" />
       <CardBody>
       <div className="story-storyboard-banner">
         <span className="chip chip-warn chip-wrap">{offer.message}</span>
@@ -208,7 +208,7 @@ function ImageOfferBanner({ storyId, ep, episode, busy, onChange }) {
             onClick={handleSwitch}
             disabled={busy || switching}
           >
-            {switching ? 'Switching…' : `Switch to ${offer.next_link}`}
+            {switching ? 'Switching…' : 'Switch provider'}
           </button>
         )}
         <StepError message={switchError} />
@@ -271,12 +271,12 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
       {/* Plan 22: a native-speech episode's two links, one a class of shot, each priced. */}
       {video.speech && (
         <div className="story-step-actions">
-          <span className="chip" title="Each character line is spoken by its own clip">
-            {`🗣 ${video.speech.speech_count} speaking · ${video.speech.speech_seconds} s on ${video.speech.speech_link}`}
+          <span className="chip" title={`Each character line is spoken by its own clip, made on ${video.speech.speech_link}`}>
+            {`🗣 ${video.speech.speech_count} speaking · ${video.speech.speech_seconds} s`}
             {video.speech.speech_price != null ? ` at $${video.speech.speech_price}/s` : ''}
           </span>
-          <span className="chip" title="Reactions and the narrator's voice-over: clips with their ambience">
-            {`${video.speech.silent_count} silent · ${video.speech.silent_seconds} s on ${video.speech.silent_link}`}
+          <span className="chip" title={`Reactions and the narrator's voice-over: clips with their ambience, made on ${video.speech.silent_link}`}>
+            {`${video.speech.silent_count} silent · ${video.speech.silent_seconds} s`}
             {video.speech.silent_price != null ? ` at $${video.speech.silent_price}/s` : ''}
           </span>
           {video.speech.retake_usd > 0 && (
@@ -289,8 +289,8 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
       {video.lipsync && video.lipsync.count > 0 && (
         <p className="form-hint">
           {video.lipsync.counted
-            ? `+ $${formatUsd(video.lipsync.est_usd)} lip-sync (${video.lipsync.count} clip${video.lipsync.count === 1 ? '' : 's'}) on ${video.lipsync.link}`
-            : `No lip-sync: ${video.lipsync.reason || 'the lipsync link cannot run'}`}
+            ? `+ $${formatUsd(video.lipsync.est_usd)} to sync the lips (${video.lipsync.count} clip${video.lipsync.count === 1 ? '' : 's'})`
+            : `No lip-sync: ${video.lipsync.reason || 'the lip-sync service cannot run'}`}
         </p>
       )}
       {!video.ready && video.message && <p className="form-hint">{video.message}</p>}
@@ -304,7 +304,7 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
               onClick={handleSwitch}
               disabled={busy || switching}
             >
-              {switching ? 'Switching…' : `Switch to ${video.offer.next_link}`}
+              {switching ? 'Switching…' : 'Switch provider'}
             </button>
           )}
           <StepError message={switchError} />
@@ -368,7 +368,7 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
       <p className="form-hint">
         No clip is bought until the keyframes are approved.{' '}
         {review
-          ? `${flagged} keyframe${flagged === 1 ? '' : 's'} still flagged by the check (J2) — see each one, large, on the Review tab.`
+          ? `${flagged} keyframe${flagged === 1 ? '' : 's'} still flagged by the check — see each one, large, on the Review tab.`
           : 'Check each one shows its beat on the Review tab.'}
       </p>
       <div className="story-step-actions">

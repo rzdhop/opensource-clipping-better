@@ -26,9 +26,10 @@ def _read(path):
 def test_the_two_controls_hold_the_plan_labels_options_and_explanations():
     src = _read(CONTROLS)
     assert "How clips are made" in src and "How images are made" in src
-    assert "Auto (API links)" in src and "My own (Flow, Higgsfield…)" in src
+    # DEC-305 section 9 (plan 28 S2): "API links" is not a word the human uses.
+    assert "The app (paid services)" in src and "My own (Flow, Higgsfield…)" in src
     assert "You paste the prompts into your provider and upload the clips; nothing is billed." in src
-    assert "The app generates them on the API links; the caps and the daily cap apply." in src
+    assert "The app makes them with paid services, within your spending limits." in src
     # the images control is the one that can be disabled (a v1 story has no manual images)
     assert "imagesDisabled" in src
 

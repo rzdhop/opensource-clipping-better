@@ -324,7 +324,7 @@ def test_a_chain_with_no_keyed_link_is_refused_naming_the_keys(cli):
     for step in ("bible", "concepts"):
         assert cli.run("step", story_id, step) == 1
         err = cli.capsys.readouterr().err
-        assert "No link in the LLM chain has an API key" in err
+        assert "None of the writing services has an API key" in err
         assert "GOOGLE_API_KEY" in err and "in the environment or in .env" in err
     assert runner.calls == []
     assert cli.story(story_id)["logline"] is None
@@ -1138,7 +1138,7 @@ def test_the_key_gate_comes_before_any_character_and_prompt_only_stays_unset(stu
     assert s.run("step", story_id, "cast", *CAST_ARGS, "--prompt-only") == 1
 
     err = s.capsys.readouterr().err
-    assert "No link in the LLM chain has an API key" in err and "in the environment or in .env" in err
+    assert "None of the writing services has an API key" in err and "in the environment or in .env" in err
     assert runner.calls == [] and s.entity_ids(story_id, "characters") == []
     assert s.story(story_id)["generation_profile"]["consistency_mode"] == "references"
 

@@ -71,7 +71,7 @@ def test_a_story_is_created_with_its_frame_and_refused_one_it_cannot_make(store)
     assert story["generation_profile"]["aspect"] == "16:9"
     plain = store.create(language="fr", generation_profile=dict(V2), now=NOW)
     assert "aspect" not in plain["generation_profile"]
-    with pytest.raises(ValueError, match="v2 pipeline"):
+    with pytest.raises(ValueError, match="animated story"):  # DEC-305: plain words
         store.create(language="fr", generation_profile={"aspect": "16:9"}, now=NOW)
     with pytest.raises(ValueError, match="Veo makes 9:16 and 16:9"):
         store.create(language="fr", generation_profile=dict(NATIVE, aspect="1:1"), now=NOW)
@@ -112,7 +112,7 @@ def test_patch_and_the_switch_cannot_change_the_frame(store):
     # a profile that can no longer make the frame is refused (400), e.g. the local route at tier 2
     with pytest.raises(workflow.WorkflowError) as caught:
         workflow.patch_story(store, story_id, {"generation_profile": {"route": "local"}}, now=NOW)
-    assert caught.value.code == workflow.INVALID and "local ComfyUI" in str(caught.value.detail)
+    assert caught.value.code == workflow.INVALID and "on this computer" in str(caught.value.detail)  # DEC-305: plain words
     # a 9:16 story may say 9:16 (null), never pick another frame
     plain = store.create(language="fr", generation_profile=dict(V2), now=NOW)["story_id"]
     assert "aspect" not in workflow.patch_story(store, plain, {"generation_profile": {"aspect": None}},
@@ -171,11 +171,12 @@ def test_the_profiles_that_cannot_take_a_frame_say_why():
 
     for frame in ("9:16", None):
         assert refusal({}, frame) is None
-    assert "v2 pipeline" in refusal({"tier": 1}, "16:9")
+    assert "animated story" in refusal({"tier": 1}, "16:9")  # DEC-305: no "v2 pipeline" in the sentence
     assert refusal(dict(V2, tier=1), "1:1") is None  # tier 1: nothing is bought
     assert refusal(dict(V2, tier=2), "1:1") is None  # the estimate picks a link that makes it
-    assert "local ComfyUI" in refusal(dict(V2, tier=2, route="local"), "16:9")
-    assert "free profile" in refusal(dict(V2, tier=2, budget_profile="free"), "16:9")
+    # DEC-305 section 9 (plan 28 S2): "this computer" and "spending plan", not ComfyUI / route / profile ids.
+    assert "on this computer" in refusal(dict(V2, tier=2, route="local"), "16:9")
+    assert "free spending plan" in refusal(dict(V2, tier=2, budget_profile="free"), "16:9")
     assert refusal(NATIVE, "16:9") is None and "Veo" in refusal(NATIVE, "1:1")
     assert refusal(MANUAL, "16:9") is None and "Flow" in refusal(MANUAL, "1:1")
     options = {row["id"]: row for row in media_policy.aspect_options(NATIVE)}

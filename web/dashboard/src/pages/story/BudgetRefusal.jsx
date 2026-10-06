@@ -47,7 +47,7 @@ export function spentLine(today) {
 /** "This cast: est $0.60 · 5 portraits $0.20 + 10 sheet edits $0.40". */
 export function estimateLine(estimate, noun) {
   const parts = (estimate.parts || []).map((part) => `${part.qty} ${part.what} ${formatCents(part.usd)}`)
-  if (Number(estimate.llm_worst_usd) > 0) parts.push(`LLM up to ${formatCents(estimate.llm_worst_usd)}`)
+  if (Number(estimate.llm_worst_usd) > 0) parts.push(`writing up to ${formatCents(estimate.llm_worst_usd)}`)
   const head = `${upperFirst(noun)}: est ${formatCents(estimate.usd)}`
   return parts.length ? `${head} · ${parts.join(' + ')}` : head
 }
