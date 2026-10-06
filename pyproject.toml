@@ -75,6 +75,11 @@ clipping = ["aistory/templates/*.json", "aistory/templates/**/*.json"]
 # only ever installed on Linux and Windows, so macOS splits are not resolved.
 [tool.uv]
 environments = ["sys_platform == 'linux'", "sys_platform == 'win32'"]
+# uv locks every extra at once; these two cannot share an environment (chatterbox-tts
+# pins starlette<1 through gradio, fastmcp 4 needs starlette>=1). A story told
+# from the chat speaks through edge/hosted voices or the local engines of the
+# backend's own environment; the MCP's environment does without [local-tts].
+conflicts = [[{ extra = "mcp" }, { extra = "local-tts" }]]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
