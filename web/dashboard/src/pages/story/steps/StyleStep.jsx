@@ -5,6 +5,7 @@ import {
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
+import MoreFold from '../MoreFold'
 import { StepError } from '../fields'
 import SubtitleStyleEditor from '../SubtitleStyleEditor'
 import { SUBTITLE_FONT_FAMILIES } from '../subtitleStyle'
@@ -384,7 +385,7 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
       </div>
 
       {!locked && (
-        <>
+        <MoreFold open={Boolean(saveError)}>
           <div className="story-step-actions">
             <button type="button" className="btn btn-secondary" onClick={handleSave} disabled={busy || saving || !templateId}>
               {saving ? 'Saving…' : 'Save draft'}
@@ -392,7 +393,7 @@ export default function StyleStep({ data, storyId, inFlightJob, onChange, onAdva
           </div>
           <StepError message={saveError} errors={saveErrors} code={saveErrorCode} detail={saveErrorDetail}
             storyId={storyId} retryLabel="Save draft" className="story-step-error" />
-        </>
+        </MoreFold>
       )}
 
       <PreviewStrip

@@ -213,8 +213,9 @@ export default function StoryWorkspace() {
     <>
       <Badge tone={badge.tone} dot>{badge.text}</Badge>
       {status === 'done' && nextStep && (
-        <Button as={Link} to={`/story/${storyId}/${nextStep.key}`} size="sm" iconRight={ArrowRight}>
-          {nextStep.label}
+        <Button as={Link} to={`/story/${storyId}/${nextStep.key}`} variant="primary" size="sm" iconRight={ArrowRight}
+          aria-label={`Continue to ${nextStep.label}`}>
+          Continue
         </Button>
       )}
     </>

@@ -718,6 +718,9 @@ function Settings() {
               Left empty, the app uses your paid Gemini key (on the
               Images, video & voices tab) first, then the free services.
             </p>
+            {/* advanced */}
+            <details className="story-profile" open={Boolean(storyLlmPremiumChain || settings?.story_llm_premium_chain) || undefined}>
+            <summary>Advanced: choose the writing services yourself</summary>
             <Field
               label="Premium chain"
               aside={<KeyBadge set={Boolean(storyLlmPremiumChain || settings?.story_llm_premium_chain)}
@@ -739,6 +742,8 @@ function Settings() {
               Not a secret, and never spent by "Test my keys" above:
               that button only tests the services of the analysis list, never this one.
             </p>
+            </details>
+            {/* /advanced */}
             <KeyField
               id="settings-anthropic-key"
               label="Anthropic API key"
@@ -1514,13 +1519,26 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
             icon={KIND_ICONS[kind] || Palette}
             title={KIND_LABELS[kind] || kind}
             subtitle={KIND_PURPOSES[kind] || undefined}
-            actions={<code className="settings-env">{chain.env}</code>}
           />
           <CardBody>
-          <p className="form-hint settings-card-lead" style={{ wordBreak: 'break-all' }}>
-            {chain.source === 'env' ? 'Set on this server' : 'App default'} · <code>{chain.chain}</code>
-          </p>
           {chain.error && <p className="settings-error" role="alert">{chain.error}</p>}
+          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-secondary" disabled={testing !== null} onClick={() => onTest(kind)}>
+              {testing === kind ? <><span className="spinner"></span> Testing…</> : 'Test these services'}
+            </button>
+            <span className="form-hint" style={{ margin: 0 }}>
+              Tries the free services and this computer; a paid service is only listed — test it from its row under Advanced, once.
+            </span>
+          </div>
+          {error && testing === null && <p className="settings-error" role="alert">{error}</p>}
+          {results[kind] && <GenerationChainResult result={results[kind]} />}
+          {kind === 'video' && <VideoKeyCheck />}
+          {/* advanced */}
+          <details className="story-profile">
+          <summary>Advanced: the services, in order</summary>
+          <p className="form-hint settings-card-lead" style={{ wordBreak: 'break-all' }}>
+            {chain.source === 'env' ? 'Set on this server' : 'App default'} · <code>{chain.chain}</code> · <code className="settings-env">{chain.env}</code>
+          </p>
           <div style={{ fontSize: '13px' }}>
             {(chain.links || []).map(row => (
               <div key={row.label} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
@@ -1544,17 +1562,8 @@ function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
               </div>
             ))}
           </div>
-          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" disabled={testing !== null} onClick={() => onTest(kind)}>
-              {testing === kind ? <><span className="spinner"></span> Testing…</> : 'Test these services'}
-            </button>
-            <span className="form-hint" style={{ margin: 0 }}>
-              Tries the free services and this computer; a paid service is only listed here — test it from its row, once.
-            </span>
-          </div>
-          {error && testing === null && <p className="settings-error" role="alert">{error}</p>}
-          {results[kind] && <GenerationChainResult result={results[kind]} />}
-          {kind === 'video' && <VideoKeyCheck />}
+          </details>
+          {/* /advanced */}
           </CardBody>
         </Card>
       ))}

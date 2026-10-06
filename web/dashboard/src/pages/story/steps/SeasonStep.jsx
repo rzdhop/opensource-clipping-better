@@ -6,6 +6,7 @@ import {
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
+import MoreFold from '../MoreFold'
 import { RegenerateControl, StepError } from '../fields'
 import { useConfirm } from '../../../ui'
 
@@ -998,12 +999,14 @@ function SeasonActions({ storyId, season, disabled, onChange }) {
       </div>
       <StepError message={approveError} errors={approveErrors} className="story-step-error" />
 
-      <div className="story-season-replan">
-        <button type="button" className="btn btn-secondary" onClick={handleReplan} disabled={disabled || replanning}>
-          {replanning ? <><span className="spinner"></span> Re-planning…</> : 'Re-plan'}
-        </button>
-      </div>
-      <StepError message={replanError} errors={replanErrors} className="story-step-error" />
+      <MoreFold open={Boolean(replanError)}>
+        <div className="story-season-replan">
+          <button type="button" className="btn btn-secondary" onClick={handleReplan} disabled={disabled || replanning}>
+            {replanning ? <><span className="spinner"></span> Re-planning…</> : 'Re-plan'}
+          </button>
+        </div>
+        <StepError message={replanError} errors={replanErrors} className="story-step-error" />
+      </MoreFold>
     </div>
   )
 }

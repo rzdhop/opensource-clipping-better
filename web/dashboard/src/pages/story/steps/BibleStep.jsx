@@ -4,6 +4,7 @@ import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
+import MoreFold from '../MoreFold'
 
 // The regenerate targets this step uses (spec 9.2 grammar `bible:<field>`).
 // tests/test_story_payload_contract.py checks this list against
@@ -100,18 +101,26 @@ export default function BibleStep({ data, storyId, inFlightJob, onChange, onAdva
   }
 
   const world = story.world || EMPTY_WORLD
+  const written = Boolean(story.logline || story.premise)
   const audience = story.audience || EMPTY_AUDIENCE
   const cardBusy = busy || approving
 
   return (
     <div className="story-step-body">
-      <div className="story-step-actions">
-        <button type="button" className="btn btn-secondary" onClick={handleWrite} disabled={busy}>
-          {myJob && myJob.step === 'bible' ? <><span className="spinner"></span> Writing…</> : 'Write the bible'}
-        </button>
-        <EstimateChip estimate={estimate} />
-        {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
-      </div>
+      {/* One primary action: write the bible; once it is written, writing it again sits under More. */}
+      {(() => {
+        const writeBar = (
+          <div className="story-step-actions">
+            <button type="button" className={`btn ${written ? 'btn-secondary' : 'btn-primary'}`} onClick={handleWrite} disabled={busy}>
+              {myJob && myJob.step === 'bible' ? <><span className="spinner"></span> Writing…</>
+                : written ? 'Write the bible again' : 'Write the bible'}
+            </button>
+            <EstimateChip estimate={estimate} />
+            {estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
+          </div>
+        )
+        return written ? <MoreFold>{writeBar}</MoreFold> : writeBar
+      })()}
       <StepError message={writeError} errors={writeErrors} className="story-step-error" />
 
       {myJob && liveJob && (

@@ -224,6 +224,7 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty,
   const [errors, setErrors] = useState(null)
   const [errorCode, setErrorCode] = useState(null)
   const [errorDetail, setErrorDetail] = useState(null)
+  const [open, setOpen] = useState(false)
 
   const run = async (withNote) => {
     setBusy(true)
@@ -239,6 +240,7 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty,
       setErrors(err.errors || null)
       setErrorCode(err.code || null)
       setErrorDetail(err.detail || null)
+      setOpen(true)
     } finally {
       setBusy(false)
     }
@@ -262,23 +264,28 @@ export function RegenerateControl({ onRegenerate, disabled, estimateChip, empty,
     )
   }
 
+  // Plan 28 stage S3: a document that exists shows no Regenerate row until its card opens "Regenerate".
   return (
-    <div className="story-regenerate">
-      <input
-        aria-label="Note for the regeneration (optional)"
-        className="form-input story-regenerate-note"
-        type="text"
-        placeholder="Optional note, e.g. 'make it darker'"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        disabled={disabled || busy}
-      />
-      <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(note.trim() || null)} disabled={disabled || busy}>
-        {busy ? 'Regenerating…' : (actionLabel || '↻ Regenerate')}
-      </button>
-      {estimateChip}
-      <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
-        storyId={storyId} retryLabel={actionLabel || 'Regenerate'} />
-    </div>
+    <details className="story-profile story-regenerate-fold" open={open || busy || undefined}
+      onToggle={(e) => setOpen(e.target.open)}>
+      <summary>Regenerate</summary>
+      <div className="story-regenerate">
+        <input
+          aria-label="Note for the regeneration (optional)"
+          className="form-input story-regenerate-note"
+          type="text"
+          placeholder="Optional note, e.g. 'make it darker'"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          disabled={disabled || busy}
+        />
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(note.trim() || null)} disabled={disabled || busy}>
+          {busy ? 'Regenerating…' : (actionLabel || '↻ Regenerate')}
+        </button>
+        {estimateChip}
+        <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
+          storyId={storyId} retryLabel={actionLabel || 'Regenerate'} />
+      </div>
+    </details>
   )
 }

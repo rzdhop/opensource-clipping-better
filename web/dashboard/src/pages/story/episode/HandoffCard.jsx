@@ -466,10 +466,6 @@ function CardHead({ open, onToggle, controls, title, chips }) {
   )
 }
 
-function modeChip(mode) {
-  return <Badge tone={mode === 'manual' ? 'accent' : 'neutral'}>{mode === 'manual' ? 'My own' : 'Auto'}</Badge>
-}
-
 /** One shot's clip (`which` = clip) or keyframe (`which` = image) card. */
 export function ShotHandoffCard({ storyId, ep, shot, which, platformInfo, domId, open, onToggle, onChanged, onUploaded }) {
   const { copy, fallback } = useCopy()
@@ -484,7 +480,6 @@ export function ShotHandoffCard({ storyId, ep, shot, which, platformInfo, domId,
         {which === 'clip' ? lengthLabel(shot.length_s, shot.clip_s) : sizeLabel(block.size)}
       </span>
       <Badge tone={state.tone} dot>{state.label}</Badge>
-      {modeChip(block.mode)}
     </>
   )
   return (
@@ -493,13 +488,17 @@ export function ShotHandoffCard({ storyId, ep, shot, which, platformInfo, domId,
       {open && (
         <div className="handoff-card-body" id={bodyId}>
           <p className="handoff-purpose">{shot.purpose}</p>
-          <ModeControl storyId={storyId} ep={ep} shot={shot} which={which} block={block} onChanged={onChanged} />
           {block.mode === 'manual' ? (
             <ManualBody storyId={storyId} ep={ep} shot={shot} which={which} block={block} platformInfo={platformInfo}
               onUploaded={onUploaded} copy={copy} />
           ) : (
             <AutoBody storyId={storyId} ep={ep} shot={shot} which={which} block={block} onChanged={onChanged} />
           )}
+          {/* Plan 28 stage S3: who makes this shot -- the app or you -- only once its card is opened, and folded. */}
+          <details className="story-profile handoff-mode-fold">
+            <summary>Who makes this {which === 'clip' ? 'clip' : 'keyframe'}: {block.mode === 'manual' ? 'you' : 'the app'}</summary>
+            <ModeControl storyId={storyId} ep={ep} shot={shot} which={which} block={block} onChanged={onChanged} />
+          </details>
           {fallback}
         </div>
       )}
@@ -516,7 +515,6 @@ export function EntityHandoffCard({ entity, domId, open, onToggle, onUploaded })
     <>
       <span className="handoff-card-meta">{sizeLabel(entity.size)}</span>
       <Badge tone={state.tone} dot>{state.label}</Badge>
-      {modeChip(entity.mode)}
     </>
   )
   const hasReference = Object.prototype.hasOwnProperty.call(entity, 'reference')

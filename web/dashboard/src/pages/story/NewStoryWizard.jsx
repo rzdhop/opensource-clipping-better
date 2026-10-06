@@ -446,6 +446,7 @@ function CreateStoryForm() {
             )}
           </div>
 
+          {/* advanced */}
           <details className="story-profile" open={showAdvanced} onToggle={(e) => setShowAdvanced(e.target.open)}>
             <summary>Advanced</summary>
             <div className="story-profile-grid">
@@ -724,6 +725,7 @@ function CreateStoryForm() {
               )}
             </div>
           </details>
+          {/* /advanced */}
         </div>
 
         {error && <p className="story-error">{error}</p>}

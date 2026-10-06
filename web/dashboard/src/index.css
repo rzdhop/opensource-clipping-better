@@ -2341,6 +2341,24 @@ button.activity-group-head:focus-visible {
   min-width: 160px;
 }
 
+/* Plan 28 stage S3 (DEC-305 section 9): the secondary actions of a step behind "More". */
+.story-more-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.story-more-body > .story-step-actions,
+.story-more-body > .story-season-replan {
+  margin-top: 0;
+}
+.story-regenerate-fold {
+  margin-top: 6px;
+}
+.episode-studio-fast-track .story-more {
+  margin-top: 2px;
+}
+
 /* --- Style step: template picker, palette, previews --------------------- */
 .story-style-pick {
   display: flex;

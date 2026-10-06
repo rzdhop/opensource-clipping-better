@@ -3,6 +3,7 @@ import { runStoryStep, approveStoryDoc, fetchStoryEstimate, patchKnowledge } fro
 import EstimateChip from '../../../components/EstimateChip'
 import RouteChip from '../../../components/RouteChip'
 import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
+import MoreFold from '../MoreFold'
 import { EditableList, EditableText, StepError } from '../fields'
 
 // Phase 7 stage 5b (A19, DEC-228): a v2 story's knowledge base, read and
@@ -440,22 +441,34 @@ export default function KnowledgeStep({ data, storyId, inFlightJob, onChange }) 
         </>
       )}
 
-      <div className="story-step-actions">
-        <button type="button" className="btn btn-secondary" onClick={handleRun} disabled={busy || running || complete}>
-          {running ? <><span className="spinner"></span> Starting…</> : knowledge ? 'Run step (write what is missing)' : 'Run step'}
-        </button>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={handleApprove}
-          disabled={busy || approving || !complete || state === 'approved'}
-        >
-          {approving ? 'Approving…' : state === 'approved' ? 'Approved'
-            : state === 'stale' ? 'Approve again' : 'Approve knowledge base'}
-        </button>
-        {!complete && <EstimateChip estimate={estimate} />}
-        {!complete && estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
-      </div>
+      {/* One primary action: write what is missing until the base is complete, then approve it. */}
+      {(() => {
+        const writeButton = (
+          <button type="button" className={`btn ${complete ? 'btn-secondary' : 'btn-primary'}`} onClick={handleRun}
+            disabled={busy || running || complete}>
+            {running ? <><span className="spinner"></span> Starting…</> : knowledge ? 'Generate what is missing' : 'Generate'}
+          </button>
+        )
+        const approveButton = (
+          <button
+            type="button"
+            className={`btn ${complete ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={handleApprove}
+            disabled={busy || approving || !complete || state === 'approved'}
+          >
+            {approving ? 'Approving…' : state === 'approved' ? 'Approved'
+              : state === 'stale' ? 'Approve again' : 'Approve knowledge base'}
+          </button>
+        )
+        return (
+          <div className="story-step-actions">
+            {complete ? approveButton : writeButton}
+            <MoreFold>{complete ? writeButton : approveButton}</MoreFold>
+            {!complete && <EstimateChip estimate={estimate} />}
+            {!complete && estimate && <RouteChip routeClass={estimate.route_class} link={estimate.link} />}
+          </div>
+        )
+      })()}
       <StepError message={error} errors={errors} className="story-step-error" />
     </div>
   )

@@ -355,6 +355,9 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           </>
         )}
       </div>
+      {/* advanced */}
+      <details className="story-profile">
+        <summary>Advanced</summary>
       <div className="form-group">
         <label className="form-label" htmlFor="story-profile-tier">Video level</label>
         <select id="story-profile-tier" className="form-select" value={tier} onChange={(e) => handleTier(Number(e.target.value))} disabled={saving}>
@@ -464,6 +467,8 @@ export default function GenerationProfileCard({ storyId, story, nextEp, onChange
           </select>
         </div>
       )}
+      </details>
+      {/* /advanced */}
       <StepError message={error} />
       {switchOffer && (
         <div className="story-step-actions">

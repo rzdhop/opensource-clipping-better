@@ -16,6 +16,7 @@ import { GenerateClipsButton, GenerateWarnings } from './episode/HandoffCard'
 import EpisodeStepper, { episodeSteps, stepOfJob } from './episode/EpisodeStepper'
 import { imagesManual } from './ManualUploadSlot'
 import { jobLabel } from './storySteps'
+import MoreFold from './MoreFold'
 
 // A cap is a round figure: two decimals, as the fast track's own caps line.
 function fmtCap(value) {
@@ -169,7 +170,7 @@ function fastTrackProgress(events) {
  * anything; while the job runs the button names the sub-step its feed
  * reports (`job`, `events`: the in-flight fast-track job and its feed).
  */
-function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onChange }) {
+function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, approveAll, onChange }) {
   const confirm = useConfirm()
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
@@ -289,6 +290,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onCh
             </>
           ) : waiting ? waitingLabel(waiting) : `Make episode ${ep}`}
         </button>
+        {approveAll}
         {estimateError ? (
           <span className="chip chip-warn chip-wrap">{estimateError}</span>
         ) : estimate && (
@@ -306,24 +308,26 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onCh
           <div className="progress-bar-fill" style={{ width: `${Math.round(((progress.number - 0.5) / progress.total) * 100)}%` }}></div>
         </div>
       )}
-      <label className="story-checkbox episode-studio-stop">
-        <input
-          type="checkbox"
-          checked={stopAtKeyframes}
-          onChange={(e) => setStopAtKeyframes(e.target.checked)}
-          disabled={busy || running}
-        />
-        Stop at the keyframes for my review
-      </label>
-      <label className="story-checkbox episode-studio-stop">
-        <input
-          type="checkbox"
-          checked={stopOnScriptIssues}
-          onChange={(e) => setStopOnScriptIssues(e.target.checked)}
-          disabled={busy || running}
-        />
-        Stop at the script if its repairs leave issues
-      </label>
+      <MoreFold>
+        <label className="story-checkbox episode-studio-stop">
+          <input
+            type="checkbox"
+            checked={stopAtKeyframes}
+            onChange={(e) => setStopAtKeyframes(e.target.checked)}
+            disabled={busy || running}
+          />
+          Stop at the keyframes for my review
+        </label>
+        <label className="story-checkbox episode-studio-stop">
+          <input
+            type="checkbox"
+            checked={stopOnScriptIssues}
+            onChange={(e) => setStopOnScriptIssues(e.target.checked)}
+            disabled={busy || running}
+          />
+          Stop at the script if its repairs leave issues
+        </label>
+      </MoreFold>
       <StepError message={error} errors={errors} code={errorCode} detail={errorDetail}
         storyId={storyId} retryLabel={`Make episode ${ep}`} className="story-step-error" />
     </div>
@@ -548,14 +552,13 @@ export default function EpisodeStudio() {
           {arcEntry && <p>{arcEntry.summary}</p>}
         </div>
         <FastTrackHeader storyId={storyId} ep={epNumber} busy={Boolean(inFlightJob)} job={fastTrackJob}
-          events={events} paused={pausedJob} handoff={handoffDoc} onChange={refresh} />
+          events={events} paused={pausedJob} handoff={handoffDoc} onChange={refresh}
+          approveAll={<EpisodeApproveAll storyId={storyId} ep={epNumber} episode={episode} busy={Boolean(inFlightJob)}
+            onChange={refresh} inline />} />
       </div>
 
       <EpisodeStepper steps={steps} runningKey={stepOfJob(inFlightJob, steps)} onSelect={selectStep}
         handoffTo={episode.storyboard ? handoffPath(storyId, ep) : null} handoffLinks={handoffNodes} />
-
-      <EpisodeApproveAll storyId={storyId} ep={epNumber} episode={episode} busy={Boolean(inFlightJob)}
-        onChange={refresh} />
 
       {inFlightJob && liveJob ? (
         liveJob.status === 'queued'

@@ -10,6 +10,7 @@ import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, EditableList, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
 import ApproveAllGroup from '../ApproveAllGroup'
+import MoreFold from '../MoreFold'
 import ManualUploadSlot, { EntityImageSlots, entityImageSlot, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import VoiceReferenceSlot from './VoiceReferenceSlot'
@@ -1139,7 +1140,7 @@ function ContinueCast({ storyId, disabled, onChange, consistencyMode }) {
 
   return (
     <div className="story-step-actions">
-      <button type="button" className="btn btn-secondary" onClick={handleContinue} disabled={disabled || running}>
+      <button type="button" className="btn btn-primary" onClick={handleContinue} disabled={disabled || running}>
         {running ? <><span className="spinner"></span> Continuing…</> : 'Continue cast'}
       </button>
       <EstimateChip estimate={estimate} />
@@ -1288,7 +1289,10 @@ export default function CastStep({ data, storyId, inFlightJob, onChange: onChang
       )}
 
       {characters.some((character) => !character.approved_at) && (
-        <ApproveAllGroup storyId={storyId} group="cast" disabled={busy} onChange={onChange} />
+        // One primary action: Continue while something is missing, Approve all once nothing is.
+        anyMissing
+          ? <MoreFold><ApproveAllGroup storyId={storyId} group="cast" disabled={busy} onChange={onChange} /></MoreFold>
+          : <ApproveAllGroup storyId={storyId} group="cast" disabled={busy} onChange={onChange} />
       )}
     </div>
   )

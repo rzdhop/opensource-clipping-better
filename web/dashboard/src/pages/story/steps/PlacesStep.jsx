@@ -9,6 +9,7 @@ import { LiveActivity, useJobFeed } from '../../../components/ActivityFeed'
 import { EditableText, RegenerateControl, StepError } from '../fields'
 import EntityGallery, { useHashAccordion } from '../EntityGallery'
 import ApproveAllGroup from '../ApproveAllGroup'
+import MoreFold from '../MoreFold'
 import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import { entityBrief, useImageBrief } from './PromptDrawer'
@@ -859,7 +860,7 @@ function ContinuePlaces({ storyId, disabled, onChange, consistencyMode }) {
 
   return (
     <div className="story-step-actions">
-      <button type="button" className="btn btn-secondary" onClick={handleContinue} disabled={disabled || running}>
+      <button type="button" className="btn btn-primary" onClick={handleContinue} disabled={disabled || running}>
         {running ? <><span className="spinner"></span> Continuing…</> : 'Continue places & props'}
       </button>
       <EstimateChip estimate={estimate} />
@@ -1065,7 +1066,10 @@ export default function PlacesStep({ data, storyId, inFlightJob, onChange: onCha
       )}
 
       {[...places, ...props].some((item) => !item.approved_at) && (
-        <ApproveAllGroup storyId={storyId} group="places" disabled={busy} onChange={onChange} />
+        // One primary action: Continue while something is missing, Approve all once nothing is.
+        anyMissing
+          ? <MoreFold><ApproveAllGroup storyId={storyId} group="places" disabled={busy} onChange={onChange} /></MoreFold>
+          : <ApproveAllGroup storyId={storyId} group="places" disabled={busy} onChange={onChange} />
       )}
     </div>
   )

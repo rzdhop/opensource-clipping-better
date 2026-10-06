@@ -32,7 +32,7 @@ export function pendingApprovals(episode, ep) {
  * anyway" stays a separate, explicit click; the keyframes have none since
  * plan 28 F1 -- a hard gate, regenerate or upload your own instead).
  */
-export default function EpisodeApproveAll({ storyId, ep, episode, busy, onChange }) {
+export default function EpisodeApproveAll({ storyId, ep, episode, busy, onChange, inline = false }) {
   const [approving, setApproving] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
@@ -60,15 +60,25 @@ export default function EpisodeApproveAll({ storyId, ep, episode, busy, onChange
     }
   }
 
+  const hint = busy ? 'A step is running.' : `In order: ${pending.map((item) => item.label).join(', ')}.`
+  if (inline) {
+    // Plan 28 stage S3: beside "Make episode N" in the studio's header, as the second button.
+    return (
+      <>
+        <button type="button" className="btn btn-secondary" onClick={handleClick} disabled={busy || approving} title={hint}>
+          {approving ? 'Approving…' : 'Approve all'}
+        </button>
+        {error && <StepError message={error} errors={errors} className="story-step-error" />}
+      </>
+    )
+  }
   return (
     <>
       <div className="story-step-actions episode-studio-approve-all">
         <button type="button" className="btn btn-primary" onClick={handleClick} disabled={busy || approving}>
           {approving ? 'Approving…' : 'Approve all'}
         </button>
-        <span className="form-hint">
-          {busy ? 'A step is running.' : `In order: ${pending.map((item) => item.label).join(', ')}.`}
-        </span>
+        <span className="form-hint">{hint}</span>
       </div>
       <StepError message={error} errors={errors} className="story-step-error" />
     </>
