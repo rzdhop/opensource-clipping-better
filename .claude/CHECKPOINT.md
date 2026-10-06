@@ -1,12 +1,18 @@
 ## CURRENT STATE — plan 29 (empty sets drawn right, Regenerate visible, ~100-word descriptions, approve anyway) IN PROGRESS (2026-10-06, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main (this commit; `FETCH_HEAD` untracked). Plan file
-  `.claude/plans/ai-story/29-empty-sets-and-full-descriptions-plan.md` (DEC-308). Stages 1 (tile reload, 201af51),
-  2 (empty-set prompts, 85108ab), 3 (redraw notes + plate pricing, b291616) MERGED on main, not deployed. Running:
-  stage 4a (descriptions, server side; worktree plan29-s4, agent Opus) and stage 5 (approve anyway; worktree plan29-s5,
-  agent Opus). Then 4b (the Description textarea on the tiles + PATCH acceptance, after 5 merges), 6 (docs), the
-  deploy (3.11 compile → `rm -sfv` + rebuild at 0 jobs: the dashboard changed), the human's Regenerate on 51dbc4213738.
-  Next action = merge 5 and 4a as they report → spawn 4b → docs → deploy.
+- **In-progress header:** phase = DOCUMENT / close-out; the deploy next. Checkpoint commit = main (this commit;
+  `FETCH_HEAD` untracked). Plan file `.claude/plans/ai-story/29-empty-sets-and-full-descriptions-plan.md` (DEC-308;
+  DEC-309 as shipped). ALL STAGES MERGED on main: 1 tile reload (201af51) · 2 empty-set prompts (85108ab) · 3 redraw
+  notes + plate pricing (b291616) · the collision fix (3aa1913) · 5 approve anyway (f00962a) · 4a descriptions server
+  (5204cae) · 4b the Description on the tiles + PATCH (9ace939) · 6 docs (5908202). 3.11 compile of the final tree:
+  0 bad. CI: red on b070ea3 and f2ae180 (the stage 2+3 test collision, fixed in 3aa1913); 3aa1913 and 8e2e2e7 in
+  progress at the write; 5a85d1d/3121d1d queued. NOT deployed. Next action = CI green on the final commit → deploy
+  (`rm -sfv` + rebuild at 0 jobs: the dashboard changed) → the human's walk: Regenerate a plate on 51dbc4213738 and
+  see it change; Places → the day plates drawn empty; a tile's Description after Regenerate (≈ 100 words); a failed
+  picture → "Approve anyway" → "Approved by you despite: …".
+- **Tier 2 (deferred to the human's walk, listed above). Tier 3 per stage:** 1 none (no JS harness) · 2
+  tests/test_story_empty_sets.py · 3 + 5 tests/test_story_sheet_gate.py · 4a tests/test_story_descriptions.py · 4b
+  tests/test_story_description_patch.py · 6 none (docs).
 - **Tier-1 baseline (2026-10-06, on 98f9c4f):** the touched-area selection (12 files: sheet_gate, refimages, look, aistory_prompting, prompt_templates, prompt_budgets, prompts, v2_redraw, gencache, cast_steps, send_layer, aspect_generation) = 542 passed in both envs (local 44 s, CI-like 45 s), exit 0.
 - **Regression contract (plan 29):** sheet/portrait prompts byte-identical (`tests/test_story_look.py`,
   `test_aistory_prompting.py` goldens) · DEC-303 send-layer order, hashes untouched (`test_story_send_layer.py`,
