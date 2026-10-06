@@ -1,38 +1,55 @@
-## CURRENT STATE — plan 32 "the fruit drama product through the MCP" IN PROGRESS (2026-10-06, local session)
+## CURRENT STATE — plan 32 "the fruit drama product through the MCP" CODE + DOCS COMPLETE (stages 0–7, 9) and PUSHED on `feat/fruit-drama-product`; stage 8 (S2V in the clips step) WAITS for the human's live test; the PR is the human's click (2026-10-06, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Done: stage 0 396a289 · stage 1 aa7252b (MCP: style/fast-track/
-  story-fast-track steps, presets.py, story_estimate, story_make_episode, STORY_CHAT_WRITER, store recipe field) ·
-  stage 3 997fcc3 (the Pixar look, goldens re-pinned; + a15b6d3 four tier-1 guard goldens) · stage 7 6f5b1de
-  (s2v_wan22 template, symlink, docs — the human's live test gates stage 8) · stage 5 d7a2f0d (episode_sheet,
-  episode_export) · stage 6 647ec44 (runpod TTS provider, frozen reference per character at cast time, own_gpu
-  tts_chain; + the brand-gate guard follow-up) · stage 2 1fb85d9 (the recipe record in the writers, guard test).
-  Wave B verified together: local 3225+1 fixed / CI-like 3056+169s / venv 130. Running now: stage 4 (format
-  fruit_drama_75s_v2 + the end card on hard_stop + hook text, Sonnet, main tree) and stage 9's docs part (skill,
-  docs/MCP.md, docs/AI_STORY.md, CHANGELOG — Sonnet, worktree). Next action = verify 4, cherry-pick 9's docs, one
-  broad local run (both envs), DEC-315 + A-202…, CHECKPOINT rewritten, push, the PR body file. Stage 8 (S2V in
-  the clips step) waits for the human's "it works" on one S2V line.
-- **Tier 1 baseline (0de84d1, the touched-area selection, 26 files):** local 1306 passed · CI-like 1306 passed ·
-  venv (test_mcp_server/director/runpod_jobs) 41 passed — exit 0 everywhere. The selection is in the scratchpad
-  (`baseline_sel.txt`): test_aistory_prompting/templates, test_comfyui_video, test_local_comfyui, test_mcp_*,
-  test_runpod_*, test_story_body_rule, test_story_cli, test_story_concepts_*, test_story_episode_*,
-  test_story_plan_fit, test_story_prompt_budgets, test_story_prompts*, test_story_setup_context,
-  test_story_shot_window, test_story_voices, test_tts_adapters, test_tts_chatterbox_template, test_voice_tools.
-- **Regression contract (plan 32):** (1) every prompt of a recipe-less story byte-identical — the SHA goldens of
-  `tests/test_story_prompts_v3.py`, the literal goldens of `tests/test_story_prompts.py`,
-  `tests/test_story_prompts_episode.py` (E1–E4, RC-M1 byte-identity), `tests/test_story_setup_context.py`, plus
-  a new guard test in stage 2; (2) hashed cores untouched — `tests/test_aistory_prompting.py` (re-pinned only for
-  the look, with a dated comment), DEC-303; (3) locked styles unchanged — `tests/test_story_body_rule.py`
-  (fruit_drama.json version 1), stylelock tests; (4) the 20 story tool names + the concepts test + comfy_download
-  — `tests/test_mcp_server.py::test_the_tools_are_listed` and siblings; (5) the director's runs/approvals —
-  `tests/test_mcp_director.py`; (6) the six existing workflow templates render byte-identically —
-  `tests/test_comfyui_video.py`, `tests/test_local_comfyui.py`, `tests/test_tts_chatterbox_template.py`; (7)
-  image/video/audio jobs unchanged — `tests/test_mcp_runpod_jobs.py`, `tests/test_runpod_*.py`; (8) the TTS
-  adapters and voice pinning — `tests/test_story_voices.py`, `tests/test_tts_adapters.py`; (9) every format fits
-  the clip links — `tests/test_story_plan_fit.py`, `tests/test_story_shot_window.py`,
-  `tests/test_story_episode_schemas.py`; (10) the CLI's profile builder — `tests/test_story_cli*.py`; (11) render
-  goldens (DEC-156, ffmpeg-keyed) re-recorded only where the recipe changes the frame — UNVERIFIED locally until
-  stage 4 records them.
-- **Open questions:** none blocking (the seven answers above). The S2V live test (stage 7 → 8) is the human's gate.
+- **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Branch `feat/fruit-drama-product`
+  from `feat/comfy-tts-chatterbox` at 0de84d1 (plan 31, NOT in main yet — **merge order: plan 31's PR, then this
+  one**). Commits: 396a289 stage 0 · aa7252b stage 1 (MCP unblock) · 997fcc3 stage 3 (the look) + a15b6d3 (four
+  tier-1 guard goldens) · 6f5b1de stage 7 (s2v_wan22 + symlink) · d7a2f0d stage 5 (episode_sheet/export) · 647ec44
+  stage 6 (voices on the worker) + 3836feb (brand-gate guard) · 1fb85d9 stage 2 (the recipe in the writers) · fddbe1f
+  stage 4 (the format + the end card/hook text) · 51681c0 stage 9 docs · 7c68de9 (no voice pick on a voiceless
+  story) · this commit = close-out (DEC-315, A-202…A-210, this file, the log). **PR:** open it from the compare page
+  with the body in the scratchpad file `PR_BODY.md` (also summarised in the action log):
+  https://github.com/rzdhop/opensource-clipping-better/compare/main...feat/fruit-drama-product?expand=1
+  Plan file `.claude/plans/ai-story/32-fruit-drama-product-plan.md`. **Next action = the human's checklist** (the PR
+  body): deploy + MCP restart → the plugin skill copy replaced by hand → plan 31's GPU steps if not done → the S2V
+  weights on the volume (`fetch_weights_s2v.sh`) + the worker image rebuilt → ONE paid S2V line on a fruit keyframe
+  (≈ $0.03–0.07 warm + ≈ $0.10 cold, a guess) → "ça marche" starts stage 8 (GenRequest audio field, the
+  `talking_clips: runpod_s2v` policy on own_gpu, the video table + pricing rows, the assets video phase passing the
+  shot's dialogue track; fallback InfiniteTalk) → the first fruit-drama story from the chat with the skill.
+- **Tier 1:** per stage in both envs + the venv (wave A 2229/2081+148s/63; stage 6 293/293/55; wave B
+  3225+1/3056+169s/130; stage 4 4856/4486+371s/30; the two guard re-pins), then ONE full local run of `tests/` at
+  7c68de9: local 9176 passed 4 skipped · CI-like 8207 passed 942 skipped · venv (MCP + presets + recipes + s2v +
+  format) 159 passed — exit 0 everywhere (DEC-278: CI runs the full suite at every push as well). **Tier 2:**
+  DEFERRED to the human — nothing here can reach RunPod or Gemini; the live steps are A-202…A-210. **Tier 3:** new
+  tests/test_story_presets.py (8), test_story_recipes.py (67), test_story_fruit_drama_format.py (23),
+  test_tts_runpod.py, test_s2v_wan22_template.py (6); +5 +6 in test_mcp_server.py, +3 test_mcp_director.py, the
+  cast/voices/budget/env extensions, the recipe guard test (nine recipe-less prompts pinned by SHA at 8b4c352).
+- **Regression contract (plan 32) — intact:** (1) recipe-less prompts byte-identical — the guard test + the SHA
+  goldens of test_story_prompts_v3/episode/setup_context unchanged; (2) hashed cores untouched (prompting.py not
+  edited; test_aistory_prompting re-pinned for the look only, dated); (3) locked styles unchanged — stylelock tests,
+  fruit_drama.json version 1; (4) the story tool names extended never removed — test_the_tools_are_listed; (5) the
+  director's runs — test_mcp_director; (6) the seven existing workflow templates byte-identical —
+  test_comfyui_video/local_comfyui/tts_chatterbox_template; (7) image/video/audio jobs — test_mcp_runpod_jobs,
+  test_runpod_*; (8) the TTS adapters and voice pinning — test_story_voices, test_tts_adapters (the four plan-31
+  references untouched, test_voice_tools); (9) every format fits — test_story_plan_fit (the new format on every
+  link pair); (10) the CLI's profile builder — test_story_cli*; (11) the render golden unchanged (recipe-less
+  fixture; the recipe path covered by unit tests on plan/ASS/timeline — UNVERIFIED on a real render until the
+  human's first recipe episode, A-210). Moved with the look, re-pinned with the dated comment: test_aistory_prompting,
+  test_story_prompts K1, test_story_shots, test_story_two_view_sheets, test_story_body_rule, test_story_empty_sets,
+  test_story_setup_context, test_story_episode_prompt_budgets, the three fixtures, test_story_clip_estimate and
+  test_story_video_phase (the two tier-1 guards found by the stage 2 sweep — a deviation, logged).
+- **Deviations logged:** three agents at a time on disjoint files (waves A and B); the map's module paths were off
+  twice (the template engine is clipping/providers/local_comfyui.py; the providers live in clipping/providers/);
+  the fast-track approves keyframes itself (DEC-311) so story_make_episode takes stop_at_keyframes; build_style takes
+  no writer (a NO_WRITER wrapper); assets_estimate refuses an unwritten episode (fast_track_estimate used); the
+  one-run story needed STORY_CHAT_WRITER; story_options' episode_formats became objects; the brand-gate guard's
+  literal updated; docker-compose forwards no RUNPOD_IMAGE_* (pre-existing, left: images and the audio fallback
+  reach the video endpoint in the container unless RUNPOD_AUDIO_ENDPOINT_ID is set — a follow-up for the human).
+- **Open questions:** none blocking. Follow-ups noted, not done: the judge's "carved into it" vs the JSON's "drawn
+  on its surface" wording; body_rules.all_matter / default_material still photoreal-worded (opt-in only);
+  propose_next/N1 characters do not see the naming rule; the reference entry has no `source: synthetic` field;
+  regenerate character:<id>:voice unfreezes a clone; the narrator is not cloned; no prompt_limits row for the TTS
+  link; episodes scripted before this plan keep no end card until rescripted; episode_export runs synchronously.
+- **Untracked, left as is:** `reports/`, `research_notes/`, `FETCH_HEAD`.
 
 ## CURRENT STATE — plan 31 (the Chatterbox TTS route on the RunPod worker; episode 1 of "Accès refusé" voiced through it) CODE + DOCS COMPLETE and PUSHED on `feat/comfy-tts-chatterbox`; the PR to main is the human's click (no gh, no token, the browser pane not signed in); the GPU steps are the human's (2026-10-06, local session)
 
