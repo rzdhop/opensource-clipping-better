@@ -967,7 +967,7 @@ def end_card_cta_font_size(text: str, *, geometry=profiles.PORTRAIT) -> int:
 
 
 def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict, duration_s: float, *,
-                 cta: bool = False, geometry=profiles.PORTRAIT) -> str:
+                 cta: bool = False, cta_text=None, geometry=profiles.PORTRAIT) -> str:
     """A standalone ASS document for the 1.0 s end card (spec 6.2/6.4,
     plan: "PART {n+1} / PARTIE {n+1} + the story title, centered, style
     typography"): burned by ``render/filtergraph.py``'s ``end_card_argv``
@@ -977,7 +977,11 @@ def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict
     With *cta* (the episode template's ``end_card_cta``), one more line
     under "PART N": :func:`end_card_cta_text`, sized by
     :func:`end_card_cta_font_size`. Without it the document is exactly
-    what it always was. *geometry* is the card's frame (:func:`_layout`;
+    what it always was. *cta_text* (plan 32 stage 4: the story's recipe's
+    end card line, ``recipes.end_card_line``) is that line's words, as
+    given, in place of :func:`end_card_cta_text`'s, and puts the line on
+    the card whether or not *cta* is set; the "PART N" headline and the
+    title are the same. *geometry* is the card's frame (:func:`_layout`;
     the portrait card by default)."""
     layout = _layout(geometry)
     label_word = "PARTIE" if language == "fr" else "PART"
@@ -1002,8 +1006,8 @@ def end_card_ass(language: str, next_ep: int, story_title: str, typography: dict
         f"{{\\an5\\pos({layout.center_x},{layout.end_card_title_y})}}{title_text}",
     ]
     styles = [label_style, title_style]
-    if cta:
-        cta_text = end_card_cta_text(language, next_ep)
+    if cta or cta_text:
+        cta_text = cta_text or end_card_cta_text(language, next_ep)
         styles.append(_style_line(
             END_CARD_CTA_STYLE_NAME, typography["font_family"], end_card_cta_font_size(cta_text, geometry=geometry),
             END_CARD_PRIMARY_HEX, END_CARD_OUTLINE_HEX, bold=False, italic=False,
@@ -1050,13 +1054,16 @@ def _scene_span(timeline: dict, scene_id: str) -> tuple:
 
 def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, language: str,
                          hook_style: str, ai_label_enabled: bool, palette: dict, typography: dict,
-                         word_timings=None, geometry=profiles.PORTRAIT, look=None) -> tuple:
+                         word_timings=None, geometry=profiles.PORTRAIT, look=None,
+                         burn_hook_text: bool = False) -> tuple:
     """The full episode ``subtitles.ass`` document (everything burned by
     the final pass's ``ass=subtitles.ass:fontsdir=fonts`` in one file,
     spec 6.5): dialogue text for *subtitle_mode* (``word_pop``/
     ``two_line``/``none`` -- spec 6.3's closed list), the hook overlay only
-    when *hook_style* == ``"text_overlay"``, and the ``ai_label`` when
-    *ai_label_enabled*.
+    when *hook_style* == ``"text_overlay"`` (or, with *burn_hook_text*, also
+    for ``"insert_prop"``: plan 32 stage 4, a story whose recipe requires the
+    hook's on-screen text; ``False`` is the document this always built), and
+    the ``ai_label`` when *ai_label_enabled*.
 
     Returns ``(document_text, meta)``, ``meta == {"approx_line_ids": [...]}``
     -- the sorted ids of every line whose word timing was an even split
@@ -1089,7 +1096,7 @@ def build_subtitles_ass(*, timeline: dict, script: dict, subtitle_mode: str, lan
         approx_by_line.update(a)
     # "none": no dialogue Style/Events at all -- the other layers still apply.
 
-    if hook_style == "text_overlay":
+    if hook_style == "text_overlay" or (burn_hook_text and hook_style == "insert_prop"):
         hook_text = (script.get("hook") or {}).get("on_screen_text")
         hook_scene = next((sc for sc in script["scenes"] if sc["function"] == "hook"), None)
         if hook_text and hook_scene is not None:

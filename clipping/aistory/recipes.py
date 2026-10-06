@@ -110,6 +110,30 @@ def for_story(story):
         return None
 
 
+def ends_on_card(story, cliffhanger_style) -> bool:
+    """Whether *story*'s episodes end on the end card (plan 32 stage 4): the
+    style's cliffhanger cuts to black (the card follows the fade), or the
+    story's recipe asks for a card (``end_card``) even when the cliffhanger
+    is a ``hard_stop`` -- the fruit drama's "Partie {n} demain". The script
+    carries the answer as ``cliffhanger.cut_to_black``
+    (``steps/script.skeleton``), which the timing and the render read. A
+    story without a recipe: the style's answer alone, as before."""
+    if cliffhanger_style == "cut_to_black":
+        return True
+    return bool((for_story(story) or {}).get("end_card"))
+
+
+def end_card_line(recipe, next_ep):
+    """The call-to-action line a recipe puts on the end card of the episode
+    that leads to part *next_ep*: the recipe's ``end_card.text`` with ``{n}``
+    filled, as written (the recipe's own language, whatever the story's), or
+    None for no recipe or a recipe without an end card."""
+    card = (recipe or {}).get("end_card")
+    if not card:
+        return None
+    return card["text"].format(n=next_ep)
+
+
 def check_id(recipe_id) -> None:
     """``store.create``'s check: None, or the id of a shipped recipe; else a
     ``ValueError`` in one sentence naming the shipped ones."""

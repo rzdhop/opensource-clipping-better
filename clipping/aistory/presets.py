@@ -3,7 +3,7 @@ product, instead of a dozen choices.
 
 A preset names the look (``style_template_id``), how the pictures and clips
 are made (``generation_profile``), the recipe the story follows (``recipe``)
-and its episode format (``episode_template_id``; None is the default that
+and its episode format (``episode_template_id``; None would be the default that
 ``defaults.episode_template_for`` gives the profile). :func:`apply` turns
 one into the keyword arguments of ``StoryStore.create``; :func:`merge` lays
 a caller's own choices over them (the caller's win); :func:`list_presets`
@@ -42,8 +42,8 @@ PRESETS = {
         "generation_profile": dict(defaults.quality_generation_profile(), budget_profile=defaults.OWN_GPU_PROFILE,
                                    universe="fruits", mode=defaults.MODE_AGENT),
         "recipe": FRUIT_DRAMA,
-        # Plan 32 stage 4 adds its own format; until then the profile's default.
-        "episode_template_id": None,
+        # Plan 32 stage 4: the recipe's own format (60-90 s, 5 scenes, 6 with the recap).
+        "episode_template_id": defaults.EPISODE_TEMPLATE_ID_FRUIT_DRAMA,
     },
 }
 

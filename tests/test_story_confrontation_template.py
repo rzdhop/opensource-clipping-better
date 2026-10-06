@@ -61,9 +61,12 @@ def test_the_template_validates_with_the_plans_values():
         "episode_words": [95, 125], "reaction_shots": [0, 1]}
     assert timing.episode_slots(tpl, 1) == ["hook", "body", "body", "body", "cliffhanger"]
     assert timing.episode_slots(tpl, 2) == ["recap", "hook", "body", "body", "cliffhanger"]  # re-pinned, as above
-    # The keys are optional: no other shipped template has any (their prompts and timing are unchanged).
+    # The keys are optional: no other shipped template has any (their prompts and timing are unchanged) --
+    # re-pinned on purpose (plan 32 stage 4, 2026-10-06): fruit_drama_75s_v2 has reaction_shots alone.
     for template_id in defaults.EPISODE_TEMPLATE_IDS:
-        if template_id != "confrontation_50s_v2":
+        if template_id == "fruit_drama_75s_v2":
+            assert set(NEW_KEYS) & set(templates.load_episode_template(template_id)) == {"reaction_shots"}
+        elif template_id != "confrontation_50s_v2":
             assert not set(NEW_KEYS) & set(templates.load_episode_template(template_id)), template_id
 
 

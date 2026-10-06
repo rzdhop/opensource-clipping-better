@@ -40,7 +40,8 @@ NOW = "2026-10-05T22:00:00+00:00"
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 WIZARD = ROOT / "web" / "dashboard" / "src" / "pages" / "story" / "NewStoryWizard.jsx"
 REFUSAL = "This format cannot fit the clips this story makes. Let the app choose one."
-V2_FORMATS = ["serial_60s_v2", "serial_90s_v2", "narrated_drama_60s_v2", "confrontation_50s_v2"]
+V2_FORMATS = ["serial_60s_v2", "serial_90s_v2", "narrated_drama_60s_v2", "confrontation_50s_v2",
+              "fruit_drama_75s_v2"]  # the last: plan 32 stage 4 (2026-10-06)
 QUALITY_SETTINGS = {"FAL_KEY": "test-fal-key"}
 
 

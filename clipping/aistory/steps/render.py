@@ -583,6 +583,9 @@ def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, vide
         "story": {"story_id": ec.story_id, "title": ec.story["title"], "language": ec.language},
         "subtitles": subtitles, "encoder": encoder, "video_encoder": video_encoder,
     }
+    if ec.story.get("recipe"):
+        # Plan 32 stage 4: the end card's line and the hook's text follow the story's recipe.
+        args["story"]["recipe"] = ec.story["recipe"]
     if fill_failed_with_motion:
         args["fill_failed_with_motion"] = True
     look = subtitle_style.look_for(ec.style_lock, ec.story)

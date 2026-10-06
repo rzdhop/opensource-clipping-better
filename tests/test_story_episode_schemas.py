@@ -47,9 +47,10 @@ def _mutate(doc, fn):
 # pack): narrated_drama_60s_v2 and serial_90s_v2 join them (count 3 -> 5); the
 # three before are unchanged. Re-pinned on purpose (plan 22 stage 3): the
 # confrontation format confrontation_50s_v2 (count 5 -> 6); the five before are
-# unchanged.
-EXPECTED_EPISODE_TEMPLATE_IDS = ("confrontation_50s_v2", "narrated_drama_60s_v2", "serial_60s_v1", "serial_60s_v2",
-                                 "serial_90s_v1", "serial_90s_v2")
+# unchanged. Re-pinned on purpose (plan 32 stage 4, 2026-10-06): the fruit drama
+# recipe's format fruit_drama_75s_v2 (count 6 -> 7); the six before are unchanged.
+EXPECTED_EPISODE_TEMPLATE_IDS = ("confrontation_50s_v2", "fruit_drama_75s_v2", "narrated_drama_60s_v2",
+                                 "serial_60s_v1", "serial_60s_v2", "serial_90s_v1", "serial_90s_v2")
 
 
 def test_exactly_the_two_shipped_episode_template_ids():
@@ -253,7 +254,8 @@ def test_a_style_suggests_any_shipped_template_and_no_other():
     serial_60s_v1 (never read); plan 20 stage 1 lifted it to the shipped ids:
     a suggestion the new-story form pre-fills."""
     style = templates.load_style("fruit_drama")
-    assert style["episode_defaults"]["episode_template_id"] == "narrated_drama_60s_v2"
+    # Re-pinned on purpose (2026-10-06, plan 32 stage 4, DEC-315): fruit_drama's own format.
+    assert style["episode_defaults"]["episode_template_id"] == "fruit_drama_75s_v2"
     for template_id in defaults.EPISODE_TEMPLATE_IDS:
         doc = _mutate(style, lambda d, t=template_id: d["episode_defaults"].__setitem__("episode_template_id", t))
         assert schemas.style_template_errors(doc) == [], template_id

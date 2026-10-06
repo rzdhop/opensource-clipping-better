@@ -33,7 +33,12 @@ for the version the cache keys need, and hands the plan to
   ``filtergraph.end_card_argv`` over ``end_card.ass``; the card carries the
   call to action under "PART N" only when the episode template says
   ``end_card_cta: true`` (read defensively: absent or anything else is off,
-  so every template without it renders the card it always did).
+  so every template without it renders the card it always did). Plan 32
+  stage 4: a story whose recipe has an ``end_card`` (``story["recipe"]``)
+  puts the recipe's own line there instead ("Partie {n} demain"), and the
+  script's ``cut_to_black`` is true for it even on a ``hard_stop`` style
+  (``steps/script.skeleton``); the same story's hook text is burned for
+  ``insert_prop`` (``subtitles.build_subtitles_ass``'s ``burn_hook_text``).
 - ``A`` (``audio_mix``) -- ``filtergraph.audio_mix_argv`` -> ``mix.wav`` and
   ``stems/``; at tier 3 a shot that keeps its clip's sound (the inputs'
   ``native_audio``, phase 6 stage 10) gives it one more stem there, in place
@@ -80,7 +85,7 @@ import os
 import re
 
 from ... import loudness
-from .. import schemas
+from .. import recipes, schemas
 from .. import timing as timing_mod
 from . import filtergraph, imagesize, motion, profiles
 from . import subtitles as subtitles_mod
@@ -224,7 +229,8 @@ def build_render_plan(*, script: dict, storyboard: dict, assets: dict, style_loc
                       fill_failed_with_motion: bool = False, aspect: str = "9:16", look=None) -> dict:
     """The plan of one render (module docstring).
 
-    - *story*: ``{"story_id", "title", "language"}`` (the end card's title).
+    - *story*: ``{"story_id", "title", "language"}`` (the end card's title),
+      plus ``"recipe"`` (the story's recipe id) when it has one.
     - *inputs*: the files the caller resolved and hashed, each ``{path
       (absolute), source (relative, for the manifest), sha256}``:
       ``shots{shot_id: ...}``, optional ``videos{shot_id: ...}``,
@@ -334,6 +340,9 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         raise PlanError(f"unknown subtitles mode {subtitles!r}, expected 'style' or one of "
                         f"{list(schemas.SUBTITLE_MODES)}")
     language = story["language"]
+    # Plan 32 stage 4: the story's recipe (``story["recipe"]``, passed by ``steps/render.plan_args`` only when
+    # the story has one; None otherwise, and the plan is what it always was).
+    recipe = recipes.for_story(story)
     if language not in schemas.LANGUAGES:
         raise PlanError(f"unknown story language {language!r}")
     font = inputs.get("font")
@@ -446,8 +455,11 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     end_card_output = None
     if timeline["end_card"] is not None:
         card_s = timeline["end_card"]["duration_s"]
+        # Plan 32 stage 4: a story whose recipe has an end card puts the recipe's line on it (its own words,
+        # "Partie {n} demain"), in place of the template's call to action; a recipe-less story's card is unchanged.
         card_text = subtitles_mod.end_card_ass(language, ep + 1, story["title"], typography, card_s,
-                                               cta=template.get("end_card_cta") is True, geometry=geometry)
+                                               cta=template.get("end_card_cta") is True,
+                                               cta_text=recipes.end_card_line(recipe, ep + 1), geometry=geometry)
         files.append({"path": END_CARD_ASS_REL, "text": card_text})
         argv0 = filtergraph.end_card_argv(END_CARD_ASS_REL, FONTS_DIR, card_s, card_profile, _OUT_TOKEN,
                                           geometry=geometry)
@@ -543,7 +555,7 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
         timeline=timeline, script=script, subtitle_mode=mode, language=language,
         hook_style=style_lock["episode_defaults"]["hook_style"], ai_label_enabled=bool(typography_doc.get("ai_label")),
         palette=style_lock["palette"], typography=typography, word_timings=word_timings, geometry=geometry,
-        look=look)
+        look=look, burn_hook_text=recipe is not None)
     files.insert(0, {"path": SUBTITLES_REL, "text": subtitles_text})
     stages.append(_stage("F", "final", filtergraph.final_pass_argv(
         timeline, shot_inputs=shot_outputs, end_card_input=end_card_output, ass_rel=SUBTITLES_REL,

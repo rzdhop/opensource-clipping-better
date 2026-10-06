@@ -1274,7 +1274,8 @@ def test_get_styles_matches_the_loaded_templates(api):
         assert entry["typography"]["font_family"] == template["typography"]["font_family"]
         assert entry["episode_defaults"]["hook_style"] == template["episode_defaults"]["hook_style"]
         assert entry["episode_defaults"]["episode_template_id"] == template["episode_defaults"]["episode_template_id"]
-    assert by_id["fruit_drama"]["episode_defaults"]["episode_template_id"] == "narrated_drama_60s_v2"
+    # Re-pinned on purpose (2026-10-06, plan 32 stage 4, DEC-315): fruit_drama's own format.
+    assert by_id["fruit_drama"]["episode_defaults"]["episode_template_id"] == "fruit_drama_75s_v2"
 
 
 def test_the_styles_route_does_not_shadow_an_unknown_story_id(api):

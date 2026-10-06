@@ -110,7 +110,8 @@ def test_the_readers_see_something():
     # Phase 7 stage 4 (DEC-227): serial_60s_v2 joins the two v1 templates.
     # Plan 20 stage 1 (on purpose): serial_90s_v2 and narrated_drama_60s_v2 join them.
     # Plan 22 stage 3 (on purpose): confrontation_50s_v2 joins them.
-    assert len(defaults.EPISODE_TEMPLATE_IDS) == 6
+    # Plan 32 stage 4 (on purpose, 2026-10-06): fruit_drama_75s_v2 joins them.
+    assert len(defaults.EPISODE_TEMPLATE_IDS) == 7
 
 
 # -------------------------------------------------- ScriptPane.jsx: scriptParams

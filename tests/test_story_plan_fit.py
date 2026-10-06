@@ -34,7 +34,8 @@ from test_story_assets_step import hermetic, store  # noqa: F401 -- stage 8's fi
 from test_story_plan_feasibility import _native_story
 
 FR = "fr"
-V2_FORMATS = ("serial_60s_v2", "serial_90s_v2", "narrated_drama_60s_v2", "confrontation_50s_v2")
+V2_FORMATS = ("serial_60s_v2", "serial_90s_v2", "narrated_drama_60s_v2", "confrontation_50s_v2",
+              "fruit_drama_75s_v2")  # the last: plan 32 stage 4 (2026-10-06)
 # Each link's lengths inside the native 5-10 s shot window (clips.link_lengths): an upload is planned at
 # native_speech.SPEECH_LENGTHS.
 LINK_LENGTHS = {"manual": (6, 8), "veo": (6, 8), "kling": (5, 10), "seedance": (5, 6, 7, 8, 9, 10), "ltx": (6, 8, 10)}

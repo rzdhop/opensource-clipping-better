@@ -26,8 +26,8 @@ def test_the_fruit_drama_preset_makes_a_story_on_the_own_gpu_profile(stories, tm
     assert profile["consistency_mode"] == "references" and profile["budget_profile"] == defaults.OWN_GPU_PROFILE
     assert profile["universe"] == "fruits" and profile["mode"] == defaults.MODE_AGENT
     assert doc["style_template_id"] == "fruit_drama" and doc["recipe"] == "fruit_drama"
-    # None for now: the default the profile gets (plan 32 stage 4 names its own format).
-    assert doc["episode_template_id"] == defaults.episode_template_for(profile)
+    # Plan 32 stage 4 (2026-10-06): the recipe's own format, no longer the profile's default.
+    assert doc["episode_template_id"] == "fruit_drama_75s_v2" != defaults.episode_template_for(profile)
     assert schemas.story_bible_errors(doc) == []
     on_disk = json.loads((tmp_path / "outputs" / "stories" / doc["story_id"] / "story.json").read_text())
     assert on_disk["recipe"] == "fruit_drama"

@@ -220,9 +220,13 @@ EPISODE_TEMPLATE_ID_NARRATED = "narrated_drama_60s_v2"
 # boundary a cut, the narrator in the recap only). The format a new story on
 # a native-speech profile starts on when it names none (episode_template_for).
 EPISODE_TEMPLATE_ID_CONFRONTATION = "confrontation_50s_v2"
+# Plan 32 stage 4 (DEC-315): the fruit drama recipe's own format -- 60-90 s, 5 scenes on episode 1 and 6 with
+# the recap, 1-2 shots of 5-10 s a scene, the recipe's 1.5 s end card. The fruit_drama preset sets it and the
+# fruit_drama style suggests it (DEC-268: a per-story choice, never a pipeline default).
+EPISODE_TEMPLATE_ID_FRUIT_DRAMA = "fruit_drama_75s_v2"
 EPISODE_TEMPLATE_IDS = ("serial_60s_v1", "serial_90s_v1", EPISODE_TEMPLATE_ID_V2,
                         EPISODE_TEMPLATE_ID_90_V2, EPISODE_TEMPLATE_ID_NARRATED,
-                        EPISODE_TEMPLATE_ID_CONFRONTATION)
+                        EPISODE_TEMPLATE_ID_CONFRONTATION, EPISODE_TEMPLATE_ID_FRUIT_DRAMA)
 
 # In order, each derived from a contiguous prefix of ``approvals``
 # (store.derive_status): concept, bible, style, then -- phase 2 -- cast,

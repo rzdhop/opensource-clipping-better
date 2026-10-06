@@ -1,0 +1,30 @@
+{
+  "$schema": "episode_template_v1",
+  "template_id": "fruit_drama_75s_v2",
+  "version": 1,
+  "label": {"fr": "Fruit drama de 75 secondes (plans animés)", "en": "75-second fruit drama (animated beats)"},
+  "window_s": [60, 90],
+  "target_s": 75,
+  "tighten_above_s": 85,
+  "scenes": [4, 6],
+  "shots": [5, 12],
+  "min_shot_s": 5,
+  "recap_from_episode": 2,
+  "default_body_count": 3,
+  "shots_per_scene": [1, 2],
+  "max_shot_s": 10,
+  "slots": {
+    "recap":       {"functions": ["recap"], "count": [1, 1], "duration_s": [5.0, 6.0]},
+    "hook":        {"functions": ["hook"], "count": [1, 1], "duration_s": [5.0, 10.0]},
+    "body":        {"functions": ["setup", "rising", "peak", "turn"], "count": [2, 4], "duration_s": [14.0, 20.0]},
+    "cliffhanger": {"functions": ["cliffhanger"], "count": [1, 1], "duration_s": [6.0, 10.0]}
+  },
+  "pauses_s": {"before_first_line": 0.35, "between_lines": 0.25, "tail": 0.6, "tail_peak": 1.2, "tail_floor": 0.3},
+  "tail_peak_functions": ["peak", "cliffhanger"],
+  "hold_extension_max_s": 1.0,
+  "end_card_s": 1.5,
+  "transitions_s": {"cut": 0.0, "dissolve": 0.4, "fadeblack": 0.4, "fadewhite": 0.3, "wipeleft": 0.3, "wiperight": 0.3, "slideup": 0.3},
+  "reaction_shots": [1, 1],
+  "end_card_cta": true,
+  "notes": "Plan 32 stage 4 (DEC-315): the format of the fruit drama recipe (recipes/fruit_drama.json: 60-90 s, 4-6 scenes). One conflict told in 5 scenes on episode 1 (the hook, three body beats setup / rising / peak, the cliffhanger) and 6 with the recap from episode 2 (default_body_count 3; scenes [4, 6] lets the plan's fit drop to 2 body beats when a link's clips cannot fit 90 s, never below 4 scenes). Each scene is 1-2 shots of 5-10 s (shots_per_scene, min_shot_s, max_shot_s: the native shot window, DEC-304): the recap 5-6 s, the hook 5-10 s, a body beat 14-20 s (two shots), the cliffhanger 6-10 s, so a default plan on 6/8 s clips (Veo, an upload) lasts 64 s on episode 1 and 70 s on episode 2 before the end card, and the target is 75 s, tightening above 85 s. One silent reaction shot a scene (reaction_shots [1, 1]) lets a fruit's face carry the beat after its line. end_card_s 1.5 matches the recipe's end card ('Partie {n} demain', 1.5 s; the recipe asks for the card even when the style's cliffhanger is hard_stop, steps/script.py sets the script's cut_to_black from it), and end_card_cta puts the recipe's line on it. No narrator fields: the fruits speak in their own voices. The format fruit_drama's style suggests (episode_defaults.episode_template_id) and the fruit_drama preset sets; still a per-story choice (DEC-268)."
+}

@@ -35,7 +35,7 @@ import re
 
 from clipping.providers import gating
 
-from .. import media_policy, timing
+from .. import media_policy, recipes, timing
 from .. import store as store_mod
 from . import assets as assets_step
 from . import clips as clips_step
@@ -151,9 +151,9 @@ def planned_shots(ec, script) -> list:
         return [(int(shot["duration_s"]), bool(shot["speaks"])) for shot in board["shots"]]
     if not media_policy.native_speech(ec.story):
         return []
+    card = recipes.ends_on_card(ec.story, ec.episode_defaults.get("cliffhanger_style"))
     preview = timing.plan_floor_preview(ec.template, ec.ep, clips_step.speech_lengths(ec.story), bool(ec.narrator),
-                                        lang=ec.language, style_lock=ec.style_lock,
-                                        end_card=ec.episode_defaults.get("cliffhanger_style") == "cut_to_black")
+                                        lang=ec.language, style_lock=ec.style_lock, end_card=card)
     return [(int(clip_s), bool(speaks)) for clip_s, speaks in preview.get("shots") or ()]
 
 

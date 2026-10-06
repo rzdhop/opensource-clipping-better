@@ -396,6 +396,12 @@ def _plan_failure(ec, exc) -> StepFailed:
     return StepFailed(timing.plan_slot_refusal(ec.ep, exc.function, exc.need_s, exc.slot_hi_s))
 
 
+def _ends_on_card(ec) -> bool:
+    """Whether this episode ends on the end card: its style's cliffhanger cuts to black, or its story's recipe
+    asks for the card (plan 32 stage 4, ``recipes.ends_on_card``)."""
+    return recipes.ends_on_card(ec.story, ec.episode_defaults.get("cliffhanger_style"))
+
+
 def beat_sheet_slots(ec) -> list:
     """The slot list E1 is asked to fill (``timing.episode_slots``): on a
     native-speech story (plan 28 stage A2) as many body scenes as the plan's
@@ -406,7 +412,7 @@ def beat_sheet_slots(ec) -> list:
         return timing.episode_slots(ec.template, ec.ep)
     return timing.episode_slots(ec.template, ec.ep, lengths=_speech_lengths(ec), narrator=bool(ec.narrator),
                                 lang=ec.language, style_lock=ec.style_lock,
-                                end_card=ec.episode_defaults.get("cliffhanger_style") == "cut_to_black")
+                                end_card=_ends_on_card(ec))
 
 
 def plan_fit_refusal(ec, script=None, *, log=None):
@@ -428,7 +434,7 @@ def plan_fit_refusal(ec, script=None, *, log=None):
                  sum(float(shot["clip_s"]) for shot in scene["line_plan"]["shots"])) for scene in planned]
         end_card = floor - sum(clip for _sid, _function, clip in rows)
     else:
-        cut = ec.episode_defaults.get("cliffhanger_style") == "cut_to_black"
+        cut = _ends_on_card(ec)
         preview = timing.plan_floor_preview(ec.template, ec.ep, _speech_lengths(ec), bool(ec.narrator),
                                             lang=ec.language, style_lock=ec.style_lock, end_card=cut)
         unplannable = preview.get("unplannable")
@@ -843,7 +849,7 @@ def skeleton(ec, *, now) -> dict:
         "$schema": schemas.EPISODE_SCRIPT_SCHEMA_NAME, "ep": ec.ep, "title": None, "language": ec.language,
         "template_id": ec.template["template_id"], "hook": {"on_screen_text": None}, "scenes": [],
         "cliffhanger": {"scene_id": None, "reveal": None,
-                        "cut_to_black": ec.episode_defaults["cliffhanger_style"] == "cut_to_black"},
+                        "cut_to_black": _ends_on_card(ec)},
         "next_episode_teaser": None, "timing": None, "consistency_report": None,
         "approved_anyway": None, "approved_at": None, "rev": 1, "created_at": now, "updated_at": now,
     }

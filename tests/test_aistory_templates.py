@@ -168,10 +168,12 @@ def test_every_style_template_passes_its_schema(template_id):
     assert tpl["version"] == 1
 
 
-def test_each_style_suggests_a_shipped_episode_format_and_fruit_drama_the_narrated_drama():
+def test_each_style_suggests_a_shipped_episode_format_and_fruit_drama_its_own():
     """Plan 20 stage 1: ``episode_defaults.episode_template_id`` is a style's
     suggested episode format (once a const nothing read). Fruit Drama
-    suggests the narrated drama; the six others keep serial_60s_v1, which
+    suggests the narrated drama (re-pinned on purpose, 2026-10-06, plan 32
+    stage 4, DEC-315: its own format, fruit_drama_75s_v2, the recipe's
+    60-90 s); the six others keep serial_60s_v1, which
     the new-story form reads as a legacy format and so never pre-fills over
     a v2 story's default. Only that one value changed: the seven ids, the
     prose and the palettes are the pinned ones (the tests around this)."""
@@ -180,9 +182,9 @@ def test_each_style_suggests_a_shipped_episode_format_and_fruit_drama_the_narrat
     suggested = {template_id: templates.load_style(template_id)["episode_defaults"]["episode_template_id"]
                  for template_id in EXPECTED_STYLE_IDS}
     assert set(suggested.values()) <= set(defaults.EPISODE_TEMPLATE_IDS)
-    assert suggested.pop("fruit_drama") == "narrated_drama_60s_v2"
+    assert suggested.pop("fruit_drama") == "fruit_drama_75s_v2"
     assert set(suggested.values()) == {"serial_60s_v1"}
-    # The suggested format carries the narration the fruit drama is told with.
+    # The narrated drama stays shipped, with the narration it was made for.
     narrated = templates.load_episode_template("narrated_drama_60s_v2")
     assert "narrator_share" in narrated and "character_lines" in narrated
 
