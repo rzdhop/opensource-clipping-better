@@ -348,7 +348,7 @@ def test_the_redraw_ceiling_is_the_story_s_images_x_two_x_one_image_and_stops_th
     _cast(store, story_id, _llm(events), events, vision=SheetVision())
     story = store.get(story_id)
     # Two characters x three sheets (three_sheet mode), no place, no prop: 6 images x 2 x $0.04 = $0.48.
-    monkeypatch.setattr(sheet_gate, "unit_usd", lambda story, env: 0.04)
+    monkeypatch.setattr(sheet_gate, "unit_usd", lambda story, env, kind="characters": 0.04)
     assert sheet_gate.image_count(store, story) == 6
     assert sheet_gate.ceiling(store, story, {}) == (0.48, 0.04)
 
@@ -369,6 +369,99 @@ def test_the_redraw_ceiling_is_the_story_s_images_x_two_x_one_image_and_stops_th
 
 
 # --------------------------------------------------------------- the species
+
+def _places_run(store, story_id, events, image, vision):
+    from clipping.aistory.steps import places
+
+    params = {"places": [{"name": "Plage", "one_line": "La plage."}],
+              "props": [{"name": "Coco-telephone", "one_line": "Le telephone.", "owner": "Kiwilo"}]}
+    llm = tsl.FakeLLM(
+        events,
+        P1=[{"descriptor": "a crescent of white sand with palm huts",
+             "layout_notes": "huts left, sea right, bonfire back", "time_variants": ["day"]}],
+        D3=[{"layout_map": {"left": "palm-leaf huts", "right": "the turquoise sea", "back": "a bonfire ring",
+                            "foreground": "", "centre": ""},
+             "scale_note": "a wide beach, huts twice a person's height",
+             "lighting": {"day": "hard tropical sun"}, "props_here": ["Coco-telephone"]}],
+        R1=[{"descriptor": "a hollow coconut with a curly cord and a brass dial", "owner": "Kiwilo"}],
+        R1v2=[{"scale_cm": 18, "material": "coconut shell and brass", "colour": "brown and gold",
+               "scale_phrase": "fits in one hand",
+               "where_when": [{"ep": 1, "holder": "Kiwilo", "place": "Plage", "note": "rings at dawn"}]}])
+    log = []
+    ctx = steps.StepContext(job_id="job000000001", story_id=story_id, step="places", ep=None, params=params,
+                            cancel=CancelToken(), settings_env=dict(SETTINGS), outputs_dir=store.outputs_dir,
+                            on_log=log.append)
+    places.run(ctx, runner=llm, time_fn=lambda: 100.0,
+               adapters={("image", "local"): image, ("vision", "gemini"): vision})
+    return log
+
+
+def test_a_failed_plate_and_a_failed_prop_are_drawn_again_with_an_empty_set_note_not_the_judge_s_words(
+        tmp_path, hermetic, unpaced):
+    store, story_id = _cast_story(tmp_path)
+    owner = tsl._character("char_kiwilo", "Kiwilo", "a fuzzy kiwi", ["gold chain", "linen shirt"],
+                           look=tsl._d2_look(175))
+    store.write_entity(story_id, "characters", owner, now=tsl.NOW)
+    fault = "The image contains fruit characters, but it must be an empty set without any persons."
+    seen = []
+
+    def answer(request):
+        what = re.match(r".*?Image 1 is (.+?)\.\n", request.prompt, re.S).group(1)
+        first = what not in seen
+        seen.append(what)
+        # Each image fails its first check and passes the second.
+        return json.dumps({"passed": False, "issues": [fault]}) if first else PASS
+
+    events = tsl.Events()
+    image = tsl.FakeImage(events)
+    log = _places_run(store, story_id, events, image, SheetVision(answer))
+    plate, plate_again, prop, prop_again = (request.prompt for request in image.requests)
+    assert "completely empty" not in plate and "Author's note" not in plate
+    assert plate_again.endswith(
+        "Author's note: The last picture showed someone or something alive in the set. Draw the set completely "
+        "empty: nobody in it, no character, no figure, no fruit person; only the room, its furniture and light.")
+    assert "fruit characters" not in plate_again and "persons" not in plate_again
+    assert prop_again.endswith(
+        "Author's note: The last picture showed a character with the object. Draw the object alone on a plain "
+        "surface: no hands, no character, no fruit person near it.")
+    assert "fruit characters" not in prop_again and "Author's note" not in prop
+    # The human still reads what the judge saw.
+    assert any(fault.rstrip(".") in line and "drawing it again (1 of 2)" in line for line in log)
+
+
+def test_a_character_redraw_keeps_the_judge_s_words_in_its_note():
+    from clipping.aistory.steps import sheet_gate
+
+    assert sheet_gate._note(["two heads on the left figure."]) == (
+        "Fix what the last picture got wrong: two heads on the left figure")
+
+
+def test_a_redraw_is_priced_as_what_it_draws_a_plate_as_a_plate_and_a_prop_as_a_prop(tmp_path, hermetic,
+                                                                                    monkeypatch):
+    from clipping.aistory import refimages
+    from clipping.aistory.steps import sheet_gate
+
+    store, story_id = _cast_story(tmp_path)
+    story = store.get(story_id)
+    asked = []
+    prices = {"sheet": 0.04, "plate": 0.05, "prop": 0.03}
+
+    def estimate(kind, env, **kwargs):
+        request = kwargs["request"]
+        asked.append((kwargs["role"], (request.width, request.height)))
+        return {"est_usd": prices[kwargs["role"]]}
+
+    monkeypatch.setattr(sheet_gate.imaging, "estimate", estimate)
+    assert sheet_gate.unit_usd(story, {}) == 0.04
+    assert sheet_gate.unit_usd(story, {}, "places") == 0.05
+    assert sheet_gate.unit_usd(story, {}, "props") == 0.03
+    assert asked == [("sheet", refimages.PORTRAIT_SIZE), ("plate", refimages.plate_size(story)),
+                     ("prop", refimages.PROP_SIZE)]
+    # One place (its day plate), one prop, no character: 2 redraws each, each at its own price.
+    monkeypatch.setattr(sheet_gate, "_counts", lambda stories, story: {"characters": 0, "places": 1, "props": 1})
+    assert sheet_gate.ceiling(store, story, {}, "places") == (round(2 * 0.05 + 2 * 0.03, 4), 0.05)
+    assert sheet_gate.ceiling(store, story, {}, "props")[1] == 0.03
+
 
 def test_two_characters_of_a_species_world_never_share_a_species(tmp_path, hermetic, unpaced):
     store, story_id = _cast_story(tmp_path)

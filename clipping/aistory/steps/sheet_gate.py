@@ -12,7 +12,7 @@ A failed image is drawn again by the regenerate path -- a fresh seed and what
 the judge saw as the note -- at most :data:`REDRAWS` times, and judged again;
 a portrait drawn again draws the sheets made from it again too. Every redraw
 is booked against the story's ceiling (:func:`ceiling`: its images x
-:data:`REDRAWS` x one image on its link); past it, or after the last redraw,
+:data:`REDRAWS` x one image of its kind on its link); past it, or after the last redraw,
 the step says the plain sentence ("Gaston's portrait does not match: the head
 is a human head, Gaston is a pineapple. Regenerate it, or upload your own.")
 and the entity cannot be approved (``judge.sheet_refusal``) until it is
@@ -52,35 +52,72 @@ def spent(stories, story_id) -> float:
     return round(total, 4)
 
 
-def image_count(stories, story) -> int:
-    """The story's images the judge watches: each character's sheets of the
-    story's sheet mode, each place's time variants (at least its day plate)
-    and each prop's picture."""
+def _counts(stories, story) -> dict:
+    """The story's images the judge watches, by kind: each character's sheets
+    of the story's sheet mode, each place's time variants (at least its day
+    plate) and each prop's picture."""
     story_id = story["story_id"]
-    count = len(refimages.character_images(story)) * len(stories.list_entities(story_id, CHARACTERS))
-    for doc in stories.list_entities(story_id, PLACES):
-        count += max(1, sum(1 for ref in (doc.get("time_variants") or {}).values() if ref))
-    return count + len(stories.list_entities(story_id, PROPS))
+    places = sum(max(1, sum(1 for ref in (doc.get("time_variants") or {}).values() if ref))
+                 for doc in stories.list_entities(story_id, PLACES))
+    return {CHARACTERS: len(refimages.character_images(story)) * len(stories.list_entities(story_id, CHARACTERS)),
+            PLACES: places, PROPS: len(stories.list_entities(story_id, PROPS))}
 
 
-def unit_usd(story, env) -> float:
-    """One image on the story's sheet link, as the estimate prices it (0 on
-    a free or local link)."""
-    width, height = refimages.PORTRAIT_SIZE
+def image_count(stories, story) -> int:
+    """The story's images the judge watches (:func:`_counts`, all kinds)."""
+    return sum(_counts(stories, story).values())
+
+
+# What one redraw of each kind is priced as (plan 29 stage 3, DEC-308): the role the image is made on and
+# the size it is asked at -- a plate on the plate role at the story's plate size, a prop on the prop role.
+_ROLES = {CHARACTERS: "sheet", PLACES: "plate", PROPS: "prop"}
+
+
+def _size(story, kind) -> tuple:
+    if kind == PLACES:
+        return refimages.plate_size(story)
+    return refimages.PROP_SIZE if kind == PROPS else refimages.PORTRAIT_SIZE
+
+
+def unit_usd(story, env, kind=CHARACTERS) -> float:
+    """One image of *kind* on the story's link for it, as the estimate prices
+    it: a character sheet on the sheet role, a plate on the plate role at the
+    plate size, a prop on the prop role (0 on a free or local link)."""
+    width, height = _size(story, kind)
     found = imaging.estimate(gen.IMAGE, env, route=story["generation_profile"]["route"],
                              request=gen.GenRequest(kind=gen.IMAGE, width=width, height=height), qty=1,
-                             step="image", what="a reference image", when="the step runs", role="sheet", story=story)
+                             step="image", what="a reference image", when="the step runs", role=_ROLES[kind],
+                             story=story)
     return float(found.get("est_usd") or 0.0)
 
 
-def ceiling(stories, story, env) -> tuple:
-    """``(ceiling_usd, unit_usd)``: the story's redraw ceiling -- its images
-    (:func:`image_count`) x :data:`REDRAWS` x one image on its link."""
-    unit = unit_usd(story, env)
-    return round(image_count(stories, story) * REDRAWS * unit, 4), unit
+def ceiling(stories, story, env, kind=CHARACTERS) -> tuple:
+    """``(ceiling_usd, unit_usd)``: the story's redraw ceiling -- each kind's
+    images (:func:`_counts`) x :data:`REDRAWS` x one image of that kind on its
+    link -- and the unit of *kind* (the image about to be drawn again)."""
+    total = 0.0
+    for each, count in _counts(stories, story).items():
+        if count:
+            total += count * REDRAWS * unit_usd(story, env, each)
+    return round(total, 4), unit_usd(story, env, kind)
 
 
-def _note(issues) -> str:
+_PLACE_NOTE = ("The last picture showed someone or something alive in the set. Draw the set completely empty: "
+               "nobody in it, no character, no figure, no fruit person; only the room, its furniture and light.")
+_PROP_NOTE = ("The last picture showed a character with the object. Draw the object alone on a plain surface: "
+              "no hands, no character, no fruit person near it.")
+
+
+def _note(issues, kind=CHARACTERS) -> str:
+    """The note a redraw carries. A character's is what the judge saw
+    (``Fix what the last picture got wrong: ...``); a place's and a prop's
+    say what to draw, in positive words, never the fault quoted back (a
+    model told "no fruit characters" draws them -- DEC-308). The issues stay
+    in the log line, where the human reads them."""
+    if kind == PLACES:
+        return _PLACE_NOTE
+    if kind == PROPS:
+        return _PROP_NOTE
     text = _NOTE_HEAD + "; ".join(" ".join(str(item).split()).rstrip(".") for item in issues)
     if len(text) <= refimages.NOTE_MAX_CHARS:
         return text
@@ -210,7 +247,7 @@ def _review_slot(ctx, store, story, kind, eid, slot, *, tools, lock, ledger, red
         if not redraw or redraws >= REDRAWS:
             ctx.on_log(f"✋ {sentence}")
             return sentence
-        top, unit = ceiling(store, story, ctx.settings_env)
+        top, unit = ceiling(store, story, ctx.settings_env, kind)
         so_far = spent(store, ctx.story_id)
         if so_far + unit > top + 1e-9:
             ctx.on_log(f"✋ {sentence} (The redraw budget for this story's images, ${top:.2f}, is spent.)")
@@ -219,7 +256,7 @@ def _review_slot(ctx, store, story, kind, eid, slot, *, tools, lock, ledger, red
                    f"({redraws + 1} of {REDRAWS})")
         before = ledger.totals()["est_usd"]
         try:
-            _redraw(ctx, store, kind, eid, slot, _note(issues), tools)
+            _redraw(ctx, store, kind, eid, slot, _note(issues, kind), tools)
         except refimages.RefImageError as exc:
             ctx.on_log(f"✖ {subject} could not be drawn again: {exc}")
             return sentence
