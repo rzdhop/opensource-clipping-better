@@ -10,6 +10,20 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### The story MCP server: comfy_download and a systemd unit (DEC-313)
+
+#### Added
+
+- **`comfy_download(path, max_mib=25)`** (`mcp_server/comfy_download.py`): the
+  file itself as a base64 embedded resource, so the chat client can save a
+  rendered clip or image and hand it to the user; `view_file` and `comfy_fetch`
+  only ever showed previews. Paths resolve as for `view_file` but are refused
+  outside `outputs/` and the repo (symlinks followed first); files over
+  `max_mib` (ceiling 50) are refused with a message pointing at scp.
+- **`deploy/rzdhop-story-mcp.service`**: the server as a system unit (the
+  repo's `.venv`, `Restart=always`, journal logging, `ProtectSystem=full` with
+  `outputs/` writable). No `EnvironmentFile=`: the server loads `.env` itself.
+
 ### The story MCP server, stage 1: RunPod jobs as tools (DEC-312)
 
 #### Added

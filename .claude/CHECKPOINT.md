@@ -1,3 +1,24 @@
+## CURRENT STATE — the MCP server is a systemd unit; comfy_download live; one branch (2026-10-06 ~17:40 UTC, local session)
+
+- **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
+  commit). `feat/mcp-story-director` (stages 1–5a + the FLUX.2 klein verification) fast-forwarded into main and
+  pushed; the merged local branches, their worktrees and the merged remote branches deleted — `main` is the only
+  branch (DEC-313; the unmerged leftovers are listed in the action log).
+- **Live:** `rzdhop-story-mcp.service` (enabled, `Restart=always`) serves `http://127.0.0.1:8787/mcp` behind
+  Tailscale Funnel `https://main-network-interface.tail01346d.ts.net/` → 401 without the bearer, as before;
+  31 tools, `comfy_download` among them (exact bytes of `outputs/mcp/2026-10-06/kiwi_explosion.mp4` over the
+  wire). Logs: `journalctl -u rzdhop-story-mcp`. The hand launch (`uv run python -m mcp_server` in a terminal)
+  is gone; never start a second instance on 8787.
+- **Tier 1 baseline:** `tests/test_mcp_server.py` + `tests/test_local_comfyui.py` 31 passed in the `.venv`
+  (`uv run --no-sync --with pytest python -m pytest …`; the venv has fastmcp, no pytest); the five `test_mcp_*`
+  + comfyui files 49 passed 2 skipped in the local xdist env (fastmcp absent there, the server tests skip).
+- **Regression contract (this task):** `comfy_download` bytes/mime/refusals —
+  `tests/test_mcp_server.py::test_comfy_download_hands_back_the_bytes_and_stays_inside_the_roots`; the tool list —
+  `::test_the_tools_are_listed`; `view_file`/`list_files` unchanged — `::test_view_file_and_list_files_see_the_outputs_dir`.
+  The unit's crash recovery is UNVERIFIED by test (checked by hand: SIGKILL → active, NRestarts=1).
+- **Tier 2 (the human):** from claude.ai, ask for a clip and see the download card.
+- **Open questions:** none blocking.
+
 ## CURRENT STATE — the first complete RunPod episode is rendered; DEC-310 + DEC-311 live (2026-10-06 ~14:20 UTC, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this

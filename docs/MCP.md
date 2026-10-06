@@ -57,22 +57,21 @@ Clients:
   token without it. Clients and tokens are kept in `outputs/mcp/oauth.json`
   (mode 600), so a restart does not log the connector out.
 
-A systemd unit for the server:
+A systemd unit for the server is in `deploy/rzdhop-story-mcp.service` (the
+repo's `.venv`, `python -m mcp_server` from the repo, `Restart=always`, logs in
+the journal under `rzdhop-story-mcp`):
 
-```ini
-[Unit]
-Description=rzdhop story MCP
-After=network-online.target
-
-[Service]
-WorkingDirectory=/path/to/opensource-clipping-better
-ExecStart=/path/to/opensource-clipping-better/.venv/bin/python -m mcp_server
-Restart=on-failure
-EnvironmentFile=/path/to/opensource-clipping-better/.env
-
-[Install]
-WantedBy=multi-user.target
+```bash
+sudo cp deploy/rzdhop-story-mcp.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now rzdhop-story-mcp
+journalctl -u rzdhop-story-mcp -f
 ```
+
+The unit carries no `EnvironmentFile=`: the server loads the repo's `.env`
+itself (python-dotenv), and that file has inline `# comments` after some
+values, which dotenv strips and systemd would keep as part of the value. The
+address stays `MCP_HOST`/`MCP_PORT` from `.env`, else `127.0.0.1:8787`, so the
+Funnel mapping above keeps working unchanged.
 
 ## The tools (stage 1)
 
@@ -87,6 +86,7 @@ WantedBy=multi-user.target
 | `comfy_jobs(limit, refresh)` | free | the journal, newest first; `refresh` asks RunPod about the unfinished ones |
 | `cost_ledger(since?)` | free | GPU seconds and dollars of the finished jobs, per kind |
 | `view_file(path)` | free | look at any image or clip under `outputs/` (or the repo) |
+| `comfy_download(path, max_mib=25)` | free | the file itself (base64 embedded resource) so the client can save it and hand it to the user; `view_file` and `comfy_fetch` only show previews. Refused outside `outputs/` and the repo, and over `max_mib` (ceiling 50): bigger files travel by scp |
 | `list_files(folder)` | free | the files under a folder of `outputs/`, newest first |
 
 Jobs are journaled in `outputs/mcp/jobs.json` the moment RunPod answers the
