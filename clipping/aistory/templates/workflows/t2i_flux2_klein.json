@@ -3,7 +3,7 @@
   "name": "t2i_flux2_klein",
   "task": "t2i",
   "min_profile": "low",
-  "verified_live": false,
+  "verified_live": true,
   "description": "Text to image with FLUX.2 [klein] 4B (Apache-2.0). Authored from ComfyUI's default API-format graph for this model, with the literal inputs replaced by placeholders (spec 8.7). Validated at run time against /object_info: a missing node or model file is refused with its name, never worked around.",
   "placeholders": [
     "prompt",
