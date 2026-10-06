@@ -1100,6 +1100,14 @@ class ShotModeRequest(BaseModel):
     image: Optional[str] = None
 
 
+class GenerateClipsRequest(BaseModel):
+    """POST /api/stories/{id}/episodes/{ep}/clips/generate (plan 28 stage A6,
+    the Generate button): ``shot_id`` -- that one of your own clips still
+    missing -- or null for every one of them. Plain string here: the route
+    refuses a shot that is not one of them with a 409 naming it."""
+    shot_id: Optional[str] = None
+
+
 class HandoffRequest(BaseModel):
     """PATCH /api/stories/{id}/episodes/{ep}/handoff (plan 25 stage 2): where
     the human makes the episode's clips -- ``platform`` (``flow`` or

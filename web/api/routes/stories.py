@@ -140,6 +140,7 @@ from clipping.aistory import voice_reference as voice_reference_mod
 from clipping.aistory import voices as voices_mod
 from clipping.aistory.steps import brief as brief_step
 from clipping.aistory.steps import episode_common
+from clipping.aistory.steps import generate_clips as generate_step
 from clipping.aistory.steps import bible as bible_step
 from clipping.aistory.steps import concepts as concepts_step
 from clipping.aistory.steps import entities as entities_step
@@ -160,6 +161,7 @@ from ..models import (
     ConceptChooseRequest,
     ConceptsGenerateRequest,
     FastTrackStepParams,
+    GenerateClipsRequest,
     HandoffRequest,
     JobResponse,
     JobStatus,
@@ -3012,13 +3014,41 @@ def _handoff_of(stories, story, story_id, ep, platform, model):
         ec = episode_common.load_context(stories, story_id, ep)
     except llm_call.StepFailed as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
+    env = worker.get_settings_env()
     try:
         platform, model = _handoff_choice(ec, platform, model)
-        return ec, brief_step.handoff(stories, story, worker.get_settings_env(), ec, platform=platform, model=model)
+        document = brief_step.handoff(stories, story, env, ec, platform=platform, model=model)
     except platforms.PresetError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     except (llm_call.StepFailed, refimages.RefImageError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    _priced(ec, document, env)
+    return ec, document
+
+
+def _priced(ec, document, env) -> None:
+    """Plan 28 stage A6, in place: each of the human's own clips still missing
+    carries ``clip.generate_price`` ``{usd, link, allowed, reason}`` -- what
+    "Generate this clip" would buy, priced server-side by the clip gate
+    (``generate_clips.quote``) -- the document ``generate_price`` ``{usd,
+    count, shot_ids, allowed, reason}`` for all of them, and ``warnings``
+    (``generate_clips.warnings``) said before any click. Off native speech,
+    or with nothing of the human's missing, ``generate_price`` is None."""
+    document["warnings"] = generate_step.warnings(ec, env)
+    document["generate_price"] = None
+    own = generate_step.missing_own(document)
+    if not own or not media_policy.native_speech(ec.story):
+        return
+    script = episode_common.read_episode(ec, episode_common.SCRIPT_DOC)
+    board = episode_common.read_episode(ec, episode_common.STORYBOARD_DOC)
+    doc = episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC)
+    if script is None or board is None:
+        return
+    priced = generate_step.quote(ec, script, board, doc, own, env=env)
+    for shot in document.get("shots") or ():
+        if shot["shot_id"] in priced["shots"]:
+            shot["clip"]["generate_price"] = priced["shots"][shot["shot_id"]]
+    document["generate_price"] = priced["all"]
 
 
 @router.get("/{story_id}/episodes/{ep}/handoff")
@@ -3040,6 +3070,101 @@ async def episode_handoff(story_id: str, ep: str, platform: Optional[str] = None
     number = _episode_number(ep)
     _ec, document = await run_in_threadpool(_handoff_of, stories, story, story_id, number, platform, model)
     return document
+
+
+def _generate_refused(detail) -> HTTPException:
+    return HTTPException(status_code=409, detail=" ".join(str(detail).split()))
+
+
+def _generate_switch(stories, story, story_id, ep, shot_id):
+    """The Generate button's work before its job exists (plan 28 stage A6):
+    the shots -- *shot_id*, else every one of the human's own clips still
+    missing -- priced by the clip gate and refused in plain words (409,
+    nothing switched, nothing booked); then each switched to ``auto``
+    (``workflow.patch_shot_mode``) and the job's own gate run on them -- the
+    one clip's (``workflow.regenerate_clip_estimate``) or the assets step's
+    (``_phase4_checks``) -- which, refusing, switches them back to the
+    human's (409). Returns ``(step, params, ep or None, gate, restore)``:
+    *restore* switches them back when the job cannot be queued."""
+    env = worker.get_settings_env()
+    ec, document = _handoff_of(stories, story, story_id, ep, None, None)
+    own = generate_step.missing_own(document)
+    if shot_id is not None and shot_id not in own:
+        raise _generate_refused(f"Shot {shot_id}'s clip is not one of yours still to make: nothing to generate.")
+    chosen = [shot_id] if shot_id is not None else own
+    if not chosen:
+        raise _generate_refused("None of your clips is missing: nothing to generate.")
+    priced = document.get("generate_price") or {}
+    verdict = (priced if shot_id is None else
+               next((shot["clip"].get("generate_price") for shot in document["shots"] if shot["shot_id"] == shot_id),
+                    None)) or {}
+    if not verdict.get("allowed"):
+        raise _generate_refused(verdict.get("reason") or "It cannot be generated now; nothing was bought.")
+    doc = episode_common.read_episode(ec, episode_common.store_mod.EPISODE_ASSETS_DOC) or {}
+    before = {sid: ((doc.get("shot_modes") or {}).get(sid) or {}).get("clip") for sid in chosen}
+
+    def restore():
+        for sid, mode in before.items():
+            with _answering():
+                workflow.patch_shot_mode(stories, story_id, ep, sid, {"clip": mode}, now=_now(), env=env)
+
+    with _answering():
+        for sid in chosen:
+            workflow.patch_shot_mode(stories, story_id, ep, sid, {"clip": "auto"}, now=_now(), env=env)
+    try:
+        if shot_id is not None:
+            parsed = (regenerate_step.SHOT_VIDEO_KIND, ep, shot_id)
+            try:
+                with _answering():
+                    estimate = workflow.regenerate_clip_estimate(stories, story, parsed, env=env, probe_local=True)
+            except HTTPException as exc:
+                raise _generate_refused(f"{exc.detail} Nothing was bought: shot {shot_id} is yours again.") from None
+            if not estimate["ready"]:
+                raise _generate_refused(f"{estimate['message']} Nothing was bought: shot {shot_id} is yours again.")
+            return "regenerate", {"target": f"shot:{ep}:{shot_id}:video", "note": None}, None, restore
+        sent, gate = _phase4_checks(stories, story, "assets", {}, ep, env)
+        try:
+            gate()
+        except HTTPException as exc:
+            raise _generate_refused(f"{exc.detail} Nothing was bought: your clips are yours again.") from None
+        try:
+            beyond = generate_step.beyond_the_clips(episode_common.load_context(stories, story_id, ep),
+                                                    float(priced.get("usd") or 0.0), env=env)
+        except llm_call.StepFailed as exc:
+            beyond = str(exc)
+        if beyond:
+            raise _generate_refused(f"{beyond} Nothing was bought: your clips are yours again.")
+        return "assets", sent, ep, restore
+    except HTTPException:
+        restore()
+        raise
+
+
+@router.post("/{story_id}/episodes/{ep}/clips/generate", status_code=201)
+async def generate_clips(story_id: str, ep: str, req: GenerateClipsRequest) -> JobResponse:
+    """The Generate button (plan 28 stage A6, DEC-305 section 1): ``{"shot_id"}``
+    buys that one of your own clips still missing (a ``shot:<ep>:<shid>:video``
+    regenerate job), ``{}`` every one of them (the assets step, which buys
+    the clips of the shots set to auto). The shot(s) are switched to auto
+    and the job queued only when the clip gate allows it at the price the
+    handoff showed (``GET .../handoff``'s ``generate_price``); refused with
+    409 in plain words -- a cap, no key, paid generation off, the keyframes
+    not approved, a shot not yours to make -- with nothing switched and
+    nothing booked; a refusal of the job's own gate, after the switch,
+    switches them back. 404 for an unknown story or episode; 409 while a
+    step of the story is queued or running; 429 when the queue is full. No
+    auth, as every story route."""
+    stories = _stories()
+    story = _load(stories, story_id)
+    number = _episode_number(ep)
+    _refuse_busy(story_id, "generate the clips once it is done, or cancel it first.")
+    step, params, job_ep, restore = await run_in_threadpool(_generate_switch, stories, story, story_id, number,
+                                                            req.shot_id)
+    try:
+        return await _create_step_job(story_id, step, params, ep=job_ep, gate=lambda: None)
+    except HTTPException:
+        await run_in_threadpool(restore)
+        raise
 
 
 def _handoff_edit(story_id, ep, sent) -> dict:

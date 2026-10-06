@@ -128,6 +128,7 @@ from .. import timing, voices
 from . import assets as assets_step
 from . import clips as clips_step
 from . import entities, episode_common, gates, llm_call, voice_lines
+from . import generate_clips
 from . import judge as judge_step
 from . import lipsync as lipsync_step
 from . import metadata as metadata_step
@@ -1124,7 +1125,14 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
     **Clips** (tier >= 2, phase 6 stage 11): the assets estimate's own video
     part on the approved storyboard (``assets._video_units``), in the paid
     part and the total as the run's paid check counts them; before the
-    storyboard is approved, ``video.count`` is None and nothing is priced.
+    storyboard is approved, a native-speech episode's clips are priced from
+    its plan (plan 28 stage A6, ``generate_clips.plan_video_units``:
+    ``video.basis`` "plan", each planned shot's length x its link's price,
+    speaking and silent apart, the retake budget with a bought speaking
+    clip), so the total and the caps' verdict are the real ones before the
+    click; any other story's ``video.count`` is None and nothing is priced.
+    ``warnings`` (plan 28 stage A6, ``generate_clips.warnings``): no
+    speech-check key, a provider's own refusal of the story's last run.
     ``keyframes`` (stage C) is what the one click does with the keyframes:
     on a v2 story they are checked (J2), auto-fixed up to ``fix_usd`` and
     -- at tier >= 2 -- approved by the run itself unless
@@ -1235,10 +1243,15 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
             if video["route_class"] == "paid" and video["count"] and video["ready"]:
                 video_paid = video["est_usd"]
         else:
-            video = {"tier": clips_step.tier_of(ec), "count": None, "seconds": None, "est_usd": 0.0, "plan": [],
-                     "route_class": None, "link": None, "ready": True, "refused": None, "animate": True,
-                     "message": ("The clips are planned once the storyboard is approved; the paid check prices "
-                                 "them before any is bought.")}
+            # Plan 28 stage A6: a native-speech episode's clips priced from its plan before the storyboard exists.
+            video = generate_clips.plan_video_units(ec, script, env=env, adapters=adapters)
+            if video is None:
+                video = {"tier": clips_step.tier_of(ec), "count": None, "seconds": None, "est_usd": 0.0, "plan": [],
+                         "route_class": None, "link": None, "ready": True, "refused": None, "animate": True,
+                         "message": ("The clips are planned once the storyboard is approved; the paid check "
+                                     "prices them before any is bought.")}
+            elif video["route_class"] == "paid" and video["count"] and video["ready"]:
+                video_paid = video["est_usd"]
     total = round(images_paid + float(voices_paid) + fix_paid + video_paid, 4)
     caps, over_cap = assets_step.spending_caps(ec, total, env=env, ledger=ledger,
                                                video=video if video_paid else None, fix_usd=fix_paid)
@@ -1285,4 +1298,6 @@ def estimate(ec, *, env, storyboard=T1, adapters=None, transport=None, custom_fo
                    "basis": (f"estimate: {RENDER_SECONDS_PER_SHOT:g} s a shot + {RENDER_TAIL_SECONDS:g} s "
                              "(stage-0 bench; A-069 records the measured times)")},
         "est_usd": verdict["est_usd"], "paid": verdict, "stops_at": stops_at,
+        # Plan 28 stage A6: what would make the click fail or check less, said before it.
+        "warnings": generate_clips.warnings(ec, env),
     }

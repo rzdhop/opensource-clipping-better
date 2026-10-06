@@ -1313,6 +1313,22 @@ export async function patchShotMode(storyId, ep, shotId, body) {
   return res.json()
 }
 
+/**
+ * Plan 28 A6, the Generate button: buy one of your own clips still missing
+ * (`shotId`), or every one of them (`shotId` null), at the price the handoff
+ * showed (`generate_price`). 201 with the job; 409 in plain words when the
+ * gate refuses (a cap, no key) -- nothing is switched or bought then.
+ */
+export async function generateClips(storyId, ep, shotId = null) {
+  const res = await request(`/stories/${storyId}/episodes/${ep}/clips/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(shotId ? { shot_id: shotId } : {}),
+  })
+  if (!res.ok) throw await apiError(res, 'Failed to generate the clips')
+  return res.json()
+}
+
 /** The path `request()` takes for a URL the API itself wrote (`/api/...`). */
 function apiPath(url) {
   return url.startsWith(API_BASE) ? url.slice(API_BASE.length) : url

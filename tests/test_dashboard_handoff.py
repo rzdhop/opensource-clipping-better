@@ -118,7 +118,8 @@ def test_the_page_reads_only_what_the_handoff_writes(store):
     # the image block and the entity rows too): the page reads them when present.
     # Plan 27: an exchange shot's clip also carries ``lines`` / ``speakers`` / ``line_ids`` (a
     # one-line row has none of them).
-    optional = {"fit", "prompt_warning", "lines", "speakers", "line_ids"}
+    # Plan 28 stage A6: ``generate_price`` is added by the route (``_priced``) to the human's own missing clips.
+    optional = {"fit", "prompt_warning", "lines", "speakers", "line_ids", "generate_price"}
     block_keys = set().union(*map(set, blocks)) | optional
     assert read("block") and read("block") <= block_keys, read("block") - block_keys
     entity_keys = set().union(*map(set, doc["entities"])) | {"variant_id", "variant_label", "reference"} | optional
@@ -225,3 +226,16 @@ def test_the_handoff_shows_the_master_prompt_word_counts_and_the_fit_notes():
     assert "import { copyLabel, fitNote } from '../../../lib/promptFit'" in card
     # The fetch returns the whole document: nothing strips the new fields.
     assert "return res.json()" in _function_body(_read(API), "fetchHandoff")
+
+
+def test_the_generate_buttons_show_their_price_and_call_the_one_route():
+    """Plan 28 stage A6: "Generate this clip — $0.60" on each of your own clips still missing, "Generate all missing
+    clips — $4.80" on the episode's one-click card, the price the server's (``generate_price``), a refusal in its
+    place in plain words; one api function, the one route; the warnings said before any click."""
+    card, studio, api = _read(CARD), _read(STUDIO), _read(API)
+    assert "`Generate this clip — ${formatCents(price.usd)}`" in card
+    assert "`Generate all missing clips — ${formatCents(price.usd)}`" in card
+    assert "price={block.generate_price}" in card and "price={handoff.generate_price}" in studio
+    assert "<GenerateWarnings warnings={estimate && estimate.warnings} />" in studio
+    assert "await generateClips(storyId, ep, shotId)" in card
+    assert "`/stories/${storyId}/episodes/${ep}/clips/generate`" in api

@@ -12,6 +12,7 @@ import PreviewPane from './episode/PreviewPane'
 import ReviewPane from './episode/ReviewPane'
 import EpisodeApproveAll from './episode/EpisodeApproveAll'
 import { handoffLinks, handoffPath } from './episode/HandoffPage'
+import { GenerateClipsButton, GenerateWarnings } from './episode/HandoffCard'
 import EpisodeStepper, { episodeSteps, stepOfJob } from './episode/EpisodeStepper'
 import { imagesManual } from './ManualUploadSlot'
 
@@ -167,7 +168,7 @@ function fastTrackProgress(events) {
  * anything; while the job runs the button names the sub-step its feed
  * reports (`job`, `events`: the in-flight fast-track job and its feed).
  */
-function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
+function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, onChange }) {
   const confirm = useConfirm()
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
@@ -218,7 +219,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
     if (est.video) {
       lines.push(est.video.count != null
         ? `Clips: ${plural(est.video.count, 'clip')} (${est.video.seconds} s) on ${est.video.link || 'the video link'}, ` +
-          `est. $${formatUsd(est.video.est_usd)}`
+          `est. $${formatUsd(est.video.est_usd)}${est.video.basis === 'plan' ? ' (from the plan)' : ''}`
         : 'Clips: planned once the storyboard is approved; the paid check prices them before any is bought')
     }
     lines.push(`Render: about ${est.render.minutes} min`)
@@ -234,6 +235,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
         ? 'It stops at the script if its checks still find blocking issues after the repair passes.'
         : 'Script issues the repair passes cannot fix are approved anyway and named for your review.')
     }
+    for (const warning of est.warnings || []) lines.push(`Warning: ${warning}`)
     lines.push('It stops before any paid spending, unless paid generation is allowed and every cap fits.')
     return lines.join('\n')
   }
@@ -292,6 +294,12 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, onChange }) {
           <span className="chip" title={estimate.message || ''}>est. ${formatUsd(estimate.est_usd)} total</span>
         )}
       </div>
+      {/* Plan 28 A6: what would make the click fail or check less, said before it. */}
+      <GenerateWarnings warnings={estimate && estimate.warnings} />
+      {/* Plan 28 A6: your own clips still missing, bought only on this click, at the price it shows. */}
+      {handoff && !generating && (
+        <GenerateClipsButton storyId={storyId} ep={ep} price={handoff.generate_price} onDone={onChange} />
+      )}
       {progress && (
         <div className="progress-bar-bg episode-studio-fast-track-bar" title={`${progress.number} of ${progress.total}: ${progress.label}`}>
           <div className="progress-bar-fill" style={{ width: `${Math.round(((progress.number - 0.5) / progress.total) * 100)}%` }}></div>
@@ -539,7 +547,7 @@ export default function EpisodeStudio() {
           {arcEntry && <p>{arcEntry.summary}</p>}
         </div>
         <FastTrackHeader storyId={storyId} ep={epNumber} busy={Boolean(inFlightJob)} job={fastTrackJob}
-          events={events} paused={pausedJob} onChange={refresh} />
+          events={events} paused={pausedJob} handoff={handoffDoc} onChange={refresh} />
       </div>
 
       <EpisodeStepper steps={steps} runningKey={stepOfJob(inFlightJob, steps)} onSelect={selectStep}

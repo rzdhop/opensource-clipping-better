@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { downloadApiFile, fetchApiObjectUrl, patchShotMode, regenerateStory } from '../../../api'
+import { downloadApiFile, fetchApiObjectUrl, generateClips, patchShotMode, regenerateStory } from '../../../api'
 import { Badge, Button, useToast } from '../../../ui'
 import { AlertTriangle, ArrowDownToLine, ChevronDown, Copy, Sparkles } from '../../../ui/icons'
 import { copyText, revealForManualCopy } from '../../../lib/clipboard'
-import { formatUsd } from '../../../lib/format'
+import { formatCents, formatUsd } from '../../../lib/format'
 import { copyLabel, fitNote } from '../../../lib/promptFit'
 import BudgetRefusal, { isBudgetRefusal } from '../BudgetRefusal'
 import ManualUploadSlot from '../ManualUploadSlot'
@@ -325,6 +325,61 @@ function AutoBody({ storyId, ep, shot, which, block, onChanged }) {
 }
 
 /**
+ * Plan 28 A6: the Generate button of one of your own clips still missing
+ * (`price`: the handoff's `clip.generate_price`, priced by the server) or,
+ * with no `shotId`, of all of them (the document's `generate_price`). The
+ * price is on the button; a refusal (a cap, no key) is shown in its place,
+ * in plain words, and nothing is bought. A click switches the shot(s) to
+ * Auto and starts the clip job.
+ */
+export function GenerateClipsButton({ storyId, ep, shotId = null, price, onDone }) {
+  const toast = useToast()
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState(null)
+  if (!price || (shotId == null && !price.count)) return null
+  const label = shotId
+    ? `Generate this clip — ${formatCents(price.usd)}`
+    : `Generate all missing clips — ${formatCents(price.usd)}`
+
+  const run = async () => {
+    setRunning(true)
+    setError(null)
+    try {
+      await generateClips(storyId, ep, shotId)
+      toast.success(shotId ? `Queued: shot ${shotId}'s clip.` : 'Queued: every missing clip.')
+      if (onDone) onDone()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="handoff-generate">
+      {price.allowed ? (
+        <Button variant="secondary" icon={Sparkles} loading={running} onClick={run}>{label}</Button>
+      ) : (
+        <p className="form-hint handoff-generate-refused">{label}: {price.reason}</p>
+      )}
+      {error && (isBudgetRefusal(error.code, error.detail)
+        ? <BudgetRefusal detail={error.detail} storyId={storyId} retryLabel={label} />
+        : <p className="story-error">{error.message}</p>)}
+    </div>
+  )
+}
+
+/** Plan 28 A6: the warnings said before any click (no speech check, a provider's refusal). */
+export function GenerateWarnings({ warnings }) {
+  if (!warnings || warnings.length === 0) return null
+  return (
+    <ul className="handoff-warnings">
+      {warnings.map((line) => <li key={line} className="chip chip-warn chip-wrap">{line}</li>)}
+    </ul>
+  )
+}
+
+/**
  * An exchange shot's lines in order (plan 27): `block.lines` when it holds two
  * or more, else null (a one-line row keeps `block.speaker` / `block.line`).
  */
@@ -339,7 +394,7 @@ export function lineToCopy(block) {
 }
 
 /** Under My own: how, the copy buttons, the prompt, references, checks, the upload and the take. */
-function ManualBody({ shot, which, block, platformInfo, onUploaded, copy }) {
+function ManualBody({ storyId, ep, shot, which, block, platformInfo, onUploaded, copy }) {
   const clip = which === 'clip'
   const how = clip ? (block.how || platformInfo.where_to_paste)
     : `Make it at ${sizeLabel(block.size)} (at least ${sizeLabel(block.min_size)}) in your image tool.`
@@ -386,6 +441,10 @@ function ManualBody({ shot, which, block, platformInfo, onUploaded, copy }) {
         onDone={onUploaded}
       />
       {clip && <TakeVerdict take={block.take} />}
+      {clip && block.state === 'missing' && (
+        <GenerateClipsButton storyId={storyId} ep={ep} shotId={shot.shot_id} price={block.generate_price}
+          onDone={onUploaded} />
+      )}
     </div>
   )
 }
@@ -430,7 +489,7 @@ export function ShotHandoffCard({ storyId, ep, shot, which, platformInfo, domId,
           <p className="handoff-purpose">{shot.purpose}</p>
           <ModeControl storyId={storyId} ep={ep} shot={shot} which={which} block={block} onChanged={onChanged} />
           {block.mode === 'manual' ? (
-            <ManualBody shot={shot} which={which} block={block} platformInfo={platformInfo}
+            <ManualBody storyId={storyId} ep={ep} shot={shot} which={which} block={block} platformInfo={platformInfo}
               onUploaded={onUploaded} copy={copy} />
           ) : (
             <AutoBody storyId={storyId} ep={ep} shot={shot} which={which} block={block} onChanged={onChanged} />

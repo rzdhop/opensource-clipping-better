@@ -1201,8 +1201,11 @@ def _preview(template: dict, slots: list, lengths: tuple, narrator_on: bool, *, 
         return dict(out, floor_s=float("inf"), per_scene=[], fitted=[],
                     unplannable={"function": exc.function, "need_s": exc.need_s, "slot_hi_s": exc.slot_hi_s})
     per_scene = [[slot, plan_clips_s(fit["plans"][scene["scene_id"]])] for slot, scene in zip(slots, scenes)]
+    # Plan 28 stage A6: each planned clip and whether it speaks, what the one-click estimate prices.
+    shots = [[int(shot["clip_s"]), bool(shot["speaks"])] for scene in scenes
+             for shot in fit["plans"][scene["scene_id"]].get("shots") or ()]
     return dict(out, floor_s=sum(clip for _slot, clip in per_scene) + end_card_s, per_scene=per_scene,
-                fitted=sorted(fit["changes"]))
+                fitted=sorted(fit["changes"]), shots=shots)
 
 
 def plan_floor_preview(template: dict, ep: int, lengths: tuple, narrator_on: bool, *, lang: str = "fr",
@@ -1222,7 +1225,8 @@ def plan_floor_preview(template: dict, ep: int, lengths: tuple, narrator_on: boo
     whether the cliffhanger cuts to black.
 
     ``{"floor_s", "scenes", "window_s", "per_scene": [[slot, clip seconds],
-    ...], "fitted": [scene ids the fit changed]}`` -- plus ``"unplannable":
+    ...], "fitted": [scene ids the fit changed], "shots": [[clip seconds,
+    speaks], ...]}`` -- plus ``"unplannable":
     {"function", "need_s", "slot_hi_s"}`` (``floor_s`` infinite) when a part
     of the format holds no clip of these lengths at all. Pure."""
     slots = episode_slots(template, ep, lengths=lengths, narrator=narrator_on, lang=lang, style_lock=style_lock,

@@ -5661,6 +5661,23 @@ button.activity-group-head:focus-visible {
 .handoff-segmented .btn:last-child {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
+/* Plan 28 A6: the Generate button (its price on it) and the warnings said before any click. */
+.handoff-generate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.handoff-warnings {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .handoff-manual,
 .handoff-auto {
   display: flex;

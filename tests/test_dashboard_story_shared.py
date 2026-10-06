@@ -56,6 +56,8 @@ STORY_FUNCTIONS = [
     "switchPipeline",
     # Plan 28 stage C: "Approve all" of the cast or the places.
     "approveStoryGroup",
+    # Plan 28 stage A6: the Generate button (one of your own clips, or all of them).
+    "generateClips",
 ]
 
 
@@ -95,7 +97,7 @@ def _function_body(src: str, name: str) -> str:
 def test_the_readers_see_something():
     """A broken regex would make every assertion below pass for free."""
     assert len(_job_status_values()) >= 8
-    assert len(STORY_FUNCTIONS) == 32  # 2026-10-02: + switchPipeline; plan 28 C: + approveStoryGroup
+    assert len(STORY_FUNCTIONS) == 33  # 2026-10-02: + switchPipeline; plan 28 C: + approveStoryGroup; A6: + generateClips
 
 
 # --------------------------------------------------------- components/ActivityFeed.jsx
