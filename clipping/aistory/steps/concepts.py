@@ -50,7 +50,7 @@ from __future__ import annotations
 import re
 import time
 
-from .. import context, media_policy, prompts, schemas, templates, universes
+from .. import context, media_policy, prompts, recipes, schemas, templates, universes
 from . import llm_call
 from .llm_call import StepFailed
 
@@ -265,6 +265,9 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
     unwritten = {key: value for key, value in story.items() if key not in _BIBLE_SERIES_FIELDS}
     setup = context.setup_for(unwritten, lock=template) if use_brief else None
     card_style_ids = [template_id] if setup and template_id else style_ids
+    # Plan 32 stage 2 (DEC-315): a story made with a recipe names its cast by it (the ask and the check);
+    # None on any other story, whose prompt and check are what they were.
+    recipe = recipes.for_story(story) if use_brief else None
 
     cards = _existing_cards(store, ctx.story_id)
     number = _next_number(cards)
@@ -307,11 +310,12 @@ def run(ctx, *, note=None, runner=None, time_fn=time.monotonic) -> dict:
         if use_brief:
             angle = prompts.C1_ANGLES[(call - 1) % len(prompts.C1_ANGLES)]
             system, user, schema = prompts.build_c1_v2(pack, style_ids=card_style_ids, batch=call, of=calls,
-                                                       angle=angle)
+                                                       angle=angle, recipe=recipe)
             prompt_id = "C1v2"
 
             def validator(reply, _brief=pack.brief, _universe=universe is not None):
-                return prompts.c1v2_errors(reply, style_ids=card_style_ids, brief=_brief, universe=_universe)
+                return prompts.c1v2_errors(reply, style_ids=card_style_ids, brief=_brief, universe=_universe,
+                                           recipe=recipe)
         else:
             system, user, schema = prompts.build_c1(pack, style_ids=style_ids, batch=call, of=calls)
             prompt_id = "C1"

@@ -35,7 +35,7 @@ import pytest
 
 import test_story_episode_prompt_budgets as budgets
 import test_story_episode_steps as eps
-from clipping.aistory import context, prompts, schemas, templates, timing
+from clipping.aistory import context, prompts, recipes, schemas, templates, timing
 from test_story_episode_steps import hermetic, store  # noqa: F401 -- phase 3's fixtures, used as they are
 
 CONFRONTATION = templates.load_episode_template("confrontation_50s_v2")
@@ -587,7 +587,11 @@ def test_the_spine_is_an_optional_key_of_the_script_and_capped():
 # E3v3 3,488 -> 3,493 (the framing parts' ranges; budget unchanged).
 # Plan 28 stage E2 (2026-10-05): E3v3 3,493 -> 3,492 (NATIVE_LINE_V3's "5 to 10 seconds" is two characters
 # shorter than "at most 8 seconds"; budget unchanged).
-MEASURED_V3 = {"E1v3": 2881, "E2v3": 2774, "E3v3": 3492, "J1v3": 4083}
+# Re-measured on purpose (pinned 2026-10-06, plan 32 stage 2: the fruit_drama recipe (DEC-315)): the worst cases
+# are a recipe story's -- E1v3 with the recipe's beats 2,881 -> 2,969 (budget 3,320 -> 3,420), E3v3 with the
+# teaser's "Team X ou Team Y ?" ask 3,492 -> 3,522 (4,020 -> 4,060); a story without one sends what it sent.
+MEASURED_V3 = {"E1v3": 2969, "E2v3": 2774, "E3v3": 3522, "J1v3": 4083}
+RECIPES = [None] + [recipes.load(recipe_id) for recipe_id in recipes.list_recipe_ids()]
 MEASURED_V3_REPLY = {"E1v3": 2232.1, "E1v3-payoff": 2770.3, "J1v3": 854.1}
 SPINE_AT_CAPS = {key: budgets._fr(words) for key, words in prompts.SPINE_MAX_WORDS.items()}
 SCENES_V3 = [dict(scene, summary=budgets._fr(prompts.SUMMARY_V3_MAX_WORDS)) for scene in budgets.SCENES]
@@ -604,7 +608,7 @@ def _tokens(triple) -> int:
     return context.estimate_tokens(triple[0], triple[1])
 
 
-def _worst_e1v3(template):
+def _worst_e1v3(template, recipe=None):
     ec, knowledge = budgets._sliced_ec()
     return prompts.build_e1_v3(
         budgets._pack(), ep=2, arc_entry=budgets.ARC2, template=template, episode_defaults=budgets.DEFAULTS,
@@ -613,7 +617,8 @@ def _worst_e1v3(template):
         props=[{"prop_id": budgets.PROP["prop_id"], "name": budgets.PROP["name"]}], memory=budgets.MEMORY,
         slots=timing.episode_slots(template, 2), open_hooks=budgets.OPEN_HOOKS,
         audience_direction=budgets.DIRECTION_AT_CAP,
-        slice_text=context.slice_for_episode(ec, knowledge=knowledge, char_ids=budgets.IDS), narration=NARRATION)
+        slice_text=context.slice_for_episode(ec, knowledge=knowledge, char_ids=budgets.IDS), narration=NARRATION,
+        recipe=recipe)
 
 
 # Plan 24 stage 2 (2026-10-05), re-measured on purpose: E2v3/E3v3 are sent
@@ -659,7 +664,7 @@ def _worst_e2v3(narrator, native):
         slice_text=context.slice_for_scene(ec, body, knowledge=knowledge), native=native, narration=NARRATION)
 
 
-def _worst_e3v3(part, single_place):
+def _worst_e3v3(part, single_place, recipe=None):
     ec, knowledge = budgets._sliced_ec()
     pack = budgets._pack(None if part is None else budgets.NOTE)
     sliced = SCENES_V3[-1] if part in (None, "cliffhanger", "teaser") else {"hook": SCENES_V3[1],
@@ -673,7 +678,8 @@ def _worst_e3v3(part, single_place):
                                                                        ("recap", 9))},
         open_hooks=budgets.OPEN_HOOKS[:budgets.E3_WORST_HOOKS],
         slice_text=context.slice_for_scene(ec, sliced, knowledge=knowledge), so_far=SO_FAR_AT_CAPS,
-        spine=SPINE_AT_CAPS, line_words=(5, 22), single_place=single_place, native=True, narrator_parts=["recap"])
+        spine=SPINE_AT_CAPS, line_words=(5, 22), single_place=single_place, native=True, narrator_parts=["recap"],
+        recipe=recipe)
 
 
 def _worst_j1v3():
@@ -694,9 +700,11 @@ def _worst_j1v3():
 
 def test_the_v3_worst_cases_measure_what_is_recorded_and_fit_their_budgets():
     worst = {
-        "E1v3": max(_tokens(_worst_e1v3(budgets.TEMPLATE_90)), _tokens(_worst_e1v3(CONFRONTATION))),
+        "E1v3": max(_tokens(_worst_e1v3(template, recipe)) for template in (budgets.TEMPLATE_90, CONFRONTATION)
+                    for recipe in RECIPES),
         "E2v3": max(_tokens(_worst_e2v3(narrator, native)) for narrator in (True, False) for native in (True, False)),
-        "E3v3": max(_tokens(_worst_e3v3(part, single)) for part in PARTS for single in (True, False)),
+        "E3v3": max(_tokens(_worst_e3v3(part, single, recipe)) for part in PARTS for single in (True, False)
+                    for recipe in RECIPES),
         "J1v3": _tokens(_worst_j1v3()),
     }
     assert worst == MEASURED_V3
@@ -704,9 +712,9 @@ def test_the_v3_worst_cases_measure_what_is_recorded_and_fit_their_budgets():
         assert prompts.input_budget(prompt_id) == _round_budget(measured) == prompts.WRITING_V3_INPUT_BUDGET[prompt_id]
         assert prompt_id not in prompts.INPUT_BUDGET  # the v1/v2 registry's rows are untouched (RC-M1)
     # Each builds under its budget (the step's own check, before any call).
-    context.check_budget(*_worst_e1v3(budgets.TEMPLATE_90)[:2], budget=prompts.input_budget("E1v3"))
+    context.check_budget(*_worst_e1v3(budgets.TEMPLATE_90, RECIPES[-1])[:2], budget=prompts.input_budget("E1v3"))
     for part in PARTS:
-        context.check_budget(*_worst_e3v3(part, True)[:2], budget=prompts.input_budget("E3v3"))
+        context.check_budget(*_worst_e3v3(part, True, RECIPES[-1])[:2], budget=prompts.input_budget("E3v3"))
     context.check_budget(*_worst_j1v3()[:2], budget=prompts.input_budget("J1v3"))
     # Each is over its v2 twin's: the spine and the dialogue so far need room of their own.
     for prompt_id in ("E1v3", "E2v3", "E3v3", "J1v3"):

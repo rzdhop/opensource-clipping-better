@@ -25,7 +25,7 @@ import re
 
 import pytest
 
-from clipping.aistory import context, prompts, schemas
+from clipping.aistory import context, prompts, recipes, schemas
 from clipping.providers.pacing import estimate_tokens
 from test_story_episode_prompt_budgets import LIVE_BIBLE_DENSITY, _at_density
 from test_story_prompts_episode import FRENCH_TOKEN_FACTOR, _fr_words, _walk_llm_schema
@@ -343,7 +343,9 @@ def test_the_worst_case_m1_input_fits_the_pack_budget():
     assert pack.trimmed == ["bible", "note"]
     kwargs = dict(ep=12, story_title=_fr_words(18)[:120], episode_title=_fr_words(12)[:80],
                   hook_text=_fr_words(6), teaser=_fr_words(15), cast_names=[_fr_words(2)] * 12)
-    for platform in schemas.PLATFORMS:
-        system, user, _schema = prompts.build_m1(pack, platform=platform, note=pack.note, **kwargs)
-        tokens = context.check_budget(system, user)
-        assert tokens <= 0.85 * context.PACK_TOKEN_BUDGET, (platform, tokens)
+    # Plan 32 stage 2: a recipe story's M1 carries the recipe's line too (the worst case).
+    for recipe in [None] + [recipes.load(recipe_id) for recipe_id in recipes.list_recipe_ids()]:
+        for platform in schemas.PLATFORMS:
+            system, user, _schema = prompts.build_m1(pack, platform=platform, note=pack.note, recipe=recipe, **kwargs)
+            tokens = context.check_budget(system, user)
+            assert tokens <= 0.85 * context.PACK_TOKEN_BUDGET, (platform, tokens)

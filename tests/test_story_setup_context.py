@@ -24,7 +24,7 @@ import functools
 import pytest
 
 import test_story_episode_prompt_budgets as budgets
-from clipping.aistory import context, prompts, schemas, templates, universes
+from clipping.aistory import context, prompts, recipes, schemas, templates, universes
 from clipping.providers.pacing import estimate_tokens
 
 FRUIT_DRAMA = templates.load_style("fruit_drama")
@@ -241,33 +241,40 @@ def test_the_concepts_step_sends_the_block_to_c1v2_and_c1j_and_fixes_style_fit(t
 # Re-recorded on purpose (plan 32 stage 3, DEC-315): fruit_drama's look is the Pixar-style cartoon, 16 tokens
 # shorter than the photoreal prose in the block (613 -> 597); every figure below fell by that, D2 (the worst of
 # all styles) and K1 (the hexes) by less, and each SETUP_INPUT_BUDGET row follows by the rule above.
+
+# Re-measured on purpose (pinned 2026-10-06, plan 32 stage 2: the fruit_drama recipe (DEC-315)): the worst block
+# is now a recipe story's, its RECIPE section last (597 -> 777 with the hexes, 757 without); every figure below
+# grew by it (about 180), C1v2 by its names line too (2,232 -> 2,521), and each SETUP_INPUT_BUDGET row follows by
+# the rule above. A story without a recipe sends the block it always sent (tests/test_story_recipes.py's guard).
 MEASURED_SETUP = {
-    "C1v2": 2232, "C1J": 1891, "B1": 1955, "B1v3": 2055, "B2": 2360, "B3": 2619,
-    "K1": 3643, "P0": 2109, "P1": 2566, "R1": 2712, "S1": 3136, "S1v2": 3551, "S2": 3204,
-    "D1": 3879, "D2": 3072, "D3": 2865, "R1v2": 2168, "D4": 2465, "D5": 4042, "D6": 3594,
+    "C1v2": 2521, "C1J": 2072, "B1": 2135, "B1v3": 2235, "B2": 2540, "B3": 2800,
+    "K1": 3824, "P0": 2289, "P1": 2746, "R1": 2892, "S1": 3316, "S1v2": 3732, "S2": 3385,
+    "D1": 4060, "D2": 3253, "D3": 3046, "R1v2": 2348, "D4": 2646, "D5": 4222, "D6": 3774,
 }
 
 
-def _worst_story(universe=None, style_id="fruit_drama"):
+def _worst_story(universe=None, style_id="fruit_drama", recipe=None):
     return {"title": budgets._filler(8, 60), "language": "fr", "logline": budgets._fr(30), "tone": budgets._fr(15),
             "genre_tags": [budgets._fr(3)] * 5, "audience": {"age": "16+", "platforms": ["tiktok", "shorts", "reels"]},
-            "narrator": {"enabled": True}, "style_template_id": style_id,
+            "narrator": {"enabled": True}, "style_template_id": style_id, "recipe": recipe,
             "generation_profile": {"pipeline": "v2", "universe": universe}}
 
 
 @functools.lru_cache(maxsize=None)
 def worst_block(hexes=False):
-    """The longest set-up block any shipped style, universe, format and speech mode makes."""
+    """The longest set-up block any shipped style, universe, format, speech mode and recipe makes (plan 32
+    stage 2: with or without a recipe -- the worst is with one, its RECIPE section)."""
     blocks = []
     for style_id in templates.list_style_ids():
         style = templates.load_style(style_id)
         for universe in [None] + [item["id"] for item in templates.load_universes()]:
-            story = _worst_story(universe, style_id)
-            for template_id in templates.list_episode_template_ids():
-                template = templates.load_episode_template(template_id)
-                for native in (True, False):
-                    blocks.append(context.setup_context(story, style, template, {"native_speech": native},
-                                                        episodes=12, hexes=hexes))
+            for recipe in [None] + recipes.list_recipe_ids():
+                story = _worst_story(universe, style_id, recipe)
+                for template_id in templates.list_episode_template_ids():
+                    template = templates.load_episode_template(template_id)
+                    for native in (True, False):
+                        blocks.append(context.setup_context(story, style, template, {"native_speech": native},
+                                                            episodes=12, hexes=hexes))
     return max(blocks, key=len)
 
 
@@ -320,8 +327,11 @@ def _c1v2():
     avoid = [budgets._filler(8, round(8 * 5.8)) for _ in range(24)]
     pack = context.build_pack(language="fr", template=FRUIT_DRAMA, brief_text=_brief(), avoid_titles=avoid,
                               universe=species, setup=worst_block())
+    # Plan 32 stage 2: the recipe's names line in the cast ask (a recipe story's C1v2 is the longer one).
     return prompts.build_c1_v2(pack, style_ids=["storybook_watercolor"], batch=10, of=10,
-                               angle=max(prompts.C1_ANGLES, key=len))
+                               angle=max(prompts.C1_ANGLES, key=len),
+                               recipe=max((recipes.load(rid) for rid in recipes.list_recipe_ids()),
+                                          key=lambda recipe: len(recipes.c1v2_names_ask(recipe))))
 
 
 def _c1j():
@@ -438,7 +448,8 @@ def test_the_worst_block_is_the_fruit_style_on_the_confrontation_format():
     block = worst_block(hexes=True)
     assert "ART STYLE: Fruit Drama." in block and "PALETTE COLOURS:" in block
     assert "Each episode is one continuous scene in one place, in real time." in block
-    assert estimate_tokens(block) == 597
+    assert "\nRECIPE: Fruit drama." in block  # plan 32 stage 2: the worst block is a recipe story's
+    assert estimate_tokens(block) == 777  # plan 32 stage 2: with the RECIPE section (597 without a recipe)
 
 
 @pytest.mark.parametrize("prompt_id", list(MEASURED_SETUP))

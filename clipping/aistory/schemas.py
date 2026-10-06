@@ -596,6 +596,141 @@ def universes_errors(doc) -> list:
     return errors
 
 
+
+# ------------------------------------------------------------- recipe_v1 (plan 32 stage 2)
+#
+# A genre recipe (``templates/recipes/<id>.json``, ``recipes.load``): what a story made with it bakes into its
+# writers -- the names, the fixed cast, the beats, the closing question, the end card, the voice direction and the
+# content guardrails (DEC-315). A story names one in its ``recipe`` field; a story without one never reads it.
+
+RECIPE_SCHEMA_NAME = "recipe_v1"
+RECIPE_BEATS = ("recap", "confrontation", "peak", "cliffhanger")
+RECIPE_CLOSING_PLACES = ("teaser", "pinned_comment")
+
+
+def _int_pair(lo, hi) -> dict:
+    return {"type": "array", "items": {"type": "integer", "minimum": lo, "maximum": hi}, "minItems": 2,
+            "maxItems": 2}
+
+
+RECIPE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "$schema": {"type": "string", "const": RECIPE_SCHEMA_NAME},
+        "id": {"type": "string", "pattern": _ID_PATTERN},
+        "version": {"type": "integer", "minimum": 1},
+        "label": bilingual(60),
+        "language_note": {"type": "string", "minLength": 1, "maxLength": 200},
+        "format": {
+            "type": "object",
+            "properties": {"seconds": _int_pair(10, 600), "scenes": _int_pair(1, 20)},
+            "required": ["seconds", "scenes"],
+            "additionalProperties": False,
+        },
+        "naming": {
+            "type": "object",
+            "properties": {
+                "rule": {"type": "string", "minLength": 1, "maxLength": 200},
+                "style": {"type": "string", "minLength": 1, "maxLength": 20},
+                "examples": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 30},
+                                   "species": {"type": "string", "minLength": 1, "maxLength": 30}},
+                    "required": ["name", "species"],
+                    "additionalProperties": False,
+                }},
+                "forbidden": {"type": "array", "minItems": 1, "items": {
+                    "type": "string", "enum": ["brands", "plain human names"]}},
+            },
+            "required": ["rule", "style", "examples", "forbidden"],
+            "additionalProperties": False,
+        },
+        "cast": {
+            "type": "object",
+            "properties": {
+                "size": _int_pair(1, 12),
+                "roles": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
+                    "type": "object",
+                    "properties": {"role": {"type": "string", "minLength": 1, "maxLength": 30},
+                                   "line": {"type": "string", "minLength": 1, "maxLength": 120}},
+                    "required": ["role", "line"],
+                    "additionalProperties": False,
+                }},
+            },
+            "required": ["size", "roles"],
+            "additionalProperties": False,
+        },
+        "beats": {
+            "type": "object",
+            "properties": {
+                "order": {"type": "array", "minItems": 1, "items": {"type": "string", "enum": list(RECIPE_BEATS)}},
+                "recap_max_words": {"type": "integer", "minimum": 1, "maximum": 6},
+                "recap_from_episode": {"type": "integer", "minimum": 2},
+                "peak_note": {"type": "string", "minLength": 1, "maxLength": 60},
+                "cliffhanger_max_words": {"type": "integer", "minimum": 1, "maximum": 40},
+                "one_conflict": {"type": "boolean"},
+            },
+            "required": ["order", "recap_max_words", "recap_from_episode", "peak_note", "cliffhanger_max_words",
+                         "one_conflict"],
+            "additionalProperties": False,
+        },
+        "closing_question": {
+            "type": "object",
+            "properties": {
+                "template": {"type": "string", "minLength": 1, "maxLength": 60},
+                "where": {"type": "array", "minItems": 1, "items": {"type": "string",
+                                                                    "enum": list(RECIPE_CLOSING_PLACES)}},
+            },
+            "required": ["template", "where"],
+            "additionalProperties": False,
+        },
+        "end_card": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": 40},
+                "seconds": {"type": "number", "minimum": 0.5, "maximum": 5},
+            },
+            "required": ["text", "seconds"],
+            "additionalProperties": False,
+        },
+        "voice_direction": {"type": "string", "minLength": 1, "maxLength": 120},
+        "guardrails": {"type": "array", "minItems": 1, "maxItems": 8,
+                       "items": {"type": "string", "minLength": 1, "maxLength": 80}},
+        "cadence": {"type": "string", "minLength": 1, "maxLength": 60},
+        "plot_seeds": {"type": "array", "minItems": 1, "maxItems": 10,
+                       "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+    },
+    "required": ["$schema", "id", "version", "label", "language_note", "format", "naming", "cast", "beats",
+                 "closing_question", "end_card", "voice_direction", "guardrails", "cadence", "plot_seeds"],
+    "additionalProperties": False,
+}
+
+
+def recipe_errors(doc) -> list:
+    """``validate()`` against ``RECIPE_SCHEMA``, plus: each range low <= high, the beats each once and in the
+    recipe's order with the cliffhanger last, the closing question naming ``{a}`` and ``{b}``, the end card
+    ``{n}``, and no example name or seed naming a brand."""
+    errors = validate(doc, RECIPE_SCHEMA)
+    if errors:
+        return errors
+    for path, pair in (("$.format.seconds", doc["format"]["seconds"]), ("$.format.scenes", doc["format"]["scenes"]),
+                       ("$.cast.size", doc["cast"]["size"])):
+        if pair[0] > pair[1]:
+            errors.append(f"{path}: {pair[0]} > {pair[1]}")
+    order = doc["beats"]["order"]
+    if len(set(order)) != len(order):
+        errors.append("$.beats.order: a beat is listed twice")
+    if order[-1] != "cliffhanger":
+        errors.append("$.beats.order: the cliffhanger comes last")
+    template = doc["closing_question"]["template"]
+    if "{a}" not in template or "{b}" not in template:
+        errors.append("$.closing_question.template: names {a} and {b}")
+    if "{n}" not in doc["end_card"]["text"]:
+        errors.append("$.end_card.text: names {n}")
+    for brand in brand_hits([doc["naming"]["examples"], doc["plot_seeds"]]):
+        errors.append(f"$: names the brand {brand!r}")
+    return errors
+
 # ------------------------------------------------------------- concept_v1 (spec 7)
 
 _CAST_MEMBER_SCHEMA = {

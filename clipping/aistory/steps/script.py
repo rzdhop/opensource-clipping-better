@@ -126,7 +126,7 @@ import copy
 import re
 import time
 
-from .. import context, media_policy, prompts, schemas, series_memory, timing
+from .. import context, media_policy, prompts, recipes, schemas, series_memory, timing
 from . import entities, episode_common, judge, llm_call
 from . import places as places_step
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
@@ -1056,9 +1056,10 @@ def write_beat_sheet(ctx, ec, script, *, tools, announced) -> None:
         prompt_id = "E1v3"
         slice_text = context.slice_for_episode(ec, knowledge=knowledge_of(ec),
                                                char_ids=[doc["char_id"] for doc in cast])
+        # Plan 32 stage 2 (DEC-315): a story made with a recipe adds its beats; None on any other story.
         system, user, schema = prompts.build_e1_v3(
             pack, slice_text=slice_text, narration=prompts.narration_of(ec.template, ec.narrator),
-            variants=variants, **kwargs)
+            variants=variants, recipe=recipes.for_story(ec.story), **kwargs)
     elif v2:
         # Phase 7 stage 5c (A13): E1v2, with the episode's slice of the knowledge base.
         prompt_id = "E1v2"
@@ -1437,7 +1438,7 @@ def write_framing(ctx, ec, script, part, *, tools, announced, note=None) -> list
         system, user, schema = prompts.build_e3_v3(
             pack, slice_text=slice_text, so_far=_so_far(ec, script, skip=rewritten), spine=script.get("spine"),
             line_words=line_words, single_place=bool(ec.template.get("single_place")), native=native,
-            narrator_parts=narrator_parts, plans=plans3, **kwargs)
+            narrator_parts=narrator_parts, plans=plans3, recipe=recipes.for_story(ec.story), **kwargs)
     elif v2:
         # Phase 7 stage 5c (A13): E3v2, with the slice of the scene it mostly writes.
         prompt_id = "E3v2"

@@ -83,7 +83,11 @@ def test_a_recipe_must_be_an_ids_shape(stories):
     for bad in ("Fruit", "1fruit", "fruit-drama", "", 3):
         with pytest.raises(ValueError):
             stories.create(language="en", recipe=bad, now=NOW)
-    assert stories.create(language="en", recipe="any_recipe_2", now=NOW)["recipe"] == "any_recipe_2"
+    # Re-pinned on purpose (plan 32 stage 2): stage 1 checked the id's shape only and said "which recipes exist is
+    # checked from plan 32 stage 2 on" -- a well-shaped id no recipe has is now refused too, nothing created.
+    with pytest.raises(ValueError, match="unknown recipe 'any_recipe_2'"):
+        stories.create(language="en", recipe="any_recipe_2", now=NOW)
+    assert stories.create(language="en", recipe="fruit_drama", now=NOW)["recipe"] == "fruit_drama"
 
 
 def test_a_story_written_before_the_recipe_still_reads(stories, tmp_path):

@@ -110,7 +110,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, NamedTuple
 
-from . import defaults, format_fit, media_policy, schemas, series_memory, subtitle_style, templates
+from . import defaults, format_fit, media_policy, recipes, schemas, series_memory, subtitle_style, templates
 from .ledger import CostLedger
 
 STORY_ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
@@ -852,9 +852,9 @@ class StoryStore:
 
         *recipe* (plan 32 stage 1): the recipe the story is made with (a
         preset names it, ``presets.apply``), stored as ``recipe``; None
-        (the default) is stored as null. An id of the shape
-        ``schemas.RECIPE_ID_PATTERN`` (else ``ValueError``); which recipes
-        exist is checked from plan 32 stage 2 on."""
+        (the default) is stored as null. Plan 32 stage 2: the id of a
+        shipped recipe (``recipes.check_id``: templates/recipes/), else a
+        ``ValueError`` naming the shipped ones, nothing created."""
         if not isinstance(language, str) or language not in schemas.LANGUAGES:
             raise ValueError(f"language must be one of {list(schemas.LANGUAGES)}, not {language!r}")
         if seed_text is not None and not isinstance(seed_text, str):
@@ -867,8 +867,8 @@ class StoryStore:
             raise ValueError(
                 f"unknown episode template {episode_template_id!r} "
                 f"(shipped: {', '.join(defaults.EPISODE_TEMPLATE_IDS)})")
-        if recipe is not None and not (isinstance(recipe, str) and re.fullmatch(schemas.RECIPE_ID_PATTERN, recipe)):
-            raise ValueError(f"recipe must be an id of lowercase letters, digits and underscores, not {recipe!r}")
+        # Plan 32 stage 2: the id of a shipped recipe (templates/recipes/), else a ValueError naming them.
+        recipes.check_id(recipe)
         profile = _merge_generation_profile(generation_profile)
         # Plan 23 stage D2: the universe is one the style accepts.
         check_universe(profile, style_template_id)

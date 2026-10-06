@@ -15,7 +15,8 @@ hashtags and the cover's hook text (and, for a French story, ``title_en``
 and ``hashtags_en``); **Python builds the rest** (:func:`platform_entry`):
 every tag carries its ``#`` (``prompts.normalize_hashtags``); the
 description ends with the script's ``next_episode_teaser``; the pinned
-comment is the teaser and the call to comment "PART {n+1}" (:data:`PART_CALL`);
+comment is the teaser (on a recipe story, with the recipe's "Team X ou Team Y ?"
+when the teaser lacks it: plan 32 stage 2) and the call to comment "PART {n+1}" (:data:`PART_CALL`);
 French prose gets its dropped elisions repaired (F1, as the script step does).
 
 ``metadata_pack.json`` (``metadata_pack_v1``) records the ``script_rev`` and
@@ -52,7 +53,7 @@ import shutil
 import subprocess
 import time
 
-from .. import context, media_policy, prompts, schemas, stock_cutaways, subtitle_style
+from .. import context, media_policy, prompts, recipes, schemas, stock_cutaways, subtitle_style
 from .. import store as store_mod
 from ..render import filtergraph, fonts, profiles
 from ..render import plan as plan_mod
@@ -161,7 +162,7 @@ def ask_platform(ctx, ec, script, platform, *, tools, announced, note=None) -> d
     system, user, schema = prompts.build_m1(
         pack, platform=platform, ep=ec.ep, story_title=ec.story["title"], episode_title=script.get("title"),
         hook_text=(script.get("hook") or {}).get("on_screen_text"), teaser=script.get("next_episode_teaser"),
-        cast_names=episode_cast_names(ec, script), note=pack.note)
+        cast_names=episode_cast_names(ec, script), note=pack.note, recipe=recipes.for_story(ec.story))
     english = prompts.m1_english_fields(pack)
     return llm_call.call_json(ctx, PROMPT_ID, system, user, schema,
                               validator=lambda reply: prompts.validate_m1(reply, platform=platform, english=english),
@@ -173,20 +174,34 @@ def _prose(text, language) -> str:
     return prompts.repair_fr_elisions(text) if language == "fr" else text
 
 
-def pinned_comment(teaser, ep, language) -> str:
+def closing_question(ec, script):
+    """Plan 32 stage 2 (DEC-315): the side-taking question a recipe story's pinned comment adds when the
+    teaser lacks it (``recipes.closing_question`` on the episode's characters); None on any other story."""
+    return recipes.closing_question(recipes.for_story(ec.story), script.get("next_episode_teaser"),
+                                    episode_cast_names(ec, script))
+
+
+def pinned_comment(teaser, ep, language, question=None) -> str:
     """The teaser, then :data:`PART_CALL` for episode ``ep+1``
-    (``Comment "PART n" for the next one →``; ``PARTIE`` in French)."""
+    (``Comment "PART n" for the next one →``; ``PARTIE`` in French).
+
+    Plan 32 stage 2 (DEC-315): on a story made with a recipe the teaser ends
+    on the side-taking question ("Team X ou Team Y ?", E3v3's ask); when it
+    does not, *question* (``recipes.closing_question``) is said after it.
+    None: the comment it always was."""
     call = PART_CALL[language].format(n=ep + 1)
     teaser = " ".join(str(teaser or "").split())
-    return f"{teaser} {call}" if teaser else call
+    said = " ".join(part for part in (teaser, " ".join(str(question or "").split())) if part)
+    return f"{said} {call}" if said else call
 
 
-def platform_entry(reply, *, ep, language, teaser, now, credits=None) -> dict:
+def platform_entry(reply, *, ep, language, teaser, now, credits=None, question=None) -> dict:
     """A platform's ``metadata_pack_v1`` entry from an accepted M1 *reply*:
     what the model wrote, and what Python adds (module docstring). *credits*
     (plan 23 stage B8: the episode's stock clips' credit records; None or
     empty for every other episode) add a "Stock footage: ..." line after the
-    teaser."""
+    teaser. *question* (plan 32 stage 2): the recipe's closing question the
+    pinned comment adds (:func:`pinned_comment`)."""
     description = _prose(reply["description"], language)
     teaser = " ".join(str(teaser or "").split())
     if teaser:
@@ -199,7 +214,7 @@ def platform_entry(reply, *, ep, language, teaser, now, credits=None) -> dict:
         "description": description,
         "hashtags": prompts.normalize_hashtags(reply["hashtags"]),
         "hook_text": _prose(reply["hook_text"], language),
-        "pinned_comment": pinned_comment(teaser, ep, language),
+        "pinned_comment": pinned_comment(teaser, ep, language, question),
         "cover": COVER_FILE,
         "written_at": now,
     }
@@ -253,7 +268,7 @@ def write_platform(ctx, ec, script, doc, platform, *, tools, announced, note=Non
     returns the document as written."""
     reply = ask_platform(ctx, ec, script, platform, tools=tools, announced=announced, note=note)
     entry = platform_entry(reply, ep=ec.ep, language=ec.language, teaser=script.get("next_episode_teaser"),
-                           now=llm_call.utc_now(), credits=doc.get("credits"))
+                           now=llm_call.utc_now(), credits=doc.get("credits"), question=closing_question(ec, script))
     doc["platforms"][platform] = entry
     saved = save_pack(ec, doc)
     ctx.on_log(f"🏷 {prompts.M1_PLATFORM_RULES[platform]['name']}: {entry['title']} "

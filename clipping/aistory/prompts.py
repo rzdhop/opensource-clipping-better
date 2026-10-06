@@ -25,7 +25,7 @@ import re
 
 from clipping.analysis.analyzer import ANALYTIC_TEMPERATURE, WRITING_TEMPERATURE
 
-from . import context, prompting, schemas
+from . import context, prompting, recipes, schemas
 
 # Bumped whenever the wording of a prompt below changes in a way that could
 # change an answer -- same convention as clipping.analysis.prompts.PROMPT_VERSION.
@@ -537,7 +537,12 @@ def anthropic_effort(prompt_id):
 # told its range and each shot's exchange its sentence (two on the worst
 # scene): E2v3 2,706 -> 2,774, 3,120 -> 3,200; E3v3 3,488 -> 3,493 (the
 # framing parts' "between lo and hi words"), its budget unchanged.
-WRITING_V3_INPUT_BUDGET = {"E1v3": 3320, "E2v3": 3200, "E3v3": 4020, "J1v3": 4700}
+# Plan 32 stage 2 (DEC-315), re-measured on purpose: a recipe story's E1v3
+# adds the recipe's beats (``recipes.e1_beats_line``) and its E3v3 the
+# teaser's "Team X ou Team Y ?" ask: E1v3 2,881 -> 2,969, 3,320 -> 3,420;
+# E3v3 3,492 -> 3,522, 4,020 -> 4,060. A story without a recipe sends what it
+# always sent.
+WRITING_V3_INPUT_BUDGET = {"E1v3": 3420, "E2v3": 3200, "E3v3": 4060, "J1v3": 4700}
 # Plan 23 stage D5: N1v2's input -- N1's French worst case with the variant
 # block at its caps (eight characters, each with two 40-character variants
 # and room for a third, and the ask) measures 3,613; + 15 %, rounded up to ten
@@ -565,11 +570,17 @@ VARIANTS_INPUT_BUDGET = {"N1v2": 4160}
 # 2,232, C1J 1,891, B1 1,955, B1v3 2,055, B2 2,360, B3 2,619, K1 3,643, P0 2,109,
 # P1 2,566, R1 2,712, S1 3,136, S1v2 3,551, S2 3,204, D1 3,879, D2 3,072, D3 2,865,
 # R1v2 2,168, D4 2,465, D5 4,042, D6 3,594 (tests/test_story_setup_context.py).
+# Re-measured for plan 32 stage 2 (DEC-315: the fruit_drama recipe): the worst
+# block is a recipe story's, its RECIPE section last (597 -> 777 tokens), and
+# C1v2 adds the recipe's names line: C1v2 2,521, C1J 2,072, B1 2,135, B1v3
+# 2,235, B2 2,540, B3 2,800, K1 3,824, P0 2,289, P1 2,746, R1 2,892, S1 3,316,
+# S1v2 3,732, S2 3,385, D1 4,060, D2 3,253, D3 3,046, R1v2 2,348, D4 2,646, D5
+# 4,222, D6 3,774. A story without a recipe sends what it always sent.
 # Kept beside INPUT_BUDGET for the same reason as the writing-v3 rows (its
 # rows, in order, are pinned by the RC-M1 file).
-SETUP_INPUT_BUDGET = {"C1v2": 2570, "C1J": 2180, "B1": 2250, "B1v3": 2370, "B2": 2720, "B3": 3020,
-                      "K1": 4190, "P0": 2430, "P1": 2960, "R1": 3120, "S1": 3610, "S1v2": 4090, "S2": 3690,
-                      "D1": 4470, "D2": 3540, "D3": 3300, "R1v2": 2500, "D4": 2840, "D5": 4650, "D6": 4140}
+SETUP_INPUT_BUDGET = {"C1v2": 2900, "C1J": 2390, "B1": 2460, "B1v3": 2580, "B2": 2930, "B3": 3220,
+                      "K1": 4400, "P0": 2640, "P1": 3160, "R1": 3330, "S1": 3820, "S1v2": 4300, "S2": 3900,
+                      "D1": 4670, "D2": 3750, "D3": 3510, "R1v2": 2710, "D4": 3050, "D5": 4860, "D6": 4350}
 
 
 def carries_setup(user) -> bool:
@@ -802,7 +813,7 @@ C1_ANGLES = (
 )
 
 
-def build_c1_v2(pack, *, style_ids, batch, of, angle):
+def build_c1_v2(pack, *, style_ids, batch, of, angle, recipe=None):
     """One brief-faithful concept (plan 22 stage 2, C1v2): call *batch* of
     *of*, leading with *angle* (one of :data:`C1_ANGLES`).
 
@@ -813,7 +824,12 @@ def build_c1_v2(pack, *, style_ids, batch, of, angle):
     Plan 28 stage E2 (the stage-D1 review): the set-up block (``pack.setup``)
     first; the angle may reorder emphasis but never adds what the brief lacks;
     the cast, world, hook and retention asks are bounded; and with one style
-    id (the story's chosen look) ``style_fit`` is that style, not a choice."""
+    id (the story's chosen look) ``style_fit`` is that style, not a choice.
+
+    Plan 32 stage 2 (DEC-315): *recipe* (``recipes.for_story``; None: the
+    prompt it always was) adds its names line after the cast ask
+    (``recipes.c1v2_names_ask``): species puns, no brand, no plain human
+    first name, the fixed cast's size and roles."""
     style_ids = list(style_ids)
     # Plan 23 stage D2: a story with a universe adds its species block (pack.universe) between the
     # style and the avoid list; without one the block is empty and these bytes are what they were.
@@ -852,6 +868,7 @@ def build_c1_v2(pack, *, style_ids, batch, of, angle):
         "more than 5, keep the 5 who carry the conflict and name the others "
         "in the world; each with a role (one of lead, support, recurring, "
         "guest) and a one-line description, at most 25 words\n"
+        f"{recipes.c1v2_names_ask(recipe) if recipe else ''}"
         "- hook_formula: at most 25 words: what makes someone stop "
         "scrolling in the first seconds of episode 1\n"
         "- value: the real substance this story carries (a dilemma, a "
@@ -872,7 +889,7 @@ def _c1v2_search_text(concept) -> str:
                      cast_text])
 
 
-def c1v2_errors(doc, *, style_ids, brief, universe=False) -> list:
+def c1v2_errors(doc, *, style_ids, brief, universe=False, recipe=None) -> list:
     """C1v2's post-validation (plan 22 stage 2): ``schemas.c1_errors``'s own
     checks, then the rule check -- every name :func:`context.brief_entities`
     finds in *brief* must appear (accent- and case-folded,
@@ -882,7 +899,11 @@ def c1v2_errors(doc, *, style_ids, brief, universe=False) -> list:
 
     Plan 23 stage D2: with *universe* (the story has one) the cast members
     also carry a species, and a brand name anywhere in the card
-    (``schemas.BRAND_DENYLIST``) is a told-why retry too."""
+    (``schemas.BRAND_DENYLIST``) is a told-why retry too.
+
+    Plan 32 stage 2 (DEC-315): with *recipe* (``recipes.for_story``) a cast
+    name that is a plain human first name or carries a brand is a told-why
+    retry (:func:`c1v2_recipe_errors`); without one, the check it always was."""
     errors = schemas.c1_errors(doc, style_ids, species=universe)
     if errors:
         return errors
@@ -892,7 +913,17 @@ def c1v2_errors(doc, *, style_ids, brief, universe=False) -> list:
         for name in context.brief_entities(brief):
             if context._fold(name) not in haystack:
                 errors.append(f"$.cast_sketch: the brief names {name}; the concept never does -- keep it")
+    if recipe:
+        errors += c1v2_recipe_errors(doc, recipe=recipe, brief=brief)
     return errors
+
+
+def c1v2_recipe_errors(doc, *, recipe, brief) -> list:
+    """The recipe's names check on a C1v2 reply (plan 32 stage 2,
+    ``recipes.name_errors``): a plain human first name or a brand in a cast
+    name is refused in one sentence the retry carries -- a first name the
+    brief itself gives is kept, the brief wins."""
+    return recipes.name_errors(doc, recipe, brief=brief or "")
 
 
 # ------------------------------------------------------------- C1J (plan 22 stage 2)
@@ -4789,6 +4820,7 @@ _M1_ASK_TEMPLATE = (
     "- hook_text: the text on the cover image, at most {hook_words} words\n"
     "{english_asks}"
     "\n"
+    "{recipe_line}"
     "{platform_name} rules: {platform_rule}.\n\n"
     "{french_line}"
     "Never use real people, brands, studio names or copyrighted characters."
@@ -4840,7 +4872,8 @@ def m1_schema(platform, *, english) -> dict:
     return _llm_obj(properties)
 
 
-def build_m1(pack, *, platform, ep, story_title, episode_title, hook_text, teaser, cast_names, note=None):
+def build_m1(pack, *, platform, ep, story_title, episode_title, hook_text, teaser, cast_names, note=None,
+             recipe=None):
     """One platform's publishing text for a rendered episode (spec 2.10, 4.2
     row M1; DEC-166): one call per platform of ``schemas.PLATFORMS``.
 
@@ -4853,6 +4886,11 @@ def build_m1(pack, *, platform, ep, story_title, episode_title, hook_text, tease
     ask, with the platform's own limits (:data:`M1_PLATFORM_RULES`, A-078).
     A French story's ask adds ``title_en``/``hashtags_en``
     (:func:`m1_english_fields`) and the elision sentence.
+
+    *recipe* (plan 32 stage 2, ``recipes.for_story``) adds its line before
+    the platform's rules: the teaser already ends on the side-taking
+    question, which the app also pins in the comments (``recipes.m1_line``).
+    None: the prompt exactly as before.
     """
     if platform not in M1_PLATFORM_RULES:
         raise ValueError(f"unknown platform {platform!r}, expected one of {list(M1_PLATFORM_RULES)}")
@@ -4876,6 +4914,7 @@ def build_m1(pack, *, platform, ep, story_title, episode_title, hook_text, tease
         hook_words=M1_HOOK_TEXT_MAX_WORDS,
         english_asks=_M1_ENGLISH_ASKS.format(title_chars=rules["title_chars"], hashtag_count=count) if english else "",
         platform_rule=rules["rule"], french_line=_french_block(pack),
+        recipe_line=recipes.m1_line(recipe) if recipe else "",
     )
     return _m1_system(pack), user, m1_schema(platform, english=english)
 
@@ -5761,7 +5800,7 @@ def e1_v3_schema(cast_ids, place_ids, prop_ids, payoff_hooks=None, new_objects_a
 
 
 def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places, props, memory, slots,
-                slice_text, open_hooks=None, audience_direction=None, narration=None, variants=None):
+                slice_text, open_hooks=None, audience_direction=None, narration=None, variants=None, recipe=None):
     """E1 for a writing-v3 story (module section above): E1v2's inputs
     (:func:`build_e1_v2`, the episode slice and the first-watch rules), the
     spine asked first, the v3 summary, and -- on a ``single_place``
@@ -5770,7 +5809,11 @@ def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places
     (:func:`narration_e1_line_v3`). *variants* (plan 23 stage D5: the cast's
     approved appearance variants, :func:`character_states_block`) adds the
     character states block and each scene's ``states``; None or empty: the
-    prompt and the schema exactly as before."""
+    prompt and the schema exactly as before. *recipe* (plan 32 stage 2,
+    ``recipes.for_story``) adds its beats after the shape line
+    (``recipes.e1_beats_line``: the recap from its episode on, the
+    confrontation, the peak, the cliffhanger; one conflict; its scene
+    count); None: the prompt exactly as before."""
     hooks = offered_hooks(ep, open_hooks)
     new_objects = offers_new_objects(ep, True)
     memory_text, was_cut = context.memory_section(memory, ep, open_hooks=None if open_hooks is None else [])
@@ -5803,7 +5846,8 @@ def build_e1_v3(pack, *, ep, arc_entry, template, episode_defaults, cast, places
         summary_ask=SUMMARY_V3_ASK,
         slot_ranges=_slot_ranges_line(template),
         target_s=template["target_s"],
-        shape_line=_E1_V3_SINGLE_PLACE_SHAPE if single_place else _E1_V3_SHAPE_LINE,
+        shape_line=((_E1_V3_SINGLE_PLACE_SHAPE if single_place else _E1_V3_SHAPE_LINE)
+                    + (recipes.e1_beats_line(recipe, ep) if recipe else "")),
         hook_style_line=_HOOK_STYLE_LINES[episode_defaults["hook_style"]],
         cliffhanger_style_line=_CLIFFHANGER_STYLE_LINES[episode_defaults["cliffhanger_style"]],
         french_line=_french_block(pack),
@@ -6205,9 +6249,12 @@ _E3_V3_LINE_SHAPE = ("Each line: speaker (one of {speakers}), text (one or two c
 
 
 def _e3_v3_ask(keys, speakers, *, language, line_words, hook_words, act, native, narrator_note,
-               french_line="") -> str:
+               french_line="", teaser_ask=None) -> str:
     out = ["Write " + ", ".join(keys) + ".", "", "Give:"]
     for key in keys:
+        if key == "teaser" and teaser_ask:
+            out.append(teaser_ask)
+            continue
         ask = "cliffhanger_act" if key == "cliffhanger" and act else key
         out.append(_E3_V3_KEY_ASKS[ask].format(words=hook_words))
     out.append("")
@@ -6236,7 +6283,7 @@ def _e3_v3_ask(keys, speakers, *, language, line_words, hook_words, act, native,
 def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene, recap_scene, outline,
                 first_body_line, last_body_line, arc_entry, next_arc_entry, memory, episode_defaults,
                 word_budgets, cast, narrator_enabled, slice_text, so_far, spine, line_words, single_place=False,
-                native=False, narrator_parts=None, open_hooks=None, plans=None):
+                native=False, narrator_parts=None, open_hooks=None, plans=None, recipe=None):
     """The framing scenes on a writing-v3 story (module section above):
     E3v2's blocks (:func:`build_e3_v2`) with the spine first in place of
     the outline (the spine says what the episode tells; the outline's
@@ -6253,7 +6300,12 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
     *plans* (plan 24 stage 2, D-3: ``{"hook" | "cliffhanger" | "recap":
     timing.scene_plan}``): each planned part says its seconds and its hard
     total (:data:`PLAN_FRAMING_V3`) in place of "Keep ... within N words",
-    the line words asked never past the largest of them. None: as it was."""
+    the line words asked never past the largest of them. None: as it was.
+
+    *recipe* (plan 32 stage 2, ``recipes.for_story``): the teaser ends on
+    the recipe's side-taking question ("Team X ou Team Y ?",
+    ``recipes.teaser_ask``), still at most 15 words; the cliffhanger's 40
+    words are the recipe's too. None: the prompt exactly as before."""
     keys = _e3_keys(part, ep)
     plans = plans or {}
 
@@ -6313,7 +6365,8 @@ def build_e3_v3(pack, *, ep, part=None, note=None, hook_scene, cliffhanger_scene
     user += _e3_v3_ask(keys, speakers, language=pack.language_name, line_words=asked_words,
                        hook_words=hook_text_max_words(episode_defaults), act=single_place, native=native,
                        narrator_note=narrator_note,
-                       french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "")
+                       french_line=_FR_ELISION_SENTENCE if pack.language_name == "French" else "",
+                       teaser_ask=recipes.teaser_ask(recipe) if recipe else None)
     return _system(pack), user, e3_schema(part, ep, speakers)
 
 

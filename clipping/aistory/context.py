@@ -465,11 +465,14 @@ def setup_context(story, lock, template, profile, *, episodes=None, hexes=False)
     - FORMAT AND TIMING: *template*'s (the episode template) name and window in seconds; with
       *profile*'s ``native_speech`` the 5-10 s shots of 1-4 spoken lines, said in the clips (else the
       template's own shot lengths); one place in real time when the format says so; the narrator or none
-      (``story["narrator"]["enabled"]``).
+      (``story["narrator"]["enabled"]``);
+    - RECIPE (plan 32 stage 2): only on a story made with a recipe (``recipes.for_story``): its names, fixed
+      cast, beats, closing question and end card, voice direction and guardrails (``recipes.setup_parts``).
 
     *lock* is the style lock, or before the style step the style template (the same texts); None leaves
-    ART STYLE out. A pure function of its arguments: :func:`setup_for` reads them from the records."""
-    from . import prompt_templates
+    ART STYLE out. A pure function of its arguments (and of the shipped recipes): :func:`setup_for` reads them
+    from the records."""
+    from . import prompt_templates, recipes
 
     story = story or {}
     series = []
@@ -513,6 +516,11 @@ def setup_context(story, lock, template, profile, *, episodes=None, hexes=False)
         ]))
 
     sections.append(_section("FORMAT AND TIMING", _format_parts(story, template, profile)))
+    # Plan 32 stage 2 (DEC-315): a story made with a recipe ends its block on it; a story without one (or with
+    # an id no recipe has) gets the block it always got, byte for byte.
+    recipe = recipes.for_story(story)
+    if recipe is not None:
+        sections.append(_section("RECIPE", recipes.setup_parts(recipe)))
     return "\n".join([SETUP_HEADING] + [section for section in sections if section])
 
 
