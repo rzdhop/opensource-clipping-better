@@ -74,8 +74,12 @@ def api(monkeypatch, tmp_path, store):
 
 
 def _manual(store):
+    import test_story_manual_link as tml
+
     tnt._require_ffmpeg()
-    return nsp.planned_story(store, profile=PROFILE)
+    story_id = nsp.planned_story(store, profile=PROFILE)
+    tml.own_keyframes(store, story_id)  # plan 28 F7, re-pinned on purpose: the clip's tests, own keyframes
+    return story_id
 
 
 def _shot(store, story_id, *, speaks=True):

@@ -183,7 +183,15 @@ def test_a_story_without_variants_resolves_requests_and_hashes_byte_for_byte_as_
         return eps.StoryStore(tmp_path / f"outputs{next(counter)}", on_log=lambda line: None)
 
     recorded = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    assert json.loads(json.dumps(_identity_cases(factory))) == recorded
+    found = json.loads(json.dumps(_identity_cases(factory)))
+    # Plan 28 F7 (DEC-305 section 5), re-pinned on purpose: a brief's references now end with the props in
+    # frame, after the plate (identity first, then the set, then the objects --
+    # tests/test_story_handoff_gate.py); every other reference, prompt and hash is byte for byte as recorded.
+    for case in found.values():
+        for shot in (case.get("shots") or {}).values():
+            if "brief" in shot:
+                shot["brief"] = [ref for ref in shot["brief"] if ref["kind"] != "prop"]
+    assert found == recorded
 
 
 # ================================================================ a story whose kiwi has a ghost version

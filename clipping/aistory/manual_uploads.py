@@ -265,7 +265,7 @@ def upload_target_refusal(ec, shot, doc) -> str | None:
 
 
 def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None, on_log=None, now=None,
-                transcribe=None, run=None, guard=None) -> dict:
+                transcribe=None, run=None, guard=None, adapters=None, transport=None) -> dict:
     """The uploaded file *received* (a path inside the episode's clips folder,
     :func:`clips_folder`; consumed: moved into place, or left for the caller
     to delete on a refusal) as shot *shot_id*'s clip (module docstring).
@@ -275,7 +275,15 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
     ffmpeg/ffprobe seams (tests). *guard()*, when given, is called once the
     checks pass and right before anything is written: it raises
     :class:`UploadRefused` (409) when a step of the story started while the
-    file was arriving, so nothing writes the storyboard beside it."""
+    file was arriving, so nothing writes the storyboard beside it.
+
+    Plan 28 F7 (DEC-305 section 5): an app-made keyframe must be current
+    and passed by its check before its clip is taken
+    (``brief.keyframe_check``'s ``upload_refusal``; the human's own
+    keyframe is warned about, never refused); once stored, the clip's first
+    frame is compared with its keyframe (:func:`first_frame_check`, a
+    warning kept on the record, never a refusal). *adapters* and *transport*
+    are the vision chain's (tests)."""
     from .steps import assets as assets_step
     from .steps import brief as brief_mod
     from .steps import clips, sticky_link
@@ -289,6 +297,10 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
     refusal = upload_target_refusal(ec, shot, doc)
     if refusal:
         raise UploadRefused(refusal)
+    # Plan 28 F7: the keyframe the clip is made from is current and matches, before the clip is taken.
+    refusal = (brief_mod.keyframe_check(ec, host.storyboard, shot, doc) or {}).get("upload_refusal")
+    if refusal:
+        raise UploadRefused(refusal, status=409)
     speaks = bool(shot.get("speaks"))
     info = probe_clip(received, run=run)
     refusal = clip_refusal(info, speaks=speaks, aspect=media_policy.aspect(ec.story))
@@ -357,12 +369,79 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
         except StepFailed as exc:
             on_log(f"⚠️ {exc}")
     stored = next(item for item in host.storyboard["shots"] if item["shot_id"] == shot_id)
+    first_frame_check(host, ec, stored, dest, env=env, on_log=on_log, run=run, adapters=adapters,
+                      transport=transport)
     clip = stored["assets"].get("clip") or {}
     take = clip.get("native_speech")
     missing = brief_mod.missing_clips(ec, host.script, host.storyboard, assets_step._read_assets_doc(ec))
     return {"shot_id": shot_id, "clip": clip, "state": brief_mod.shot_state(ec, host.script, stored),
             "take": take, "duration_s": stored.get("duration_s"), "replaced": replaced, "missing": missing,
             "waiting": brief_mod.waiting_sentence(len(missing)) if missing else None}
+
+
+def extract_first_frame(clip, out, *, run=None) -> bool:
+    """The clip's first frame as a PNG at *out* (ffmpeg); False when it
+    cannot be read."""
+    runner = run or subprocess.run
+    argv = ["ffmpeg", "-v", "error", "-y", "-i", os.fspath(clip), "-frames:v", "1", os.fspath(out)]
+    try:
+        result = runner(argv, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    except (OSError, ValueError, TypeError):
+        return False
+    return getattr(result, "returncode", 1) == 0 and os.path.isfile(out) and os.path.getsize(out) > 0
+
+
+def first_frame_check(host, ec, shot, clip_path, *, env=None, on_log=None, run=None, adapters=None,
+                      transport=None):
+    """Plan 28 F7 (DEC-305 section 5): the first frame of the human's clip
+    against the shot's keyframe, one free vision call (``judge.
+    check_first_frame``) -- kept on the clip record as ``first_frame``
+    ``{version, passed, issues, checked_at, link, keyframe_sha256}`` and
+    said in the feed; never a refusal (the clip is the human's call). A
+    legacy story, a shot with no keyframe on disk, a frame that cannot be
+    read or no vision link: nothing is checked, nothing stored. Returns the
+    verdict or None."""
+    import tempfile
+
+    from . import prompts
+    from .steps import assets as assets_step
+    from .steps import judge
+    from .steps import script as script_step
+    from .steps.llm_call import StepFailed
+
+    on_log = on_log or (lambda _line: None)
+    if not media_policy.is_v2(ec.story):
+        return None
+    keyframe = assets_step.shot_image_path(ec, shot)
+    if not keyframe or not os.path.isfile(keyframe):
+        return None
+    with tempfile.TemporaryDirectory(prefix="first-frame-") as folder:
+        frame = os.path.join(folder, "first_frame.png")
+        if not extract_first_frame(clip_path, frame, run=run):
+            on_log(f"👁 First-frame check of shot {shot['shot_id']} skipped: the clip's first frame cannot be read.")
+            return None
+        try:
+            continuity = script_step.ledger_of(ec)
+        except StepFailed:
+            continuity = None
+        found = judge.check_first_frame(ec, shot, frame, keyframe, env=env, ledger=assets_step._open_ledger(ec),
+                                        on_log=on_log, adapters=adapters, transport=transport,
+                                        continuity=continuity)
+    if found is None:
+        return None
+    record = shot["assets"].get("clip")
+    if not record:
+        return None
+    record[judge.FIRST_FRAME] = {"version": prompts.J4_PROMPT_VERSION, "passed": found["passed"],
+                                 "issues": list(found["issues"]), "checked_at": _utc_now(), "link": found["link"],
+                                 "keyframe_sha256": sha256_file(keyframe)}
+    try:
+        host.write_board()
+    except StepFailed as exc:
+        on_log(f"⚠️ {exc}")
+        return None
+    on_log(f"👁 Shot {shot['shot_id']}: {judge.first_frame_line(record)}")
+    return record[judge.FIRST_FRAME]
 
 
 # ------------------------------------------------------------- the images

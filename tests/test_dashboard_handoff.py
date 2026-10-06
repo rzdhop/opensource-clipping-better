@@ -25,6 +25,8 @@ STORY = SRC / "pages" / "story"
 EPISODE = STORY / "episode"
 PAGE = EPISODE / "HandoffPage.jsx"
 CARD = EPISODE / "HandoffCard.jsx"
+# Plan 28 F7 (DEC-305 section 5): the clip row's checks (the keyframe check, the cut, the first frame).
+CHECKS = EPISODE / "HandoffChecks.jsx"
 APP = SRC / "App.jsx"
 API = SRC / "api.js"
 STUDIO = STORY / "EpisodeStudio.jsx"
@@ -38,7 +40,7 @@ def _read(path):
 
 
 def _handoff_sources():
-    return _read(PAGE) + "\n" + _read(CARD)
+    return _read(PAGE) + "\n" + _read(CARD) + "\n" + _read(CHECKS)
 
 
 def _function_body(src, name):
@@ -119,7 +121,11 @@ def test_the_page_reads_only_what_the_handoff_writes(store):
     # Plan 27: an exchange shot's clip also carries ``lines`` / ``speakers`` / ``line_ids`` (a
     # one-line row has none of them).
     # Plan 28 stage A6: ``generate_price`` is added by the route (``_priced``) to the human's own missing clips.
-    optional = {"fit", "prompt_warning", "lines", "speakers", "line_ids", "generate_price"}
+    # Plan 28 F7 (DEC-305 section 5), re-pinned on purpose: a clip row carries ``keyframe_check`` on a v2
+    # story, ``references_cut`` when the platform's cap left a reference out and ``first_frame`` once an
+    # uploaded clip's first frame was checked -- the page reads each when present.
+    optional = {"fit", "prompt_warning", "lines", "speakers", "line_ids", "generate_price", "keyframe_check",
+                "references_cut", "first_frame"}
     block_keys = set().union(*map(set, blocks)) | optional
     assert read("block") and read("block") <= block_keys, read("block") - block_keys
     entity_keys = set().union(*map(set, doc["entities"])) | {"variant_id", "variant_label", "reference"} | optional

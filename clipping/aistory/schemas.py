@@ -3730,6 +3730,16 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     # Plan 23 stage B8: a stock clip's credit record (route stock, link stock/<provider>):
     # who made it and under what licence (clipping/stock/credits.credit_record).
     "source": {"type": "object"},
+    # Plan 28 F7: the first frame of the human's clip against its keyframe (judge.check_first_frame), a
+    # warning on the Handoff card, never a refusal.
+    "first_frame": _document({
+        "version": {"type": "integer", "minimum": 1},
+        "passed": {"type": "boolean"},
+        "issues": {"type": "array", "items": _NON_EMPTY_STRING, "maxItems": 3},
+        "checked_at": _NON_EMPTY_STRING,
+        "link": _NON_EMPTY_STRING,
+        "keyframe_sha256": _SHA256,
+    }),
 }))
 
 # The five keys of spec 2.8 stay required; phase 4's record of the image is

@@ -13,6 +13,7 @@ import os
 import zipfile
 
 import test_story_assets_step as tas
+import test_story_manual_link as tml
 import test_story_native_speech_plan as nsp
 import test_story_native_take as tnt
 from test_story_assets_step import hermetic, store  # noqa: F401 -- stage 8's fixtures
@@ -36,6 +37,7 @@ def test_upload_clip_takes_the_file_through_the_routes_checks(cli, tmp_path):
     tnt._require_ffmpeg()
     story_id = nsp.planned_story(cli.store, profile="native_speech_manual")
     shot = next(item for item in tas._board(cli.store, story_id)["shots"] if not item.get("speaks"))
+    tml.own_keyframes(cli.store, story_id, [shot["shot_id"]])  # plan 28 F7, re-pinned on purpose
     clip = tnt.make_clip(tmp_path / "mine.mp4", 6)
     cli.capsys.readouterr()
 

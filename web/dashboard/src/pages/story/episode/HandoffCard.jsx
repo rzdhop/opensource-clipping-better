@@ -7,6 +7,7 @@ import { formatCents, formatUsd } from '../../../lib/format'
 import { copyLabel, fitNote } from '../../../lib/promptFit'
 import BudgetRefusal, { isBudgetRefusal } from '../BudgetRefusal'
 import ManualUploadSlot from '../ManualUploadSlot'
+import HandoffChecks, { uploadRefusal } from './HandoffChecks'
 
 // The Handoff view's cards (plan 25 stage 3, D-3): one per clip, keyframe or
 // entity image of the handoff document (GET .../episodes/{ep}/handoff),
@@ -432,14 +433,19 @@ function ManualBody({ storyId, ep, shot, which, block, platformInfo, onUploaded,
       <PromptText prompt={block.prompt} />
       <References references={block.references} zipUrl={block.zip_url}
         zipName={`${shot.shot_id}_${which}_references.zip`} />
+      {clip && <HandoffChecks block={block} />}
       {clip && <Checks checks={block.checks} />}
       {block.stock && <p className="form-hint">{block.stock}. Upload your own clip to replace it.</p>}
-      <ManualUploadSlot
-        slot={block.upload_slot}
-        label={`${block.state === 'missing' ? 'Upload' : 'Replace'} ${clip ? 'clip' : 'keyframe'}`}
-        accept={clip ? VIDEO_ACCEPT : IMAGE_ACCEPT}
-        onDone={onUploaded}
-      />
+      {clip && uploadRefusal(block) ? (
+        <p className="story-error handoff-upload-refused" role="status">{uploadRefusal(block)}</p>
+      ) : (
+        <ManualUploadSlot
+          slot={block.upload_slot}
+          label={`${block.state === 'missing' ? 'Upload' : 'Replace'} ${clip ? 'clip' : 'keyframe'}`}
+          accept={clip ? VIDEO_ACCEPT : IMAGE_ACCEPT}
+          onDone={onUploaded}
+        />
+      )}
       {clip && <TakeVerdict take={block.take} />}
       {clip && block.state === 'missing' && (
         <GenerateClipsButton storyId={storyId} ep={ep} shotId={shot.shot_id} price={block.generate_price}

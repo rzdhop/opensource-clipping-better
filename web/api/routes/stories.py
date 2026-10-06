@@ -3190,8 +3190,10 @@ async def patch_episode_handoff(story_id: str, ep: str, req: HandoffRequest) -> 
 
 
 def _shot_references(stories, story_id, ep, shot_id, platform, model, kind):
-    """``(ec, refs)`` of *shot_id*'s *kind* references (``clip``: the shot
-    brief's, cut to the platform's model; ``image``: the keyframe's own);
+    """``(ec, refs, notes)`` of *shot_id*'s *kind* references (``clip``: the
+    shot brief's, cut to the platform's model, with the keyframe check's line
+    and what the cut left out as *notes*, plan 28 F7; ``image``: the
+    keyframe's own, no notes);
     404 for a shot with none to brief, 400 for a bad platform, model or kind."""
     if kind not in brief_step.HANDOFF_KINDS:
         raise HTTPException(status_code=400, detail=f"Unknown kind {kind!r}. Known: clip, image.")
@@ -3202,7 +3204,7 @@ def _shot_references(stories, story_id, ep, shot_id, platform, model, kind):
     try:
         if kind == "image":
             entry = brief_step.keyframe_entry(ec, shot_id)
-            return ec, (None if entry is None else entry["references"])
+            return ec, (None if entry is None else entry["references"]), ()
         platform, model = _handoff_choice(ec, platform, model)
         found = brief_step.shot_brief(ec, platform=platform, model=model)
     except platforms.PresetError as exc:
@@ -3210,7 +3212,11 @@ def _shot_references(stories, story_id, ep, shot_id, platform, model, kind):
     except llm_call.StepFailed as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     entry = next((item for item in found["shots"] if item["shot_id"] == shot_id), None)
-    return ec, (None if entry is None else entry["references"])
+    if entry is None:
+        return ec, None, ()
+    # Plan 28 F7: the keyframe check's line and what the cap left out, beside the files (check.txt).
+    notes = ((entry.get("keyframe_check") or {}).get("line"), entry.get("references_cut"))
+    return ec, entry["references"], notes
 
 
 @router.get("/{story_id}/episodes/{ep}/shots/{shot_id}/references.zip")
@@ -3229,10 +3235,11 @@ async def shot_references_zip(story_id: str, ep: str, shot_id: str, platform: Op
     number = _episode_number(ep)
     if _SHOT_ID.fullmatch(shot_id) is None:
         raise HTTPException(status_code=404, detail=f"There is no shot {shot_id!r}.")
-    ec, refs = await run_in_threadpool(_shot_references, stories, story_id, number, shot_id, platform, model, kind)
+    ec, refs, notes = await run_in_threadpool(_shot_references, stories, story_id, number, shot_id, platform, model,
+                                              kind)
     if refs is None:
         raise HTTPException(status_code=404, detail=f"There is no {kind} brief for shot {shot_id!r}.")
-    data = await run_in_threadpool(brief_step.shot_references_zip, ec, refs)
+    data = await run_in_threadpool(lambda: brief_step.shot_references_zip(ec, refs, notes=notes))
     name = f"references_{shot_id}_{'image' if kind == 'image' else 'clip'}.zip"
     return Response(content=data, media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})

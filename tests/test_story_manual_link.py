@@ -35,6 +35,19 @@ def manual_story(store, **kwargs):
     return nsp.planned_story(store, profile=PROFILE, **kwargs)
 
 
+def own_keyframes(store, story_id, shot_ids=None):
+    """Plan 28 F7 (DEC-305 section 5): an app-made keyframe must exist and
+    pass its check before its clip is taken. The upload tests are about the
+    clip, so their shots' keyframes are the human's own (allowed, warned);
+    the gate itself is ``tests/test_story_handoff_gate.py``'s."""
+    from clipping.aistory import workflow
+
+    for shot in tas._board(store, story_id)["shots"]:
+        if shot_ids is None or shot["shot_id"] in shot_ids:
+            workflow.patch_shot_mode(store, story_id, 1, shot["shot_id"], {"image": "manual"}, now=NOW,
+                                     env=tas._settings())
+
+
 # ================================================================ the provider
 
 class _Counting:
@@ -355,6 +368,7 @@ def test_once_every_clip_is_uploaded_the_step_no_longer_waits(store, tmp_path):
 
     tnt._require_ffmpeg()
     story_id = manual_story(store)
+    own_keyframes(store, story_id)  # plan 28 F7, re-pinned on purpose (own_keyframes)
     source = tnt.make_clip(tmp_path / "take.mp4", 8)
     folder = manual_uploads.clips_folder(store, story_id, 1)
     shots = tas._board(store, story_id)["shots"]
@@ -382,6 +396,7 @@ def test_an_8_s_upload_on_a_6_s_plan_is_judged_on_its_real_length(store, tmp_pat
 
     tnt._require_ffmpeg()
     story_id = manual_story(store)
+    own_keyframes(store, story_id)  # plan 28 F7, re-pinned on purpose (own_keyframes)
     shot = next(item for item in tas._board(store, story_id)["shots"] if item.get("speaks") and item["clip_s"] == 6)
     script = tas.eps._script(store, story_id)
     text = next(line["text"] for scene in script["scenes"] for line in scene["lines"]
@@ -408,6 +423,7 @@ def test_an_exchange_upload_is_taken_per_line_and_the_brief_says_the_lines_heard
 
     tnt._require_ffmpeg()
     story_id = nsp.exchange_story(store, profile=PROFILE)
+    own_keyframes(store, story_id)  # plan 28 F7, re-pinned on purpose (own_keyframes)
     _planted(store, story_id)
     shot = nsp.exchange_shot(store, story_id)
     script = tas.eps._script(store, story_id)

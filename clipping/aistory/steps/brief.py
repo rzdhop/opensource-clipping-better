@@ -253,7 +253,104 @@ def references(ec, script, shot) -> list:
                             f"{place.get('name') or place['place_id']} — place plate ({variant.replace('_', ' ')})")
         if entry is not None:
             refs.append(dict(entry, kind="plate"))
+    # Plan 28 F7: the props in frame last -- identity first, then the set, then the objects.
+    props = (ec.entities or {}).get("props") or {}
+    for tag in shot.get("subject_tags") or ():
+        doc = props.get(tag[1:]) if tag.startswith("%") else None
+        entry = _entity_ref(ec, "props", doc["prop_id"], doc.get("image"),
+                            f"{doc.get('name') or doc['prop_id']} — object") if doc else None
+        if entry is not None:
+            refs.append(dict(entry, kind="prop"))
     return refs
+
+
+# Plan 28 F7: what each kind of reference is called in the line saying what a
+# platform's cap left out.
+_CUT_WORDS = {"keyframe": "the keyframe", "sheet": "{name}'s sheet", "plate": "the plate", "prop": "{name}"}
+
+
+def handoff_checks(entry) -> dict:
+    """Plan 28 F7: the shot brief entry's checks a Handoff clip row carries
+    -- ``keyframe_check``, ``references_cut``, ``first_frame`` -- the ones
+    it has."""
+    return {key: entry[key] for key in ("keyframe_check", "references_cut", "first_frame") if entry.get(key)}
+
+
+def judge_first_frame_line(record):
+    """``judge.first_frame_line`` (plan 28 F7), imported here: the judge pulls in the timing engine."""
+    if not (record or {}).get("first_frame"):
+        return None
+    from . import judge
+
+    return judge.first_frame_line(record)
+
+
+def references_cut(preset, model, left) -> str | None:
+    """The plain line saying what *model*'s cap left out of a shot's
+    references (*left*, in priority order), or None when nothing was: "Flow
+    takes 3 images: the plate was left out, the prompt describes it." """
+    if not left:
+        return None
+    names = []
+    for ref in left:
+        name = ref["label"].split(" — ", 1)[0]
+        names.append(_CUT_WORDS.get(ref["kind"], "{name}").format(name=name))
+    many = len(names) > 1
+    said = ", ".join(names[:-1]) + " and " + names[-1] if many else names[0]
+    platform = str(preset.get("platform") or preset.get("name") or "The platform").capitalize()
+    return (f"{platform} takes {model['max_references']} image{'s' if model['max_references'] != 1 else ''}: "
+            f"{said} {'were' if many else 'was'} left out, the prompt describes {'them' if many else 'it'}.")
+
+
+def keyframe_check(ec, storyboard, shot, doc):
+    """Plan 28 F7 (DEC-305 section 5): *shot*'s keyframe check, plain, for
+    the Handoff and the clip upload: ``{state, own, line, upload_refusal}``
+    -- ``state`` ``passed`` / ``failed`` / ``unjudged`` (no current J2
+    verdict on the keyframe as it is now) / ``stale`` (drawn from an older
+    prompt) / ``none`` (no keyframe on disk);
+    ``line`` what the card, the zip and the brief say ("The check saw:
+    ..."); ``upload_refusal`` why the clip is not taken yet, for an app-made
+    keyframe that is not current and passed (the human's own keyframe is
+    warned about, never refused). None on a legacy story or a stock shot."""
+    stock = ((shot.get("assets") or {}).get("clip") or {}).get("route") == schemas.STOCK_ROUTE
+    if not media_policy.is_v2(getattr(ec, "story", None)) or stock:
+        return None
+    from . import assets as assets_step
+    from . import judge
+
+    shot_id = shot["shot_id"]
+    ordered = storyboard["shots"]
+    index = next((i for i, item in enumerate(ordered) if item["shot_id"] == shot_id), None)
+    item = (assets_step.keyframe_item(ec, storyboard, index, link=assets_step.recorded_image_link(doc))
+            if index is not None else None)
+    own = assets_step.image_mode(ec.story, shot, doc) == video_plan.MANUAL
+    if item is None and assets_step.shot_image_path(ec, shot) is not None:
+        return {"state": "stale", "own": own,
+                "line": "The keyframe is out of date: make it again first (the assets step).",
+                "upload_refusal": None if own
+                else (f"Shot {shot_id}'s keyframe is out of date: make it again (the assets step), then upload "
+                      "its clip.")}
+    if item is None:
+        return {"state": "none", "own": own,
+                "line": "No keyframe yet: upload yours first." if own
+                else "No keyframe yet: make it first (the assets step).",
+                "upload_refusal": None if own
+                else f"Shot {shot_id} has no keyframe yet: make it first (the assets step), then upload its clip."}
+    entry = ((doc or {}).get(judge.KEYFRAME_VERDICTS) or {}).get(shot_id)
+    if not judge.verdict_current(entry, item[2], item[5]):
+        return {"state": "unjudged", "own": own,
+                "line": "The keyframe has no check yet: run the assets step again (it checks it, free).",
+                "upload_refusal": None if own
+                else (f"Shot {shot_id}'s keyframe has no check yet: run the assets step again (it checks it, free), "
+                      "then upload its clip.")}
+    if judge.verdict_passed(entry):
+        return {"state": "passed", "own": own, "line": "The keyframe check passed.", "upload_refusal": None}
+    seen = judge.verdict_text(entry)
+    return {"state": "failed", "own": own,
+            "line": f"The check saw: {seen}." + (" It is your own keyframe: your call." if own else ""),
+            "upload_refusal": None if own
+            else (f"Shot {shot_id}'s keyframe does not match (the check saw: {seen}): regenerate it, or upload "
+                  "your own, before its clip.")}
 
 
 # ------------------------------------------------------------------ the prompt
@@ -412,7 +509,7 @@ def _language(ec) -> str:
     return {"fr": "French", "en": "English"}.get(getattr(ec, "language", ""), getattr(ec, "language", ""))
 
 
-def shot_entry(ec, script, shot, *, preset, assets_doc=None, wardrobe=None) -> dict:
+def shot_entry(ec, script, shot, *, preset, assets_doc=None, wardrobe=None, storyboard=None) -> dict:
     """One shot of the brief (module docstring). On a v2 story (plan 26 H1)
     the prompt is the master and the scene template before stage 4's core
     (``clips.sent_clip_prompt`` on the manual link: nothing dropped), then
@@ -429,7 +526,8 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None, wardrobe=None) -> d
         parts = clips.clip_request_parts(ec, shot, script, tier=3, flags=clips.shot_flags(shot, assets_doc),
                                          link=gen.MANUAL_LINK)
     sent = clips.sent_clip_prompt(ec, shot, script, parts, link=gen.MANUAL_LINK, wardrobe=wardrobe)
-    refs = references(ec, script, shot)[:model["max_references"]]
+    ordered = references(ec, script, shot)
+    refs = ordered[:model["max_references"]]
     for number, ref in enumerate(refs, start=1):
         ref["number"] = number
         ref["file"] = f"{shot['shot_id']}_{number}_{ref['kind']}{os.path.splitext(ref['name'])[1]}"
@@ -454,6 +552,17 @@ def shot_entry(ec, script, shot, *, preset, assets_doc=None, wardrobe=None) -> d
     }
     if entry["state"] == "stock":
         entry["stock"] = stock_note(shot)
+    # Plan 28 F7: what the platform's cap left out, said; the keyframe's check (a v2 story's).
+    cut = references_cut(preset, model, ordered[model["max_references"]:])
+    if cut:
+        entry["references_cut"] = cut
+    if storyboard is not None and entry["state"] != "stock":
+        check = keyframe_check(ec, storyboard, shot, assets_doc)
+        if check is not None:
+            entry["keyframe_check"] = check
+    first = judge_first_frame_line((shot.get("assets") or {}).get("clip"))
+    if first:
+        entry["first_frame"] = first
     if media_policy.is_v2(getattr(ec, "story", None)):
         entry["fit"] = {key: sent[key] for key in ("limit", "words", "full_words", "dropped")}
         warning = prompt_templates.short_warning(sent["full_words"]) if entry["state"] != "stock" else None
@@ -524,7 +633,7 @@ def shot_brief(ec, *, platform=None, script=None, storyboard=None, assets_doc=No
     v2 = media_policy.is_v2(getattr(ec, "story", None))
     # Plan 26: the ledger is read once for every shot (an empty map: each look's first set).
     wardrobe = (clips.wardrobe_of(ec) or {}) if v2 else None
-    shots = [shot_entry(ec, script, shot, preset=preset, assets_doc=assets_doc, wardrobe=wardrobe)
+    shots = [shot_entry(ec, script, shot, preset=preset, assets_doc=assets_doc, wardrobe=wardrobe, storyboard=board)
              for shot in sorted(board["shots"], key=lambda item: item["order"])
              if not clips.shot_flags(shot, assets_doc).get("keep_still")]
     missing = [entry for entry in shots if entry["state"] == "missing"]
@@ -619,6 +728,10 @@ def render_markdown(brief) -> str:
             body += ["**Reference images (attach in this order):**", ""]
             body += [f"{ref['number']}. `{ref['file']}` — {ref['label']}" for ref in entry["references"]]
             body.append("")
+        if entry.get("references_cut"):
+            body += [entry["references_cut"], ""]  # plan 28 F7
+        if entry.get("keyframe_check") and entry["keyframe_check"].get("line"):
+            body += [f"**Keyframe check:** {entry['keyframe_check']['line']}", ""]  # plan 28 F7
         body += ["**Check before uploading:**", ""]
         body += [f"- [ ] {check}" for check in entry["checks"]]
         body += ["", f"Upload to: `{entry['upload_slot']}`", ""]
@@ -973,13 +1086,18 @@ def _zip_url(story_id, ep, shot_id, **query) -> str:
     return f"{base}?{pairs}" if pairs else base
 
 
-def shot_references_zip(ec, refs) -> bytes:
+def shot_references_zip(ec, refs, *, notes=()) -> bytes:
     """A zip of *refs*' files alone (the references of one shot, as
     :func:`shot_entry` or :func:`_keyframe_entries` number them) under
     ``references/<file>``, the names :func:`brief_zip` gives them; a
-    reference whose file is not on disk is left out."""
+    reference whose file is not on disk is left out. *notes* (plan 28 F7:
+    the keyframe check's line, what the cap left out), when any, as
+    ``check.txt`` beside them."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        lines = [line for line in notes or () if line]
+        if lines:
+            archive.writestr("check.txt", "\n".join(lines) + "\n")
         seen = set()
         for ref in refs or ():
             if ref["file"] in seen:
@@ -1156,6 +1274,7 @@ def handoff(stories, story, env, ec, *, platform=None, model=None) -> dict:
                 clip.update(speakers=list(entry["speakers"]), lines=[dict(row) for row in entry["lines"]])
             if entry.get("prompt_warning"):
                 clip["prompt_warning"] = entry["prompt_warning"]
+            clip.update(handoff_checks(entry))  # plan 28 F7
             if clip_mode == video_plan.AUTO and native:
                 clip["gate"] = _refused(lambda: assets_step.shot_mode_verdict(ec, script, board, shot, env=env))
                 clip.update(link=clip["gate"]["link"] or clip_link, est_usd=clip["gate"]["est_usd"])

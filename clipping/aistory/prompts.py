@@ -189,6 +189,8 @@ MAX_TOKENS = {
     # 3 issues of 16 words, 6-character words, the passed flag): 94 tokens
     # (chars/4); + 15 %, rounded up to ten (tests/test_story_sheet_gate.py).
     "J3": 110,
+    # Plan 28 F7: the first-frame check answers J3's own shape and caps.
+    "J4": 110,
     "S1v2": 1150,
     # Plan 22 stage 2 (DEC-274): C1v2 answers the same C1 schema (= C1's own
     # cap); C1J is a short verdict (kept/missing); B1v3 answers the same
@@ -248,6 +250,7 @@ TEMPERATURE = {
     "J1": ANALYTIC_TEMPERATURE,
     "J2": ANALYTIC_TEMPERATURE,
     "J3": ANALYTIC_TEMPERATURE,
+    "J4": ANALYTIC_TEMPERATURE,
     "S1v2": WRITING_TEMPERATURE,
     "C1v2": C1V2_TEMPERATURE,
     "C1J": ANALYTIC_TEMPERATURE,
@@ -269,6 +272,7 @@ SCHEMA_NAMES = {
     "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
     "L1": "continuity_ledger",
     "J1": "first_watch_check", "J2": "keyframe_check", "J3": "sheet_check",
+    "J4": "first_frame_check",
     "S1v2": "season_arc_skeleton_v2",
     # Distinct from "C1"/"B1"'s own schema names even though the shape is
     # identical -- the same convention every other versioned prompt follows
@@ -3976,6 +3980,35 @@ def validate_j3(reply) -> list:
     if not reply["passed"] and not issues:
         errors.append("$.issues: passed is false, so name what does not hold")
     return errors
+
+
+# ------------------------------------------------------------------------- J4
+#
+# Plan 28 F7 (DEC-305 section 5): the first frame of a clip the human
+# uploaded, against the shot's keyframe -- one vision call on VISION_CHAIN,
+# free first (``steps/judge.check_first_frame``): the same characters (each
+# head and species, skin and outfit), the same place and light. Its verdict
+# is a warning on the Handoff card, never a refusal (the human's clip is
+# their call). J3's reply shape and caps (``{passed, issues}``).
+J4_PROMPT_VERSION = 1
+
+_J4_SYSTEM = (
+    "You compare the first frame of a vertical-video clip with the keyframe it was made from. You only look and "
+    "report; you never describe a real person or name anyone outside the text you are given. Reply with JSON "
+    "only, matching the schema, in English."
+)
+
+
+def j4_prompt_text(*, shot_id, brief, checks) -> str:
+    """J4 as the one text a vision adapter sends beside the two images
+    (image 1 the clip's first frame, image 2 the keyframe)."""
+    import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
+
+    user = (f"Image 1 is the first frame of shot {shot_id}'s clip. Image 2 is the keyframe the clip was made "
+            f"from.\n\nWhat the shot shows:\n{brief}\n\nCheck, image 1 against image 2:\n")
+    user += "\n".join(f"- {line}" for line in checks) + "\n\n" + _J3_ASK
+    shape = json.dumps(j3_schema(), ensure_ascii=False, separators=(",", ":"))
+    return f"{_J4_SYSTEM}\n\n{user}\n\nThe reply's JSON schema: {shape}"
 
 
 # ------------------------------------------------------------------------- T1/T1r

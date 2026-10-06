@@ -212,6 +212,9 @@ def test_an_api_story_takes_a_manual_shot_s_clip_and_keeps_its_speaking_link(sto
     story_id = nsp.planned_story(store)
     own, other = _speaking(store, story_id, 2)
     _set_mode(store, story_id, own, clip="manual")
+    # Plan 28 F7 (DEC-305 section 5), re-pinned on purpose: an app-made keyframe must exist and pass its check
+    # before its clip is taken; this shot's keyframe is the human's own (allowed).
+    _set_mode(store, story_id, own, image="manual")
     folder = manual_uploads.clips_folder(store, story_id, 1)
     received = f"{folder}/.upload-mute.part"
     shutil.copyfile(tnt.make_clip(tmp_path / "mute.mp4", 8, sound=False), received)

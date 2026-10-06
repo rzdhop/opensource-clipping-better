@@ -1209,3 +1209,91 @@ def species_clash(story, doc, species, others, *, lock=None):
                     "characters may not share a species in this world. Give "
                     f"{_entity_name(doc)} another species.")
     return None
+
+
+# ------------------------------------------------------------------ J4, the first frame
+
+# Plan 28 F7 (DEC-305 section 5): the first frame of a clip the human
+# uploaded is compared with the shot's keyframe (one free vision call, the J2
+# pattern): the same characters -- each head and species, skin and outfit --
+# and the same place and light. Kept on the shot's clip record
+# (``first_frame``: ``{version, passed, issues, checked_at, link,
+# keyframe_sha256}``) and said on the Handoff card as a warning; never a
+# refusal (the human's clip is their call).
+J4 = "J4"
+FIRST_FRAME = "first_frame"
+_FIRST_FRAME_CHECKS = (
+    "the same characters as image 2, each with the same head and species, skin or material, and outfit",
+    "the same place, set and light as image 2",
+    "nobody in image 1 who is not in image 2",
+)
+
+
+def first_frame_request(ec, shot, frame_path, keyframe_path, *, ledger=None):
+    """The J4 call of *shot*: its clip's first frame (image 1) and its
+    keyframe (image 2), with what the shot shows (:func:`keyframe_brief`)."""
+    text = prompts.j4_prompt_text(shot_id=shot["shot_id"], brief=keyframe_brief(ec, shot, ledger=ledger),
+                                  checks=_FIRST_FRAME_CHECKS)
+    return gen.GenRequest(kind=gen.VISION, prompt=text, images=(frame_path, keyframe_path),
+                          extra={"max_tokens": prompts.MAX_TOKENS[J4], "temperature": prompts.TEMPERATURE[J4]})
+
+
+def check_first_frame(ec, shot, frame_path, keyframe_path, *, env, ledger, on_log, cancel=None, adapters=None,
+                      transport=None, continuity=None):
+    """J4 on one uploaded clip (plan 28 F7): returns ``{passed, issues,
+    link}``, or None when no vision link could judge it (said in the feed).
+    Each answered call is booked on *ledger* (the story's) as
+    ``first_frame_check:<shot_id>``; a reply that fails validation is asked
+    for once more. *continuity*: the episode's continuity ledger (the
+    outfit each character wears)."""
+    if adapters is None:
+        adapters_mod.load_all()
+    merged = gating.merged_env(env)
+    shot_id = shot["shot_id"]
+    try:
+        chain = gen.chain_from_env(gen.VISION, merged)
+        budget_obj = gating.budget_of(merged)
+    except (ChainError, ValueError) as exc:
+        on_log(f"👁 First-frame check of shot {shot_id} skipped: {gen.ENV_NAMES[gen.VISION]} cannot be used: {exc}")
+        return None
+    check = gating.budget_check(budget_obj, story_spent=lambda: ledger.totals()["est_usd"])
+    request = first_frame_request(ec, shot, frame_path, keyframe_path, ledger=continuity)
+    limiter = gating.FreeTierLimiter()
+    for attempt in (1, 2):
+        try:
+            result, answered = gen.run_generation_chain(
+                gen.VISION, chain, request, env=merged, allow_paid=budget_obj.allow_paid,
+                route=ec.story["generation_profile"]["route"], on_log=on_log, budget_check=check, limiter=limiter,
+                adapters=adapters, transport=transport, cancel=cancel)
+        except gen.NoRunnableLink as exc:
+            reasons = "; ".join(f"{label}: {reason}" for label, reason in exc.failures) or str(exc)
+            on_log(f"👁 First-frame check of shot {shot_id} skipped: no vision link could judge it ({reasons})")
+            return None
+        paid = bool(result.paid)
+        est = float(result.est_cost) if paid else 0.0
+        unit, qty = _vision_units(answered, request, adapters)
+        ledger.append(step=f"first_frame_check:{shot_id}", provider=answered.provider,
+                      model=gating.api_model_id(gen.VISION, answered), unit=unit, qty=qty, est_usd=est, paid=paid,
+                      ep=ec.ep)
+        if paid and result.est_cost > 0:
+            budget_mod.record(result.est_cost)
+        found, errors = _sheet_reply(result)
+        if found is not None:
+            found["link"] = describe(answered)
+            return found
+        if attempt == 1:
+            on_log(f"⚠️ {J4} reply for shot {shot_id} rejected ({'; '.join(errors[:2])}); asking once more")
+    on_log(f"✖ First-frame check of shot {shot_id} failed: the replies failed validation twice")
+    return None
+
+
+def first_frame_line(record):
+    """The Handoff card's line for a clip's first-frame check, plain, or
+    None when it was not checked."""
+    found = (record or {}).get(FIRST_FRAME)
+    if not found:
+        return None
+    if found["passed"]:
+        return "The first frame matches its keyframe."
+    return ("The first frame does not match its keyframe: " + "; ".join(found["issues"]).rstrip(".")
+            + ". It is your clip: kept, your call.")

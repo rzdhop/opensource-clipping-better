@@ -278,10 +278,14 @@ def test_a_shot_s_references_zip_holds_exactly_that_shot_s_files(api):
     response = api.client.get(url + "?platform=flow")
     assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
     assert "references_sh" in response.headers["content-disposition"] or first in response.headers["content-disposition"]
-    names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
+    archive = zipfile.ZipFile(io.BytesIO(response.content))
+    names = archive.namelist()
     expected = sorted(f"references/{ref['file']}" for ref in entries[first]["references"]
                       if brief.reference_file(ec, ref))
-    assert names and sorted(names) == expected
+    # Plan 28 F7 (DEC-305 section 5), re-pinned on purpose: the shot's keyframe check (and what the cap left
+    # out, when anything) rides beside the files as check.txt.
+    assert names and sorted(name for name in names if name != "check.txt") == expected
+    assert archive.read("check.txt").decode("utf-8").splitlines()[0] == entries[first]["keyframe_check"]["line"]
     assert f"references/{first}_1_keyframe.png" in names
     assert not [name for name in names if name.startswith(f"references/{second}_")]
     # Another shot's zip names its own files only.
