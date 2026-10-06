@@ -23,11 +23,15 @@
   chain test (call-free, RC-V8) prices the runpod row at est $0.10 for the default 5-s clip = $0.02 a second;
   the per-episode estimate of the existing tier-2 stories (04feb539840f, 979c8376e43e, d0ee5ebd745d) lists the
   runpod link as `keyed` but keeps each episode's recorded fal link (sticky link, by design). No episode rendered.
-- **OPEN:** (1) the Lightning LoRA files on the `comfy-models` volume still carry their lightx2v names (runbook
-  §2.5): a runpod job fails with "LoRA not found" until the human renames them on the pod — do that first;
-  (2) then the first real episode on the link: measure the 480×832 clip's GPU seconds (A-196), confirm the
-  `executionTime + delayTime` bill against the RunPod balance (A-194) and the base64 `.mp4` under `images`
-  (A-195); (3) plan 29's walk (below) is also still the human's; (4) the Settings key fields do not know the
+- **Smoke clip through the adapter 2026-10-06 11:55–11:59 UTC** (after the human renamed the two LoRAs on the
+  volume to the template's names, `/workspace/models/loras/`): `tools/runpod_smoke.py` → job 3167537b…-e2
+  COMPLETED; 480x832, 81 frames at 16 fps, 5.06 s h264, 0.6 MB; 202 s execution + 6 s delay = 208 GPU-s =
+  $0.101 at $1.75/h ($0.0202 per output second; the worker had just started). A-195 confirmed; A-196's first
+  measurement recorded (not 0.4x of 720p). Clip in `outputs/runpod_smoke/`.
+- **OPEN:** (1) the LoRA rename is DONE; (2) the first real episode on the link (a story with no recorded
+  video link, or a new one): measure the 480×832 clip's GPU seconds (A-196), confirm the
+  `executionTime + delayTime` bill against the RunPod balance (A-194: the smoke's $0.101 is the figure to
+  find on the balance) and measure a warm clip (A-196); (3) plan 29's walk (below) is also still the human's; (4) the Settings key fields do not know the
   RUNPOD names (the .env is the only place; a follow-up if the human wants them in Settings).
 - **Open questions:** none blocking.
 
