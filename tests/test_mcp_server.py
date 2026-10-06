@@ -86,7 +86,7 @@ def test_the_tools_are_listed(backend):
     server = build_server(backend)
     names = tool_names(server)
     for name in ("comfy_cancel", "comfy_fetch", "comfy_jobs", "comfy_status", "comfy_submit", "cost_ledger",
-                 "list_files", "runpod_health", "templates_list", "view_file"):
+                 "list_files", "runpod_health", "templates_list", "view_file", "comfy_download"):
         assert name in names, name
     for name in ("story_list", "story_create", "story_options", "story_get", "story_doc", "story_entities",
                  "story_entity", "episode_get", "episode_doc", "story_step_start", "story_step_answer",
@@ -176,6 +176,27 @@ def test_view_file_and_list_files_see_the_outputs_dir(backend, tmp_path):
     assert sorted(r["path"] for r in rows) == ["cast/kiwi.png", "cast/notes.txt"]
     other = call(server, "view_file", path="cast/notes.txt")
     assert json.loads(other.content[0].text)["note"] == "not an image or a video"
+
+
+def test_comfy_download_hands_back_the_bytes_and_stays_inside_the_roots(backend, tmp_path):
+    out = tmp_path / "outputs" / "cast"
+    out.mkdir(parents=True)
+    png = png_bytes(size=(64, 64))
+    (out / "kiwi.png").write_bytes(png)
+    (out / "big.bin").write_bytes(b"\0" * (1024 * 1024 + 1))
+    server = build_server(backend)
+    got = call(server, "comfy_download", path="cast/kiwi.png")
+    block = got.content[0]
+    assert type(block).__name__ == "EmbeddedResource"
+    assert base64.b64decode(block.resource.blob) == png
+    assert block.resource.model_dump(by_alias=True)["mimeType"] == "image/png"
+    assert block.resource.model_dump(by_alias=True)["uri"] == "file://" + str(out / "kiwi.png")
+    for bad in ("/etc/passwd", "../../etc/passwd", "cast/missing.png"):
+        refused = call(server, "comfy_download", path=bad)
+        assert refused.is_error, bad
+        assert "outside" in refused.content[0].text or "no such file" in refused.content[0].text
+    too_big = call(server, "comfy_download", path="cast/big.bin", max_mib=1)
+    assert too_big.is_error and "over the 1 MiB limit" in too_big.content[0].text
 
 
 def test_a_bad_submit_is_a_tool_error_with_the_reason(backend):

@@ -1,0 +1,37 @@
+# systemd unit of the rzdhop-story MCP server (mcp_server/): install with
+#   sudo cp deploy/rzdhop-story-mcp.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now rzdhop-story-mcp
+[Unit]
+Description=rzdhop-story MCP server (RunPod ComfyUI backend for opensource-clipping-better)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/Documents/tools/opensource-clipping-better
+# Secrets stay in the repo's .env (chmod 600, owned by ubuntu), which the server
+# itself loads through python-dotenv at startup, exactly as when run by hand.
+# No EnvironmentFile= on purpose: that file carries inline "# comments" after
+# some values, which dotenv strips and systemd would keep as part of the value.
+# Transport, host and port come from the same place: MCP_HOST / MCP_PORT in
+# .env, else 127.0.0.1:8787 (the address tailscale serve proxies to).
+ExecStart=/home/ubuntu/Documents/tools/opensource-clipping-better/.venv/bin/python -m mcp_server
+Restart=always
+RestartSec=3
+# Let a RunPod fetch finish before a stop kills it
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rzdhop-story-mcp
+
+# Hardening that does not get in the way of reading/writing the repo's outputs dir
+# (the job journal and the OAuth state live under outputs/mcp/).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/home/ubuntu/Documents/tools/opensource-clipping-better/outputs
+
+[Install]
+WantedBy=multi-user.target

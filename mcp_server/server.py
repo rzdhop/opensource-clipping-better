@@ -16,7 +16,8 @@ from fastmcp.exceptions import ToolError
 from fastmcp.utilities.types import Image
 
 from . import auth as auth_mod, media, story_tools
-from .config import Settings, load_settings
+from .comfy_download import register_comfy_download
+from .config import ROOT, Settings, load_settings
 from .runpod_jobs import JobClient, JobError, list_templates
 
 INSTRUCTIONS = """rzdhop story backend. You (Claude) are the writer and director; these tools are the
@@ -204,6 +205,8 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
         return rows[:max(1, int(limit))]
 
     story_tools.register(mcp, backend.story)
+    # The file itself (view_file and comfy_fetch only show previews); the same two roots as view_file.
+    register_comfy_download(mcp, outputs_dir=settings.outputs_dir, repo_root=ROOT)
     return mcp
 
 
