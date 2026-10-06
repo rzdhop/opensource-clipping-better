@@ -54,6 +54,20 @@ local-tts = [
     "chatterbox-tts>=0.1.7,<1",
 ]
 
+# What `pip install .` ships. Setuptools' automatic discovery refuses a flat
+# layout with this many top-level folders (assets, outputs, wiki, ...), so the
+# packages are named: the app, the web backend, the uploaders, the MCP server,
+# and the `main` module the scripts point at. The JSON templates the app reads
+# at run time ride along; an editable install (`-e`) reads them from the tree.
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["clipping*", "web*", "mcp_server*", "youtube_uploader*", "youtube_tracker*", "facebook_uploader*"]
+
+[tool.setuptools.package-data]
+clipping = ["aistory/templates/*.json", "aistory/templates/**/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
