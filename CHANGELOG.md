@@ -10,6 +10,92 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### The fruit drama as a product: a preset, a genre recipe, one look, a format, frozen voices, and the whole flow from the chat (DEC-315)
+
+#### Added
+
+- **A story can be created from a preset** (`clipping/aistory/presets.py`).
+  `story_create(..., preset="fruit_drama")` sets the fruit-drama look, the
+  `own_gpu` profile (pictures and clips on your own RunPod GPU, fal behind, $2 an
+  episode, reference images, universe fruits, agent mode), the recipe and the
+  format below; what the caller names wins over the preset, key by key.
+  `story_options` lists the presets, the budget profiles with their caps in
+  dollars and the episode formats as objects (`mcp_server/story_tools.py`).
+- **The whole flow runs from the chat** (`mcp_server/director.py`,
+  `mcp_server/style_step.py`, `mcp_server/story_tools.py`): the `style` step (a
+  story could not leave the bible before: cast and places refused "Approve the
+  style first"), the `fast-track` and `story-fast-track` steps,
+  `story_make_episode(story_id, episode, stop_at_keyframes?)` (one episode in one
+  run instead of eight starts; Claude still answers every writing prompt; the run
+  approves the keyframes itself unless told to stop, DEC-311) and
+  `story_estimate(story_id, what, episode?)` (what a step would cost in dollars,
+  free, before it starts). `story_step_start` documents every step and its params;
+  `story_get` shows the story's `recipe`; `STORY_CHAT_WRITER`
+  (`clipping/aistory/steps/llm_call.py`) counts the chat as a keyed writer.
+- **`episode_sheet` and `episode_export`** (`mcp_server/episode_tools.py`): one
+  picture of every shot of an episode (a clip frame, else the keyframe, else a grey
+  tile), and a copy of the finished video re-encoded under the download ceiling,
+  to hand over with `comfy_download`.
+- **A genre recipe** (`clipping/aistory/recipes.py`,
+  `templates/recipes/fruit_drama.json`, `schemas.RECIPE_SCHEMA`): telenovela names
+  (a French pun on the species, `-ito/-ita`; no brand, no plain human first
+  name, checked at the concepts step), a fixed cast of 5 to 8 with roles, the
+  beats (recap of at most 6 words from episode 2, confrontation, peak,
+  cliffhanger of at most 40 words), the closing "Team X ou Team Y ?" in the
+  teaser and the pinned comment, the end card "Partie N demain", the voice
+  direction and the guardrails (no sexist or racist trope, no sexualisation).
+  Injected into the set-up block, the concept's names and cast ask, the script's
+  shape line, the teaser ask and the publication pack
+  (`context.py`, `prompts.py`, `schemas.py`, `steps/concepts.py`,
+  `steps/script.py`, `steps/metadata.py`), gated on the story's `recipe` field:
+  a story without one is byte-identical.
+- **The format `fruit_drama_75s_v2`**: 60 to 90 s, 4 to 6 scenes of 1 or 2 shots
+  of 5 to 10 s, one silent reaction shot, the recap from episode 2, an end card of
+  1.5 s drawn even on a hard stop when the recipe asks, the hook's on-screen text
+  burned when the recipe asks (`templates/episodes/fruit_drama_75s_v2.json`, the
+  render).
+- **Frozen voices on the worker** (`clipping/providers/tts.py`
+  `RunPodTtsAdapter`, `clipping/aistory/voice_clone.py`, `voice_reference.py`,
+  `steps/cast.py`, `steps/voice_lines.py`): the `runpod/tts_chatterbox` voice link
+  (the reference `.wav` uploaded like a keyframe, a fixed seed per character,
+  FLAC converted to WAV, about $0.004 a line, `RUNPOD_AUDIO_*` in `.env.example` and
+  `docker-compose.yml`); the cast's character answer carries `voice_pick` and
+  `voice_sample_text`, and one Gemini-made reference per character is made once
+  and kept. The `own_gpu` profile's TTS chain is `runpod/tts_chatterbox`, then
+  `gemini/flash-lite-tts`.
+- **The S2V template** (`templates/workflows/s2v_wan22.json`,
+  `docker/worker-comfyui-tts/`: the `audio_encoders` symlink, `fetch_weights_s2v.sh`,
+  the README's S2V section): Wan 2.2 S2V on core nodes, a keyframe and a voice
+  line in, a clip of up to 5 s out. Not in the clips pipeline: it waits for one
+  paid test line.
+- **The fruit-drama skill rewritten** (`.claude/skills/fruit-drama-episode/SKILL.md`):
+  it asks the need first, then drives the story from the idea to the finished
+  video with the tools above, no shell. The copy Claude Desktop loads is replaced
+  by hand.
+- Docs: `docs/MCP.md` ("The fruit drama in a handful of calls", "Voice lines on
+  RunPod"), `docs/AI_STORY.md` ("The fruit drama product").
+- Tests: `tests/test_story_presets.py`, `tests/test_story_recipes.py`,
+  `tests/test_tts_runpod.py`, `tests/test_s2v_wan22_template.py`, the plan 32
+  cases in `tests/test_mcp_server.py`, `tests/test_mcp_director.py`,
+  `tests/test_story_voices.py`, `tests/test_story_cast_steps.py`,
+  `tests/test_budget.py` and `tests/test_env_template.py`.
+
+#### Changed
+
+- **One look for the fruit drama.** The `fruit_drama` style said "photorealistic"
+  where the send layer said "Pixar-style cartoon"; its rendering, negative prompt
+  and design rules now describe a Pixar-style 3D cartoon (the head rule kept),
+  with the master spec (section 5.1) edited in step. Stories whose style is
+  already locked keep their lock. The goldens that pinned the old words were
+  re-pinned with a dated comment (`tests/test_aistory_prompting.py`, the prompt
+  fixtures, and the guards that follow them).
+
+#### Known limitation
+
+- The talking mouth is not in an episode: `s2v_wan22` has never run on a GPU
+  (nothing is known about cartoon faces or French, and no timing or price is
+  measured). Publishing stays by hand.
+
 ### A text-to-speech route on the RunPod worker: Chatterbox Multilingual (French), and "Accès refusé" episode 1 voiced through it (DEC-314)
 
 #### Added

@@ -1506,6 +1506,114 @@ the keyframes and clips already made on the old prompts out of date, so run
 it before you make the shots, not after. Then re-read a shot's prompt in the
 Handoff before pasting it.
 
+## The fruit drama product (plan 32)
+
+A talking-fruit drama made in a handful of chat calls (`docs/MCP.md`, "The fruit
+drama in a handful of calls"). Five pieces make it: a preset, a recipe, a look,
+an episode format and frozen voices. Each one is gated so that a story made
+without it, or before it, is byte-identical to what it was.
+
+### The preset
+
+A **preset** names the choices a product needs in one word (`clipping/aistory/presets.py`).
+`fruit_drama` sets the look (`fruit_drama`), how pictures and clips are made
+(the v2 quality profile on the `own_gpu` budget profile: your own RunPod GPU first,
+fal behind, $2 an episode; reference images; universe `fruits`; agent mode),
+the recipe (`fruit_drama`) and the episode format (`fruit_drama_75s_v2`).
+`story_create(..., preset="fruit_drama")` from the MCP builds all of it; what
+the caller names in the same call wins over the preset, key by key. The preset
+reads no key and calls nothing. The dashboard's form is unchanged: it sends its
+four choices as before.
+
+### The recipe
+
+A **recipe** is the rules of a genre as data (`clipping/aistory/templates/recipes/<id>.json`,
+validated by `schemas.RECIPE_SCHEMA`, read through `clipping/aistory/recipes.py`).
+A story names one in its `recipe` field, set at creation (a preset sets it;
+`store.create` refuses an id no recipe has). **That field is the one gate:** the
+writers call `recipes.for_story(story)`, which gives nothing for a story without
+a recipe, so such a story's prompts, checks and goldens do not move. The
+`fruit_drama` recipe holds:
+
+- **Names.** A French telenovela pun on the character's own species, in the
+  `-ito/-ita` style (Fraisita the strawberry, Bananito the banana, Citronello the
+  lemon); one species per character; no brand, no plain human first name. The
+  concepts step checks every name of a card's cast and sends back, as the
+  validator's refusal, a sentence naming the offender and how to fix it. A first
+  name the user's own idea gives is kept; a brand never is.
+- **A fixed cast** of 5 to 8 recurring characters with roles: matriarch, villain,
+  schemer, innocent, heir, best friend, newcomer. A concept card still sketches
+  3 to 5; the rest come at the cast step.
+- **The beats** of an episode: a recap of at most 6 words on screen (from episode
+  2), the confrontation, the peak (the moment a viewer sends to a friend), a
+  cliffhanger of at most 40 words; one conflict, no subplot.
+- **The closing question** "Team X ou Team Y ?" (the two characters the episode
+  sets against each other) in the teaser and, when the teaser lacks it, in the
+  pinned comment; and the **end card** "Partie N demain".
+- **The voice direction** (over-acted telenovela, crisp and quick) and the
+  **guardrails**: no sexist trope, no racist trope, no sexualisation, nobody
+  judged by body, looks or love life. They are on by default and the writers
+  are told them in the set-up block.
+- A posting **cadence** (one episode a day) and a few **plot seeds** (a
+  betrayal, an inheritance, a secret identity, a loyalty test, a family twist),
+  kept as notes.
+
+Where it reaches the writers: the set-up block's RECIPE section
+(`context.setup_context`; "The set-up block" above), the concept step's names and
+cast ask and its names check, the script's shape line, the teaser ask, and the
+publication pack (the pinned comment's question). Everything it adds is text in
+the user part of a prompt; the cores of the master prompts and their hashes are
+untouched (DEC-303).
+
+### The look: Pixar-style 3D cartoon
+
+The `fruit_drama` style is one look everywhere: a stylised 3D cartoon in the
+manner of a Pixar feature (soft rounded forms, subsurface-lit fruit skin, big
+expressive eyes, warm key light, shallow depth of field). Before plan 32 the
+template said "photorealistic" while the send layer said "Pixar-style cartoon";
+the template (rendering, negative prompt, design rules) and the master spec
+(section 5.1) now agree. The head rule is kept (every head is one whole fruit at
+human head scale, never a human head or a mask), and so are the judges that
+check it. A story whose style was already locked keeps its old lock; only new
+stories get the new look.
+
+### The format `fruit_drama_75s_v2`
+
+`templates/episodes/fruit_drama_75s_v2.json`: a window of 60 to 90 s (target
+75), 4 to 6 scenes of 1 or 2 shots, each shot 5 to 10 s (the clip window, DEC-304),
+one silent reaction shot, the recap from episode 2, a cliffhanger, and an end
+card of 1.5 s "Partie N demain". When the story's recipe asks for them, the
+render draws the end card even though the style ends on a hard stop, and burns
+the hook's on-screen text. Stories without a recipe render as before.
+
+### Frozen voices
+
+A story whose TTS chain starts with `runpod/tts_chatterbox` (the `own_gpu`
+profile's does) or that follows the `fruit_drama` recipe gives **each character
+one voice, made once and kept** (`clipping/aistory/voice_clone.py`):
+
+1. The character's text answer (K1) carries two more fields on such a story only:
+   `voice_pick`, one of the Gemini voices of the catalogue (a different one for
+   each character, the writer is told which are taken), and `voice_sample_text`,
+   25 to 40 words (about 12 seconds) in character, in the story's language.
+2. At cast time, one Gemini voice call per character speaks that text; the audio is
+   accepted like an uploaded recording (mono, 24 kHz, 16-bit, 5 to 30 s) and kept
+   as the character's `voice_reference.wav`. It is **frozen**: a rewritten text
+   never changes the voice.
+3. The character's voice is pinned to `runpod/reference` (or, when RunPod has no key
+   and Gemini has one, to the Gemini voice picked). Every line is then cloned from
+   the reference on the RunPod worker (the `tts_chatterbox` template) with a fixed
+   seed, the CRC32 of the character's id, so the voice is the same in every line
+   and every episode. About $0.004 a line; the chain falls back to
+   `gemini/flash-lite-tts`.
+4. These references are synthetic voices only (DEC-281): the consent box of "Your
+   own voice (chatterbox)" is for a real person's recording and is a separate
+   path. Without a Gemini key the pick and text wait, recorded, until one is set.
+
+The talking mouth (Wan 2.2 S2V, a clip made from a keyframe and a voice line)
+exists as a template (`s2v_wan22`) and is **not in the clips step**: it is
+unverified on cartoon faces and on French, and waits for one paid test line.
+
 ## Walkthrough (dashboard)
 
 Open **AI Story** in the mode switch, or go to `/story`. It lists your
