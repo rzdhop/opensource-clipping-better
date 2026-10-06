@@ -189,6 +189,34 @@ The first two are one server call (`POST /api/stories/{id}/approve-all/cast`
 or `…/places`, below); the third is the dashboard doing the four approvals in
 order. The one-click run and the CLI approve a cast by the same rule.
 
+**Approve anyway, on a cast, place or prop picture (plan 29).** The check on a
+character's sheets, a place's plates and a prop's picture can be wrong, and the
+picture is yours to judge. When a picture failed its check, its tile shows the
+check's sentence ("Does not match: …. Regenerate it, or upload your own.") and
+a button, **Approve anyway**. Press it and the character, place or prop is
+approved over the picture that failed; the tile then says "Approved by you
+despite: …" with what the check saw, and its badge reads "Approved despite the
+check". The rules around it:
+
+- A picture that has **not been checked yet** cannot be approved this way.
+  Nothing has been said about it, so there is nothing to approve over: the
+  refusal still reads "… has no check yet: run the … step again (it checks it,
+  free)." (the check is free).
+- It holds only for **that picture**. If you regenerate the picture, the new
+  file is checked like any other and the old "approved anyway" no longer counts.
+- **Running the step again leaves it alone.** The app does not check it again,
+  does not redraw it and does not spend on it; it writes one line in the job log
+  ("… was approved by you despite the check; left as it is.").
+- **Approve all** still never does this for you: it leaves a failed picture and
+  names it.
+- **Keyframes keep their gate.** There is still no "Approve anyway" on a
+  keyframe ("Strict consistency rules").
+
+Behind the button, `POST /api/stories/{id}/approve/{doc}` takes
+`{"approve_anyway": true}` for `character:<id>`, `place:<id>` and `prop:<id>`
+(and still for the script, as before). (DEC-307; `workflow.approve_entity`,
+`judge.sheet_refusal`.)
+
 ### Concepts: generated cards only
 
 The Concepts step no longer lists the fourteen concepts that shipped with the
@@ -268,10 +296,13 @@ note, and checked again. Past the story's ceiling (**its images × 2 × the pric
 one image**) or after the last redraw, the step says "Gaston's portrait does not
 match: the head is a human head, Gaston is a pineapple. Regenerate it, or upload
 your own." and that character, place or prop **cannot be approved** (nor by
-Approve all) until you regenerate it or replace it with your own image, which is
-checked and warned about, never refused. A picture made before this rule has no
+Approve all) until you regenerate it, replace it with your own image (checked and
+warned about, never refused), or press **Approve anyway** ("Approve all", above;
+plan 29). A picture made before this rule has no
 check and is left as it is; a check that cannot run leaves the picture unchecked
-and the next run of the step checks it. In a fruit world, **two characters never
+and the next run of the step checks it. A place or a prop picture that keeps
+coming back with a character in it is the subject of "Empty sets and lone
+objects" (under "6. Places & props"). In a fruit world, **two characters never
 share a species** (unless the universe allows it): the look writer is refused a
 repeat and told to pick another ("Gaston cannot be a pineapple: Rida is already a
 pineapple, and two characters may not share a species in this world. Give Gaston
@@ -430,6 +461,16 @@ a set-up block every set-up writer reads, and a set of strict consistency
 rules that make a wrong face, a wrong outfit or a wrong plate a refusal, not a
 surprise ("Strict consistency rules"). The screens that show all of it are
 simpler: one button per step, plain words, the rest under Advanced.
+
+**2026-10-06: plan 29 fixed the empty sets, the descriptions and the approvals.**
+A place's picture came back with a fruit character in it, **Regenerate** drew a
+new picture that the tile did not show, and a picture the check had wrongly
+failed could not be approved. Now a place or prop picture is asked for in words
+that say the set is empty ("Empty sets and lone objects"), every character,
+place and prop gets a written **Description** of about 100 words that comes
+first in its prompts ("The Cast, Places and Props tiles"), a failed picture can
+be approved anyway after you read the check's sentence ("Approve all"), and a
+regenerated picture shows on its tile at once ("5. Cast", "6. Places & props").
 
 ## The quality pipeline (v2)
 
@@ -1189,6 +1230,48 @@ drawer's prompt carries the series, the style and that one character's,
 place's or prop's full paragraph in front of the sheet prompt, with the same
 word count and fit line as a shot's.
 
+#### The Description of a character, a place or a prop (plan 29)
+
+A character used to be a few short fields (a descriptor of 8 to 20 words, its
+signature items), a place about a hundred words stacked from several fields, a
+prop about forty. A picture prompt built from them was a list, not a description,
+and the image services drew from the list. Now the app writes **one paragraph
+of about 100 words** for each of them (it is asked for 80 to 120; one of 60 to
+160 words is accepted), the way a painter could work from it. A place's and a prop's never
+mentions a person: the place is shown empty and the prop alone.
+
+- **When the app writes it.** Together with the look: when the app writes a
+  character's look, a place's look or a prop's look, it writes the Description in
+  the same call. It is on the quality pipeline only; an older story is unchanged.
+- **Where it goes.** First in every picture prompt of that character, place or
+  prop (the sheet, the plate, the prop picture), and first in its paragraph of
+  the master prompt ("The master prompt and the templates"). The short fields stay:
+  the checks read them.
+- **A story made before plan 29 has none.** Nothing is written for it by itself.
+  Press **Regenerate** on the tile (the whole-text one) and the app writes the
+  text, then the look, and with it the Description. Until then the story's
+  prompts are exactly what they were.
+- **The tile does not show a box for it yet.** The Description is saved on the
+  character, place or prop; the editable text box on its tile is the follow-up. To
+  change it today, regenerate the text with a note.
+
+The word budgets. A prompt that has a Description may use about 100 more words in
+that element's own picture prompt, so the rest of it (the style, the rules, the
+framing) is cut no more than before. The keyframe and clip prompts are unchanged.
+
+| Picture prompt | Without a Description | With one |
+|---|---|---|
+| Character sheet | 130 words | 230 words |
+| Character sheet, two views | 260 words | 360 words |
+| Place plate | 150 words | 250 words |
+| Prop picture | 80 words | 180 words |
+| Link ceiling for a sheet | 200 words | 300 words |
+| Keyframe / clip | 220 / 80 words | 220 / 80 words (unchanged) |
+
+A link that takes fewer words keeps its own limit. A character, place or prop
+with no Description is built to the left column, word for word as before.
+(`prompting.*_V2_DESCRIBED_MAX_WORDS`, `prompt_budgets`; DEC-308.)
+
 ### The master prompt and the templates
 
 A generator can only draw what its prompt says. Until plan 26 the prompt of
@@ -1829,7 +1912,8 @@ with nothing missing it calls nothing.
 checked once, free, when it is made (one head, the species named, the outfit,
 both views of a two-view sheet), redrawn up to twice with what the check saw as
 the note, and a character whose picture still fails says why and cannot be
-approved until you regenerate it or upload your own ("Strict consistency rules").
+approved until you regenerate it, upload your own or press **Approve anyway**
+("Approve all"; "Strict consistency rules").
 In a fruit world two characters never share a species. **Approve all** approves
 every character that has everything it needs in one tap, names the ones it
 left, and never approves one the app refused.
@@ -1842,7 +1926,10 @@ or "Not made yet."), its editable **descriptor**, **signature items**,
 **personality** (traits / wants / fears / speech style), **voice direction**
 and **sample line** (each saved inline, no job needed), and a
 whole-character **Regenerate** (K1 again, with a note — the images and the
-pinned voice are untouched).
+pinned voice are untouched; on the quality pipeline it also writes the look and the
+Description again, "The Description of a character, a place or a prop"). **A
+regenerated picture shows on the tile at once** (plan 29): the tile used to keep the
+old one, because the new file has the same name.
 
 **Voice** (only on a story that has voices; a story made since plan 28 shows
 none on its tiles) shows the pinned voice (`provider/voice_id`) with a player for its
@@ -2013,6 +2100,55 @@ edit. Each prop's card shows its image, an editable **owner** dropdown and
 
 **Approve** each place and prop individually; **places are approved when
 every place and every prop is**.
+
+**Regenerate shows the new picture at once (plan 29).** A regenerated plate keeps
+its file name, so the tile used to keep showing the old one until you reloaded the
+page. The tile now reloads whenever the file changes, on the Cast, Places and Props
+tiles and on the storyboard's shot cards.
+
+#### Empty sets and lone objects (plan 29)
+
+**What went wrong.** A place's plate came back with a fruit character standing in
+it. The prompt that was sent described a world of fruit people (the style, the
+universe, the character design rules), and asked for no people in two short
+negative phrases. The image services behind the app take **no negative prompt**,
+so "no people" is only more words about people, and a long paragraph of fruit
+people won over two short negations.
+
+**What the app does now.** It says what the set is, in positive words, at the very
+start of the prompt:
+
+- A plate opens with: "A completely empty, unoccupied set with nobody in it: no
+  people, no characters, no figures, no creatures, no fruit people, no fruit or
+  food lying about; only the set itself, its furniture, fixtures and light."
+  (`prompting.PLATE_EMPTY`)
+- A prop picture opens with: "The object alone on a plain surface: no hands, no
+  people, no characters, no fruit people, nothing else in frame."
+  (`prompting.PROP_ALONE`)
+
+For a place or a prop the rest of the sent prompt stops talking about people too:
+the style's rendering loses its clauses about heads, faces, bodies and outfits,
+the "character design rules" and the universe lines are left out, and the scale
+note is said for an empty room. Character sheets, portraits and keyframes are
+unchanged.
+
+**If the check still fails.** Each plate and prop picture is checked when it is made
+("Strict consistency rules"). A failed one is drawn again automatically, up to
+twice, with a new random seed and a note. The note for a place says: "The last
+picture showed someone or something alive in the set. Draw the set completely empty:
+nobody in it, no character, no figure, no fruit person; only the room, its
+furniture and light." For a prop: "The last picture showed a character with the
+object. Draw the object alone on a plain surface: no hands, no character, no fruit
+person near it." The note does **not** repeat what the check saw about the
+character, because a service told "no fruit characters" draws them. The check's
+other faults (the layout, the light) are kept and added after "Also fix:". The log
+line still shows everything the check saw. A redraw of a plate is priced as a
+plate, not as a sheet.
+
+**Then it is yours.** After the second redraw the tile shows the check's sentence
+and three ways on: **Regenerate** (with a note if you like), **Upload** your own
+picture (checked and warned about, never refused), or **Approve anyway**
+("Approve all", above).
 
 ### 7. Season arc
 
@@ -4203,7 +4339,8 @@ on the keyframe as it is now.
 pineapple. Regenerate it, or upload your own."** — the sheet check on the cast,
 the places or the props (after its two redraws or the story's redraw ceiling): the
 picture cannot be approved, and Approve all leaves it. Regenerate it with a note,
-or upload your own image.
+upload your own image, or press **Approve anyway** if you judge the picture fine
+(the tile then says "Approved by you despite: …").
 
 **"The story's image link … cannot serve now: …"** — the one link the story's
 character sheets, places and props are made on cannot serve (a spent balance, a
