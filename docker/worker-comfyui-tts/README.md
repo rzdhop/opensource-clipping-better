@@ -2,7 +2,7 @@
 
 The RunPod serverless ComfyUI worker image with **Chatterbox Multilingual TTS** added
 (plan 31). It is `runpod/worker-comfyui:5.10.0-base-cuda12.8.1` (the pin of
-`deploy/runpod/worker-comfyui.Dockerfile`) plus three additive changes. The base already
+`deploy/runpod/worker-comfyui.Dockerfile`) plus four additive changes. The base already
 carries the ComfyUI the endpoints run today; ComfyUI does not move, so the existing
 image and video workflow templates keep working unchanged.
 
@@ -12,6 +12,7 @@ image and video workflow templates keep working unchanged.
 |---|---|---|
 | The `FL_ChatterboxMultilingualTTS` node | `git clone` of `filliptm/ComfyUI_Fill-ChatterBox` into `/comfyui/custom_nodes`, pinned to commit `f7d7a16187430abcaf91a3039b9c83aa9960816a` (v1.0.5, 2026-08-24, "Fix optional Perth imports"), `uv pip install -r requirements.txt` into `/opt/venv` | The registry copy (`comfy-node-install`) is 1.0.4 and needs `resemble-perth`; the pin makes the build reproducible. Chatterbox is vendored in the pack, so nothing pins torch; the build compares `torch.__version__` before and after the install and fails if it moved. |
 | A symlink `/comfyui/models/chatterbox -> /runpod-volume/models/chatterbox` | `ln -s` in the Dockerfile | The node reads its weights from `<ComfyUI>/models/chatterbox/chatterbox_multilingual/` (its own path, not `extra_model_paths.yaml`). The link puts them on the network volume. |
+| A symlink `/comfyui/models/audio_encoders -> /runpod-volume/models/audio_encoders` | `ln -s` in the Dockerfile | The worker's `extra_model_paths.yaml` does not map the `audio_encoders` folder, which the Wan 2.2 S2V workflow (`s2v_wan22`, below) reads through core `AudioEncoderLoader`. The link puts it on the network volume. |
 | A patched `/handler.py` | `patch_handler.py` run at build time | SaveAudio's `audio` output is returned like images (below). |
 
 Input of the node: `text`, `language` (`"French (fr)"`), `exaggeration`, `cfg_weight`,
@@ -36,6 +37,41 @@ the image stays the base's size and the CI build stays light.
   exist: with the symlink dangling, a `makedirs` through it can fail. Running
   `fetch_weights.sh` once, or `mkdir -p /workspace/models/chatterbox` on the dev pod, avoids
   the question.
+
+## Wan 2.2 S2V weights (plan 32): a talking clip from a keyframe and a voice line
+
+The workflow template `clipping/aistory/templates/workflows/s2v_wan22.json` (image + one spoken
+line in, a clip of up to 5 s out, the mouth following the voice) runs on core ComfyUI nodes only
+(`WanSoundImageToVideo`, `AudioEncoderLoader`, `AudioEncoderEncode`, in ComfyUI since v0.3.53;
+the base's ComfyUI is newer). It adds no node pack; it needs the three files below on the
+volume, next to the Wan 2.2 I2V files already there (`umt5_xxl_fp8_e4m3fn_scaled.safetensors` and
+`wan_2.1_vae.safetensors` are shared and not fetched again).
+`Comfy-Org/Wan_2.2_ComfyUI_Repackaged` (Apache-2.0), `split_files/`:
+
+| File | Size | Goes in |
+|---|---|---|
+| `diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors` | 16.4 GB | `models/diffusion_models` |
+| `audio_encoders/wav2vec2_large_english_fp16.safetensors` | 0.63 GB | `models/audio_encoders` (the new symlink) |
+| `loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors` | 1.2 GB | `models/loras` (the T2V v1.1 LoRA, not the two I2V ones already there) |
+
+Pre-fetch once from the dev pod: `sh docker/worker-comfyui-tts/fetch_weights_s2v.sh` (default
+`/workspace/models`; pass `/runpod-volume/models` inside a worker container). Same behaviour
+as `fetch_weights.sh`: skips files present, `huggingface-cli` or `curl`, prints the sizes. The
+Chatterbox script is untouched.
+
+How the graph works: the voice line goes through `LoadAudio` (a WAV uploaded like a keyframe) and
+`AudioEncoderEncode` (resampled to 16 kHz, channels averaged); `WanSoundImageToVideo` takes the
+keyframe (`ref_image`, center-cropped to width x height; 480x832 is valid, both are multiples of
+16) and one 77-frame chunk; 4 steps, cfg 1, `uni_pc`/`simple`, shift 8, with the lightx2v LoRA.
+**First-frame note:** ComfyUI's own graph doubles the first latent frame (`LatentCut` +
+`LatentConcat`) and drops the first 3 decoded frames (`ImageFromBatch`) because the VAE
+overbakes the first frame. One chunk decodes to 81 frames, 78 remain (4.9 s at 16 fps); audio
+beyond the clip is ignored, a shorter line leaves the mouth idle. The template's input names
+were checked against the ComfyUI v0.34.0 source, not against a running ComfyUI.
+
+Status: `verified_live` is false. **Unverified on cartoon faces and on French: the human's
+one-line test on a fruit keyframe gates its use**; nothing in the clips pipeline calls it yet.
+Rebuild the image (CI) before the test: the `audio_encoders` link is new.
 
 ## The handler patch
 
