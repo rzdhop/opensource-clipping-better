@@ -2,10 +2,9 @@
 
 - **In-progress header:** phase = DOCUMENT / close-out; the human's walk next. Checkpoint commit = main (this
   commit; `FETCH_HEAD` untracked). **LIVE: a271439 deployed 2026-10-06 ~01:50 UTC** (rm -sfv + rebuild at 0 jobs after
-  the 3.11 in-memory compile; health 200; bundle index-MtAb8BvW.js; 383 jobs intact; smoke calls green). **CI:** the
-  A-096 replica on 229f041 found only the known archive artifact + one PIL import in a CI-less test (fixed 55f2ccf);
-  the runs for 55f2ccf/a271439 are to read on `actions/runs?branch=main` (the API rate limit reset at 01:58 UTC) —
-  if red, fix forward on main and restart at 0 jobs.
+  the 3.11 in-memory compile; health 200; bundle index-MtAb8BvW.js; 383 jobs intact; smoke calls green). **CI GREEN on
+  a271439** (the deployed code; the A-096 replica had found only the known archive artifact + one PIL import in a
+  CI-less test, fixed 55f2ccf); the docs commits after it pending at the read. Tier 2 = the human's walk below.
 - **Shipped (DEC-305, A-181…A-189; plan `.claude/plans/ai-story/28-one-click-reliability-plan.md`; every stage's
   line in the action log 2026-10-05/06 "Plan 28 stage …"):** A1 feasibility refusal before spend · A2 the planner
   always fits (formats re-slotted; fit matrix) · A3 one clock + one remedy · A4/S1 four-choice new story + the
