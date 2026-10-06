@@ -1,13 +1,11 @@
 ## CURRENT STATE — plan 28 (the one-click episode: fits every time, ≤ $2 on the human's clips, strict consistency, no voices, Approve all, generated concepts, set-up prompts, simple screens) CODE + DOCS COMPLETE on main; CI replica running; NOT yet deployed (2026-10-06, local session)
 
-- **In-progress header:** phase = TEST (CI) → DEPLOY → close-out. Checkpoint commit = main (this commit; `FETCH_HEAD`
-  untracked). **Live is STILL e2c8b46** (plan 27): nothing of plan 28 is deployed; 0 running jobs. **CI on main: red
-  from c180060 (B1) to 65313e3 (B2) — annotation-free; the A-096 replica (app image 3.11, `python -S`, pytest alone,
-  archive of 229f041) is running detached as docker `plan28-replica`, output
-  `<scratchpad>/replica/out2.txt`; one F seen at 60 %.** Next action: read the replica's failures, fix forward on
-  main (never loosen), push, confirm CI green, then deploy at 0 jobs: compile with the image's 3.11, `sudo -n docker
-  compose rm -sfv backend && sudo -n docker compose up -d --build backend` (the bundle changed), health 200, then
-  tell the human the walk (below).
+- **In-progress header:** phase = DOCUMENT / close-out; the human's walk next. Checkpoint commit = main (this
+  commit; `FETCH_HEAD` untracked). **LIVE: a271439 deployed 2026-10-06 ~01:50 UTC** (rm -sfv + rebuild at 0 jobs after
+  the 3.11 in-memory compile; health 200; bundle index-MtAb8BvW.js; 383 jobs intact; smoke calls green). **CI:** the
+  A-096 replica on 229f041 found only the known archive artifact + one PIL import in a CI-less test (fixed 55f2ccf);
+  the runs for 55f2ccf/a271439 are to read on `actions/runs?branch=main` (the API rate limit reset at 01:58 UTC) —
+  if red, fix forward on main and restart at 0 jobs.
 - **Shipped (DEC-305, A-181…A-189; plan `.claude/plans/ai-story/28-one-click-reliability-plan.md`; every stage's
   line in the action log 2026-10-05/06 "Plan 28 stage …"):** A1 feasibility refusal before spend · A2 the planner
   always fits (formats re-slotted; fit matrix) · A3 one clock + one remedy · A4/S1 four-choice new story + the
