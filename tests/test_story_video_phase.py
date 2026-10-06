@@ -59,11 +59,11 @@ BOTH_VIDEO = {"VIDEO_CHAIN": f"{SEEDANCE},{KLING}", **tas.FAL}
 # shots carry the optional `video_action` (the resolved, name-free action for the
 # clip prompt). With that key removed from every shot the board still hashes to
 # the old value 859441d7…4cf4, so the run itself is unchanged.
-TIER1_BOARD_SHA = "58347ea3be2fa6f3bb5bacd182e8fffe5d3aed5ccf00606403a2bdcde2bddf25"
+TIER1_BOARD_SHA = "cb5c252f6b27a44ad9c6985983efef0aa4c59b53903a9fa1366acedb894ebe20"  # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
 TIER1_ASSETS_SHA = "1dcdc000b37ba3851e3c22448b880c8566d1d60f2d895d69cd554c49ae272d9e"
 TIER1_EPISODE_LEDGER_SHA = "cba8b99eb6a38426ec2a4395e0fb970e6aaa7e5affd4a70fdec1c69c0aeb4459"
 TIER1_STORY_LEDGER_SHA = "1ae2004a3c1e537b128d95cfb3b17a91e8a2669123f4710fcc9d87b2aa7164ec"
-TIER1_SUMMARY_SHA = "8b52b4407afedca93e1799160ebfcff9cd76d43a110dc43057ca997d0e80a33f"
+TIER1_SUMMARY_SHA = "eb43581b350fc85799781327544e37ab26a77cf90a203f84d02add5e8af0d327"  # re-pinned 2026-10-06, plan 32 stage 3: the Pixar-style cartoon look of fruit_drama (DEC-315)
 _VOLATILE = {"ts", "created_at", "updated_at", "generated_at", "approved_at", "since", "requested_at", "at"}
 
 
