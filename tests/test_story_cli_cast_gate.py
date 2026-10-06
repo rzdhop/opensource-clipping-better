@@ -87,7 +87,7 @@ def test_v2_cast_over_the_daily_cap_with_its_edits_is_refused_before_any_portrai
     day.add(3.70)
     # Every reply the cast would need is queued: only the gate keeps them unasked.
     runner = s.llm(K1=[sc.K1_KIWI, sc.K1_MANGO, sc.K1_FIG], D1=[_d1("Né sur la plage.")] * 3,
-                   D2=[_d2(175), _d2(160), _d2(150)])
+                   D2=[_d2(175), _d2(160, "mango"), _d2(150, "pear")])  # DEC-305 F3: one species each
 
     code = s.run("step", story_id, "cast", *sc.CAST_ARGS)
 

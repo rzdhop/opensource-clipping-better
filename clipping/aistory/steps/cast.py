@@ -84,7 +84,8 @@ import time
 from .. import context, media_policy, prompting, prompts, refimages, schemas, series_memory, universes, voices
 from .. import store as store_mod
 from .. import uploads as uploads_mod
-from . import entities, episode_common, llm_call, pacing, voice_lines
+from . import entities, episode_common, llm_call, pacing, sheet_gate, voice_lines
+from . import judge as judge_step
 from .entities import CHARACTERS
 from .llm_call import StepFailed
 
@@ -572,10 +573,17 @@ def write_look(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
                                             regenerate=regen, species=world is not None)
     names = [doc["name"] for doc in cast]
 
+    # Plan 28 F3 (DEC-305 section 5): two characters of a species world never share a species, unless its
+    # universe allows it (judge.species_clash) -- told to D2 as a validation error, so it picks another.
+    looked = [doc for doc in cast if doc["char_id"] != char_id and doc.get("look")]
+
     def validate(reply):
         errors = schemas.d2_errors(reply, names, species_world=world is not None) or universes.brand_gate(story, reply)
         if errors:
             return errors
+        clash = judge_step.species_clash(story, character, reply.get("species"), looked, lock=lock)
+        if clash:
+            return [f"$.species: {clash}"]
         trial = copy.deepcopy(character)
         apply_d2(trial, reply)
         return schemas.character_errors(trial)
@@ -609,6 +617,8 @@ class _Run:
         # (:func:`pacing.rate_limited_by`), popped once the part is made.
         self.image_failures = {}
         self.sample_failures = {}
+        # Plan 28 F3: the sentences of the images the sheet judge still fails.
+        self.sheet_issues = []
 
     def fail(self, character, part, reason, target):
         self.failures.append((character["name"], part, reason, target))
@@ -691,7 +701,18 @@ def _image(run, ctx, store, char_id, which, tools):
     run.image_failures.pop((char_id, which), None)
     run.made(character, which, ref)
     entities.clear_approval(store, ctx.story_id, CHARACTERS, char_id, now=ref["created_at"])
+    # Plan 28 F3: judged right away -- a portrait is fixed before the sheets are drawn from it.
+    _review(run, ctx, store, char_id, tools, slots=(which,))
     return ref
+
+
+def _review(run, ctx, store, char_id, tools, slots=None) -> None:
+    """Plan 28 F3: the sheet judge on the character's images not judged yet
+    (``sheet_gate.review``); the sentences of the ones still failing are
+    kept for the step's result, each once."""
+    for sentence in sheet_gate.review(ctx, store, CHARACTERS, char_id, tools=tools, slots=slots):
+        if sentence not in run.sheet_issues:
+            run.sheet_issues.append(sentence)
 
 
 def _images(run, ctx, store, char_id, tools) -> None:
@@ -936,6 +957,7 @@ def _retry_image(run, ctx, store, tools, char_id, which) -> str:
     run.image_failures.pop((char_id, which), None)
     run.made(character, which, ref)
     entities.clear_approval(store, ctx.story_id, CHARACTERS, char_id, now=ref["created_at"])
+    _review(run, ctx, store, char_id, tools, slots=(which,))  # plan 28 F3
     return _DONE
 
 
@@ -1065,6 +1087,9 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
                     _dossier(run_, ctx, store, character["char_id"], tools, announced)
                 if not v2 or _look(run_, ctx, store, character["char_id"], tools, announced):
                     _images(run_, ctx, store, character["char_id"], tools)
+            if v2:
+                # Plan 28 F3: an image made by an earlier run and not judged yet is judged now.
+                _review(run_, ctx, store, character["char_id"], tools)
         except KeyError:
             if entities.exists(store, ctx.story_id, CHARACTERS, character["char_id"]):
                 raise
@@ -1093,7 +1118,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
                         else f" Waiting for an editor or prompt-only consistency: {names}.")
         raise StepFailed(message)
 
-    return {
+    summary = {
         "created": created,
         "written": run_.written,
         "images": run_.images,
@@ -1102,3 +1127,6 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
         "pick_voice": run_.pick_voice,
         "samples": run_.samples,
     }
+    if run_.sheet_issues:
+        summary["sheet_issues"] = run_.sheet_issues  # plan 28 F3: the images the sheet judge still fails
+    return summary

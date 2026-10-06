@@ -298,6 +298,9 @@ def test_max_tokens():
         # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2), its English worst case,
         # under the plan's 160 (same file).
         "J2": 190,  # plan 28 F2, re-pinned on purpose: the framing and sheet issues counted
+        # Plan 28 F3 (DEC-305 section 5): re-pinned on purpose -- the sheet judge (J3), a new id, its English
+        # worst case (3 issues of 16 words; tests/test_story_sheet_gate.py).
+        "J3": 110,
         # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes, a new id (the S1
         # row is unchanged), measured on its French worst case (tests/test_story_season_archetypes.py).
         "S1v2": 1150,
@@ -354,6 +357,8 @@ def test_schema_names():
         "J1": "first_watch_check",
         # Phase 7 stage 6b (DEC-230): re-pinned on purpose -- the keyframe judge (J2).
         "J2": "keyframe_check",
+        # Plan 28 F3 (DEC-305 section 5): re-pinned on purpose -- the sheet judge (J3), a new id.
+        "J3": "sheet_check",
         # Plan 20 stage 2: re-pinned on purpose -- a v2 story's S1 with the plot archetypes, a new id.
         "S1v2": "season_arc_skeleton_v2",
         # Plan 22 stage 2 (DEC-274): re-pinned on purpose -- C1v2/B1v3 answer their v1 schemas but keep their own

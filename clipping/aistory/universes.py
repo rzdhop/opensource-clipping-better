@@ -103,6 +103,13 @@ def taken_species(characters, *, sketches=()) -> list:
     return taken
 
 
+def shares_species(world) -> bool:
+    """Whether two characters of species world *world* may share a species
+    (plan 28 F3): only a universe that says so (``shared_species: true``);
+    none does today, so every cast is distinct."""
+    return bool((world or {}).get("shared_species"))
+
+
 def cast_species_block(world, *, taken=(), own=None) -> str:
     """The data block the cast writers (K1, D2) are given in a species world
     (plan 26 stage 7b, ``media_policy.species_world``): the universe, its pool,

@@ -15,6 +15,7 @@ import { Badge, Chip, useConfirm } from '../../../ui'
 import VoiceReferenceSlot from './VoiceReferenceSlot'
 import PromptDrawer, { entityBrief, entryKey, useImageBrief } from './PromptDrawer'
 import { Mic } from '../../../ui/icons'
+import { SheetCheckBadge, SheetCheckLine } from '../SheetCheck'
 
 // The character roles a custom entry may pick (spec 2.3): the closed list
 // clipping.aistory.schemas.CHARACTER_ROLES also uses.
@@ -238,6 +239,7 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange, consist
         <span className="story-cast-image-label">{SLOT_LABELS[slot]}</span>
         <ConsistencyChip consistency={ref && ref.consistency} />
       </div>
+      <SheetCheckLine entity={character} slot={slot} />
       <RegenerateControl
         storyId={storyId}
         disabled={disabled}
@@ -1168,6 +1170,7 @@ function characterTile(character, info, pickVoiceIds, withoutVoices) {
         {character.approved_at
           ? <Badge tone="success" dot>Approved</Badge>
           : <Badge tone="warning" dot>To approve</Badge>}
+        <SheetCheckBadge entity={character} slots={IMAGE_SLOTS} />
         {withoutVoices ? null : voice
           ? <Chip icon={Mic} title={`${voice.provider}/${voice.voice_id}`}>{voice.voice_id}</Chip>
           : <Chip icon={Mic} tone={pickVoiceIds.includes(character.char_id) ? 'warning' : 'neutral'}>No voice</Chip>}

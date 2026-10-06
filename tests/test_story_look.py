@@ -339,12 +339,15 @@ def _k1(descriptor, items):
     }
 
 
-def _d2(height):
-    return {"build": "lean human body", "silhouette": "narrow and upright", "face": "fuzzy round kiwi head",
+def _d2(height, species="kiwi"):
+    # Plan 28 F3 (DEC-305 section 5): two characters of a species world never share a species, so a second
+    # character's D2 names its own (*species*); the kiwi reply is byte for byte what it was.
+    face = "fuzzy round kiwi head" if species == "kiwi" else f"round {species} head"
+    return {"build": "lean human body", "silhouette": "narrow and upright", "face": face,
             "hair": "short brown fuzz", "skin_material": "fuzzy brown kiwi skin", "height_cm": height,
             "palette": ["brown", "green"],
             "wardrobe_sets": [{"id": "daily", "context": "every day", "items": "white linen shirt, gold chain"}],
-            "season_change": "", "species": "kiwi"}  # fruit_drama is a species world: D2 names the head (plan 26 stage 7b)
+            "season_change": "", "species": species}  # fruit_drama is a species world: D2 names the head (plan 26 stage 7b)
 
 
 def _story(store, *, v2):
@@ -412,7 +415,7 @@ def test_v2_cast_runs_k1_d1_d2_then_the_sheets_and_a_legacy_story_makes_no_d1_or
     llm = FakeLLM(events, K1=[_k1("a fuzzy kiwi", ["gold chain", "linen shirt"]),
                               _k1("a sly mango", ["red dress", "crown clip"])],
                   D1=[_d1("Né sur la plage.", with_="Mangella"), _d1("Reine du parloir.", with_="Kiwilo")],
-                  D2=[_d2(175), _d2(160)])
+                  D2=[_d2(175), _d2(160, "mango")])  # DEC-305 F3: one species each
     image = FakeImage(events)
     _run_cast(store, v2_id, llm, events, image)
     assert events == ["K1", "D1", "D2", "image:portrait", "image:turnaround", "image:expressions",

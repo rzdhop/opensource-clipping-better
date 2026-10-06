@@ -761,6 +761,20 @@ def _make(stories, story, plan, *, entity, eid, lock, env, on_log, cancel, adapt
     return ref, label, est, bool(result.paid)
 
 
+def _mark_unjudged(stories, story, kind, eid, slot, ref, current) -> None:
+    """Plan 28 F3 (DEC-305 section 5): an image made for a v2 story's
+    entity is not judged yet -- its ``sheet_checks[slot]`` says so, with the
+    sha256 of the file just stored, so it is never approved before the sheet
+    judge passed it (``steps/judge.sheet_refusal``). *current* is the
+    document about to be written (in place). A legacy story is never judged."""
+    if not media_policy.is_v2(story):
+        return
+    from .steps import judge
+
+    path = _existing(stories, story["story_id"], kind, eid, ref)
+    current.setdefault(judge.SHEET_CHECKS, {})[slot] = judge.unjudged_entry(judge.file_sha(path) if path else None)
+
+
 def _done(on_log, plan, ref, label, est, paid) -> dict:
     on_log(f"🖼 {plan.subject} via {label} (${est:.3f}{' paid' if paid else ''}), "
            f"consistency: {ref['consistency'].replace('_', '-')}")
@@ -879,6 +893,7 @@ def character_image(stories, story_id, char_id, which, *, env, on_log, cancel, n
     with uploads_mod._ENTRIES_LOCK:
         current = stories.read_entity(story_id, CHARACTERS, char_id)
         current["refs"][which] = ref
+        _mark_unjudged(stories, story, CHARACTERS, char_id, which, ref, current)
         if which == "portrait":
             current["ref_seed"] = ref["seed"]
             if current["descriptor"] and current["signature_items"]:
@@ -1102,6 +1117,7 @@ def place_image(stories, story_id, place_id, variant, *, env, on_log, cancel, no
 
     current = stories.read_entity(story_id, PLACES, place_id)
     current["time_variants"][variant] = ref
+    _mark_unjudged(stories, story, PLACES, place_id, variant, ref, current)
     if variant == MASTER_PLATE and current["descriptor"] and current["layout_notes"]:
         current["prompt_block"] = prompting.place_prompt_block(
             lock, descriptor=current["descriptor"], layout_notes=current["layout_notes"])
@@ -1169,6 +1185,7 @@ def prop_image(stories, story_id, prop_id, *, env, on_log, cancel, note=None, se
 
     current = stories.read_entity(story_id, PROPS, prop_id)
     current["image"] = ref
+    _mark_unjudged(stories, story, PROPS, prop_id, "image", ref, current)
     if current["descriptor"]:
         current["prompt_block"] = prompting.prop_prompt_block(lock, descriptor=current["descriptor"])
     stories.write_entity(story_id, PROPS, current, now=ref["created_at"])

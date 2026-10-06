@@ -71,7 +71,7 @@ import time
 
 from .. import media_policy, prompts, refimages, schemas, voice_reference, voices
 from .. import store as store_mod
-from . import bible, concepts, entities, llm_call
+from . import bible, concepts, entities, llm_call, sheet_gate
 from .entities import CHARACTERS, PLACES, PROPS
 from .llm_call import StepFailed
 
@@ -360,7 +360,7 @@ def _regenerate_image(ctx, store, target, kind, eid, slot, note, tools) -> dict:
     summary = {"target": target, "images": images, "needs_editor": []}
     ctx.on_log(f"🔁 Regenerated {target} (seed {ref['seed']}){_noted(note)}")
     if kind != CHARACTERS or slot != "portrait":
-        return summary
+        return _judged(ctx, store, kind, eid, summary, tools)
 
     # The sheets that were drawn from the old portrait are drawn again.
     character = store.read_entity(ctx.story_id, CHARACTERS, eid)
@@ -390,6 +390,16 @@ def _regenerate_image(ctx, store, target, kind, eid, slot, note, tools) -> dict:
         targets = [entities.target(CHARACTERS, eid, "image", sheet) for sheet, _ in failed]
         raise StepFailed(f"The portrait of {character['name']} was made again, but {parts}. Regenerate "
                          f"{entities.quoted_list(targets)} to finish it.")
+    return _judged(ctx, store, kind, eid, summary, tools)
+
+
+def _judged(ctx, store, kind, eid, summary, tools) -> dict:
+    """Plan 28 F3: the images just made are judged (``sheet_gate.review``),
+    a failed one drawn again within the story's redraw budget; the
+    sentences of those still failing join the summary."""
+    failing = sheet_gate.review(ctx, store, kind, eid, tools=tools)
+    if failing:
+        summary["sheet_issues"] = failing
     return summary
 
 

@@ -1921,6 +1921,42 @@ def variant_errors(variant, path="$.variant") -> list:
     return errors
 
 
+# Plan 28 F3 (DEC-305 section 5): the sheet judge's verdict on each of an
+# entity's images, by slot (a character's portrait/turnaround/expressions, a
+# place's time variant, a prop's "image"): the J3 version, passed (null until
+# judged), what it saw, when, and the sha256 of the very file judged;
+# ``redraws``/``redraw_usd`` once the cast or places step redrew it, ``link``
+# the vision link that judged it.
+SHEET_CHECK_ISSUES_MAX = 3
+SHEET_CHECK_REDRAWS_MAX = 2
+_SHEET_CHECK_SCHEMA = _document({
+    "version": {"type": "integer", "minimum": 1},
+    "passed": {"type": ["boolean", "null"]},
+    "issues": {"type": "array", "items": _NON_EMPTY_STRING, "maxItems": SHEET_CHECK_ISSUES_MAX},
+    "judged_at": _TIMESTAMP_OR_NULL,
+    "image_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+}, optional={
+    "redraws": {"type": "integer", "minimum": 0, "maximum": SHEET_CHECK_REDRAWS_MAX},
+    "redraw_usd": {"type": "number", "minimum": 0},
+    "link": _NON_EMPTY_STRING,
+})
+_SHEET_CHECK_SLOT = r"^[a-z][a-z0-9_]{0,19}$"
+
+
+def sheet_checks_errors(checks, path="$.sheet_checks") -> list:
+    """Each entry of an entity's ``sheet_checks`` (plan 28 F3): keyed by a
+    slot name, :data:`_SHEET_CHECK_SCHEMA`'s shape."""
+    errors = validate(checks, {"type": "object"}, path)
+    if errors:
+        return errors
+    for key, entry in checks.items():
+        if not (isinstance(key, str) and _search(_SHEET_CHECK_SLOT, key)):
+            errors.append(f"{path}: {key!r} is not an image slot")
+            continue
+        errors.extend(validate(entry, _SHEET_CHECK_SCHEMA, f"{path}.{key}"))
+    return errors
+
+
 CHARACTER_SCHEMA = _document({
     "$schema": {"type": "string", "const": CHARACTER_SCHEMA_NAME},
     "char_id": {"type": "string", "pattern": CHAR_ID_PATTERN},
@@ -1971,6 +2007,8 @@ CHARACTER_SCHEMA = _document({
     "variants": {"type": "array", "items": _VARIANT_SCHEMA, "maxItems": VARIANTS_MAX},
     # Plan 23 stage B4: the character's own voice recording, cloned locally.
     "voice_reference": VOICE_REFERENCE_SCHEMA,
+    # Plan 28 F3: the sheet judge's verdict on each image (sheet_checks_errors).
+    "sheet_checks": {"type": "object"},
 })
 
 
@@ -2018,6 +2056,8 @@ def character_errors(doc) -> list:
         errors.extend(character_look_errors(doc["look"]))
     if "dossier" in doc:
         errors.extend(character_dossier_errors(doc["dossier"], doc["char_id"]))
+    if "sheet_checks" in doc:
+        errors.extend(sheet_checks_errors(doc["sheet_checks"]))
     seen = set()
     for i, variant in enumerate(doc.get("variants") or ()):
         errors.extend(variant_errors(variant, f"$.variants[{i}]"))
@@ -2052,6 +2092,8 @@ PLACE_SCHEMA = _document({
     "look": PLACE_LOOK_SCHEMA,
     # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
     "approved_by": _AGENT_APPROVED_SCHEMA,
+    # Plan 28 F3: the sheet judge's verdict on each plate (sheet_checks_errors).
+    "sheet_checks": {"type": "object"},
 })
 
 
@@ -2088,6 +2130,8 @@ def place_errors(doc) -> list:
         _slot_errors(errors, path, ref, stem=f"variant_{key}", allowed=allowed)
     if "look" in doc:
         errors.extend(place_look_errors(doc["look"]))
+    if "sheet_checks" in doc:
+        errors.extend(sheet_checks_errors(doc["sheet_checks"]))
     return errors
 
 
@@ -2113,6 +2157,8 @@ PROP_SCHEMA = _document({
     "look": PROP_LOOK_SCHEMA,
     # Plan 21 stage 1: approved by the agent run (see AGENT_APPROVED).
     "approved_by": _AGENT_APPROVED_SCHEMA,
+    # Plan 28 F3: the sheet judge's verdict on its picture (sheet_checks_errors).
+    "sheet_checks": {"type": "object"},
 })
 
 
@@ -2131,6 +2177,8 @@ def prop_errors(doc) -> list:
     _slot_errors(errors, "$.image", doc["image"], stem="image", allowed=_BASE_ONLY)
     if "look" in doc:
         errors.extend(prop_look_errors(doc["look"]))
+    if "sheet_checks" in doc:
+        errors.extend(sheet_checks_errors(doc["sheet_checks"]))
     return errors
 
 

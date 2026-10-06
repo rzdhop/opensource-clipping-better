@@ -185,6 +185,10 @@ MAX_TOKENS = {
     "E1v2": 1750, "E2v2": 600, "E3v2": 720,
     "L1": 690,
     "J1": 970, "J2": 190,
+    # Plan 28 F3 (DEC-305 section 5): the sheet judge's largest reply (English:
+    # 3 issues of 16 words, 6-character words, the passed flag): 94 tokens
+    # (chars/4); + 15 %, rounded up to ten (tests/test_story_sheet_gate.py).
+    "J3": 110,
     "S1v2": 1150,
     # Plan 22 stage 2 (DEC-274): C1v2 answers the same C1 schema (= C1's own
     # cap); C1J is a short verdict (kept/missing); B1v3 answers the same
@@ -243,6 +247,7 @@ TEMPERATURE = {
     "L1": ANALYTIC_TEMPERATURE,
     "J1": ANALYTIC_TEMPERATURE,
     "J2": ANALYTIC_TEMPERATURE,
+    "J3": ANALYTIC_TEMPERATURE,
     "S1v2": WRITING_TEMPERATURE,
     "C1v2": C1V2_TEMPERATURE,
     "C1J": ANALYTIC_TEMPERATURE,
@@ -263,7 +268,7 @@ SCHEMA_NAMES = {
     "D4": "knowledge_world", "D5": "knowledge_timeline", "D6": "knowledge_props",
     "E1v2": "episode_beat_sheet_v2", "E2v2": "episode_scene_dialogue_v2", "E3v2": "episode_framing_scenes_v2",
     "L1": "continuity_ledger",
-    "J1": "first_watch_check", "J2": "keyframe_check",
+    "J1": "first_watch_check", "J2": "keyframe_check", "J3": "sheet_check",
     "S1v2": "season_arc_skeleton_v2",
     # Distinct from "C1"/"B1"'s own schema names even though the shape is
     # identical -- the same convention every other versioned prompt follows
@@ -3886,6 +3891,90 @@ def validate_j2(reply, *, has_previous=True) -> list:
         errors.append(f"$.sheet_issues: {len(sheet_issues)} item(s), expected at most {J2_SHEET_ISSUES_MAX}")
     for i, item in enumerate(sheet_issues):
         _text_errors(errors, f"$.sheet_issues[{i}]", item, max_words=J2_SHEET_ISSUE_MAX_WORDS)
+    return errors
+
+
+# ------------------------------------------------------------------------- J3
+#
+# Plan 28 F3 (DEC-305 section 5, the human: "strict rules to avoid
+# consistency problems, and all details"): the sheet judge -- one vision call
+# per reference image a v2 story's cast and places steps make (a character's
+# portrait or two-view sheet, its turnaround, its expressions sheet; a
+# place's plate; a prop's picture), on VISION_CHAIN (free Gemini first), the
+# J2 pattern: the image and one text, no system turn and no schema slot
+# (:func:`j3_prompt_text`). The text says what the image must show
+# (``steps/judge.sheet_brief``) and the checks of its kind: one head a
+# figure, the head the species named (never a human head, never a mask), the
+# outfit and the signature items, the forbidden colours, the two views of a
+# two-view sheet, the plate's layout, the prop's look. English, like J2.
+
+# J3's own version, stamped on each stored verdict (``sheet_checks[slot]
+# .version``): a verdict of another version is asked again when its sheet is
+# next judged.
+J3_PROMPT_VERSION = 1
+J3_ISSUES_MAX = 3
+J3_ISSUE_MAX_WORDS = 16
+
+_J3_SYSTEM = (
+    "You check one reference image of a story's character, set or object against what it must show. You only "
+    "look and report; you never describe a real person or name anyone outside the text you are given. Reply "
+    "with JSON only, matching the schema, in English."
+)
+_J3_ASK = (
+    "Give:\n"
+    "- passed: true when every check above holds\n"
+    f"- issues: each check that does not hold, at most {J3_ISSUES_MAX} items of at most {J3_ISSUE_MAX_WORDS} "
+    "words, in plain words a non-technical reader understands (\"the head is a human head, Gaston is a "
+    "pineapple\"); [] when passed"
+)
+
+
+def j3_schema() -> dict:
+    """The J3 output schema: ``{passed, issues}``."""
+    return _llm_obj({
+        "passed": {"type": "boolean"},
+        "issues": {"type": "array", "description": f"at most {J3_ISSUES_MAX} items",
+                   "items": {"type": "string", "description": f"at most {J3_ISSUE_MAX_WORDS} words"}},
+    }, required=("passed", "issues"))
+
+
+def build_j3(*, what, brief, checks):
+    """The sheet judge of one image: *what* says what image 1 is ("Gaston's
+    portrait"), *brief* what it must show (``steps/judge.sheet_brief``),
+    *checks* the lines to check, each said as it must hold. Takes no pack,
+    as :func:`build_j2`."""
+    user = f"Image 1 is {what}.\n\nWhat it must show:\n{brief}\n\nCheck:\n"
+    user += "\n".join(f"- {line}" for line in checks) + "\n\n" + _J3_ASK
+    return _J3_SYSTEM, user, j3_schema()
+
+
+def j3_prompt_text(*, what, brief, checks) -> str:
+    """J3 as the one text a vision adapter sends beside the image
+    (:func:`j2_prompt_text`'s shape)."""
+    import json  # stdlib; imported here: this module's top level imports only ``re`` (its guard test)
+
+    system, user, schema = build_j3(what=what, brief=brief, checks=checks)
+    shape = json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+    return f"{system}\n\n{user}\n\nThe reply's JSON schema: {shape}"
+
+
+def validate_j3(reply) -> list:
+    """Post-validation for a J3 reply: at most :data:`J3_ISSUES_MAX` issues
+    within their word cap, and *passed* exactly when there is none (a failed
+    check names what it saw; a passed one names nothing)."""
+    errors = schemas.validate(reply, j3_schema())
+    if errors:
+        return errors
+    errors = []
+    issues = reply["issues"]
+    if len(issues) > J3_ISSUES_MAX:
+        errors.append(f"$.issues: {len(issues)} item(s), expected at most {J3_ISSUES_MAX}")
+    for i, item in enumerate(issues):
+        _text_errors(errors, f"$.issues[{i}]", item, max_words=J3_ISSUE_MAX_WORDS)
+    if reply["passed"] and issues:
+        errors.append("$.passed: true while issues are named; passed is true only when nothing is wrong")
+    if not reply["passed"] and not issues:
+        errors.append("$.issues: passed is false, so name what does not hold")
     return errors
 
 

@@ -45,7 +45,7 @@ import time
 
 from .. import context, media_policy, prompting, prompts, refimages, schemas, universes
 from .. import store as store_mod
-from . import entities, llm_call
+from . import entities, llm_call, sheet_gate
 from .entities import CHARACTERS, PLACES, PROPS
 from .llm_call import StepFailed
 
@@ -530,11 +530,15 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
             _image(run_, ctx, store, prop, PROPS, rid, "image",
                    lambda: refimages.prop_image(store, ctx.story_id, rid, **kwargs))
 
+    sheet_issues = []
     for kind, fill in ((PLACES, fill_place), (PROPS, fill_prop)):
         id_field = store_mod.ENTITY_KINDS[kind].id_field
         for doc in store.list_entities(ctx.story_id, kind):
             try:
                 fill(doc, doc[id_field])
+                if v2:
+                    # Plan 28 F3: each image not judged yet is judged (and drawn again when it fails).
+                    sheet_issues.extend(sheet_gate.review(ctx, store, kind, doc[id_field], tools=tools))
             except KeyError:
                 if entities.exists(store, ctx.story_id, kind, doc[id_field]):
                     raise
@@ -545,4 +549,7 @@ def run(ctx, *, runner=None, time_fn=time.monotonic, sleep_fn=time.sleep, adapte
         targets = list(dict.fromkeys(target for *_, target in run_.failures))
         raise StepFailed(f"Places incomplete: {parts}. Run the places step again to fill what is missing, "
                          f"or regenerate {entities.quoted_list(targets)}.")
-    return {"created": created, "written": run_.written, "images": run_.images}
+    summary = {"created": created, "written": run_.written, "images": run_.images}
+    if sheet_issues:
+        summary["sheet_issues"] = sheet_issues  # plan 28 F3: the images the sheet judge still fails
+    return summary

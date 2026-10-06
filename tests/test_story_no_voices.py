@@ -113,7 +113,7 @@ def test_the_cast_of_a_no_voice_story_pins_nothing_books_no_speech_and_is_comple
     llm = look.FakeLLM(events, K1=[look._k1("a fuzzy kiwi", ["gold chain", "linen shirt"]),
                                    look._k1("a sly mango", ["red dress", "crown clip"])],
                        D1=[look._d1("Né sur la plage."), look._d1("Reine du parloir.")],
-                       D2=[look._d2(175), look._d2(160)])
+                       D2=[look._d2(175), look._d2(160, "mango")])  # DEC-305 F3: one species each
     # The sheets are the human's uploads, so the run stops on them -- and on nothing else: no voice, no sample.
     with pytest.raises(look.steps.StepFailed) as stopped:
         _run_cast(store, story_id, llm)

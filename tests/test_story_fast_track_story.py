@@ -36,6 +36,7 @@ import test_story_cast_steps as tcs
 import test_story_episode_steps as eps
 import test_story_fast_track as tft
 import test_story_metadata_step as tms
+import test_story_sheet_gate as tsg
 import test_story_steps as tss
 from clipping.aistory import defaults, prompts, schemas, steps
 from clipping.cancel import CancelToken
@@ -456,6 +457,9 @@ def test_a_v2_story_s_knowledge_base_is_written_approved_and_its_new_prop_drawn(
     inner = eps.FakeLLM(D4=[D4], D6=[D6_KEY], R1=[R1_KEY], default={"D5": d5_reply, "R1v2": r1v2_reply})
     fal = tas.FakeImage(price=0.04)
     fakes = tft.Fakes(tmp_path, runner=Failing(inner, "E1v2"), image=tas.NeverImage(), fal=fal, local=_local())
+    # Plan 28 F3 (DEC-305 section 5), re-pinned on purpose: every image the places step makes is judged
+    # (one free vision call) before its entity is approved -- here they pass.
+    fakes.adapters[("vision", "gemini")] = tsg.SheetVision()
 
     estimate = wf.story_fast_track_estimate(store, store.get(story_id), env=QUALITY)
     message, log, seen = stopped(store, story_id, fakes, settings=QUALITY)

@@ -12,6 +12,7 @@ import ApproveAllGroup from '../ApproveAllGroup'
 import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import { entityBrief, useImageBrief } from './PromptDrawer'
+import { SheetCheckBadge, SheetCheckLine } from '../SheetCheck'
 
 // The place time-variant choices a user may add (spec 2.4): the closed list
 // clipping.aistory.schemas.TIME_VARIANT_CHOICES also uses. "day" is always
@@ -318,6 +319,7 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
         <span className="story-places-image-label">{variantKey}</span>
         <ConsistencyChip consistency={imageRef && imageRef.consistency} />
       </div>
+      <SheetCheckLine entity={place} slot={variantKey} />
       <RegenerateControl
         storyId={storyId}
         disabled={slotDisabled}
@@ -633,6 +635,7 @@ function PropImage({ storyId, prop, disabled, onChange }) {
       <div className="story-places-image-meta">
         <ConsistencyChip consistency={prop.image && prop.image.consistency} />
       </div>
+      <SheetCheckLine entity={prop} slot="image" />
       <RegenerateControl
         storyId={storyId}
         disabled={disabled}
@@ -888,6 +891,7 @@ function placeTile(place, missing) {
     meta: (
       <>
         {approvalBadge(place)}
+        <SheetCheckBadge entity={place} slots={Object.keys(place.time_variants)} />
         <Chip>{variantCount} variant{variantCount === 1 ? '' : 's'}</Chip>
       </>
     ),
@@ -905,6 +909,7 @@ function propTile(prop, ownerName) {
     meta: (
       <>
         {approvalBadge(prop)}
+        <SheetCheckBadge entity={prop} slots={['image']} />
         {ownerName && <Chip>{ownerName}</Chip>}
       </>
     ),

@@ -2291,18 +2291,25 @@ def approve_entity(stories, story_id, kind, eid, *, now, by=USER_APPROVED) -> di
     """Approve one character, place or prop; returns the story.
 
     ``not_found`` for an unknown one; ``conflict`` listing what it still
-    lacks (:func:`character_missing` & co.). Its ``approved_at`` becomes
+    lacks (:func:`character_missing` & co.), or -- plan 28 F3 -- naming each
+    image the sheet judge failed or has not judged yet
+    (``judge.sheet_refusal``). Its ``approved_at`` becomes
     *now* (the character re-read and written under the uploads' lock), and
     the store re-folds ``approvals.cast`` / ``approvals.places``. *by* (plan
     21): the human (default) or the agent run, recorded on the entity.
     """
     _check_approver(by)
-    load(stories, story_id)
+    story = load(stories, story_id)
     doc = read_entity(stories, story_id, kind, eid)
     missing = MISSING[kind](stories, story_id, doc)
     if missing:
         labels = ", ".join(MISSING_LABELS[item] for item in missing)
         raise WorkflowError(CONFLICT, f"{doc['name']} cannot be approved yet; missing: {labels}.")
+    # Plan 28 F3 (DEC-305 section 5): an image made from now on is approved only once the sheet judge passed
+    # it; the human's own image and one made before the rule never stop it (judge.sheet_refusal).
+    refusal = judge_step.sheet_refusal(stories, story, kind, doc)
+    if refusal:
+        raise WorkflowError(CONFLICT, f"{doc['name']} cannot be approved yet. {refusal}")
 
     def approve(current):
         current["approved_at"] = now

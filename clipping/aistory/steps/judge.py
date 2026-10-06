@@ -886,3 +886,326 @@ def check_keyframes(ctx, ec, items, verdicts, *, env, ledger, step, before_call,
     result = dict(kept)
     result.update({sid: verdicts[sid] for sid in summary["judged"]})
     return result, summary
+
+
+# ------------------------------------------------------------------ J3, the sheets
+
+# Plan 28 F3 (DEC-305 section 5, the human: "strict rules to avoid
+# consistency problems, and all details"): every reference image a v2
+# story's cast and places steps make -- a character's portrait (the two-view
+# sheet in a two-view story), turnaround and expressions sheet, a place's
+# plate (each time variant), a prop's picture -- is judged once, one vision
+# call on VISION_CHAIN (:func:`check_sheet`), and its verdict is kept on the
+# entity: ``sheet_checks[slot] = {version, passed, issues, judged_at,
+# image_hash}`` (``passed`` None until judged; ``redraws`` and
+# ``redraw_usd`` once the cast step redrew it). ``refimages`` writes the
+# unjudged entry with every image it makes (``mark_unjudged``), so an image
+# made from now on is never approved before its check passed
+# (:func:`sheet_refusal`, ``workflow.approve_entity``); an image made before
+# this rule has no entry and keeps its approval (it is judged when it is
+# made again). The human's own image (``source`` manual/upload) is judged
+# and warned about, never refused -- as F1 does for keyframes.
+J3 = "J3"
+SHEET_CHECKS = "sheet_checks"
+CHARACTERS, PLACES, PROPS = "characters", "places", "props"
+# What each sheet state is: no entry (made before the rule), the human's own,
+# not judged yet (or its image changed since), passed, failed.
+SHEET_NONE, SHEET_OWN, SHEET_UNJUDGED, SHEET_PASSED, SHEET_FAILED = "none", "own", "unjudged", "passed", "failed"
+_STEP_OF = {CHARACTERS: "cast", PLACES: "places", PROPS: "places"}
+
+
+def file_sha(path):
+    """sha256 of the file at *path*, or None when it cannot be read."""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 16), b""):
+                digest.update(block)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def unjudged_entry(image_hash) -> dict:
+    """The entry an image gets the moment it is made: not judged yet."""
+    return {"version": prompts.J3_PROMPT_VERSION, "passed": None, "issues": [], "judged_at": None,
+            "image_hash": image_hash}
+
+
+def sheet_slots(story, kind, doc) -> list:
+    """``[(slot, image ref)]`` of the entity's images that exist: a
+    character's sheets of the story's sheet mode, a place's time variants
+    (the day plate first), a prop's picture."""
+    from .. import refimages
+
+    if kind == CHARACTERS:
+        return [(slot, doc["refs"][slot]) for slot in refimages.character_images(story) if doc["refs"].get(slot)]
+    if kind == PLACES:
+        variants = doc.get("time_variants") or {}
+        order = sorted(variants, key=lambda name: (name != schemas.MASTER_PLATE_VARIANT, name))
+        return [(name, variants[name]) for name in order if variants[name]]
+    return [("image", doc["image"])] if doc.get("image") else []
+
+
+def sheet_word(story, kind, slot) -> str:
+    """The image in plain words: "portrait", "character sheet" (a two-view
+    story's portrait slot), "turnaround sheet", "expressions sheet", "night
+    plate", "picture"."""
+    if kind == CHARACTERS:
+        if slot == "portrait":
+            return "character sheet" if media_policy.two_view(story) else "portrait"
+        return {"turnaround": "turnaround sheet", "expressions": "expressions sheet"}.get(slot, slot)
+    if kind == PLACES:
+        return f"{slot.replace('_', ' ')} plate"
+    return "picture"
+
+
+def _entity_name(doc) -> str:
+    return doc.get("name") or doc.get("char_id") or doc.get("place_id") or doc.get("prop_id") or "it"
+
+
+def sheet_sentence(story, kind, doc, slot, issues) -> str:
+    """What a failed check says, plain: "Gaston's portrait does not match:
+    the head is a human head, Gaston is a pineapple. Regenerate it, or
+    upload your own." """
+    found = "; ".join(" ".join(str(item).split()).rstrip(".") for item in issues) or "it does not match its look"
+    return (f"{_entity_name(doc)}'s {sheet_word(story, kind, slot)} does not match: {found}. Regenerate it, or "
+            "upload your own.")
+
+
+def unjudged_sentence(story, kind, doc, slot) -> str:
+    return (f"{_entity_name(doc)}'s {sheet_word(story, kind, slot)} has no check yet: run the "
+            f"{_STEP_OF[kind]} step again (it checks it, free).")
+
+
+def sheet_state(stories, story, kind, doc, slot, ref) -> tuple:
+    """``(state, entry)`` of one image (the ``SHEET_*`` states): the human's
+    own image is ``own`` whatever its verdict; an app-made image with no
+    entry was made before the rule (``none``); an entry whose image is not
+    the file on disk any more, or not judged yet, is ``unjudged``."""
+    entry = (doc.get(SHEET_CHECKS) or {}).get(slot)
+    if (ref or {}).get("source") == gen.MANUAL_LINK:
+        return SHEET_OWN, entry
+    if entry is None:
+        return SHEET_NONE, None
+    if entry.get("passed") is None:
+        return SHEET_UNJUDGED, entry
+    try:
+        path = stories.media_path(story["story_id"], kind, doc_id(kind, doc), ref["name"])
+    except KeyError:
+        path = None
+    if path is None or file_sha(path) != entry.get("image_hash"):
+        return SHEET_UNJUDGED, entry
+    return (SHEET_PASSED if entry["passed"] else SHEET_FAILED), entry
+
+
+def own_verdict(stories, story, kind, doc, slot, ref):
+    """The verdict of the human's own image when it judged that very file,
+    else None (a warning only)."""
+    entry = (doc.get(SHEET_CHECKS) or {}).get(slot)
+    if not entry or entry.get("passed") is None:
+        return None
+    try:
+        path = stories.media_path(story["story_id"], kind, doc_id(kind, doc), ref["name"])
+    except KeyError:
+        return None
+    return entry if file_sha(path) == entry.get("image_hash") else None
+
+
+def doc_id(kind, doc) -> str:
+    return doc[{CHARACTERS: "char_id", PLACES: "place_id", PROPS: "prop_id"}[kind]]
+
+
+def sheet_refusal(stories, story, kind, doc):
+    """Why *doc* cannot be approved for its images (plan 28 F3), in plain
+    sentences, or None: each app-made image whose check failed
+    (:func:`sheet_sentence`) or has not run on that very image
+    (:func:`unjudged_sentence`). A legacy story, an image made before the
+    rule and the human's own image are never refused."""
+    if not media_policy.is_v2(story):
+        return None
+    sentences = []
+    for slot, ref in sheet_slots(story, kind, doc):
+        state, entry = sheet_state(stories, story, kind, doc, slot, ref)
+        if state == SHEET_FAILED:
+            sentences.append(sheet_sentence(story, kind, doc, slot, entry.get("issues") or []))
+        elif state == SHEET_UNJUDGED:
+            sentences.append(unjudged_sentence(story, kind, doc, slot))
+    return " ".join(sentences) or None
+
+
+def _forbidden(lock) -> list:
+    return [str(item).strip() for item in ((lock or {}).get("palette") or {}).get("forbidden") or ()
+            if str(item).strip()]
+
+
+def sheet_brief(story, kind, doc, slot, *, lock=None) -> str:
+    """What the image must show, for J3: a character's look (its head first,
+    its first wardrobe set -- the sheets are drawn in it -- and its signature
+    items; without a look its descriptor and items), a place's descriptor,
+    layout and light, a prop's look."""
+    if kind == CHARACTERS:
+        if media_policy.is_v2(story) and doc.get("look"):
+            text = shots.render_look(doc)
+        else:
+            text = _clipped(doc.get("descriptor"), 300)
+        lines = [f"- {_entity_name(doc)}: {text}"]
+        items = [" ".join(str(item).split()) for item in doc.get("signature_items") or ()]
+        if items and slot != "expressions":
+            lines.append(f"- Signature items: {', '.join(items)}")
+        return "\n".join(lines)
+    if kind == PLACES:
+        lines = [f"- {_entity_name(doc)}: {_clipped(doc.get('descriptor'), 300)}"]
+        if doc.get("layout_notes"):
+            lines.append(f"- Layout: {_clipped(doc['layout_notes'], 400)}")
+        lines.append(f"- Light: {slot.replace('_', ' ')}")
+        return "\n".join(lines)
+    text = shots.render_prop(doc, for_reference=True) if doc.get("look") else doc.get("descriptor")
+    return f"- {_entity_name(doc)}: {_clipped(text, 300)}"
+
+
+def sheet_check_lines(story, kind, doc, slot, *, lock=None) -> list:
+    """The checks J3 runs on one image, each said as it must hold: one head
+    a figure and no one else, the head the species named (never a human
+    head, never a mask) in a species world, the two views of a two-view
+    sheet, the outfit and the items, the plate's layout and light, the
+    prop's look, and the style's forbidden colours."""
+    name = _entity_name(doc)
+    checks = []
+    if kind == CHARACTERS:
+        if slot == "portrait" and media_policy.two_view(story):
+            checks.append(f"{name} appears exactly twice, side by side: the front on the left, the back on the "
+                          "right; no third view and no other character")
+        elif slot == "portrait":
+            checks.append(f"{name} appears once, full body, and no other character is in the image")
+        elif slot == "turnaround":
+            checks.append(f"every view is {name}, the same character each time, and no other character")
+        else:
+            checks.append(f"every face is {name}'s, the same character in each cell, and no other character")
+        checks.append("every figure has exactly one head")
+        species = shots.look_species(doc.get("look"))
+        world = media_policy.species_world(story, lock)
+        if species:
+            checks.append(f"the head is a whole {species} at human head scale, the face carved into it: never "
+                          "a human head, never a mask, a helmet or a costume")
+        elif world is not None:
+            checks.append(f"the head is one whole {world.get('head_kind') or 'fruit or vegetable'}: never a human "
+                          "head, never a mask, a helmet or a costume")
+        if slot != "expressions":
+            worn = shots.sheet_wardrobe(doc) if doc.get("look") else None
+            if worn is not None:
+                checks.append(f"{name} wears this outfit: {_clipped(worn['items'], 160)}")
+            if doc.get("signature_items"):
+                checks.append("the signature items above are all there")
+    elif kind == PLACES:
+        checks.append("the set matches the layout above: what is left, right and at the back")
+        checks.append(f"the light is {slot.replace('_', ' ')}")
+        checks.append("no person and no character is in it")
+    else:
+        checks.append("the image shows this one object, matching the description above")
+        checks.append("no person and no hand is in it")
+    forbidden = _forbidden(lock)
+    if forbidden:
+        checks.append(f"none of these colours is used: {', '.join(forbidden)}")
+    return checks
+
+
+def sheet_what(story, kind, doc, slot) -> str:
+    """Image 1 in J3's words: "Gaston's portrait", "the set Kitchen, its
+    night plate", "the object Old key"."""
+    if kind == CHARACTERS:
+        return f"{_entity_name(doc)}'s {sheet_word(story, kind, slot)}"
+    if kind == PLACES:
+        return f"the set {_entity_name(doc)}, its {sheet_word(story, kind, slot)} (an empty set)"
+    return f"the object {_entity_name(doc)}, its reference picture"
+
+
+def sheet_request(story, kind, doc, slot, path, *, lock=None):
+    """The J3 call of one image at *path*."""
+    text = prompts.j3_prompt_text(what=sheet_what(story, kind, doc, slot),
+                                  brief=sheet_brief(story, kind, doc, slot, lock=lock),
+                                  checks=sheet_check_lines(story, kind, doc, slot, lock=lock))
+    return gen.GenRequest(kind=gen.VISION, prompt=text, images=(path,),
+                          extra={"max_tokens": prompts.MAX_TOKENS[J3], "temperature": prompts.TEMPERATURE[J3]})
+
+
+def _sheet_reply(result):
+    """``(found, errors)`` from one J3 answer."""
+    text = (result.meta or {}).get("text") or ""
+    try:
+        value = jsonx.extract_json(text)
+    except ValueError as exc:
+        return None, [str(exc)]
+    errors = prompts.validate_j3(value)
+    if errors:
+        return None, errors
+    return {"passed": bool(value["passed"]), "issues": [" ".join(item.split()) for item in value["issues"]]}, []
+
+
+def check_sheet(story, doc, slot, *, kind=CHARACTERS, path, env, ledger, on_log, cancel=None, adapters=None,
+                transport=None, lock=None):
+    """J3 on one image of an entity (plan 28 F3): one vision call on
+    VISION_CHAIN, free first (the J2 pattern: every gate of the generation
+    runner, each answered call booked on *ledger* as
+    ``sheet_check:<kind>:<id>:<slot>``, a reply that fails validation asked
+    for once more). Returns ``{passed, issues, link}``, or None when no
+    vision link could judge it (said in the feed): the image then stays
+    unjudged, and is never approved on that."""
+    if adapters is None:
+        adapters_mod.load_all()
+    merged = gating.merged_env(env)
+    subject = f"{_entity_name(doc)}'s {sheet_word(story, kind, slot)}"
+    try:
+        chain = gen.chain_from_env(gen.VISION, merged)
+        budget_obj = gating.budget_of(merged)
+    except (ChainError, ValueError) as exc:
+        on_log(f"👁 Sheet check of {subject} skipped: {gen.ENV_NAMES[gen.VISION]} cannot be used: {exc}")
+        return None
+    check = gating.budget_check(budget_obj, story_spent=lambda: ledger.totals()["est_usd"])
+    request = sheet_request(story, kind, doc, slot, path, lock=lock)
+    step = f"sheet_check:{kind}:{doc_id(kind, doc)}:{slot}"
+    limiter = gating.FreeTierLimiter()
+    for attempt in (1, 2):
+        try:
+            result, answered = gen.run_generation_chain(
+                gen.VISION, chain, request, env=merged, allow_paid=budget_obj.allow_paid,
+                route=story["generation_profile"]["route"], on_log=on_log, budget_check=check, limiter=limiter,
+                adapters=adapters, transport=transport, cancel=cancel)
+        except gen.NoRunnableLink as exc:
+            reasons = "; ".join(f"{label}: {reason}" for label, reason in exc.failures) or str(exc)
+            on_log(f"👁 Sheet check of {subject} skipped: no vision link could judge it ({reasons})")
+            return None
+        paid = bool(result.paid)
+        est = float(result.est_cost) if paid else 0.0
+        unit, qty = _vision_units(answered, request, adapters)
+        ledger.append(step=step, provider=answered.provider, model=gating.api_model_id(gen.VISION, answered),
+                      unit=unit, qty=qty, est_usd=est, paid=paid)
+        if paid and result.est_cost > 0:
+            budget_mod.record(result.est_cost)
+        found, errors = _sheet_reply(result)
+        if found is not None:
+            found["link"] = describe(answered)
+            return found
+        if attempt == 1:
+            on_log(f"⚠️ {J3} reply for {subject} rejected ({'; '.join(errors[:2])}); asking once more")
+    on_log(f"✖ Sheet check of {subject} failed: the replies failed validation twice")
+    return None
+
+
+def species_clash(story, doc, species, others, *, lock=None):
+    """Plan 28 F3: the plain sentence refusing *species* for *doc* when
+    another character of *others* already has it, in a species world that
+    does not let two characters share one (``universes.shares_species``);
+    else None."""
+    from .. import universes
+
+    world = media_policy.species_world(story, lock)
+    wanted = " ".join(str(species or "").split()).lower()
+    if world is None or not wanted or universes.shares_species(world):
+        return None
+    for other in others:
+        if universes.taken_species([other]) == [wanted]:
+            return (f"{_entity_name(doc)} cannot be a {wanted}: {_entity_name(other)} is already a {wanted}, and two "
+                    "characters may not share a species in this world. Give "
+                    f"{_entity_name(doc)} another species.")
+    return None

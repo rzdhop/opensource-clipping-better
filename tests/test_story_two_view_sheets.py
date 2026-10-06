@@ -62,7 +62,7 @@ def _k1_d1_d2_queues(events):
         events,
         K1=[tsl._k1("a fuzzy kiwi", ["gold chain", "linen shirt"]), tsl._k1("a sly mango", ["red dress", "crown clip"])],
         D1=[tsl._d1("Né sur la plage.", with_="Mangella"), tsl._d1("Reine du parloir.", with_="Kiwilo")],
-        D2=[tsl._d2(175), tsl._d2(160)])
+        D2=[tsl._d2(175), tsl._d2(160, "mango")])  # DEC-305 F3: one species each
 
 
 # ================================================================ the profile key

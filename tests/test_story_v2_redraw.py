@@ -98,7 +98,8 @@ def test_a_legacy_cast_moved_to_v2_is_counted_then_redrawn_from_its_looks(tmp_pa
     assert _images_and_calls(workflow.cast_units(store, story)) == (4, 2, 4)
 
     events = Events()
-    llm = FakeLLM(events, D1=[_d1("Né sur la plage."), _d1("Reine du parloir.")], D2=[_d2(175), _d2(160)])
+    # DEC-305 F3: one species each (two characters of a species world never share one).
+    llm = FakeLLM(events, D1=[_d1("Né sur la plage."), _d1("Reine du parloir.")], D2=[_d2(175), _d2(160, "mango")])
     image = FakeImage(events)
     _run_cast(store, story_id, llm, events, image)
 
