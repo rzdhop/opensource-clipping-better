@@ -1,11 +1,12 @@
 ## CURRENT STATE — plan 29 (empty sets drawn right, Regenerate visible, ~100-word descriptions, approve anyway) IN PROGRESS (2026-10-06, local session)
 
-- **In-progress header:** phase = CHECKPOINT → IMPLEMENT. Checkpoint commit = `96f2e33` (clean tree; `FETCH_HEAD`
-  untracked, left alone). Plan file `.claude/plans/ai-story/29-empty-sets-and-full-descriptions-plan.md` (DEC-308,
-  approved: one description per element; warn and let me approve; all six stages). Current stage = 1–3 in parallel
-  worktrees (plan29-s1 tile reload · plan29-s2 empty-set prompts · plan29-s3 redraw notes + plate pricing), then 4
-  (descriptions, the riskiest), 5 (approve anyway), 6 (docs). Next action = Tier 1 baseline (the touched-area
-  selection, both envs) → spawn the three stage agents.
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = main (this commit; `FETCH_HEAD` untracked). Plan file
+  `.claude/plans/ai-story/29-empty-sets-and-full-descriptions-plan.md` (DEC-308). Stages 1 (tile reload, 201af51),
+  2 (empty-set prompts, 85108ab), 3 (redraw notes + plate pricing, b291616) MERGED on main, not deployed. Running:
+  stage 4a (descriptions, server side; worktree plan29-s4, agent Opus) and stage 5 (approve anyway; worktree plan29-s5,
+  agent Opus). Then 4b (the Description textarea on the tiles + PATCH acceptance, after 5 merges), 6 (docs), the
+  deploy (3.11 compile → `rm -sfv` + rebuild at 0 jobs: the dashboard changed), the human's Regenerate on 51dbc4213738.
+  Next action = merge 5 and 4a as they report → spawn 4b → docs → deploy.
 - **Tier-1 baseline (2026-10-06, on 98f9c4f):** the touched-area selection (12 files: sheet_gate, refimages, look, aistory_prompting, prompt_templates, prompt_budgets, prompts, v2_redraw, gencache, cast_steps, send_layer, aspect_generation) = 542 passed in both envs (local 44 s, CI-like 45 s), exit 0.
 - **Regression contract (plan 29):** sheet/portrait prompts byte-identical (`tests/test_story_look.py`,
   `test_aistory_prompting.py` goldens) · DEC-303 send-layer order, hashes untouched (`test_story_send_layer.py`,
