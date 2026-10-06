@@ -57,9 +57,11 @@ def episode_length(ec, script, board=None) -> dict:
     episode_pass`` over *script* with *board* (None: no storyboard yet), in
     whole frames when the board is timed in them -- what
     ``episode_common.retime`` stores and ``render/timeline.build_timeline``
-    renders."""
+    renders. A native-speech story with no board yet is timed on its
+    stored plans' clips (plan 28 stage A3: one clock with its storyboard)."""
     result, _scenes = timing.episode_pass(script, ec.template, ec.language, style_lock=ec.style_lock,
-                                          storyboard=board, whole_frames=timing.board_whole_frames(board))
+                                          storyboard=board, whole_frames=timing.board_whole_frames(board),
+                                          native_plan=media_policy.native_speech(ec.story))
     return result
 
 

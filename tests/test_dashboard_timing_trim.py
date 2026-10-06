@@ -51,3 +51,11 @@ def test_the_trim_button_is_disabled_while_a_job_runs_and_shows_its_error():
     assert "disabled={disabled || running}" in bar
     assert "<StepError message={error} errors={errors}" in bar
     assert "'Trimming…'" in bar
+
+
+def test_a_native_episode_over_its_window_trims_the_scene_its_flag_names():
+    """Plan 28 stage A3: a native story's ``episode_over`` flag names the scene to trim first (``scene_id``); the
+    same Trim, through the same regenerate, unless another flag offers that scene already."""
+    bar = _read(BAR)
+    assert "(flag.kind === 'episode_over' && !sceneFlagged.has(flag.scene_id))" in bar
+    assert "Trim to fit the episode (${flag.message}): scene ${flag.scene_id} gets fewer or shorter clips; " in bar

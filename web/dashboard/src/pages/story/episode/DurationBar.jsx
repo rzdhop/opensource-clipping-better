@@ -56,6 +56,12 @@ function plannedLine(plan, index) {
 // the flagged line's cap, or every planned line's when the flag names none;
 // a scene without a line plan gets the slot alone.
 export function trimNote(flag, scene, flags = []) {
+  if (flag.kind === 'episode_over') {
+    // Plan 28 A3: a native episode over its window is trimmed at the scene the server names first; the server
+    // plans it again inside the episode's fit before the writer rewrites it.
+    return `Trim to fit the episode (${flag.message}): scene ${flag.scene_id} gets fewer or shorter clips; `
+      + 'keep the meaning and the speaker, cut words.'
+  }
   const hi = sceneSlotHi(flag, scene, flags)
   let note = `Trim to the slot: scene ${flag.scene_id} ` + (hi == null ? 'is over its slot' : `lasts at most ${hi} s`)
   const plan = scene && scene.line_plan
@@ -165,10 +171,14 @@ export function TimingWarnings({ timing, scenes, storyId, ep, busy, onChange }) 
   if (flags.length === 0) return null
   const sceneById = Object.fromEntries((scenes || []).map((scene) => [scene.scene_id, scene]))
   const trimmed = new Set(flags.filter((f) => f.kind === 'trim_line' && f.scene_id).map((f) => f.scene_id))
+  const sceneFlagged = new Set(flags.filter((f) => f.kind !== 'episode_over' && f.scene_id).map((f) => f.scene_id))
   // A trim_line flag is trimmable; so is a scene_over flag whose scene has no
-  // trim_line flag of its own (the same scene is not offered twice).
+  // trim_line flag of its own (the same scene is not offered twice); and
+  // (plan 28 A3, a native story) the episode_over flag naming the scene to
+  // trim first, when no other flag offers that scene already.
   const trimmable = (flag) => Boolean(storyId && flag.scene_id && sceneById[flag.scene_id]) && (
-    flag.kind === 'trim_line' || (flag.kind === 'scene_over' && !trimmed.has(flag.scene_id)))
+    flag.kind === 'trim_line' || (flag.kind === 'scene_over' && !trimmed.has(flag.scene_id))
+    || (flag.kind === 'episode_over' && !sceneFlagged.has(flag.scene_id)))
   return (
     <details className="story-script-warnings">
       <summary className="story-script-warnings-summary">

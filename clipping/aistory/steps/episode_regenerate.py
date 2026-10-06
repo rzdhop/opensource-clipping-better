@@ -37,6 +37,11 @@ cleared too early, never one standing over text it did not approve. The
 script is re-timed. A shot re-plan rebuilds the storyboard (never approved
 after it) and re-times the script without moving its revision.
 
+Plan 28 stage A3: on a native-speech story a scene target is planned again
+inside the episode's fit before it is written (``script.refit_plans``), so
+the Trim button's rewrite of a scene over its slot, or of the scene an
+episode over its window is trimmed at first, is held to fewer clips.
+
 An unknown episode, scene or shot is refused naming it, before any call.
 ``story.json`` is never written (RC-E2).
 """
@@ -134,6 +139,10 @@ def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic, sleep
 
     announced = set()
     try:
+        if sid is not None:
+            # Plan 28 stage A3 (the Trim button): a native-speech scene is planned again inside the episode's
+            # fit first, so its rewrite is held to the clips the episode can afford (nothing changes off native).
+            script_step.refit_plans(ec, script, only={sid})
         if part is None:
             ctx.on_log(f"📝 Scene {sid} ({scene['function']}) again (E2){_noted(note)}")
             script_step.write_body_scene(ctx, ec, script, sid, tools=tools, announced=announced, note=note)

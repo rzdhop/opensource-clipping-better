@@ -343,9 +343,10 @@ def test_an_exchange_of_three_lines_and_the_one_line_shot_beside_it_as_today():
     lines = [("char_a", "Tu caches la clé."), ("char_b", "Et alors ?"), ("char_a", "Je la prends.")]
     scene = _with_shots(_scene(lines), [(8, [1, 2, 3], True)])
     planned = shots.speech_shot_plan(scene, [_beat([1]), _beat([2]), _beat([3])], language="fr")
-    # the whole exchange at the first beat naming one of its lines; the beats left are a reaction at most
-    assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [([1, 2, 3], True, 8),
-                                                                                     ([], False, 6)]
+    # the whole exchange at the first beat naming one of its lines. Re-pinned on purpose (plan 28 stage A3, one
+    # clock): the beats left are no longer a reaction shot -- a scene whose stored plan names its shots is bought
+    # as planned, so the board sums what the Script step timed it at.
+    assert [(plan["lines"], plan["speaks"], plan["clip_s"]) for plan in planned] == [([1, 2, 3], True, 8)]
     assert planned[0]["speakers"] == ["char_a", "char_b"]
     # a one-line planned shot is exactly the plan-24 path's shot
     single = _with_shots(_scene(lines[:1]), [(8, [1], True)])

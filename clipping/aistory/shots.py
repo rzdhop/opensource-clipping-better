@@ -3088,7 +3088,11 @@ def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPE
     before): only a beat plan naming every line of an exchange makes it one
     shot, so a board that split it keeps its shots. A one-line planned shot
     is planned exactly as above; *links* (``(speech, silent)`` labels) name
-    the link in the note of a stored length it does not sell."""
+    the link in the note of a stored length it does not sell.
+
+    Plan 28 stage A3 (one clock): a scene whose stored shots still name its
+    lines (:func:`planned_exchanges`) gets no reaction shot -- its shots are
+    its plan's, the clips the Script step's length was timed on."""
     lines = scene["lines"]
     entries = planned_line_entries(scene, notes)
     groups = planned_exchanges(scene, speech_lengths=speech_lengths, silent_lengths=silent_lengths, links=links,
@@ -3097,6 +3101,10 @@ def speech_shot_plan(scene, plans, *, language, speech_lengths=native_speech.SPE
                    for n in numbers}
     exchange_clip = {tuple(numbers): clip for numbers, clip, _speaks in groups or ()}
     lo, hi = (list(reaction_shots) + [0, 1])[:2] if reaction_shots else (0, 1)
+    if groups is not None:
+        # Plan 28 stage A3 (one clock): a scene whose stored plan names its shots is bought as planned -- no
+        # reaction shot beyond them -- so its board sums what the Script step timed it at.
+        lo = hi = 0
     place_tags = [tag for plan in plans for tag in plan["subjects"] if not tag.startswith("@")]
     place_tags = list(dict.fromkeys(place_tags)) or [f"#{scene['place_id']}:{scene['time_variant']}"]
     characters = set(scene["characters"])

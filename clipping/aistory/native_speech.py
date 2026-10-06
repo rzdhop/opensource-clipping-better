@@ -435,7 +435,12 @@ def native_pass(script, storyboard, template, language_duration) -> tuple:
     what its clip is: no hold, no tail, no window pass); the scene
     boundaries are cuts (:func:`plan_transitions` makes them so); the total
     adds the end card as the other boards do. The window state is said, a
-    native episode is never re-timed to fit it."""
+    native episode is never re-timed to fit it.
+
+    Plan 28 stage A3: a scene whose shots sum past the top of its stored
+    slot (``slot_s``, the line plan's) is ``over``, with a ``scene_over``
+    flag in the words the other boards use (each after the episode's own
+    flag); a scene with no stored slot is never judged against one."""
     durations = {}
     for shot in storyboard["shots"]:
         durations[shot["scene_id"]] = durations.get(shot["scene_id"], 0.0) + float(shot["duration_s"] or 0.0)
@@ -443,14 +448,20 @@ def native_pass(script, storyboard, template, language_duration) -> tuple:
     end_card = 0.0
     if script["cliffhanger"]["cut_to_black"]:
         end_card = template["end_card_s"] - template["transitions_s"]["fadeblack"]
-    scenes, scene_timings = {}, {}
+    scenes, scene_timings, scene_flags = {}, {}, []
     for scene in script["scenes"]:
         sid = scene["scene_id"]
         seconds = round(durations.get(sid, 0.0), 3)
         starts = {line["line_id"]: placements[line["line_id"]][0] for line in scene["lines"]
                   if line["line_id"] in placements}
         speech = sum(placements[line_id][1] for line_id in starts)
-        entry = {"duration_s": seconds, "tail_s": 0.0, "hold_s": 0.0, "state": "ok"}
+        state = "ok"
+        slot = scene.get("slot_s")
+        if isinstance(slot, (list, tuple)) and len(slot) == 2 and seconds > float(slot[1]) + 1e-6:
+            state, over = "over", seconds - float(slot[1])
+            scene_flags.append({"kind": "scene_over", "scene_id": sid, "line_id": None, "seconds": round(over, 3),
+                                "message": f"Scene {sid} is {over:.1f} s over its {float(slot[1]):g} s slot."})
+        entry = {"duration_s": seconds, "tail_s": 0.0, "hold_s": 0.0, "state": state}
         scenes[sid] = entry
         scene_timings[sid] = dict(entry, speech_s=round(speech, 3), line_starts=starts)
     total = round(sum(entry["duration_s"] for entry in scenes.values()) + end_card, 3)
@@ -466,6 +477,7 @@ def native_pass(script, storyboard, template, language_duration) -> tuple:
         flags.append({"kind": "episode_under", "scene_id": None, "line_id": None,
                       "seconds": round(window_lo - total, 3),
                       "message": f"The episode is {window_lo - total:.1f} s under {window_lo:g} s."})
+    flags.extend(scene_flags)
     measured = estimated = 0
     for scene in script["scenes"]:
         for line in scene["lines"]:

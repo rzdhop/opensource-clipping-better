@@ -532,6 +532,14 @@ def covers(storyboard, script) -> bool:
     return timing.covers(storyboard, script)
 
 
+def _native_plan(ec) -> bool:
+    """Whether *ec*'s story is a native-speech one (the plan's clock, plan 28
+    stage A3); False for a context that carries no story (a bare timing
+    context)."""
+    story = getattr(ec, "story", None)
+    return bool(story) and media_policy.native_speech(story)
+
+
 def retime(script, ec, storyboard=None) -> dict:
     """Set ``script["timing"]`` from its text (or its measured lines) and
     returns *script*. A storyboard that covers every scene
@@ -545,13 +553,19 @@ def retime(script, ec, storyboard=None) -> dict:
     the old timing beside a storyboard timed before
     (``timing.board_whole_frames``; phase 5 stage 6). Derived: the revision
     and the approvals never move. A script with no scene yet has no
-    timing."""
+    timing.
+
+    Plan 28 stage A3 (one clock): a native-speech story's script with no
+    storyboard is timed on the clips its stored line plans buy
+    (``timing.episode_pass``'s *native_plan*), the clock its storyboard is
+    gated on -- never on its words."""
     if not script["scenes"]:
         script["timing"] = None
         return script
     script["timing"], _scenes = timing.episode_pass(script, ec.template, ec.language, style_lock=ec.style_lock,
                                                     storyboard=storyboard,
-                                                    whole_frames=timing.board_whole_frames(storyboard))
+                                                    whole_frames=timing.board_whole_frames(storyboard),
+                                                    native_plan=_native_plan(ec))
     # Plan 24 stage 5 (D-6): a narrated template's planned narrator share rides on the stored timing.
     share = timing.plan_narrator_share(script, ec.template)
     if share is not None:

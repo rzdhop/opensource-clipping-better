@@ -46,7 +46,17 @@ run again ("Continue"):
 2. **storyboard** -- ``t1``: ``storyboard.run`` fills what is missing;
    ``fast``: ``storyboard.build_fast`` unless the board already is the
    fast plan of this script. Auto-approved by its own rule
-   (``workflow.approve_storyboard``);
+   (``workflow.approve_storyboard``). Plan 28 stage A3: on a native-speech
+   story whose script (timed on its plans' clips, the clock the storyboard
+   is gated on) or storyboard runs over the window, the run tries ONE
+   remedy before it stops (:meth:`_FastTrack.fit`): the plans fitted again
+   (A2's fit), only the scenes whose planned clips changed -- at the
+   storyboard, with the scenes its board flags over their slot -- written
+   again as a regenerate writes them ("✂ Fitting episode 1: 2 scenes
+   shortened (s03 and s05)"), then the script checked and approved again
+   and the rewritten scenes' shots planned again; still over, it stops with
+   A1's plain sentence (``timing.plan_floor_refusal``). "Continue" runs the
+   remedy again;
 3. **paid check** -- ``assets.asset_units`` (calling nothing but a local
    editor's status probe): :func:`paid_verdict`. A paid part needs ``allow_paid`` **and** must fit
    under the episode's, the day's and the story's caps; anything that
@@ -117,7 +127,7 @@ from .. import store as store_mod
 from .. import timing, voices
 from . import assets as assets_step
 from . import clips as clips_step
-from . import episode_common, llm_call, voice_lines
+from . import entities, episode_common, gates, llm_call, voice_lines
 from . import judge as judge_step
 from . import lipsync as lipsync_step
 from . import metadata as metadata_step
@@ -628,6 +638,8 @@ class _FastTrack:
         self.keyframes = None
         # Plan 19 stage 3: the blocking issues the run approved the script over, once it did.
         self.script_anyway = None
+        # Plan 28 stage A3: the one remedy a run tries on an episode over its window (:meth:`fit`).
+        self.fit_tried = False
 
     # ------------------------------------------------------------ plumbing
 
@@ -722,6 +734,55 @@ class _FastTrack:
             "Continue the fast track: it picks up here and repeats nothing already done.",
             reason=getattr(exc, "reason", message))
 
+    # ------------------------------------------- plan 28 stage A3: the remedy
+
+    def fit(self, ec, length=None) -> bool:
+        """The one remedy a run tries on a native-speech episode over its
+        window before it stops (plan 28 stage A3): the episode's plans fitted
+        again (``script.refit_plans``, A2's fit) and only the scenes whose
+        planned clips changed -- with, at the storyboard, every scene its
+        board flags over its slot (*length*'s ``scene_over`` flags) --
+        written again as a regenerate writes them (``script.rewrite_scenes``,
+        under the run's budget). Both approvals go with the rewrite: the
+        caller checks and approves again. Whether a scene was rewritten;
+        False once tried in this run, off native speech, or with nothing to
+        rewrite."""
+        if self.fit_tried or not media_policy.native_speech(ec.story):
+            return False
+        self.fit_tried = True
+        script = episode_common.read_episode(ec, SCRIPT_DOC)
+        board = episode_common.read_episode(ec, STORYBOARD_DOC)
+        changed = script_step.refit_plans(ec, script)
+        flagged = {flag["scene_id"] for flag in (length or {}).get("flags") or () if flag["kind"] == "scene_over"}
+        targets = [scene["scene_id"] for scene in script["scenes"]
+                   if scene["scene_id"] in changed or scene["scene_id"] in flagged]
+        if not targets:
+            return False
+        count = len(targets)
+        self.log(f"✂ Fitting episode {ec.ep}: {count} scene{_s(count)} shortened ({_and(targets)})")
+        tools = entities.Tools(runner=self.runner, time_fn=self.time_fn)
+        rewritten, failed = script_step.rewrite_scenes(
+            self.sub("script"), ec, script, board, targets, tools=tools, note=script_step.FIT_NOTE,
+            before_call=lambda: self.budget.before_call(lambda: f"the rewrite of {_and(targets)} to fit the episode"))
+        for sid, reason in failed:
+            self.log(f"✖ Fitting episode {ec.ep}: scene {sid} failed ({reason}); it keeps its lines")
+        if rewritten:
+            self.log(f"✂ Fitting episode {ec.ep}: {_and(rewritten)} rewritten to {'its' if len(rewritten) == 1 else 'their'}"
+                     " new plan; checked and approved again")
+        return bool(rewritten)
+
+    def unfit(self, ec, script, length) -> StepFailed:
+        """The stop of an episode still over its window after :meth:`fit`:
+        A1's plain sentence (``timing.plan_floor_refusal``) on its length."""
+        window_hi = float(ec.template["window_s"][1])
+        sentence = timing.plan_floor_refusal(ec.ep, len(script["scenes"]), float(length["total_s"]), window_hi)
+        return StepFailed(sentence or f"Episode {ec.ep} runs {float(length['total_s']):.1f} s, over its window.")
+
+    @staticmethod
+    def over(ec, length) -> bool:
+        """Whether *length* (a timing) is a native-speech episode over its window."""
+        return media_policy.native_speech(ec.story) and (length or {}).get("state") == "over"
+
     # ----------------------------------------------------------- sub-steps
 
     def script(self) -> dict:
@@ -734,6 +795,15 @@ class _FastTrack:
                                   budget=self.budget)
         ec = self.context()
         script = episode_common.read_episode(ec, SCRIPT_DOC)
+        if self.over(ec, script.get("timing")):
+            # Plan 28 stage A3: one remedy, then the checks (E4, J1, the repairs) on what it rewrote.
+            if self.fit(ec):
+                summary = script_step.run(self.sub("script"), runner=self.runner, time_fn=self.time_fn,
+                                          budget=self.budget)
+                ec = self.context()
+                script = episode_common.read_episode(ec, SCRIPT_DOC)
+            if self.over(ec, script.get("timing")):
+                raise self.unfit(ec, script, script["timing"])
         v2 = media_policy.is_v2(ec.story)
         j1_version = judge_step.j1_version(ec.story, script)
         refusal = script_refusal(script, ec.ep, v2=v2, j1_version=j1_version)
@@ -797,6 +867,17 @@ class _FastTrack:
                                                budget=self.budget), mode=T1)
             summary["calls"] = len(summary.get("planned") or [])
         ec = self.context()
+        if media_policy.native_speech(ec.story):
+            # Plan 28 stage A3: the board's clips over the window -- one remedy, the script checked and approved
+            # again, its rewritten scenes planned again; still over, A1's sentence.
+            script = episode_common.read_episode(ec, SCRIPT_DOC)
+            board = episode_common.read_episode(ec, STORYBOARD_DOC)
+            length = gates.episode_length(ec, script, board)
+            if self.over(ec, length):
+                if self.fit(ec, length):
+                    self.script()
+                    return self.storyboard()
+                raise self.unfit(ec, script, length)
         self.approve(ec, "storyboard",
                      lambda workflow, now: workflow.approve_storyboard(ec.store, ec.story_id, ec.ep, now=now),
                      f"{summary['shots']} shots, {mode}")

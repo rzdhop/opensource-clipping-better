@@ -447,6 +447,99 @@ def plan_fit_refusal(ec, script=None, *, log=None):
     return sentence
 
 
+# ------------------------------------------- plan 28 stage A3: the remedy on "over"
+
+# The author's note a scene rewritten to its fitted plan is written with.
+FIT_NOTE = ("Rewrite this scene to its new line plan: the episode must fit its length, so the scene buys fewer or "
+            "shorter clips. Keep what happens and who it happens to; cut words, never the scene's turn.")
+# The fields a plan is stored in and the episode's fit sets (restored on a rewrite that fails).
+_PLAN_FIELDS = ("slot_s", "line_plan", "character_line", "clip_cap_s")
+
+
+def _clip_shape(plan) -> list:
+    return [(int(shot["clip_s"]), bool(shot["speaks"])) for shot in (plan or {}).get("shots") or ()]
+
+
+def refit_plans(ec, script, *, only=None) -> list:
+    """The episode's fit (``timing.fit_episode_plans``, plan 28 stage A2) on
+    *script* as it stands now (plan 28 stage A3): each scene -- each in
+    *only* when given -- stores the plan the fit holds it to and the fields
+    the fit changed (``character_line``, ``clip_cap_s``), in place. Returns
+    the ids of the WRITTEN scenes whose planned clips changed, in script
+    order -- the scenes a remedy rewrites (a stub's new plan needs no
+    rewrite). ``[]`` off native speech, or for a script a scene of which has
+    no stored plan (``timing.plan_board``). A scene no clip fits is refused
+    in one plain sentence (:func:`_plan_failure`)."""
+    if not media_policy.native_speech(ec.story) or timing.plan_board(script) is None:
+        return []
+    floors = timing.plan_tail_floors(script, ec.template)
+
+    def plan_of(scene):
+        return line_plan(ec, script, scene, tail_floor=floors[scene["scene_id"]])
+
+    try:
+        fit = timing.fit_episode_plans(ec.template, script["scenes"], plan_of,
+                                       window_hi=float(ec.template["window_s"][1]),
+                                       end_card_s=timing.plan_end_card_s(script, ec.template))
+    except timing.PlanError as exc:
+        raise _plan_failure(ec, exc) from None
+    changed = []
+    for scene in script["scenes"]:
+        sid = scene["scene_id"]
+        if only is not None and sid not in only:
+            continue
+        plan = fit["plans"][sid]
+        moved = _clip_shape(scene.get("line_plan")) != _clip_shape(plan)
+        scene.update(fit["changes"].get(sid, {}))
+        _store_plan(scene, plan)
+        if moved and scene["state"] != "stub":
+            changed.append(sid)
+    return changed
+
+
+def rewrite_scenes(ctx, ec, script, board, scene_ids, *, tools, note, before_call=None) -> tuple:
+    """Each scene of *scene_ids* written again with *note*, one after the
+    other, exactly as a regenerate of ``scene:<ep>:<sid>`` writes it
+    (``episode_regenerate``: E2 for a body scene, the partial E3 for a
+    framing one -- each recomputing its plan from what the scene stores --
+    then ``episode_common.mark_changed``, the re-time, the storyboard then
+    the script written). *before_call* (no argument) is asked before each
+    call (the caller's budget). A rewrite that fails keeps the scene as it
+    was, its stored plan too. ``(rewritten ids, [(scene_id, reason)])``."""
+    announced = set()
+    rewritten, failed = [], []
+    for sid in scene_ids:
+        scene = scene_of(script, sid)
+        if scene is None or sid in rewritten:
+            continue
+        if before_call is not None:
+            before_call()
+        kept = {key: copy.deepcopy(scene[key]) for key in _PLAN_FIELDS if key in scene}
+        try:
+            if scene["function"] in FRAMING_FUNCTIONS:
+                touched = write_framing(ctx, ec, script, scene["function"], tools=tools, announced=announced,
+                                        note=note)
+            else:
+                write_body_scene(ctx, ec, script, sid, tools=tools, announced=announced, note=note)
+                touched = [sid]
+        except BudgetSpent:
+            raise
+        except StepFailed as exc:
+            for key in _PLAN_FIELDS:
+                scene.pop(key, None)
+            scene.update(kept)
+            failed.append((sid, exc.reason))
+            continue
+        now = llm_call.utc_now()
+        episode_common.mark_changed(script, board, scene_ids=touched, now=now)
+        episode_common.retime(script, ec, board)
+        if board is not None:
+            episode_common.write_storyboard(ec, board, script, now=now)
+        episode_common.write_script(ec, script, now=now)
+        rewritten.extend(touched)
+    return rewritten, failed
+
+
 def current_plan(ec, script, scene) -> dict:
     """*scene*'s line plan as it stands now (:func:`line_plan`: the voices,
     the clip lengths and the neighbours of this moment), stored on the scene

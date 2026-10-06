@@ -1537,7 +1537,7 @@ def _longest_lines(scenes: list, language: str) -> list:
 
 
 def episode_timing(script: dict, template: dict, language: str, *, style_lock: dict = None,
-                    storyboard: dict = None, whole_frames: bool = True) -> dict:
+                    storyboard: dict = None, whole_frames: bool = True, native_plan: bool = False) -> dict:
     """The episode's ``timing`` object (spec 2.7): total length, per-scene
     durations and the window state, computed end to end from the script's
     text (or its already-measured lines).
@@ -1584,9 +1584,15 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
     The storyboard, when given, must cover every scene of the script
     (:func:`covers`); :func:`episode_pass` is the same computation for any
     storyboard, and also returns each scene's line starts.
+
+    *native_plan* (plan 28 stage A3): :func:`episode_pass`'s.
     """
     if _native(storyboard):
         return native_pass(script, storyboard, template, language)[0]
+    if native_plan and storyboard is None:
+        board = plan_board(script)
+        if board is not None:
+            return native_pass(script, board, template, language)[0]
     boundary = _boundary_transitions(script["scenes"], template, storyboard)
     result, _scene_timings = _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
                                            shot_floors=_shot_floors(storyboard, template), whole_frames=whole_frames)
@@ -1594,7 +1600,7 @@ def episode_timing(script: dict, template: dict, language: str, *, style_lock: d
 
 
 def episode_pass(script: dict, template: dict, language: str, *, style_lock: dict = None,
-                 storyboard: dict = None, whole_frames: bool = True) -> tuple:
+                 storyboard: dict = None, whole_frames: bool = True, native_plan: bool = False) -> tuple:
     """``(timing, scenes)``: the one timing a script and its storyboard
     share -- the script's stored ``timing`` is the first, and a storyboard's
     shots are cut to the second (``shots.build_storyboard``,
@@ -1617,9 +1623,21 @@ def episode_pass(script: dict, template: dict, language: str, *, style_lock: dic
     off, exactly as before phase 5 stage 6) -- :func:`board_whole_frames`
     says which one a script beside a given storyboard is timed with, and
     every caller timing a stored document passes it.
+
+    *native_plan* (plan 28 stage A3, the one clock): the script of a
+    native-speech story with no storyboard yet is timed on the clips its
+    stored line plans buy (:func:`plan_board`) -- by the very computation a
+    native board is timed with (:func:`native_pass`), so the length the
+    Script step shows and gates on is the one the storyboard will sum. A
+    script any scene of which has no stored ``line_plan.shots`` (written
+    before plan 27, or not on writing v3) keeps the words' clock.
     """
     if _native(storyboard):
         return native_pass(script, storyboard, template, language)
+    if native_plan and storyboard is None:
+        board = plan_board(script)
+        if board is not None:
+            return native_pass(script, board, template, language)
     boundary_board = storyboard if covers(storyboard, script) else None
     boundary = _boundary_transitions(script["scenes"], template, boundary_board)
     return _episode_pass(script, template, language, style_lock=style_lock, boundary=boundary,
@@ -1632,16 +1650,59 @@ def _native(storyboard) -> bool:
     return bool(storyboard) and storyboard.get("timing_mode") == "native_speech"
 
 
+def plan_board(script: dict):
+    """The board *script*'s stored line plans would buy (plan 28 stage A3):
+    one shot a planned shot -- ``clip_s`` long, the plan's ``line_ids``,
+    ``speaks`` -- in scene order, ``timing_mode`` ``native_speech``: what
+    :func:`episode_pass` times a native-speech script with before its
+    storyboard exists. None when a scene has no stored ``line_plan.shots``.
+    Pure; *script* is never changed."""
+    shots = []
+    for scene in script.get("scenes") or ():
+        planned = (scene.get("line_plan") or {}).get("shots")
+        if not planned:
+            return None
+        for shot in planned:
+            shots.append({"scene_id": scene["scene_id"], "order": len(shots), "duration_s": float(shot["clip_s"]),
+                          "lines": list(shot.get("line_ids") or ()), "speaks": bool(shot.get("speaks"))})
+    if not shots:
+        return None
+    return {"timing_mode": "native_speech", "shots": shots, "transitions": []}
+
+
+def _trim_first(script: dict, scenes: dict) -> str:
+    """The written scene a native episode over its window is trimmed at
+    first (plan 28 stage A3): the least watched beat (:data:`_FIT_RANK`, as
+    the episode's fit holds them down), the longest of its rank, the
+    earliest of those; None when no scene has a line yet."""
+    written = [(k, scene) for k, scene in enumerate(script["scenes"]) if scene.get("lines")]
+    if not written:
+        return None
+    _k, scene = min(written, key=lambda item: (_FIT_RANK.get(item[1]["function"], 0),
+                                               -float(scenes[item[1]["scene_id"]]["duration_s"]), item[0]))
+    return scene["scene_id"]
+
+
 def native_pass(script: dict, storyboard: dict, template: dict, language: str) -> tuple:
     """:func:`episode_pass` of a native-speech board (plan 22,
     ``native_speech.native_pass``): each shot lasts what its clip lasts, a
     speaking shot's line starts where its take heard it, a narrator's line
     in its silent shot. Only a board whose ``timing_mode`` is
-    ``native_speech`` is ever timed so."""
+    ``native_speech`` is ever timed so.
+
+    Plan 28 stage A3: a scene whose shots sum past its stored slot is
+    ``over`` with a ``scene_over`` flag (``native_speech.native_pass``), and
+    the ``episode_over`` flag names the scene the Trim button rewrites first
+    (:func:`_trim_first`) in its ``scene_id``."""
     from . import native_speech
 
     _check_language(language)
-    return native_speech.native_pass(script, storyboard, template, lambda line: line_duration(line, language)[0])
+    result, scene_timings = native_speech.native_pass(script, storyboard, template,
+                                                      lambda line: line_duration(line, language)[0])
+    for flag in result["flags"]:
+        if flag["kind"] == "episode_over":
+            flag["scene_id"] = _trim_first(script, result["scenes"])
+    return result, scene_timings
 
 
 def _episode_pass(script: dict, template: dict, language: str, *, style_lock: dict, boundary: list,
