@@ -93,7 +93,9 @@ def test_the_tools_are_listed(backend):
                  "story_step_status", "story_step_cancel", "story_runs", "story_approve", "story_approve_all",
                  "story_choose_concept", "story_patch", "entity_patch", "episode_patch",
                  # Plan 32 stage 1.
-                 "story_make_episode", "story_estimate"):
+                 "story_make_episode", "story_estimate",
+                 # Plan 32 stage 5.
+                 "episode_sheet", "episode_export"):
         assert name in names, name
 
 
@@ -379,3 +381,161 @@ def test_make_episode_is_the_fast_track_run_of_one_episode(backend):
     # A story not ready yet: the run ends at once with the step's own sentence (what comes first).
     assert run["state"] == "failed" and "first" in run["error"].lower(), run
 
+
+
+# ------------------------------------------------------------- plan 32 stage 5
+
+NOW = "2026-10-06T12:00:00+00:00"
+
+
+def _storyboard(ep, *, clip_shot=None, keyframe_shot=None):
+    """A valid three-shot storyboard (the minimal documents the store checks); the keyframe and the
+    clip are recorded on the shots named, the others have neither."""
+    sha = "a" * 64
+
+    def shot(n):
+        shot_id = f"sh{n:02d}"
+        assets = {"image": None, "video": None, "seed": None, "provider": None, "approved": False}
+        if shot_id == keyframe_shot:
+            assets["image"] = f"assets/shots/shot_{n:02d}.png"
+        if shot_id == clip_shot:
+            assets["video"] = f"assets/clips/shot_{n:02d}.mp4"
+            assets["clip"] = {"state": "current", "link": "fal/test", "route": "paid", "clip_s": 2, "est_usd": 0.1,
+                              "prompt_hash": sha, "image_sha256": sha, "cache_key": None, "generated_at": NOW}
+        return {"shot_id": shot_id, "scene_id": "s01", "order": n, "framing": "medium_single",
+                "camera_motion": "hold", "modifiers": [], "subject_tags": ["@char_kiwilo"],
+                "action": "Something happens on screen.", "lines": [f"l{n:02d}"], "image_prompt": "a prompt",
+                "negative_prompt": "no text", "prompt_override": None, "reference_images": [],
+                "consistency": "references", "duration_s": 2.0, "keep_still": False,
+                "motion": {"type": "hold", "zoom_from": 1.0, "zoom_to": 1.0, "pan": "none"}, "video_prompt": None,
+                "assets": assets}
+
+    return {"$schema": "storyboard_v1", "ep": ep, "shots": [shot(1), shot(2), shot(3)],
+            "transitions": [{"after": "sh01", "type": "cut", "duration_s": 0.0}],
+            "scenes": {"s01": {"source": "t1", "script_rev": 1, "stale": False}},
+            "resolved_from": {}, "approved_at": None, "rev": 1, "created_at": NOW, "updated_at": NOW}
+
+
+def _episode(backend, *, board=True, clip_shot=None, keyframe_shot=None):
+    """A story with episode 1 in the store; returns (story_id, the episode's folder)."""
+    stories = backend.story.stories
+    story_id = payload(call(build_server(backend), "story_create", language="en", seed_text="A kiwi."))["story_id"]
+    if board:
+        stories.write_episode_doc(story_id, 1, "storyboard.json",
+                                  _storyboard(1, clip_shot=clip_shot, keyframe_shot=keyframe_shot), now=NOW)
+    return story_id, stories.episode_dir(story_id, 1, create=True)
+
+
+def _clip(path, *, seconds=2):
+    import subprocess
+
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    f"testsrc=size=180x320:rate=16:duration={seconds}", "-pix_fmt", "yuv420p", str(path)], check=True)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="ffmpeg not installed")
+def test_the_episode_sheet_shows_a_clip_a_keyframe_and_a_grey_tile_for_nothing(backend):
+    story_id, folder = _episode(backend, clip_shot="sh02", keyframe_shot="sh01")
+    stories = backend.story.stories
+    with open(stories.episode_asset_path(story_id, 1, "shots", "shot_01.png", create=True), "wb") as fh:
+        fh.write(png_bytes(size=(180, 320)))
+    _clip(stories.episode_asset_path(story_id, 1, "clips", "shot_02.mp4", create=True))
+    server = build_server(backend)
+    result = call(server, "episode_sheet", story_id=story_id, episode=1, columns=3, max_px=900)
+    assert not result.is_error, result
+    assert type(result.content[0]).__name__ == "ImageContent"
+    answer = json.loads(result.content[1].text)
+    assert [(s["id"], s["state"]) for s in answer["shots"]] == [("sh01", "keyframe"), ("sh02", "clip"),
+                                                                 ("sh03", "missing")]
+    assert answer["shots"][0]["source"] == "assets/shots/shot_01.png"
+    assert answer["shots"][1]["source"] == "assets/clips/shot_02.mp4" and answer["shots"][2]["source"] is None
+    assert max(answer["width"], answer["height"]) <= 900
+    from PIL import Image
+
+    sheet = backend.settings.outputs_dir + "/" + answer["path"]
+    assert answer["path"].endswith("episodes/ep01/episode_sheet.png")
+    with Image.open(sheet) as im:
+        assert im.size == (answer["width"], answer["height"])
+        # Three tiles on one row: the keyframe is red, the clip's frame is a test pattern, the third is grey.
+        tile_w = (im.width - 6 * 4) // 3
+        mid_y = 6 + (im.height - 12) // 3
+        reds = im.getpixel((6 + tile_w // 2, mid_y))
+        grey = im.getpixel((6 * 3 + 2 * tile_w + tile_w // 2, mid_y))
+    assert reds[0] > 150 > reds[1] and grey == (70, 70, 70)
+
+
+def test_the_episode_sheet_without_a_keyframe_or_clip_is_all_grey_and_refuses_without_a_storyboard(backend):
+    story_id, folder = _episode(backend)
+    server = build_server(backend)
+    answer = json.loads(call(server, "episode_sheet", story_id=story_id, episode=1).content[-1].text)
+    assert [s["state"] for s in answer["shots"]] == ["missing"] * 3
+    bare, _folder = _episode(backend, board=False)
+    refused = call(server, "episode_sheet", story_id=bare, episode=1)
+    assert refused.is_error and "no storyboard yet" in refused.content[0].text
+    unknown = call(server, "episode_sheet", story_id="000000000000", episode=1)
+    assert unknown.is_error
+
+
+def test_the_episode_export_refuses_a_missing_video_and_a_limit_over_the_ceiling(backend):
+    story_id, folder = _episode(backend)
+    server = build_server(backend)
+    absent = call(server, "episode_export", story_id=story_id, episode=1)
+    assert absent.is_error and "no episode_final.mp4 yet" in absent.content[0].text
+    with open(folder + "/episode_final.mp4", "wb") as fh:
+        fh.write(b"x" * 1000)
+    over = call(server, "episode_export", story_id=story_id, episode=1, max_mib=51)
+    assert over.is_error and "ceiling" in over.content[0].text
+
+
+def test_a_video_under_the_limit_is_exported_as_it_is(backend):
+    import os
+
+    story_id, folder = _episode(backend)
+    with open(folder + "/episode_final.mp4", "wb") as fh:
+        fh.write(b"x" * 5000)
+    answer = payload(call(build_server(backend), "episode_export", story_id=story_id, episode=1))
+    assert answer["crf"] is None and answer["path"].endswith("episodes/ep01/episode_final.mp4")
+    assert answer["download_hint"] == f"comfy_download({answer['path']})"
+    assert "no copy needed" in answer["message"]
+    assert not os.path.exists(folder + "/episode_share.mp4")
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="ffmpeg not installed")
+def test_a_big_video_is_re_encoded_down_the_ladder_and_the_original_is_kept(backend):
+    import os
+    import subprocess
+
+    story_id, folder = _episode(backend)
+    final = folder + "/episode_final.mp4"
+    # Near-lossless and so a few MiB, though a plain test pattern: the first step of the ladder fits 1 MiB.
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=25:duration=3",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-crf", "0", "-pix_fmt", "yuv444p", "-c:a", "aac", "-shortest", final], check=True)
+    original = os.path.getsize(final)
+    assert original > 1024 * 1024
+    answer = payload(call(build_server(backend), "episode_export", story_id=story_id, episode=1, max_mib=1))
+    assert answer["crf"] == 23 and answer["size_mib"] <= 1.0
+    assert answer["path"].endswith("episodes/ep01/episode_share.mp4")
+    assert answer["download_hint"] == f"comfy_download({answer['path']})"
+    share = backend.settings.outputs_dir + "/" + answer["path"]
+    assert os.path.getsize(share) <= 1024 * 1024 and os.path.getsize(final) == original
+    info = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,width,height", "-of",
+                           "csv=p=0", share], capture_output=True, text=True, check=True).stdout
+    assert "h264" in info and "aac" in info and "360,640" in info
+    assert not [f for f in os.listdir(folder) if f.endswith(".part.mp4")]
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="ffmpeg not installed")
+def test_a_video_that_never_fits_keeps_the_smallest_copy_and_says_so(backend):
+    import os
+    import subprocess
+
+    story_id, folder = _episode(backend)
+    final = folder + "/episode_final.mp4"
+    # Noise does not compress: even the lowest step stays over 1 MiB.
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "nullsrc=s=640x640:r=25:d=2,geq=random(1)*255:128:128", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-crf", "5", "-pix_fmt", "yuv420p", final], check=True)
+    answer = payload(call(build_server(backend), "episode_export", story_id=story_id, episode=1, max_mib=1))
+    assert answer["crf"] == 32 and answer["size_mib"] > 1.0 and "Even the lowest quality step" in answer["message"]
+    assert os.path.getsize(backend.settings.outputs_dir + "/" + answer["path"]) < os.path.getsize(final)
