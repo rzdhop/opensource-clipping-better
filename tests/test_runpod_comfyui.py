@@ -279,3 +279,12 @@ def test_the_probe_and_the_key_check_ask_health_and_count_workers():
 def test_no_sdk_is_imported_in_the_adapter():
     source = (ROOT / "clipping" / "providers" / "runpod_comfyui.py").read_text(encoding="utf-8")
     assert "import runpod" not in source and "import requests" not in source
+
+
+def test_docker_compose_forwards_the_runpod_names_into_the_container():
+    """The compose file lists the container's environment name by name: a
+    RUNPOD_* line in the host's .env that is not forwarded here never reaches
+    the backend (the LLM_CUSTOM_* names were lost that way once)."""
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    for name in ("RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID", "RUNPOD_GPU_USD_PER_HOUR"):
+        assert f"- {name}=${{{name}:-}}" in compose, f"{name} is not forwarded by docker-compose.yml"

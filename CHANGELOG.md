@@ -16,7 +16,7 @@ The three local ComfyUI video templates now also run on a RunPod Serverless
 endpoint, billed per GPU second while a clip renders and nothing while idle,
 as a paid video link that names the template: `runpod/i2v_wan22_14b_lightning`,
 `runpod/i2v_wan22_5b`, `runpod/i2v_ltx2` (DEC-310). Not in the shipped
-`VIDEO_CHAIN`: name the link in `.env` or Settings once the endpoint and its
+`VIDEO_CHAIN`: name the link in `.env` once the endpoint and its
 network volume exist (`docs/AI_STORY.md`, "A rented GPU by the second").
 
 #### Added
@@ -24,7 +24,7 @@ network volume exist (`docs/AI_STORY.md`, "A rented GPU by the second").
 - **`runpod` provider** keyed by `RUNPOD_API_KEY` and `RUNPOD_COMFY_ENDPOINT_ID`
   (`RUNPOD_GPU_USD_PER_HOUR` optional, to log what RunPod really billed next
   to the table's estimate); the Settings key check asks the endpoint's
-  `/health`.
+  `/health`. `docker-compose.yml` forwards the three names into the container.
 - **`clipping/providers/runpod_comfyui.py`**: refuses before sending what the
   template cannot sell, submits the rendered graph with the keyframe inline in
   one `POST /run`, journals the job id at once, polls `/status`, resumes by id
