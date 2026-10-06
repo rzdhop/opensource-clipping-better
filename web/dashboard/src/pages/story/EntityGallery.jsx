@@ -12,17 +12,17 @@ import { ImageIcon, X } from '../../ui/icons'
 
 /**
  * One entity image as a blob URL (the media route is token-gated, so it is
- * fetched with the auth header, DEC-113), revoked when the name changes or
+ * fetched with the auth header, DEC-113), revoked when the name or version changes or
  * the tile unmounts. Null while loading, with no name, or on a failure.
  * `thumb` asks for the route's cached 160 px thumbnail (DEC-257).
  */
-export function useStoryMediaUrl(storyId, kind, eid, name, { thumb = false } = {}) {
+export function useStoryMediaUrl(storyId, kind, eid, name, { thumb = false, version = '' } = {}) {
   const [url, setUrl] = useState(null)
   useEffect(() => {
     if (!name) return undefined
     let cancelled = false
     let current = null
-    fetchStoryMediaUrl(storyId, kind, eid, name, { thumb }).then((fresh) => {
+    fetchStoryMediaUrl(storyId, kind, eid, name, { thumb, version }).then((fresh) => {
       if (cancelled) { URL.revokeObjectURL(fresh); return }
       current = fresh
       setUrl(fresh)
@@ -32,7 +32,7 @@ export function useStoryMediaUrl(storyId, kind, eid, name, { thumb = false } = {
       if (current) URL.revokeObjectURL(current)
       setUrl(null)
     }
-  }, [storyId, kind, eid, name, thumb])
+  }, [storyId, kind, eid, name, thumb, version])
   return url
 }
 
@@ -74,7 +74,7 @@ function useGridColumns(ref) {
 
 function Tile({ storyId, item, open, editorId, tileId, onToggle }) {
   const thumb = item.thumb || {}
-  const url = useStoryMediaUrl(storyId, thumb.kind, thumb.eid, thumb.name, { thumb: true })
+  const url = useStoryMediaUrl(storyId, thumb.kind, thumb.eid, thumb.name, { thumb: true, version: thumb.version })
   return (
     <button
       type="button"
@@ -98,7 +98,7 @@ function Tile({ storyId, item, open, editorId, tileId, onToggle }) {
 }
 
 /**
- * *items*: [{id, name, thumb: {kind, eid, name} | null, thumbEmpty, shape
+ * *items*: [{id, name, thumb: {kind, eid, name, version?} | null, thumbEmpty, shape
  * ('portrait' 4:5, 'wide' 16:9, 'square'), meta (badges)}]. *openId* and
  * *onToggle* come from useHashAccordion; *renderEditor(item)* is the
  * entity's full editor. The editor is placed after the last tile of the open

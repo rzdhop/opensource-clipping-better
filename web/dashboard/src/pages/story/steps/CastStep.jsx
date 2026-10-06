@@ -17,6 +17,7 @@ import VoiceReferenceSlot from './VoiceReferenceSlot'
 import PromptDrawer, { entityBrief, entryKey, useImageBrief } from './PromptDrawer'
 import { Mic } from '../../../ui/icons'
 import { SheetCheckBadge, SheetCheckLine } from '../SheetCheck'
+import { imageVersion } from '../../../lib/imageVersion'
 
 // The character roles a custom entry may pick (spec 2.3): the closed list
 // clipping.aistory.schemas.CHARACTER_ROLES also uses.
@@ -204,7 +205,7 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange, consist
     }
     setUrl(null)
     if (ref) {
-      fetchStoryMediaUrl(storyId, 'characters', character.char_id, ref.name).then((fresh) => {
+      fetchStoryMediaUrl(storyId, 'characters', character.char_id, ref.name, { version: imageVersion(ref) }).then((fresh) => {
         if (cancelled) { URL.revokeObjectURL(fresh); return }
         urlRef.current = fresh
         setUrl(fresh)
@@ -214,7 +215,7 @@ function ImageSlot({ storyId, character, slot, info, disabled, onChange, consist
       cancelled = true
       if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
     }
-  }, [storyId, character.char_id, ref && ref.name])
+  }, [storyId, character.char_id, ref && ref.name, imageVersion(ref)])
 
   useEffect(() => {
     // consistencyMode is not part of the target, but it flips this slot's
@@ -281,7 +282,7 @@ function VariantThumb({ storyId, character, slot, refDoc }) {
     let fresh = null
     setUrl(null)
     if (refDoc) {
-      fetchStoryMediaUrl(storyId, 'characters', character.char_id, refDoc.name).then((made) => {
+      fetchStoryMediaUrl(storyId, 'characters', character.char_id, refDoc.name, { version: imageVersion(refDoc) }).then((made) => {
         if (cancelled) { URL.revokeObjectURL(made); return }
         fresh = made
         setUrl(made)
@@ -291,7 +292,7 @@ function VariantThumb({ storyId, character, slot, refDoc }) {
       cancelled = true
       if (fresh) URL.revokeObjectURL(fresh)
     }
-  }, [storyId, character.char_id, refDoc && refDoc.name])
+  }, [storyId, character.char_id, refDoc && refDoc.name, imageVersion(refDoc)])
   return (
     <div className="story-cast-image-slot">
       <div className="story-cast-image-box">
@@ -1163,7 +1164,7 @@ function characterTile(character, info, pickVoiceIds, withoutVoices) {
     id: character.char_id,
     name: character.name,
     shape: 'portrait',
-    thumb: portrait ? { kind: 'characters', eid: character.char_id, name: portrait.name } : null,
+    thumb: portrait ? { kind: 'characters', eid: character.char_id, name: portrait.name, version: imageVersion(portrait) } : null,
     thumbEmpty: missing.includes('text') ? 'Not written yet' : 'No portrait yet',
     meta: (
       <>

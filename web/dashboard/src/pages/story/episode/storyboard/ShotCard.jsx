@@ -13,6 +13,7 @@ import RouteChip from '../../../../components/RouteChip'
 import { EditableText, RegenerateControl, StepError } from '../../fields'
 import { Badge, Card, CardBody, CardHeader } from '../../../../ui'
 import ShotClipBlock from './ClipControls'
+import { imageVersion } from '../../../../lib/imageVersion'
 
 // clipping.aistory.schemas closed lists, verbatim (tests/test_story_payload_contract_episode.py).
 const FRAMINGS = [
@@ -177,7 +178,7 @@ function ShotImageBlock({ storyId, ep, assetShot, planConsistency, assetsBlocked
     setLoadFailed(false)
     if (!assetShot.image_name) return undefined
     let cancelled = false
-    fetchShotImageUrl(storyId, ep, assetShot.image_name).then((fresh) => {
+    fetchShotImageUrl(storyId, ep, assetShot.image_name, imageVersion(assetShot)).then((fresh) => {
       if (cancelled) { URL.revokeObjectURL(fresh); return }
       urlRef.current = fresh
       setUrl(fresh)
@@ -187,7 +188,7 @@ function ShotImageBlock({ storyId, ep, assetShot, planConsistency, assetsBlocked
       if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storyId, ep, assetShot.image_name])
+  }, [storyId, ep, assetShot.image_name, imageVersion(assetShot)])
 
   const toggleLock = async () => {
     setLockSaving(true)

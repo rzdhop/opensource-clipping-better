@@ -14,6 +14,7 @@ import { EntityImageSlots, imagesManual } from '../ManualUploadSlot'
 import { Badge, Chip, useConfirm } from '../../../ui'
 import { entityBrief, useImageBrief } from './PromptDrawer'
 import { SheetCheckBadge, SheetCheckLine } from '../SheetCheck'
+import { imageVersion } from '../../../lib/imageVersion'
 
 // The place time-variant choices a user may add (spec 2.4): the closed list
 // clipping.aistory.schemas.TIME_VARIANT_CHOICES also uses. "day" is always
@@ -282,7 +283,7 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
     }
     setUrl(null)
     if (imageRef) {
-      fetchStoryMediaUrl(storyId, 'places', place.place_id, imageRef.name).then((fresh) => {
+      fetchStoryMediaUrl(storyId, 'places', place.place_id, imageRef.name, { version: imageVersion(imageRef) }).then((fresh) => {
         if (cancelled) { URL.revokeObjectURL(fresh); return }
         urlRef.current = fresh
         setUrl(fresh)
@@ -292,7 +293,7 @@ function VariantSlot({ storyId, place, variantKey, imageRef, dayReady, textMissi
       cancelled = true
       if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
     }
-  }, [storyId, place.place_id, imageRef && imageRef.name])
+  }, [storyId, place.place_id, imageRef && imageRef.name, imageVersion(imageRef)])
 
   useEffect(() => {
     // consistencyMode is not part of the target, but it flips this slot's
@@ -604,7 +605,7 @@ function PropImage({ storyId, prop, disabled, onChange }) {
     if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
     setUrl(null)
     if (prop.image) {
-      fetchStoryMediaUrl(storyId, 'props', prop.prop_id, prop.image.name).then((fresh) => {
+      fetchStoryMediaUrl(storyId, 'props', prop.prop_id, prop.image.name, { version: imageVersion(prop.image) }).then((fresh) => {
         if (cancelled) { URL.revokeObjectURL(fresh); return }
         urlRef.current = fresh
         setUrl(fresh)
@@ -614,7 +615,7 @@ function PropImage({ storyId, prop, disabled, onChange }) {
       cancelled = true
       if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
     }
-  }, [storyId, prop.prop_id, prop.image && prop.image.name])
+  }, [storyId, prop.prop_id, prop.image && prop.image.name, imageVersion(prop.image)])
 
   useEffect(() => {
     fetchStoryEstimate(storyId, 'regenerate', { target }).then(setEstimate).catch(() => setEstimate(null))
@@ -887,7 +888,7 @@ function placeTile(place, missing) {
     id: place.place_id,
     name: place.name,
     shape: 'wide',
-    thumb: plate ? { kind: 'places', eid: place.place_id, name: plate.name } : null,
+    thumb: plate ? { kind: 'places', eid: place.place_id, name: plate.name, version: imageVersion(plate) } : null,
     thumbEmpty: missing.includes('text') ? 'Not written yet' : 'No plate yet',
     meta: (
       <>
@@ -905,7 +906,7 @@ function propTile(prop, ownerName) {
     id: prop.prop_id,
     name: prop.name,
     shape: 'square',
-    thumb: prop.image ? { kind: 'props', eid: prop.prop_id, name: prop.image.name } : null,
+    thumb: prop.image ? { kind: 'props', eid: prop.prop_id, name: prop.image.name, version: imageVersion(prop.image) } : null,
     thumbEmpty: prop.descriptor ? 'No image yet' : 'Not written yet',
     meta: (
       <>

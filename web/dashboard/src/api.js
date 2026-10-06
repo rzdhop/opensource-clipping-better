@@ -905,10 +905,12 @@ export async function deleteCharacterUpload(storyId, charId, name) {
  * directly as a `src`. The caller is responsible for revoking the URL.
  * `{ thumb: true }` asks for the route's cached 160 px-wide JPEG of an image
  * (DEC-257) -- for an avatar or a tile; the editors keep the full image.
+ * `{ version }` (`lib/imageVersion.js`) goes in the URL as `?v=`, so a file
+ * rewritten under the same name is never answered from a cache.
  */
-export async function fetchStoryMediaUrl(storyId, kind, eid, name, { thumb = false } = {}) {
-  const size = thumb ? '?size=thumb' : ''
-  const res = await request(`/stories/${storyId}/media/${kind}/${eid}/${encodeURIComponent(name)}${size}`)
+export async function fetchStoryMediaUrl(storyId, kind, eid, name, { thumb = false, version = '' } = {}) {
+  const query = [thumb ? 'size=thumb' : '', version ? `v=${encodeURIComponent(version)}` : ''].filter(Boolean).join('&')
+  const res = await request(`/stories/${storyId}/media/${kind}/${eid}/${encodeURIComponent(name)}${query ? `?${query}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to load the file')
   const blob = await res.blob()
   return URL.createObjectURL(blob)
@@ -1084,8 +1086,9 @@ export async function fetchEpisodeVoiceUrl(storyId, ep, name) {
  * fetched rather than used directly as an `<img src>`. The caller is
  * responsible for revoking the URL.
  */
-export async function fetchShotImageUrl(storyId, ep, imageName) {
-  const res = await request(`/stories/${storyId}/episodes/${ep}/shots/${encodeURIComponent(imageName)}`)
+export async function fetchShotImageUrl(storyId, ep, imageName, version = '') {
+  const query = version ? `?v=${encodeURIComponent(version)}` : ''
+  const res = await request(`/stories/${storyId}/episodes/${ep}/shots/${encodeURIComponent(imageName)}${query}`)
   if (!res.ok) throw await apiError(res, 'Failed to load the shot image')
   const blob = await res.blob()
   return URL.createObjectURL(blob)

@@ -15,6 +15,7 @@ import RouteChip from '../../../../components/RouteChip'
 import { StepError } from '../../fields'
 import { Card, CardBody, CardHeader, IconButton } from '../../../../ui'
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Film, ImageIcon } from '../../../../ui/icons'
+import { imageVersion } from '../../../../lib/imageVersion'
 import ShotCard, {
   SCENE_FUNCTION_LABELS, SHOT_STATE_LABELS, TransitionSelect, buildEntityMaps, shotStateTone,
 } from './ShotCard'
@@ -271,14 +272,14 @@ function ApproveStoryboard({ storyId, ep, episode, busy, onChange }) {
  * unchanged and revoked on a change or unmount -- ShotImageBlock's own
  * discipline.
  */
-function useShotImageUrl(storyId, ep, imageName) {
+function useShotImageUrl(storyId, ep, imageName, version = '') {
   const [url, setUrl] = useState(null)
   useEffect(() => {
     setUrl(null)
     if (!imageName) return undefined
     let cancelled = false
     let current = null
-    fetchShotImageUrl(storyId, ep, imageName).then((fresh) => {
+    fetchShotImageUrl(storyId, ep, imageName, version).then((fresh) => {
       if (cancelled) { URL.revokeObjectURL(fresh); return }
       current = fresh
       setUrl(fresh)
@@ -287,7 +288,7 @@ function useShotImageUrl(storyId, ep, imageName) {
       cancelled = true
       if (current) URL.revokeObjectURL(current)
     }
-  }, [storyId, ep, imageName])
+  }, [storyId, ep, imageName, version])
   return url
 }
 
@@ -304,7 +305,7 @@ function verdictTone(state) {
 }
 
 function FilmstripThumb({ storyId, ep, shot, assetShot, verdict, tier, selected, onSelect }) {
-  const url = useShotImageUrl(storyId, ep, assetShot ? assetShot.image_name : null)
+  const url = useShotImageUrl(storyId, ep, assetShot ? assetShot.image_name : null, imageVersion(assetShot))
   const clip = tier >= 2 && assetShot ? assetShot.clip : null
   const marks = []
   if (assetShot) {
