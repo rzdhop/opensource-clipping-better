@@ -25,6 +25,9 @@ network volume exist (`docs/AI_STORY.md`, "A rented GPU by the second").
   (`RUNPOD_GPU_USD_PER_HOUR` optional, to log what RunPod really billed next
   to the table's estimate); the Settings key check asks the endpoint's
   `/health`. `docker-compose.yml` forwards the three names into the container.
+- **The three RunPod values are Settings fields too** (Images, video & voices):
+  the key is a secret field, the endpoint id and the optional GPU price are plain
+  fields; a price of zero or text is refused.
 - **`clipping/providers/runpod_comfyui.py`**: refuses before sending what the
   template cannot sell, submits the rendered graph with the keyframe inline in
   one `POST /run`, journals the job id at once, polls `/status`, resumes by id

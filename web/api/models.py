@@ -439,6 +439,11 @@ class SettingsRequest(BaseModel):
     anthropic_api_key: Optional[str] = None
     # ElevenLabs voices (plan 23 stage B3): billed per character.
     elevenlabs_api_key: Optional[str] = None
+    # RunPod Serverless (DEC-310): the key is a secret; the endpoint id and the
+    # optional GPU price (dollars per hour, kept as typed) are plain values.
+    runpod_api_key: Optional[str] = None
+    runpod_comfy_endpoint_id: Optional[str] = None
+    runpod_gpu_usd_per_hour: Optional[str] = None
     local_comfyui_url: Optional[str] = None
     local_ollama_url: Optional[str] = None
 
@@ -505,6 +510,9 @@ class SettingsResponse(BaseModel):
     gemini_paid_api_key_set: bool = False
     anthropic_api_key_set: bool = False
     elevenlabs_api_key_set: bool = False
+    runpod_api_key_set: bool = False
+    runpod_comfy_endpoint_id: str = ""
+    runpod_gpu_usd_per_hour: str = ""
     local_comfyui_url: str = ""
     local_ollama_url: str = ""
     generation_chains: dict = {}

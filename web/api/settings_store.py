@@ -89,6 +89,11 @@ PERSISTED_KEYS = frozenset({
     "ANTHROPIC_API_KEY",
     # ElevenLabs voices (plan 23 stage B3): billed per character.
     "ELEVENLABS_API_KEY",
+    # RunPod Serverless (DEC-310): the key is a secret; the endpoint id and
+    # the optional GPU price are plain values.
+    "RUNPOD_API_KEY",
+    "RUNPOD_COMFY_ENDPOINT_ID",
+    "RUNPOD_GPU_USD_PER_HOUR",
     "LOCAL_COMFYUI_URL",
     "LOCAL_OLLAMA_URL",
 })
@@ -116,6 +121,7 @@ SECRET_KEYS = frozenset({
     "GEMINI_PAID_API_KEY",
     "ANTHROPIC_API_KEY",
     "ELEVENLABS_API_KEY",
+    "RUNPOD_API_KEY",
 })
 
 

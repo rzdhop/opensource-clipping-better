@@ -22,6 +22,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 GEN_VARS = ("FAL_KEY", "OPENAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "POLLINATIONS_API_KEY",
             "ELEVENLABS_API_KEY", "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN",
+            "RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID", "RUNPOD_GPU_USD_PER_HOUR",
             "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL",
             "ALLOW_PAID", "PER_EPISODE_CAP_USD", "DAILY_CAP_USD", "PER_STORY_CAP_USD", "BUDGET_PROFILE")
 
@@ -148,6 +149,29 @@ def test_new_keys_and_local_urls_round_trip_and_clear(client, settings_env, tmp_
     assert cleared["fal_key_set"] is False and cleared["local_comfyui_url"] == "http://127.0.0.1:8188"
 
 
+def test_the_runpod_settings_round_trip_clear_and_refuse_a_bad_price(client, settings_env, tmp_path):
+    """DEC-310: the key is a secret, the endpoint id and the price are echoed as typed."""
+    updated = client.put("/api/settings", json={
+        "runpod_api_key": "rk", "runpod_comfy_endpoint_id": " e14bceyj7rrdxl ", "runpod_gpu_usd_per_hour": "1.575"}).json()
+    assert updated["runpod_api_key_set"] is True
+    assert updated["runpod_comfy_endpoint_id"] == "e14bceyj7rrdxl" and updated["runpod_gpu_usd_per_hour"] == "1.575"
+    assert "rk" not in json.dumps(updated)
+    stored = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert stored["RUNPOD_API_KEY"] == "rk" and stored["RUNPOD_COMFY_ENDPOINT_ID"] == "e14bceyj7rrdxl"
+    assert stored["RUNPOD_GPU_USD_PER_HOUR"] == "1.575"
+    again = client.get("/api/settings").json()
+    assert again["runpod_api_key_set"] is True and again["runpod_gpu_usd_per_hour"] == "1.575"
+    for bad in ("abc", "0", "-1", "inf", "nan"):
+        response = client.put("/api/settings", json={"runpod_gpu_usd_per_hour": bad})
+        assert response.status_code == 400, bad
+        assert "above 0" in response.json()["detail"]
+    assert client.get("/api/settings").json()["runpod_gpu_usd_per_hour"] == "1.575"
+    cleared = client.put("/api/settings", json={
+        "runpod_api_key": "", "runpod_comfy_endpoint_id": "", "runpod_gpu_usd_per_hour": ""}).json()
+    assert cleared["runpod_api_key_set"] is False
+    assert cleared["runpod_comfy_endpoint_id"] == "" and cleared["runpod_gpu_usd_per_hour"] == ""
+
+
 def test_a_paid_link_is_never_summarised_as_allowed_while_paid_is_off(client):
     """Found live: gemini/flash's token estimate rounded to $0.000 and the row said "allowed"."""
     client.put("/api/settings", json={"google_api_key": "gk"})
@@ -182,7 +206,8 @@ def test_the_new_secrets_are_persisted_and_redacted():
     for name in ("FAL_KEY", "OPENAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "POLLINATIONS_API_KEY",
                  "ELEVENLABS_API_KEY"):
         assert name in settings_store.PERSISTED_KEYS and name in settings_store.SECRET_KEYS, name
-    for name in ("LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL"):
+    assert "RUNPOD_API_KEY" in settings_store.PERSISTED_KEYS and "RUNPOD_API_KEY" in settings_store.SECRET_KEYS
+    for name in ("RUNPOD_COMFY_ENDPOINT_ID", "RUNPOD_GPU_USD_PER_HOUR", "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL"):
         assert name in settings_store.PERSISTED_KEYS and name not in settings_store.SECRET_KEYS, name
 
 
@@ -340,7 +365,8 @@ def test_compose_passes_every_generation_variable_and_the_host_gateway():
 def test_env_example_documents_the_generation_surface():
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
     for name in ("FAL_KEY", "OPENAI_API_KEY", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "POLLINATIONS_API_KEY",
-                 "ELEVENLABS_API_KEY", "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN", "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL"):
+                 "ELEVENLABS_API_KEY", "IMAGE_CHAIN", "IMAGE_EDIT_CHAIN", "VIDEO_CHAIN", "TTS_CHAIN", "VISION_CHAIN", "LOCAL_COMFYUI_URL", "LOCAL_OLLAMA_URL",
+                 "RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID", "RUNPOD_GPU_USD_PER_HOUR"):
         assert re.search(rf"^{name}=", text, re.M), name
 
 

@@ -103,7 +103,7 @@ export function frameRefusal(frame, { pipeline, tier, route, budgetProfile, reas
 const KEY_NAMES = {
   GEMINI_PAID_API_KEY: 'the paid Gemini key', GOOGLE_API_KEY: 'the Google key', GROQ_API_KEY: 'the Groq key',
   FAL_KEY: 'the fal.ai key', ELEVENLABS_API_KEY: 'the ElevenLabs key', OPENAI_API_KEY: 'the OpenAI key',
-  MISTRAL_API_KEY: 'the Mistral key',
+  MISTRAL_API_KEY: 'the Mistral key', RUNPOD_API_KEY: 'the RunPod key', RUNPOD_COMFY_ENDPOINT_ID: 'the RunPod endpoint id',
 }
 const keyName = (env) => KEY_NAMES[env] || env
 

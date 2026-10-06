@@ -4049,8 +4049,9 @@ $0.082 at $1.58/h`) and kept in the clip's meta (`gpu_seconds`,
 
 - The link names the template: `runpod/i2v_wan22_14b_lightning`,
   `runpod/i2v_wan22_5b` or `runpod/i2v_ltx2`. None is in the shipped
-  `VIDEO_CHAIN`; name the one your volume carries in `.env` (the chains and
-  the RunPod ids are `.env` values, not Settings fields), for
+  `VIDEO_CHAIN`; name the one your volume carries in `.env` (the chain is
+  a `.env` value; the RunPod key, endpoint id and GPU price can also be entered in
+  Settings → Images, video & voices), for
   example `VIDEO_CHAIN=local/comfyui,runpod/i2v_wan22_14b_lightning,fal/seedance-1-pro-fast`.
 - `RUNPOD_API_KEY` (a key restricted to Serverless) and
   `RUNPOD_COMFY_ENDPOINT_ID` key the link; Settings' key check asks the

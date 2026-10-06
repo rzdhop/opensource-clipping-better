@@ -86,6 +86,7 @@ const KEY_PROVIDERS = {
   gemini_paid_api_key: 'gemini_paid',
   anthropic_api_key: 'anthropic',
   elevenlabs_api_key: 'elevenlabs',
+  runpod_api_key: 'runpod',
 }
 
 function providerOfLabel(label) {
@@ -256,6 +257,10 @@ function Settings() {
   const [anthropicKey, setAnthropicKey] = useState('')
   // ElevenLabs voices, billed per character (plan 23 stage B3).
   const [elevenlabsKey, setElevenlabsKey] = useState('')
+  // A rented GPU by the second (DEC-310): the key is a secret; the endpoint id and the price are prefilled.
+  const [runpodKey, setRunpodKey] = useState('')
+  const [runpodEndpointId, setRunpodEndpointId] = useState('')
+  const [runpodGpuRate, setRunpodGpuRate] = useState('')
   // B-roll sources (plan 23 stage B2): the Pixabay key is a secret; the order and the folder are prefilled.
   const [pixabayKey, setPixabayKey] = useState('')
   const [brollSources, setBrollSources] = useState('')
@@ -366,6 +371,8 @@ function Settings() {
         setPerStoryCap(String(data.per_story_cap_usd ?? ''))
         setBudgetProfile(data.budget_profile || '')
         setBudgetTimezone(data.budget_timezone || '')
+        setRunpodEndpointId(data.runpod_comfy_endpoint_id || '')
+        setRunpodGpuRate(data.runpod_gpu_usd_per_hour || '')
         setLocalComfyuiUrl(data.local_comfyui_url || '')
         setLocalOllamaUrl(data.local_ollama_url || '')
         setLoading(false)
@@ -395,6 +402,7 @@ function Settings() {
       if (geminiPaidKey) payload.gemini_paid_api_key = geminiPaidKey
       if (anthropicKey) payload.anthropic_api_key = anthropicKey
       if (elevenlabsKey) payload.elevenlabs_api_key = elevenlabsKey
+      if (runpodKey) payload.runpod_api_key = runpodKey
       if (pixabayKey) payload.pixabay_api_key = pixabayKey
 
       // B-roll order and folder: sent when changed; "" restores the default order / clears the folder.
@@ -448,6 +456,13 @@ function Settings() {
       if (budgetTimezone.trim() !== (settings?.budget_timezone || '')) {
         payload.budget_timezone = budgetTimezone.trim()
       }
+      // RunPod (DEC-310): the endpoint id and the price are sent when changed; "" clears.
+      if (runpodEndpointId.trim() !== (settings?.runpod_comfy_endpoint_id || '')) {
+        payload.runpod_comfy_endpoint_id = runpodEndpointId.trim()
+      }
+      if (runpodGpuRate.trim() !== (settings?.runpod_gpu_usd_per_hour || '')) {
+        payload.runpod_gpu_usd_per_hour = runpodGpuRate.trim()
+      }
       // Local servers (spec 8.1): sent when changed; "" clears back to the default.
       if (localComfyuiUrl.trim() !== (settings?.local_comfyui_url || '')) {
         payload.local_comfyui_url = localComfyuiUrl.trim()
@@ -474,6 +489,8 @@ function Settings() {
       setPerStoryCap(String(updated.per_story_cap_usd ?? ''))
       setBudgetProfile(updated.budget_profile || '')
       setBudgetTimezone(updated.budget_timezone || '')
+      setRunpodEndpointId(updated.runpod_comfy_endpoint_id || '')
+      setRunpodGpuRate(updated.runpod_gpu_usd_per_hour || '')
       setLocalComfyuiUrl(updated.local_comfyui_url || '')
       setLocalOllamaUrl(updated.local_ollama_url || '')
       setGoogleKey('')
@@ -490,6 +507,7 @@ function Settings() {
       setCloudflareAccountId('')
       setPollinationsKey('')
       setElevenlabsKey('')
+      setRunpodKey('')
       setPixabayKey('')
       setBrollSources(updated.broll_sources || '')
       setBrollLocalDir(updated.broll_local_dir || '')
@@ -994,6 +1012,27 @@ function Settings() {
               onChange={setElevenlabsKey}
               placeholder="Paste your ElevenLabs API key"
             />
+            <KeyField
+              id="settings-runpod-key"
+              label="RunPod key"
+              note="paid per GPU second: clips on your own ComfyUI workflows"
+              isSet={settings?.runpod_api_key_set}
+              tested={isTested('runpod_api_key')}
+              value={runpodKey}
+              onChange={setRunpodKey}
+              placeholder="Paste your RunPod API key (Serverless)"
+            />
+            <Field label="RunPod endpoint id" htmlFor="settings-runpod-endpoint">
+              <input id="settings-runpod-endpoint" className="form-input" type="text" value={runpodEndpointId}
+                onChange={e => setRunpodEndpointId(e.target.value)} placeholder="the Serverless endpoint's id"
+                autoComplete="off" spellCheck={false} />
+            </Field>
+            <Field label="RunPod GPU price per hour (USD)" htmlFor="settings-runpod-rate"
+              hint="Optional: the flex price of the endpoint's GPU, used only to log what RunPod really billed next to the estimate.">
+              <input id="settings-runpod-rate" className="form-input" type="number" min="0.01" step="0.01"
+                inputMode="decimal" value={runpodGpuRate}
+                onChange={e => setRunpodGpuRate(e.target.value)} placeholder="1.75" />
+            </Field>
             </CardBody>
           </Card>
           <ChainLinksPanel

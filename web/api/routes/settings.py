@@ -291,6 +291,19 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
             env_updates["BUDGET_TIMEZONE"] = check_zone_name(req.budget_timezone)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
+    # The RunPod GPU price (DEC-310): optional, but when given it must be a
+    # positive number of dollars per hour. Stored as typed ("" clears it).
+    if req.runpod_gpu_usd_per_hour is not None and req.runpod_gpu_usd_per_hour.strip():
+        try:
+            rate = float(req.runpod_gpu_usd_per_hour.strip())
+            rate_ok = rate > 0 and rate != float("inf")
+        except ValueError:
+            rate_ok = False
+        if not rate_ok:
+            raise HTTPException(
+                status_code=400,
+                detail="The RunPod GPU price must be a number of dollars per hour above 0.",
+            )
     # Generation providers (spec 8.6): keys clear on "" like every key; the
     # local URLs are stored as typed and normalised when read.
     for name, value in (("FAL_KEY", req.fal_key), ("OPENAI_API_KEY", req.openai_api_key),
@@ -300,6 +313,9 @@ async def update_settings(req: SettingsRequest) -> SettingsResponse:
                         ("GEMINI_PAID_API_KEY", req.gemini_paid_api_key),
                         ("ANTHROPIC_API_KEY", req.anthropic_api_key),
                         ("ELEVENLABS_API_KEY", req.elevenlabs_api_key),
+                        ("RUNPOD_API_KEY", req.runpod_api_key),
+                        ("RUNPOD_COMFY_ENDPOINT_ID", req.runpod_comfy_endpoint_id),
+                        ("RUNPOD_GPU_USD_PER_HOUR", req.runpod_gpu_usd_per_hour),
                         ("LOCAL_COMFYUI_URL", req.local_comfyui_url), ("LOCAL_OLLAMA_URL", req.local_ollama_url)):
         if value is not None:
             env_updates[name] = value.strip()
@@ -674,6 +690,9 @@ def _generation_fields(env) -> dict:
         "gemini_paid_api_key_set": bool(merged.get("GEMINI_PAID_API_KEY")),
         "anthropic_api_key_set": bool(merged.get("ANTHROPIC_API_KEY")),
         "elevenlabs_api_key_set": bool(merged.get("ELEVENLABS_API_KEY")),
+        "runpod_api_key_set": bool(merged.get("RUNPOD_API_KEY")),
+        "runpod_comfy_endpoint_id": merged.get("RUNPOD_COMFY_ENDPOINT_ID", "") or "",
+        "runpod_gpu_usd_per_hour": merged.get("RUNPOD_GPU_USD_PER_HOUR", "") or "",
         "local_comfyui_url": gen.local_url("comfyui", merged),
         "local_ollama_url": gen.local_url("ollama", merged),
         "generation_chains": chains,
