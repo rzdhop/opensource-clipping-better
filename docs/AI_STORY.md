@@ -1251,9 +1251,14 @@ mentions a person: the place is shown empty and the prop alone.
   Press **Regenerate** on the tile (the whole-text one) and the app writes the
   text, then the look, and with it the Description. Until then the story's
   prompts are exactly what they were.
-- **The tile does not show a box for it yet.** The Description is saved on the
-  character, place or prop; the editable text box on its tile is the follow-up. To
-  change it today, regenerate the text with a note.
+- **You edit it on the tile.** Each character, place and prop tile shows it under
+  the descriptor, labelled **Description**, with a word count beside the label
+  (for example "98 words") and the hint "About 100 words a painter could work
+  from. Used first in every picture prompt." When there is none, the box says
+  "Not written yet — Regenerate writes it." (the tile's **↻ Regenerate** writes the
+  text and then the look, and the look writes the Description). Empty the box and
+  the Description is cleared. On a place or a prop, a text that names a person
+  is refused: the set is shown empty and the prop alone.
 
 The word budgets. A prompt that has a Description may use about 100 more words in
 that element's own picture prompt, so the rest of it (the style, the rules, the
