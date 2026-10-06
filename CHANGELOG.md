@@ -10,6 +10,66 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### A text-to-speech route on the RunPod worker: Chatterbox Multilingual (French), and "Accès refusé" episode 1 voiced through it (DEC-314)
+
+#### Added
+
+- **`tts_chatterbox` workflow template** (`clipping/aistory/templates/workflows/`,
+  task `tts`, kind `audio`): core `LoadAudio` reads the reference voice
+  (`audio_path`), `FL_ChatterboxMultilingualTTS` speaks the line in French
+  (`prompt`, `seed`, `exaggeration`, `cfg_weight`), core `SaveAudio` writes a
+  FLAC. Its `requires` entries carry an empty `field`: the node loads the six
+  `ResembleAI/chatterbox` files itself from `models/chatterbox/chatterbox_multilingual/`.
+- **`docker/worker-comfyui-tts/`**: the serverless worker image
+  (`FROM runpod/worker-comfyui:5.10.0-base-cuda12.8.1`, the repo's pin) plus
+  the `ComfyUI_Fill-ChatterBox` node pack pinned to a commit, a symlink that
+  puts the weights on the network volume, and `patch_handler.py`, a build-time
+  patch of the worker's handler that returns SaveAudio outputs under `audio`
+  exactly like `images` (base64 or S3). `fetch_weights.sh` pre-fetches the
+  3.2 GB once from the dev pod. The README records the licences (node pack MIT
+  per its README, no LICENSE file; weights MIT; worker AGPL-3.0).
+- **`.github/workflows/worker-tts-image.yml`**: builds and pushes
+  `ghcr.io/rzdhop/worker-comfyui-tts:<sha>` and `:latest` with `GITHUB_TOKEN`
+  (`packages: write`), by hand or on a push to main under the image's folder.
+- **The MCP server speaks audio**: an `audio` job kind
+  (`RUNPOD_AUDIO_ENDPOINT_ID` / `_API_KEY` / `_GPU_USD_PER_HOUR`; empty = the
+  image endpoint, then the video one), `comfy_submit`'s `audio_path`,
+  `exaggeration`, `cfg_weight`; the worker's `audio` outputs saved as
+  `.flac`/`.wav` in `dest`; `comfy_fetch` and `view_file` report a sound file's
+  duration, sample rate, channels and size; `templates_list` shows the template
+  with its kind; `comfy_download` knows `.flac`. `docs/MCP.md` "Voice lines".
+- **`tools/make_voice_refs.py`**: the four frozen reference voices of the
+  series (RIDA, MARIE-JEANNE, ANANAS, INÈS), 10-15 s of French each, Gemini's
+  prebuilt voices first and edge-tts fr-FR voices as the fallback, never remade
+  without `--force`. Runs on the host that holds the key.
+- **`tools/voice_ep01_comfy.py`**: the 18 lines of episode 1, one
+  `tts_chatterbox` job each through the MCP's job client with the speaker's
+  reference and a fixed seed per speaker, sequential by default, the estimate
+  printed and `--go` required before any GPU second; the FLAC converted to
+  `outputs/acces_refuse/ep01/voices/lNN.wav`.
+- **`tools/render_ep01.py --use-existing-voices`** (and `--voices-dir`): mixes
+  those files without a Gemini call.
+- Tests: `tests/test_tts_chatterbox_template.py`,
+  `tests/test_worker_tts_handler_patch.py`, `tests/test_voice_tools.py`, plus
+  the audio cases in `tests/test_mcp_runpod_jobs.py` and `tests/test_mcp_server.py`.
+
+#### Changed
+
+- `render_template` types `exaggeration` and `cfg_weight` as floats; a
+  `requires` entry with an empty `field` is listed by `validate_template` and
+  the schema test but never checked against a combo (the node loads the file).
+- The job client reads `output.images` then `output.audio`; the "finished
+  without a file" message names SaveAudio with SaveImage/SaveVideo. Image and
+  video jobs are byte-identical in naming, pricing and refusals.
+
+#### Known limitation
+
+- Nothing ran on a GPU here: the image build, the GHCR push, the endpoint
+  re-pointing and the first spoken line are the manual steps listed in the
+  pull request and in `docker/worker-comfyui-tts/README.md` ("To verify on the
+  first live run": the vendored Chatterbox against the base's `transformers`,
+  the `.wav` upload for `LoadAudio`, the first-run download through the symlink).
+
 ### The story MCP server: comfy_download and a systemd unit (DEC-313)
 
 #### Added
