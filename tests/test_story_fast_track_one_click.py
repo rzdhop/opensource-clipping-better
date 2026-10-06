@@ -4,9 +4,9 @@ directly the whole thing at once, ready to read and approve").
 
 - On a v2 story at tier >= 2 the fast track no longer stops at the keyframes:
   once they are made, checked (J2) and auto-fixed, it records the keyframe
-  approval itself (``keyframes_approved.by == "fast_track"``; plan 28 F1:
-  only when every check passed -- a shot still flagged stops it, never
-  approved "anyway"), buys the clips, approves the
+  approval itself (``keyframes_approved.by == "fast_track"``; DEC-311: a
+  shot still flagged is approved with the check's warning and named, never
+  a stop), buys the clips, approves the
   assets (``approved.by``), renders and writes the metadata. The job ends
   completed, "ready for review". ``stop_at_keyframes`` keeps today's stop.
 - The paid check before anything is bought counts the whole episode -- the
@@ -168,29 +168,25 @@ def test_the_one_click_approves_the_keyframes_buys_the_clips_approves_the_assets
     assert any(f"under a {int(expected // 60)}-minute budget" in line for line in log), log[:3]
 
 
-def test_flagged_keyframes_stop_the_one_click_naming_them(store, tmp_path, built):
-    """Plan 28 F1 (DEC-305 §5), re-pinned on purpose: a keyframe still
-    flagged after the auto-fix stops the one click with the keyframe
-    approval's own sentences -- it was approved "anyway" -- and no clip is
-    bought; once it passes, Continue approves and finishes the episode."""
+def test_flagged_keyframes_do_not_stop_the_one_click_and_are_named(store, tmp_path, built):
+    """DEC-311, re-pinned on purpose (plan 28 F1 stopped here): a keyframe
+    still flagged after the auto-fix is approved for the human with the
+    check's warning -- named on the record, in the feed and at the end --
+    and the clips are bought and the episode rendered in the same run."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
     video = tvp.FakeVideo()
     fakes = _fakes(tmp_path, video=video, vision=kg.FakeVision(kg._failing("sh02")))
 
-    message = tft.stopped(store, story_id, fakes, settings=kg.SETTINGS)
+    summary, log = tft.run(store, story_id, fakes, settings=kg.SETTINGS)
 
-    assert message == ("Fast track stopped at the assets (step 4 of 6): Episode 1's keyframes are not approved. Shot "
-                       "sh02 does not match: does not show the beat, missing the coconut phone. Regenerate it, or "
-                       "upload your own. Then Continue the fast track: it picks up here and repeats nothing already "
-                       "done.")
-    assert video.requests == []
-    assert "keyframes_approved" not in kg._doc(store, story_id)
-
-    kg._pass_verdict(store, story_id, "sh02")
-    summary, _log = tft.run(store, story_id, _fakes(tmp_path, video=video), settings=kg.SETTINGS)
-    approved = kg._doc(store, story_id)["keyframes_approved"]
-    assert approved["by"] == "fast_track" and approved["anyway"] is False and approved["flagged"] == []
     assert video.requests and summary["steps"]["render"]["state"] == "completed"
+    assert summary["keyframes"] == {"auto_approved": True, "anyway": True, "flagged": ["sh02"], "unchecked": []}
+    approved = kg._doc(store, story_id)["keyframes_approved"]
+    assert approved["by"] == "fast_track" and approved["anyway"] is True and approved["flagged"] == ["sh02"]
+    assert approved["shots"]["sh02"]["issues"] == ["does not show the beat", "missing the coconut phone"]
+    assert any("kept with the check's warning: sh02 (does not show the beat, missing the coconut phone)" in line
+               for line in log)
+    assert "(the keyframes were approved for you; still flagged: sh02)" in log[-1]
 
 
 def test_stop_at_keyframes_keeps_todays_stop_and_the_human_s_approval(store, tmp_path, built):
@@ -295,6 +291,17 @@ def test_the_keyframe_and_assets_approvals_record_who_approved_and_what_was_flag
     doc["approved"]["by"] = "user"
     doc["keyframes_approved"]["flagged"] = ["nope"]
     assert any("$.keyframes_approved.flagged" in error for error in schemas.episode_assets_errors(doc))
+    # DEC-311: each shot approved with the check's warning, keyed by shot id -- what it saw and the image.
+    doc["keyframes_approved"]["flagged"] = ["sh02", "sh07"]
+    doc["keyframes_approved"]["shots"] = {"sh02": {"issues": ["does not show the beat"], "image_hash": tsp.SHA_A},
+                                          "sh07": {"issues": ["no keyframe check yet"], "image_hash": tsp.SHA_A}}
+    assert schemas.episode_assets_errors(doc) == []
+    doc["keyframes_approved"]["shots"] = {"shot2": {"issues": ["x"], "image_hash": tsp.SHA_A}}
+    assert "$.keyframes_approved.shots: 'shot2' is not a shot id" in schemas.episode_assets_errors(doc)
+    doc["keyframes_approved"]["shots"] = {"sh02": {"issues": ["x"], "image_hash": "not-a-sha"}}
+    assert any("$.keyframes_approved.shots.sh02.image_hash" in error for error in schemas.episode_assets_errors(doc))
+    doc["keyframes_approved"]["shots"] = {"sh02": {"issues": [], "image_hash": tsp.SHA_A}}
+    assert any("$.keyframes_approved.shots.sh02.issues" in error for error in schemas.episode_assets_errors(doc))
 
 
 # ============================================================ the review
@@ -305,13 +312,11 @@ def test_the_review_block_reads_the_finished_episode_and_what_is_still_pending(s
     wf = _wf()
     story_id = kg._v2_keyframes(store, tmp_path, built)
     video = tvp.FakeVideo()
-    tft.run(store, story_id, _fakes(tmp_path, video=video), settings=kg.SETTINGS)
-    # Plan 28 F1, re-pinned on purpose: the one click no longer approves over a flagged keyframe; the
-    # review still reads an approval recorded "anyway" before it (sh02 flagged, its verdict a failure).
-    doc = kg._doc(store, story_id)
-    doc["keyframe_verdicts"]["sh02"].update(shows_beat=False, missing=["the coconut phone"])
-    doc["keyframes_approved"].update(anyway=True, flagged=["sh02"])
-    store.write_episode_doc(story_id, 1, "assets.json", doc, now=kg.LATER)
+    # DEC-311, re-pinned on purpose: the one click approves over a flagged keyframe again, with the check's
+    # warning (sh02 flagged, its verdict a failure) -- the review reads the record it keeps.
+    tft.run(store, story_id, _fakes(tmp_path, video=video, vision=kg.FakeVision(kg._failing("sh02"))),
+            settings=kg.SETTINGS)
+    sha = kg._doc(store, story_id)["keyframe_verdicts"]["sh02"]["image_sha256"]
 
     review = wf.episode_review(_page(store, story_id))
 
@@ -322,6 +327,8 @@ def test_the_review_block_reads_the_finished_episode_and_what_is_still_pending(s
     approvals = review["approvals"]
     assert approvals["keyframes"]["by"] == "fast_track" and approvals["keyframes"]["anyway"] is True
     assert approvals["keyframes"]["flagged"] == ["sh02"] and approvals["keyframes"]["target"] == "keyframes:1"
+    assert approvals["keyframes"]["shots"] == {"sh02": {"issues": ["does not show the beat", "missing the coconut "
+                                                                   "phone"], "image_hash": sha, "current": True}}
     assert approvals["assets"] == {"approval": "current", "at": approvals["assets"]["at"], "by": "fast_track",
                                    "target": "assets:1"}
     assert approvals["script"]["approved"] is True and approvals["storyboard"]["approved"] is True
@@ -350,10 +357,12 @@ def test_the_review_block_reads_the_finished_episode_and_what_is_still_pending(s
     assert by_id[shot["shot_id"]]["lines"] == [
         {"line_id": line_id, "speaker": lines[line_id]["speaker"], "text": lines[line_id]["text"]}
         for line_id in shot["lines"]]
-    # Plan 28 F1, re-pinned on purpose: "warning", the check's issues on the human's own keyframe (else None).
+    # Plan 28 F1, DEC-311 re-pinned on purpose: "warning", the check's issues on any flagged keyframe -- the
+    # human's own or app-made (else None).
     assert set(review["shots"][0]) == {"shot_id", "scene_id", "order", "image_name", "image_state", "locked",
                                        "target", "clip", "verdict", "fix", "lines", "warning"}
     assert review["shots"][0]["warning"] is None
+    assert by_id["sh02"]["warning"] == "The check saw: does not show the beat, missing the coconut phone"
 
     # A keyframe changed since: both approvals are stale, pending in order, the render out of date.
     ec = tas._ec(store, story_id)

@@ -129,7 +129,8 @@ def _doc(store, story_id):
 
 def _pass_verdict(store, story_id, shot_id):
     """Shot *shot_id*'s stored verdict made a pass (as a redraw that passed
-    would leave it): the hard gate's way through in a test (plan 28 F1)."""
+    would leave it): an approval with nothing flagged, in a test (DEC-311:
+    a flagged one is approved too, with its warning)."""
     doc = _doc(store, story_id)
     doc["keyframe_verdicts"][shot_id].update(shows_beat=True, missing=[], continuity_issue=None)
     store.write_episode_doc(story_id, 1, "assets.json", doc, now=LATER)
@@ -216,10 +217,11 @@ def test_a_changed_keyframe_makes_the_approval_stale_and_holds_the_clips_again(s
     assert summary["keyframes"]["approval"] == "stale"
 
 
-def test_a_failed_or_missing_verdict_refuses_the_approval(store, tmp_path, built):
-    """Plan 28 F1, re-pinned on purpose: a hard gate -- the refusal names
-    each shot in plain sentences and ``approve_anyway`` goes over nothing."""
-    wf = _wf()
+def test_a_failed_or_missing_verdict_is_approved_with_its_warning(store, tmp_path, built):
+    """DEC-311, re-pinned on purpose (plan 28 F1 refused it): the keyframe
+    check warns, it never blocks -- a shot with no check, or one whose check
+    failed, is approved with what the check said kept on the approval
+    (``shots``), and ``approve_anyway`` is accepted and ignored."""
     story_id = _v2_keyframes(store, tmp_path, built)
     shots = [shot["shot_id"] for shot in tas._board(store, story_id)["shots"]]
 
@@ -229,21 +231,22 @@ def test_a_failed_or_missing_verdict_refuses_the_approval(store, tmp_path, built
     summary, log = tas._run(store, story_id, adapters=table, settings=SETTINGS, params={"animate": False})
     assert summary["keyframes"]["unavailable"].startswith("no vision link could judge the keyframes")
     assert any(line.startswith("👁 Keyframe check (J2) stopped: no vision link") for line in log)
-    with pytest.raises(wf.WorkflowError) as caught:
-        _approve_keyframes(store, story_id, approve_anyway=True)
-    assert caught.value.code == wf.CONFLICT
-    assert str(caught.value).startswith(f"Episode 1's keyframes are not approved. Shots {shots[0]}, ")
-    assert "have no keyframe check yet: run the assets step again (it checks them, free)." in str(caught.value)
+    # Said in the feed as a warning, never as a refusal.
+    assert summary["keyframes"]["warnings"].startswith(f"Shots {shots[0]}, ")
+    assert any(line.startswith("⚠️ Episode 1's keyframes kept with the check's warning: ") for line in log)
+    approved = _approve_keyframes(store, story_id, approve_anyway=True)["keyframes_approved"]
+    assert approved["anyway"] is True and approved["flagged"] == shots
+    assert {shot_id: entry["issues"] for shot_id, entry in approved["shots"].items()} == {
+        shot_id: ["no keyframe check yet"] for shot_id in shots}
 
-    # J2 finds sh03 short of its prop: refused naming it and what it found, anyway or not.
+    # J2 finds sh03 short of its prop: approved with what it found, anyway or not.
     _run(store, story_id, vision=FakeVision(_failing("sh03")), params={"animate": False})
+    verdict = _doc(store, story_id)["keyframe_verdicts"]["sh03"]
     for anyway in (False, True):
-        with pytest.raises(wf.WorkflowError) as caught:
-            _approve_keyframes(store, story_id, approve_anyway=anyway)
-        assert str(caught.value) == (
-            "Episode 1's keyframes are not approved. Shot sh03 does not match: does not show the beat, missing the "
-            "coconut phone. Regenerate it, or upload your own.")
-    assert "keyframes_approved" not in _doc(store, story_id)
+        approved = _approve_keyframes(store, story_id, approve_anyway=anyway)["keyframes_approved"]
+        assert approved["anyway"] is True and approved["flagged"] == ["sh03"]
+        assert approved["shots"] == {"sh03": {"issues": ["does not show the beat", "missing the coconut phone"],
+                                              "image_hash": verdict["image_sha256"]}}
     assert _doc(store, story_id)["keyframe_verdicts"]["sh03"]["missing"] == ["the coconut phone"]
 
 
@@ -500,20 +503,23 @@ def test_j2_asks_a_framing_issue_of_its_own_and_its_brief_is_unchanged():
 # ============================================================ the API and the CLI
 
 def test_the_approve_route_takes_keyframes_without_auth_and_anyway_goes_over_nothing(api, tmp_path, built):
-    """Plan 28 F1, re-pinned on purpose: ``approve_anyway`` is still taken
-    on ``keyframes:<ep>`` and goes over nothing (a hard gate)."""
+    """DEC-311, re-pinned on purpose (plan 28 F1 refused it with a 409): a
+    flagged keyframe is approved with its warning, with or without
+    ``approve_anyway`` -- still taken on ``keyframes:<ep>``, and ignored."""
     story_id = _v2_keyframes(api.store, tmp_path, built)
     tas._run(api.store, story_id, adapters=_adapters(vision=FakeVision(_failing("sh02"))), settings=SETTINGS,
              params={"animate": False})
     path = f"/api/stories/{story_id}/approve/keyframes:1"
 
     for body in (None, {"approve_anyway": True}):
-        refused = api.client.post(path, json=body) if body else api.client.post(path)
-        assert refused.status_code == 409, refused.text
-        assert ("Shot sh02 does not match: does not show the beat, missing the coconut phone. Regenerate it, or "
-                "upload your own.") in refused.json()["detail"]
+        warned = api.client.post(path, json=body) if body else api.client.post(path)
+        assert warned.status_code == 200, warned.text
+        keyframes = warned.json()["assets"]["keyframes"]
+        assert keyframes["approval"] == "current" and keyframes["anyway"] is True
+        assert keyframes["shots"]["sh02"]["issues"] == ["does not show the beat", "missing the coconut phone"]
+        assert keyframes["shots"]["sh02"]["current"] is True
     assert api.client.post(f"/api/stories/{story_id}/approve/keyframes:99").status_code == 400
-    assert "keyframes_approved" not in api.store.read_episode_doc(story_id, 1, "assets.json")
+    assert api.store.read_episode_doc(story_id, 1, "assets.json")["keyframes_approved"]["flagged"] == ["sh02"]
 
     # Every keyframe passing, the route approves.
     _pass_verdict(api.store, story_id, "sh02")
@@ -530,11 +536,13 @@ def test_the_cli_approves_keyframes_and_refuses_any_other_document(cli, tmp_path
     story_id = _v2_keyframes(cli.store, tmp_path, built)
     _run(cli.store, story_id, vision=FakeVision(_failing("sh02")), params={"animate": False})
 
-    assert cli.run("approve", story_id, "keyframes:1") == 1
-    assert "Shot sh02 does not match: does not show the beat" in cli.capsys.readouterr().err
-    # Plan 28 F1, re-pinned on purpose: --anyway goes over nothing.
-    assert cli.run("approve", story_id, "keyframes:1", "--anyway") == 1
-    assert "Regenerate it, or upload your own." in cli.capsys.readouterr().err
+    # DEC-311, re-pinned on purpose (plan 28 F1 refused it): a flagged keyframe is approved with its warning,
+    # named on the line printed; --anyway is accepted and ignored.
+    for extra in ((), ("--anyway",)):
+        assert cli.run("approve", story_id, "keyframes:1", *extra) == 0
+        out = cli.capsys.readouterr().out
+        assert out.startswith("✅ Episode 1's keyframes approved anyway (fingerprint ")
+        assert "Still flagged, kept with the check's warning: sh02." in out
     _pass_verdict(cli.store, story_id, "sh02")
     assert cli.run("approve", story_id, "keyframes:1") == 0
     out = cli.capsys.readouterr().out

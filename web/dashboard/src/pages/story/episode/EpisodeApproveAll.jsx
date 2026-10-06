@@ -29,8 +29,9 @@ export function pendingApprovals(episode, ep) {
  * keyframes and the assets, one after the other through the same approvals
  * their own buttons use. It stops at the first one the server refuses and
  * shows that sentence; it never approves anyway (the script's "Approve
- * anyway" stays a separate, explicit click; the keyframes have none since
- * plan 28 F1 -- a hard gate, regenerate or upload your own instead).
+ * anyway" stays a separate, explicit click). The keyframes need none since
+ * DEC-311: a shot the check flags is approved with its warning, never
+ * refused -- only a missing keyframe stops it.
  */
 export default function EpisodeApproveAll({ storyId, ep, episode, busy, onChange, inline = false }) {
   const [approving, setApproving] = useState(false)

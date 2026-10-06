@@ -74,9 +74,13 @@ props in frame (:meth:`KeyframeContext.refs_of`, within
 fingerprint of the keyframe images (:func:`keyframes_fingerprint`): once
 it differs, the approval is stale (:func:`keyframes_state`) -- derived,
 never cleared (DEC-155's rule). No clip of a v2 episode is bought before it
-is current (``assets.clip_hold``, RC-Q3). Plan 28 F1: a hard gate -- a
-failed or missing verdict is refused in plain sentences
-(:func:`keyframe_refusal`), with no "anyway".
+is current (``assets.clip_hold``, RC-Q3). DEC-311 (the DEC-307 rule
+applied to shots; it reverses plan 28 F1's hard gate): a failed or missing
+verdict never refuses the approval -- it is said as a warning in plain
+sentences (:func:`keyframe_warning`), and the approval keeps each app-made
+shot it went over as ``shots {<shot_id>: {issues, image_hash}}``
+(:func:`keyframe_approved_anyway`: it counts only while the keyframe is
+that very image).
 
 A legacy story is never judged: nothing here runs for it, its script never
 has ``first_watch`` and its ``assets.json`` neither key.
@@ -680,10 +684,11 @@ def verdict_passed(entry) -> bool:
             and not entry.get("sheet_issues") and not entry["continuity_issue"])
 
 
-def verdict_text(entry) -> str:
-    """One verdict's findings, for a refusal or the feed: each character
-    that does not match its sheet first (plan 28 F2, J2's own words), then
-    the rest."""
+def verdict_issues(entry) -> list:
+    """One verdict's findings as a list, in the order :func:`verdict_text`
+    says them: each character that does not match its sheet first (plan 28
+    F2, J2's own words), then the rest. Empty when it passed. DEC-311: what
+    the keyframe approval records for a shot it went over."""
     found = [issue.rstrip(".") for issue in entry.get("sheet_issues") or ()]
     if not entry["shows_beat"]:
         found.append("does not show the beat")
@@ -693,25 +698,32 @@ def verdict_text(entry) -> str:
         found.append(f"framing: {entry['framing_issue']}")
     if entry["continuity_issue"]:
         found.append(f"continuity: {entry['continuity_issue']}")
-    return ", ".join(found) or "passed"
+    return found
 
 
-def keyframe_refusal(failed, unjudged) -> str:
-    """Plan 28 F2 (DEC-305 §5): why keyframes cannot be approved, in plain
-    sentences -- each failed shot (*failed*: ``[(shot_id, verdict)]``) with
-    what the judge saw ("Shot sh04 does not match: Gaston's head is a pear,
-    the sheet shows a pineapple. Regenerate it, or upload your own."), then
-    the shots with no current check (*unjudged*). The keyframe approval's
-    refusal and the fast track's stop say it alike; nothing goes over it."""
+def verdict_text(entry) -> str:
+    """One verdict's findings, for a warning or the feed
+    (:func:`verdict_issues`, joined)."""
+    return ", ".join(verdict_issues(entry)) or "passed"
+
+
+def keyframe_warning(failed, unjudged) -> str:
+    """DEC-311 (plan 28 F2's sentences, a warning now, never a refusal):
+    what the keyframe check says of the shots the approval goes over, in
+    plain sentences -- each failed shot (*failed*: ``[(shot_id, verdict)]``)
+    with what the judge saw ("Shot sh04 does not match: Gaston's head is a
+    pear, the sheet shows a pineapple."), then the shots with no current
+    check (*unjudged*), then that they are kept and their clips made from
+    them. The assets step's feed and the approval's docs say it alike."""
     sentences = [f"Shot {shot_id} does not match: {verdict_text(entry)}." for shot_id, entry in failed]
-    if failed:
-        sentences.append("Regenerate it, or upload your own." if len(failed) == 1
-                         else "Regenerate them, or upload your own.")
     if unjudged:
         many = len(unjudged) > 1
         names = ", ".join(unjudged[:-1]) + f" and {unjudged[-1]}" if many else unjudged[0]
-        sentences.append(f"Shot{'s' if many else ''} {names} {'have' if many else 'has'} no keyframe check yet: run "
-                         "the assets step again (it checks them, free).")
+        sentences.append(f"Shot{'s' if many else ''} {names} {'have' if many else 'has'} no keyframe check yet.")
+    if failed or unjudged:
+        one = len(failed) + len(unjudged) == 1
+        sentences.append("A warning only: the clip is made from it; regenerate it if you want another try." if one
+                         else "A warning only: the clips are made from them; regenerate one if you want another try.")
     return " ".join(sentences)
 
 
@@ -918,6 +930,14 @@ SHEET_NONE, SHEET_OWN, SHEET_UNJUDGED, SHEET_PASSED, SHEET_FAILED = "none", "own
 # while its verdict is still on that very file (:func:`approved_anyway`), so
 # a regenerate makes it refusable again. An unjudged image never is.
 APPROVED_ANYWAY = "approved_anyway"
+# DEC-311 (the DEC-307 rule applied to shots): the keyframe approval
+# (``keyframes_approved``) keeps each app-made shot it went over -- its
+# check failed, or it had none yet -- as ``shots {<shot_id>: {issues,
+# image_hash}}``: what the check saw (``NO_KEYFRAME_CHECK`` for a shot never
+# checked) and the sha256 of the very keyframe approved. It counts only
+# while the keyframe is still that image (:func:`keyframe_approved_anyway`).
+KEYFRAMES_APPROVED_SHOTS = "shots"
+NO_KEYFRAME_CHECK = "no keyframe check yet"
 _STEP_OF = {CHARACTERS: "cast", PLACES: "places", PROPS: "places"}
 
 
@@ -1026,6 +1046,16 @@ def approved_anyway(doc, slot, entry) -> bool:
     record = ((doc.get(APPROVED_ANYWAY) or {}).get("slots") or {}).get(slot)
     found = (entry or {}).get("image_hash")
     return bool(record and found and record.get("image_hash") == found)
+
+
+def keyframe_approved_anyway(approved, shot_id, image_sha) -> bool:
+    """DEC-311, :func:`approved_anyway`'s rule for a shot: True while the
+    keyframe approval *approved* (``keyframes_approved``) went over *shot_id*
+    with its warning and its keyframe is still that very image (*image_sha*,
+    the sha256 of the keyframe on disk now): a regenerated keyframe clears
+    it."""
+    record = ((approved or {}).get(KEYFRAMES_APPROVED_SHOTS) or {}).get(shot_id)
+    return bool(record and image_sha and record.get("image_hash") == image_sha)
 
 
 def failed_slots(stories, story, kind, doc) -> dict:

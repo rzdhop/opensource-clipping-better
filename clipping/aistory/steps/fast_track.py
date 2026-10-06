@@ -6,9 +6,8 @@ DEC-162, A-076).
 call per scene) or ``fast`` (the deterministic plan, no call);
 ``params.stop_at_keyframes`` (stage C, default false) stops a v2 episode
 once its keyframes are made and checked, for the human's own approval
-(plan 28 F1: kept, and moot for consistency -- the one click never
-approves a flagged or unchecked keyframe any more, it stops; the param only
-adds a stop over keyframes that all passed);
+(DEC-311: without it the one click approves them for the human, a flagged
+or unchecked keyframe with the check's warning -- never a stop);
 ``params.stop_on_script_issues`` (plan 19 stage 3, default false) stops a
 v2 episode at its script over blocking issues its repair passes could not
 fix, instead of approving it anyway (step 1 below). Needs
@@ -73,14 +72,14 @@ run again ("Continue"):
    once they are made, checked (J2) and auto-fixed, the fast track records
    that approval itself (``workflow.approve_keyframes`` with ``by:
    fast_track`` -- the human's click on "Generate episode" is the
-   approval, which the confirm dialog says in words; stage C) when every
-   keyframe passed its check, runs the step again for the clips, then
-   approves the assets (``by: fast_track``). Plan 28 F1 (DEC-305 §5): a
-   keyframe still flagged after the auto-fix, or not checked, stops the run
-   with the approval's own sentences (each shot and what the judge saw:
-   "Regenerate it, or upload your own.") -- never approved "anyway". With
-   ``stop_at_keyframes`` it stops there even when all passed, for the
-   human's own approval, as it did before stage C;
+   approval, which the confirm dialog says in words; stage C), runs the
+   step again for the clips, then approves the assets (``by:
+   fast_track``). DEC-311 (it reverses plan 28 F1's stop): a keyframe
+   still flagged after the auto-fix, or not checked, is approved with the
+   check's warning -- named in the feed, kept on the record (``flagged``,
+   ``shots``) and said at the run's end ("still flagged: sh02") -- never a
+   stop. With ``stop_at_keyframes`` it stops there, for the human's own
+   approval, as it did before stage C;
 5. **render** -- ``render.run``, unless the last render is still the one it
    would make (``render.current_render``); the budget is asked first for
    :func:`render_seconds`;
@@ -100,7 +99,9 @@ the job ends ``completed`` (``steps.ends_completed``, DEC-161) and returns
 ``{ep, storyboard, steps{script, storyboard, paid_check, assets, render,
 metadata}, auto_approved[...], seconds}`` -- with ``keyframes {auto_approved,
 anyway, flagged, unchecked}`` when the run approved the keyframes itself
-(stage C; since plan 28 F1 ``anyway`` false and both lists empty), and
+(stage C; DEC-311: ``flagged`` the shots the check still flags,
+``unchecked`` those it never checked, ``anyway`` true when an app-made one
+is among them), and
 ``script {auto_approved, anyway, issues}`` when it approved the script
 anyway (plan 19 stage 3), its last feed line then saying the episode is
 ready for review and naming what it approved over.
@@ -699,32 +700,32 @@ class _FastTrack:
     def approve_keyframes(self, ec) -> None:
         """Stage C: the keyframe approval the one click records on the
         human's behalf, once the keyframes are made, checked (J2) and
-        auto-fixed -- every one passed (the human's own uploads: judged,
-        warned about, never a stop); ``by: fast_track`` on the record,
-        so the review screen says who approved. Plan 28 F1 (DEC-305 §5): a
-        shot still flagged after the auto-fix, or not checked, is a stop
-        with the approval's own sentences (``workflow.keyframe_findings``:
-        each shot and what the judge saw, "Regenerate it, or upload your
-        own."), never an approval over it. A missing keyframe is still the
-        approval's own refusal: a stop with its reason."""
+        auto-fixed; ``by: fast_track`` on the record, so the review screen
+        says who approved. DEC-311 (it reverses plan 28 F1's stop): a shot
+        still flagged after the auto-fix, or not checked, is approved with
+        the check's warning (``workflow.keyframe_findings``) -- named in the
+        feed, on the record (``flagged``, ``shots``) and in the run's end
+        line, never a stop. A missing keyframe is still the approval's own
+        refusal: a stop with its reason."""
         workflow = _workflow()
         board = episode_common.read_episode(ec, STORYBOARD_DOC)
         doc = episode_common.read_episode(ec, ASSETS_DOC)
         findings = workflow.keyframe_findings(ec, board, doc)
-        if findings["refusal"]:
-            raise StepFailed(f"Episode {ec.ep}'s keyframes are not approved. {findings['refusal']}")
         total = len(board["shots"])
-        own = [shot_id for shot_id, _text in findings["warnings"]]
+        warned = findings["warnings"]
         detail = f"{total} keyframe{_s(total)} checked, every one passed"
-        if own:
-            # The human's own keyframes: the check's issues are a warning, never a stop.
-            detail = (f"{total} keyframe{_s(total)} checked; your own keyframe{_s(len(own))} kept with the "
-                      "check's warning: " + "; ".join(f"{shot_id} ({text})" for shot_id, text in findings["warnings"]))
+        if warned:
+            # DEC-311: a flagged or unchecked keyframe is approved with its warning, never a stop.
+            detail = (f"{total} keyframe{_s(total)} checked; {len(warned)} kept with the check's warning: "
+                      + "; ".join(f"{shot_id} ({text})" for shot_id, text in warned))
         self.approve(ec, "keyframes",
                      lambda workflow, now: workflow.approve_keyframes(ec.store, ec.story_id, ec.ep, now=now,
                                                                       by=workflow.FAST_TRACK_APPROVED),
                      detail)
-        self.keyframes = {"auto_approved": True, "anyway": False, "flagged": own, "unchecked": []}
+        unchecked = set(findings["unjudged"])
+        self.keyframes = {"auto_approved": True, "anyway": bool(findings["record"]),
+                          "flagged": [shot_id for shot_id, _text in warned if shot_id not in unchecked],
+                          "unchecked": list(findings["unjudged"])}
 
     def stopped(self, number, name, exc) -> StepFailed:
         message = " ".join(str(exc).split())
@@ -946,8 +947,8 @@ class _FastTrack:
             if self.params[STOP_PARAM]:
                 raise StepFailed(f"Episode {ec.ep}'s keyframes are made and checked, and wait for you: {wait}. "
                                  "Look at each keyframe and its check on the storyboard, then Approve keyframes (a "
-                                 "shot that does not match: regenerate it, or upload your own); the clips are bought "
-                                 "after that.")
+                                 "shot the check flags is approved with its warning: regenerate it first if you want "
+                                 "another try); the clips are bought after that.")
             # Stage C: the human's click is the approval; the clips, held until now, are bought in the same run.
             self.approve_keyframes(ec)
             summary = self.make_assets()
@@ -1023,11 +1024,11 @@ class _FastTrack:
                 review += (" (the script was approved for you anyway; still found: "
                            f"{_and(_issue_label(issue) for issue in self.script_anyway)})")
             if self.keyframes is not None:
-                # Plan 28 F1: only keyframes that passed (or are the human's own, warned) are approved for them.
-                own = self.keyframes["flagged"]
-                review += (f" (the keyframes were approved for you; your own keyframes kept with the check's "
-                           f"warning: {_and(own)})" if own else " (the keyframes were approved for you: every check "
-                           "passed)")
+                # DEC-311: the keyframes are approved for them; the ones the check flagged or never checked are
+                # named, kept with its warning.
+                still = self.keyframes["flagged"] + self.keyframes["unchecked"]
+                review += (f" (the keyframes were approved for you; still flagged: {_and(still)})" if still
+                           else " (the keyframes were approved for you: every check passed)")
         self.log(f"🏁 Fast track done: episode {ec.ep} is rendered with its metadata pack{review} "
                  f"({seconds / 60:.1f} min{approved}).")
         result = {"ep": ec.ep, "storyboard": mode, "steps": results, "auto_approved": list(self.auto_approved),

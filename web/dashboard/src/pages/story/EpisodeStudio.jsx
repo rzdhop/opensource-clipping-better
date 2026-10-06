@@ -230,7 +230,7 @@ function FastTrackHeader({ storyId, ep, busy, job, events, paused, handoff, appr
     if (v2 && kf.tier >= 2) {
       lines.push(stop
         ? 'It stops once the keyframes are made and checked, for your review; the clips are bought after you approve them.'
-        : 'No stop for keyframe review — this click approves the keyframes (when every check passes; a shot that does not match stops it) and the assets for you; you review the finished episode.')
+        : 'No stop for keyframe review — this click approves the keyframes and the assets for you; a shot the check flags is kept with its warning; you review the finished episode.')
     }
     if (v2) {
       lines.push(scriptStop

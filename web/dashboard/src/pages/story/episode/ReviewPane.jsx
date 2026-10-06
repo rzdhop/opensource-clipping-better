@@ -92,9 +92,23 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
+/**
+ * DEC-311 (SheetCheck.jsx's approvedAnyway(), for a shot): the line saying the
+ * keyframes were approved over this shot's warning -- "Approved by you
+ * despite: ..." or "Approved for you despite: ..." (Generate episode) -- while
+ * the record (`approvals.keyframes.shots[shotId]`) is still on the keyframe as
+ * it is now (`current`: the same image; a regenerate clears it), else null.
+ */
+function approvedDespite(keyframes, shotId) {
+  const record = ((keyframes || {}).shots || {})[shotId]
+  if (!record || !record.current) return null
+  const who = keyframes.by === 'fast_track' ? 'for you' : 'by you'
+  return `Approved ${who} despite: ${(record.issues || []).join('; ')}`
+}
+
 // -------------------------------------------------------------------- the tile
 
-function ReviewTile({ storyId, ep, shot, characters, onOpen }) {
+function ReviewTile({ storyId, ep, shot, own, characters, onOpen }) {
   const { url, failed } = useBlobUrl(() => fetchShotImageUrl(storyId, ep, shot.image_name), shot.image_name)
   const chip = verdictChip(shot.verdict)
   const first = shot.lines[0]
@@ -124,7 +138,7 @@ function ReviewTile({ storyId, ep, shot, characters, onOpen }) {
       <span className="story-review-tile-head">
         <span className="story-script-scene-id">{shot.shot_id}</span>
         {shot.locked && <span className="chip">locked</span>}
-        {shot.warning && <span className="chip chip-warn" title={shot.warning}>your own</span>}
+        {own && shot.warning && <span className="chip chip-warn" title={shot.warning}>your own</span>}
       </span>
       <span className={chip.className}>{chip.text}</span>
       {first && (
@@ -172,7 +186,7 @@ function ClipRegenerate({ storyId, shot, disabled, onChange }) {
   )
 }
 
-function ReviewDetail({ storyId, ep, shot, characters, assetsBlocked, busy, onClose, onChange }) {
+function ReviewDetail({ storyId, ep, shot, own, despite, characters, assetsBlocked, busy, onClose, onChange }) {
   const image = useBlobUrl(() => fetchShotImageUrl(storyId, ep, shot.image_name), shot.image_name)
   const clipName = shot.clip ? shot.clip.name : null
   const clip = useBlobUrl(() => fetchEpisodeClipUrl(storyId, ep, shot.clip.name), clipName)
@@ -235,10 +249,13 @@ function ReviewDetail({ storyId, ep, shot, characters, assetsBlocked, busy, onCl
             Clip: {clipName ? `${shot.clip.state}${shot.clip.current ? '' : ' (not this keyframe’s)'}` : 'none yet'}
           </p>
         )}
-        {shot.warning ? (
+        {own && shot.warning ? (
           // Plan 28 F1: the human's own keyframe -- the check's issues are a warning, never a refusal.
           <p className="form-hint">Your own keyframe. {shot.warning}</p>
-        ) : shot.verdict.issue && <p className="form-hint">Keyframe check: {shot.verdict.issue}</p>}
+        ) : despite ? (
+          // DEC-311: the keyframes were approved over this shot's warning, and it is still that image.
+          <p className="form-hint">{despite}</p>
+        ) : shot.verdict.issue && <p className="form-hint">Keyframe check: {shot.verdict.issue} (a warning only)</p>}
         {shot.fix && (
           <p className="form-hint">
             Auto-fix: {plural(shot.fix.redraws, 'redraw')}, ${formatUsd(shot.fix.spent_usd)}
@@ -365,7 +382,7 @@ function ApprovalsChecklist({ review }) {
     rows.push({
       key: 'keyframes', label: 'Keyframes', done: keyframes.approval === 'current', stale: keyframes.approval === 'stale',
       detail: keyframes.approval === 'current'
-        ? `Approved${keyframes.anyway ? ' anyway' : ''} ${BY_LABELS[keyframes.by] || ''} ${whenText(keyframes.at)}${flaggedNote}`
+        ? `Approved${keyframes.anyway ? ' with the check’s warning' : ''} ${BY_LABELS[keyframes.by] || ''} ${whenText(keyframes.at)}${flaggedNote}`
         : keyframes.approval === 'stale' ? 'Approved before a keyframe changed: approve again' : 'Not approved',
     })
   }
@@ -406,20 +423,22 @@ function ApprovalsChecklist({ review }) {
 /**
  * The one primary action: approves what `review.pending` lists, in its
  * order -- the keyframes (`keyframes:<ep>`), then the assets (`assets:<ep>`)
- * -- with the existing routes. Plan 28 F1: the keyframe check (J2) is a hard
- * gate, the server goes over nothing -- a keyframe refusal shows the
- * server's sentence (each shot and what the judge saw) and offers the two
- * ways out instead: regenerate the shot (its tile, opened large) or upload
- * your own keyframe (the Handoff, the shot set to "My own"). Disabled once
+ * -- with the existing routes. DEC-311: the keyframe check warns, it never
+ * blocks -- a flagged shot is approved with its warning. While the
+ * keyframes wait and some are flagged, two optional ways to another try sit
+ * beside the button: regenerate the shot (its tile, opened large) or upload
+ * your own keyframe (the Handoff, the shot set to "My own"). A refusal (a
+ * keyframe still missing) shows the server's sentence. Disabled once
  * nothing is pending.
  */
 function ApproveAll({ storyId, ep, review, busy, onChange, onOpenShot }) {
   const [approving, setApproving] = useState(false)
   const [error, setError] = useState('')
   const [errors, setErrors] = useState(null)
-  const [refusedKeyframes, setRefusedKeyframes] = useState(false)
 
   const pending = review.pending
+  // DEC-311: flagged keyframes are a warning; these controls are optional, never required.
+  const warned = pending.includes('keyframes') && review.flagged.length > 0
   const label = pending.length === 2 ? 'Approve keyframes and assets'
     : pending[0] === 'keyframes' ? 'Approve keyframes'
     : pending[0] === 'assets' ? 'Approve assets'
@@ -430,16 +449,8 @@ function ApproveAll({ storyId, ep, review, busy, onChange, onOpenShot }) {
     setApproving(true)
     setError('')
     setErrors(null)
-    setRefusedKeyframes(false)
     try {
-      if (pending.includes('keyframes')) {
-        try {
-          await approveStoryDoc(storyId, review.approvals.keyframes.target)
-        } catch (err) {
-          setRefusedKeyframes(true)
-          throw err
-        }
-      }
+      if (pending.includes('keyframes')) await approveStoryDoc(storyId, review.approvals.keyframes.target)
       if (pending.includes('assets')) await approveStoryDoc(storyId, `assets:${ep}`)
       onChange()
     } catch (err) {
@@ -465,7 +476,14 @@ function ApproveAll({ storyId, ep, review, busy, onChange, onOpenShot }) {
         {reason && <span className="form-hint">{reason}</span>}
       </div>
       <StepError message={error} errors={errors} className="story-step-error" />
-      {refusedKeyframes && error && (
+      {warned && (
+        <p className="form-hint">
+          {plural(review.flagged.length, 'keyframe')} flagged by the check: a warning only, approving keeps
+          {review.flagged.length === 1 ? ' it' : ' them'} as {review.flagged.length === 1 ? 'it is' : 'they are'}.
+          Want another try first?
+        </p>
+      )}
+      {warned && (
         <div className="story-step-actions">
           {review.flagged.map((shotId) => (
             <button key={shotId} type="button" className="btn btn-secondary btn-sm"
@@ -495,6 +513,9 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
   const scriptApproval = review.approvals.script
   const scriptIssues = scriptApproval.issues || []
   const shot = open ? review.shots.find((item) => item.shot_id === open) : null
+  // Plan 28 F1: the human's own keyframes (the episode's assets view); DEC-311: every other flagged one is app-made.
+  const ownShots = new Set(((episode.assets || {}).shots || []).filter((item) => item.own_keyframe)
+    .map((item) => item.shot_id))
 
   return (
     <div className="story-step-body">
@@ -524,7 +545,7 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
               <p className="form-hint">
                 Approved for you by Generate episode: {review.auto_approved.join(' and ')}
                 {keyframes && keyframes.anyway && keyframes.flagged.length
-                  ? ` (the keyframes anyway — still flagged: ${keyframes.flagged.join(', ')})` : ''}.
+                  ? ` (the keyframes with the check’s warning — still flagged: ${keyframes.flagged.join(', ')})` : ''}.
               </p>
             )}
             {scriptApproval.by === 'fast_track' && scriptApproval.anyway && scriptIssues.length > 0 && (
@@ -559,8 +580,8 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
       <h4 className="story-review-strip-title">Keyframes · {plural(review.shots.length, 'shot')}</h4>
       <div className="story-review-grid">
         {review.shots.map((item) => (
-          <ReviewTile key={item.shot_id} storyId={storyId} ep={ep} shot={item} characters={characters}
-            onOpen={(opened) => setOpen(opened.shot_id)} />
+          <ReviewTile key={item.shot_id} storyId={storyId} ep={ep} shot={item} own={ownShots.has(item.shot_id)}
+            characters={characters} onOpen={(opened) => setOpen(opened.shot_id)} />
         ))}
       </div>
 
@@ -569,6 +590,8 @@ export default function ReviewPane({ episode, characters, storyId, ep, inFlightJ
           storyId={storyId}
           ep={ep}
           shot={shot}
+          own={ownShots.has(shot.shot_id)}
+          despite={approvedDespite(keyframes, shot.shot_id)}
           characters={characters}
           assetsBlocked={episode.state.assets_regenerate_blocked}
           busy={busy}

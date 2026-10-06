@@ -87,6 +87,9 @@ def test_the_confirm_says_what_the_click_does_and_costs():
         assert read in confirm, read
     assert "up to the finished video" in confirm  # DEC-305: plain words
     assert "No stop for keyframe review" in confirm and "review the finished episode" in confirm
+    # DEC-311, re-pinned on purpose: a flagged keyframe no longer stops the click -- it is kept with its warning.
+    assert "approves the keyframes and the assets for you; a shot the check flags is kept with its warning" in confirm
+    assert "does not match stops it" not in confirm
     assert "redrawn automatically" in confirm and "each one checked" in confirm  # DEC-305: no check id
     assert "stops once the keyframes are made and checked" in confirm
     assert "caps:" in confirm and "Total: est. $" in confirm
@@ -138,8 +141,9 @@ def test_the_review_approves_what_is_pending_in_order_and_regenerates_in_place()
     keyframes = approve.index("approveStoryDoc(storyId, review.approvals.keyframes.target")
     assets = approve.index("approveStoryDoc(storyId, `assets:${ep}`)")
     assert keyframes < assets
-    # Plan 28 F1, re-pinned on purpose: the keyframe check is a hard gate -- no "anyway"; a refusal offers
-    # Regenerate (the flagged shot's tile, opened large) and Upload your own (the Handoff).
+    # DEC-311, re-pinned on purpose: the keyframe check warns, it never blocks -- no "anyway" (nothing needs
+    # one); flagged keyframes come with two optional ways to another try: Regenerate (the flagged shot's tile,
+    # opened large) and Upload your own (the Handoff).
     assert "approve_anyway" not in approve and "Approve anyway" not in approve
     assert "review.flagged.map" in approve and "onOpenShot(shotId)" in approve and "Regenerate {shotId}" in approve
     assert "handoffPath(storyId, ep)" in approve and "Upload your own" in approve
@@ -158,7 +162,8 @@ def test_the_storyboard_pane_s_keyframe_card_points_to_the_review():
     body = _component(src, "ApproveKeyframes")
     assert "assets.doc.keyframe_verdicts" not in body
     assert "Review" in body and "episode.review" in body
-    # Plan 28 F1, re-pinned on purpose: no "Approve anyway" -- regenerate or upload your own instead.
+    # DEC-311, re-pinned on purpose: no "Approve anyway" (a flagged keyframe is approved with its warning);
+    # the hint still names regenerate or upload your own, as optional ways to another try.
     assert "Approve keyframes" in body and "Approve anyway" not in body and "approve_anyway" not in body
     assert "upload your own keyframe on the Handoff" in body
 

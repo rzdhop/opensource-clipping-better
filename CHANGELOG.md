@@ -10,6 +10,22 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### The keyframe check warns, it never blocks (DEC-311)
+
+#### Changed
+
+- **A keyframe the check flags is approved with its warning, never refused.**
+  The two automatic redraws a shot and their ceiling stay; a shot still flagged
+  after them, or never checked, is approved with what the check saw kept on the
+  approval (`keyframes_approved.shots`: the issues and the very image), and its
+  clip is made from it. Approve keyframes, Approve all, the CLI's `approve
+  keyframes:N` and Generate episode no longer stop there (the run's last line
+  says "still flagged: sh02"); the Handoff takes a clip whatever the check said
+  (only a missing or out-of-date keyframe still holds it); the Review tab says
+  "Approved by you despite: …" while the keyframe is still that image.
+  `approve_anyway` / `--anyway` on keyframes are accepted and ignored. The cast,
+  places and props check is unchanged.
+
 ### A rented GPU by the second (RunPod Serverless)
 
 The three local ComfyUI video templates now also run on a RunPod Serverless

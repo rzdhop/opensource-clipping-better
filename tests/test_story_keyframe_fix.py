@@ -187,8 +187,9 @@ def test_the_fix_budget_is_sized_to_the_episode_and_kept_across_runs(store, tmp_
     """Plan 28 F1 (DEC-305 §5), re-pinned on purpose: the episode's budget is
     its shots x 2 redraws x one keyframe on its link ($0.04) -- it was $0.40
     whatever the shot count, so 5 shots got their redraws and the rest none.
-    Every shot now uses its two; one still flagged after them is said with
-    the keyframe approval's own sentence, never left silent."""
+    Every shot now uses its two; one still flagged after them is said --
+    DEC-311, re-pinned on purpose: as the check's warning (the approval
+    keeps it, never refuses it) -- never left silent."""
     story_id = _quality(store, tmp_path)
     _seeds(monkeypatch)
     every = {shot["shot_id"]: None for shot in tas._shots(store, story_id)}
@@ -203,10 +204,11 @@ def test_the_fix_budget_is_sized_to_the_episode_and_kept_across_runs(store, tmp_
     assert fix["gave_up"] == list(every) and fix["flagged"] == [] and fix["stopped"] is None
     doc = tas._assets_doc(store, story_id)
     assert doc["keyframe_fix_budget"] == {"max_redraws_per_shot": 2, "cap_usd": ceiling, "spent_usd": ceiling}
-    refusal = summary["keyframes"]["refusal"]
-    assert refusal.startswith(f"Shot sh01 does not match: missing {MISSING}. Shot sh02 does not match: ")
-    assert refusal.endswith("Regenerate them, or upload your own.")
-    assert f"⛔ Episode 1's keyframes cannot be approved yet. {refusal}" in log
+    warning = summary["keyframes"]["warnings"]
+    assert warning.startswith(f"Shot sh01 does not match: missing {MISSING}. Shot sh02 does not match: ")
+    assert warning.endswith("A warning only: the clips are made from them; regenerate one if you want another try.")
+    assert f"⚠️ Episode 1's keyframes kept with the check's warning: {warning}" in log
+    assert "refusal" not in summary["keyframes"]
     # Per episode, not per run: the next run redraws nothing more.
     image = kc.SeededImage(price=PRICE)
     summary, _log = _run(store, story_id, image=image, vision=Judge(every))
