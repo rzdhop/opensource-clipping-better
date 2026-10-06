@@ -45,7 +45,7 @@ from clipping.providers import budget as budget_mod
 from clipping.providers import gating, generation, tts
 from clipping.providers.registry import ChainError, Link, describe
 
-from . import voice_reference, voices
+from . import media_policy, voice_reference, voices
 
 RECIPE = "fruit_drama"
 CLONE_LINK = Link(voice_reference.CLONE_PROVIDER, tts.RUNPOD_TTS_TEMPLATES[0])
@@ -101,7 +101,11 @@ def tts_chain(story, env=None) -> list:
 def applies(story, env=None) -> bool:
     """Whether *story*'s characters each get a frozen cloned voice: its TTS
     chain starts with ``runpod/tts_chatterbox``, or it follows the
-    ``fruit_drama`` recipe."""
+    ``fruit_drama`` recipe -- never on a story with no generated voice at
+    all (``generation_profile.voices == "none"``, DEC-305: no pin, no
+    sample, so no reference either)."""
+    if media_policy.no_voices(story):
+        return False
     if (story or {}).get("recipe") == RECIPE:
         return True
     chain = tts_chain(story, env)

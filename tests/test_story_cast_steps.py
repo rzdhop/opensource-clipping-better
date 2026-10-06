@@ -1368,6 +1368,9 @@ def test_the_gate_is_the_recipe_or_a_tts_chain_that_starts_with_the_clone(clone_
     assert not voice_clone.applies(quality, {"TTS_CHAIN": "gemini/flash-lite-tts"})
     assert voice_clone.applies(quality, {"TTS_CHAIN": "runpod/tts_chatterbox,gemini/flash-lite-tts"})
     assert voice_clone.applies(dict(quality, recipe="fruit_drama"), {"TTS_CHAIN": "gemini/flash-lite-tts"})
+    # Plan 32 stage 9 follow-up: a story with no generated voice (DEC-305) asks for no voice pick either.
+    silent = dict(quality, recipe="fruit_drama", generation_profile=dict(quality["generation_profile"], voices="none"))
+    assert not voice_clone.applies(silent, {"TTS_CHAIN": "runpod/tts_chatterbox,gemini/flash-lite-tts"})
     # Which link a character is pinned on: the clone when RunPod has its keys, the Gemini voice behind it when
     # only Gemini has one, the clone when neither does (the voices step then names what is missing).
     runpod = {"RUNPOD_API_KEY": "k", "RUNPOD_COMFY_ENDPOINT_ID": "e"}
