@@ -255,6 +255,11 @@ def _review_slot(ctx, store, story, kind, eid, slot, *, tools, lock, ledger, red
         subject = f"{doc['name']}'s {judge.sheet_word(story, kind, slot)}"
         if state == judge.SHEET_NONE or state == judge.SHEET_PASSED:
             return None
+        if state == judge.SHEET_FAILED and judge.approved_anyway(doc, slot, entry):
+            # Plan 29 stage 5 (DEC-307): the human approved this very image over its verdict -- final for
+            # that file: neither judged nor drawn (nor billed) again; a new image is judged as any other.
+            ctx.on_log(f"👍 {subject} was approved by you despite the check; left as it is.")
+            return None
         if state == judge.SHEET_OWN:
             # The human's own image: judged once, warned about, never drawn again nor refused.
             if judge.own_verdict(store, story, kind, doc, slot, ref) is None:

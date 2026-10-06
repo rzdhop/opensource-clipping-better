@@ -360,6 +360,37 @@ def test_a_regenerated_image_after_an_approve_anyway_is_refused_again(tmp_path, 
                       "slots": {"portrait": {"issues": ["two heads"], "image_hash": fresh}}}
 
 
+@pytest.mark.parametrize("same_image", [True, False])
+def test_the_step_again_leaves_a_picture_approved_anyway_alone_and_redraws_one_whose_record_is_stale(
+        tmp_path, hermetic, unpaced, same_image):
+    from clipping.aistory import workflow
+
+    store, story_id = _cast_story(tmp_path)
+    events = tsl.Events()
+    _cast(store, story_id, _llm(events), events, vision=SheetVision(failing("Kiwilo's portrait")))
+    workflow.approve_entity(store, story_id, "characters", "char_kiwilo", now=tsl.NOW, anyway=True)
+    kiwilo = store.read_entity(story_id, "characters", "char_kiwilo")
+    kiwilo["sheet_checks"]["portrait"]["redraws"] = 0  # redraws left: the step again would draw it
+    if not same_image:
+        kiwilo["approved_anyway"]["slots"]["portrait"]["image_hash"] = "0" * 64  # approved over another file
+    store.write_entity(story_id, "characters", kiwilo, now=tsl.NOW)
+    verdict = kiwilo["sheet_checks"]["portrait"]
+
+    vision = SheetVision(failing("Kiwilo's portrait"))
+    events.clear()
+    _summary, log, _image = _cast(store, story_id, tsl.FakeLLM(events), events, vision=vision)
+    line = "Kiwilo's portrait was approved by you despite the check; left as it is."
+    after = store.read_entity(story_id, "characters", "char_kiwilo")
+    if same_image:
+        assert "image:portrait" not in events and "Kiwilo's portrait" not in vision.asked()
+        assert any(line in entry for entry in log)
+        assert after["sheet_checks"]["portrait"] == verdict
+        assert after["approved_anyway"] == kiwilo["approved_anyway"]
+    else:
+        assert "image:portrait" in events and "Kiwilo's portrait" in vision.asked()
+        assert not any(line in entry for entry in log)
+
+
 def _approve_route(store, monkeypatch):
     pytest.importorskip("pydantic")
     pytest.importorskip("fastapi")
