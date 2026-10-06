@@ -1,19 +1,38 @@
-## CURRENT STATE — plan 32 "the fruit drama product through the MCP" in EXPLORE (2026-10-06, local session)
+## CURRENT STATE — plan 32 "the fruit drama product through the MCP" IN PROGRESS (2026-10-06, local session)
 
-- **In-progress header:** phase = PLAN, awaiting the human's answers and "Go" (plan file
-  `.claude/plans/ai-story/32-fruit-drama-product-plan.md`, 10 stages, DEC-315 proposed). The three maps are in the
-  agents' reports of this session; their facts are summarised in the plan file. Was: phase = EXPLORE. The human (2026-10-06, after the research report
-  `reports/Fruit drama viraux en self hosted.md`): "fait moi le produit parfait, utilisable via le MCP facilement avec
-  Claude, édite les prompts, les idées de noms etc, une vraie énorme amélioration très lourde". Three Explore agents
-  mapping: the story engine's fruit_drama genre/prompts/names; the MCP story tools + the fruit-drama-episode skill
-  (today's chat flow); Wan2.2-S2V (image + voice → talking clip) on the worker + the lipsync step. Next = CLARIFY +
-  PLAN (plan file 32) for the human's Go. Plan 31 (the TTS route) is complete and pushed (see the section below);
-  its PR and GPU steps remain the human's.
-- **Open questions (to the human):** (1) the look = Pixar-style 3D cartoon everywhere; (2) names = French
-  telenovela puns (-ito/-ita) on the species; (3) the format 60–90 s, 4–6 scenes, Team question + end card; (4) one
-  frozen reference voice per character made by Gemini at cast time, cloned on the worker; (5) the S2V bet: build the
-  template, the human runs one paid line before it enters the episode; (6) the $2 episode cap kept; (7) the content
-  guardrail (no sexist/racist tropes) on by default.
+- **In-progress header:** phase = IMPLEMENT, stage = 1 (MCP unblock) starting; next action = stage 1 (director
+  STEP_MODULES += style / fast-track / story-fast-track; story_estimate; story_create(preset=…) through
+  clipping/aistory/presets.py; story_options presets; docstrings). Branch `feat/fruit-drama-product` from
+  `feat/comfy-tts-chatterbox` at **0de84d1** (plan 31, pushed, NOT yet in main — merge order 31 then 32).
+  Checkpoint commit = this commit (the header only). Plan file `.claude/plans/ai-story/32-fruit-drama-product-plan.md`
+  (10 stages 0–9; the human's answers of 2026-10-06 are decided: Pixar-style 3D cartoon look; -ito/-ita French
+  puns on the species, no brands; 60–90 s, 4–6 scenes, cliffhanger, "Team X ?" question, end card "Partie N
+  demain"; one frozen Gemini-made reference voice per character cloned on the worker with a fixed seed; the
+  Wan2.2-S2V template built, the human runs ONE paid line before it enters the episode; the $2 cap of own_gpu
+  stays; the content guardrail on by default). DEC-315 to write at close-out; A-202… ; untracked `reports/`,
+  `research_notes/`, `FETCH_HEAD` stay untracked.
+- **Tier 1 baseline (0de84d1, the touched-area selection, 26 files):** local 1306 passed · CI-like 1306 passed ·
+  venv (test_mcp_server/director/runpod_jobs) 41 passed — exit 0 everywhere. The selection is in the scratchpad
+  (`baseline_sel.txt`): test_aistory_prompting/templates, test_comfyui_video, test_local_comfyui, test_mcp_*,
+  test_runpod_*, test_story_body_rule, test_story_cli, test_story_concepts_*, test_story_episode_*,
+  test_story_plan_fit, test_story_prompt_budgets, test_story_prompts*, test_story_setup_context,
+  test_story_shot_window, test_story_voices, test_tts_adapters, test_tts_chatterbox_template, test_voice_tools.
+- **Regression contract (plan 32):** (1) every prompt of a recipe-less story byte-identical — the SHA goldens of
+  `tests/test_story_prompts_v3.py`, the literal goldens of `tests/test_story_prompts.py`,
+  `tests/test_story_prompts_episode.py` (E1–E4, RC-M1 byte-identity), `tests/test_story_setup_context.py`, plus
+  a new guard test in stage 2; (2) hashed cores untouched — `tests/test_aistory_prompting.py` (re-pinned only for
+  the look, with a dated comment), DEC-303; (3) locked styles unchanged — `tests/test_story_body_rule.py`
+  (fruit_drama.json version 1), stylelock tests; (4) the 20 story tool names + the concepts test + comfy_download
+  — `tests/test_mcp_server.py::test_the_tools_are_listed` and siblings; (5) the director's runs/approvals —
+  `tests/test_mcp_director.py`; (6) the six existing workflow templates render byte-identically —
+  `tests/test_comfyui_video.py`, `tests/test_local_comfyui.py`, `tests/test_tts_chatterbox_template.py`; (7)
+  image/video/audio jobs unchanged — `tests/test_mcp_runpod_jobs.py`, `tests/test_runpod_*.py`; (8) the TTS
+  adapters and voice pinning — `tests/test_story_voices.py`, `tests/test_tts_adapters.py`; (9) every format fits
+  the clip links — `tests/test_story_plan_fit.py`, `tests/test_story_shot_window.py`,
+  `tests/test_story_episode_schemas.py`; (10) the CLI's profile builder — `tests/test_story_cli*.py`; (11) render
+  goldens (DEC-156, ffmpeg-keyed) re-recorded only where the recipe changes the frame — UNVERIFIED locally until
+  stage 4 records them.
+- **Open questions:** none blocking (the seven answers above). The S2V live test (stage 7 → 8) is the human's gate.
 
 ## CURRENT STATE — plan 31 (the Chatterbox TTS route on the RunPod worker; episode 1 of "Accès refusé" voiced through it) CODE + DOCS COMPLETE and PUSHED on `feat/comfy-tts-chatterbox`; the PR to main is the human's click (no gh, no token, the browser pane not signed in); the GPU steps are the human's (2026-10-06, local session)
 
