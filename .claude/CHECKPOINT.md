@@ -1,3 +1,32 @@
+## CURRENT STATE — plan 31 (TTS route: Chatterbox Multilingual on the RunPod worker, episode 1 of "Accès refusé" voiced) in PLAN (2026-10-06, local session)
+
+- **In-progress header:** phase = IMPLEMENT, stage 1 (template engine + tts_chatterbox.json); stage 2 drafted in parallel by an agent in a worktree, committed after stage 1. Branch `feat/comfy-tts-chatterbox`
+  (0d39ad6 = main 8f935e5 + `tools/render_ep01.py`). Plan file
+  `.claude/plans/ai-story/31-comfy-tts-chatterbox-plan.md`. No code touched; no checkpoint commit yet (the
+  checkpoint is 0d39ad6 once approved). Next action = Stage 0 (Tier-1 baseline on the touched-area selection) after
+  the "Go".
+- **Checkpoint commit:** 0d39ad6 (clean tree; `FETCH_HEAD` untracked). **Tier-1 baseline (2026-10-06):** the
+  touched-area selection (10 files: test_comfyui_video, test_local_comfyui, test_mcp_server, test_mcp_runpod_jobs,
+  test_mcp_auth, test_mcp_director, test_env_template, test_runpod_comfyui, test_dependency_manifests, test_hardware)
+  = local 123 passed 2 skipped, CI-like 122 passed 3 skipped, the four test_mcp_* files in the `.venv` 42 passed;
+  exit 0 everywhere.
+- **Regression contract (plan 31):** the six existing templates render byte-identically
+  (`tests/test_comfyui_video.py` parametrised + `test_every_shipped_workflow…`, `tests/test_local_comfyui.py`) ·
+  image/video jobs unchanged in naming, S3 refusal and "without a file" error (`tests/test_mcp_runpod_jobs.py`) ·
+  the three MCP contract tests (`tests/test_mcp_server.py::test_the_tools_are_listed`,
+  `::test_view_file_and_list_files_see_the_outputs_dir`, `::test_comfy_download_hands_back_the_bytes_and_stays_inside_the_roots`)
+  · `.env.example` and compose forwarding (`tests/test_env_template.py`, `tests/test_runpod_comfyui.py`) ·
+  `ci.yml` untouched · `render_ep01.py`'s default path — UNVERIFIED by any test (a Tier-3 flow test in stage 4).
+- **Answers 2026-10-06:** base tag 5.10.0-base-cuda12.8.1 (yes, "the serverless endpoints' model"); the image
+  endpoint gets the TTS image; the LICENSE-file gap accepted as an assumption; weights on the network volume;
+  separate `audio` key; FLAC→WAV conversion fine. Out of scope, noted: "a viral, dynamic video full of dialogue and
+  action" (story writing, a later task).
+- **Open questions (answered, kept for the record):** (1) base tag `5.10.0-base-cuda12.8.1` (repo pin, CUDA 12.8 for Blackwell)
+  vs the brief's `5.5.0-base`; (2) which endpoint gets the TTS image — the image one (aq6qg1pykxa2st, $1.58/h)
+  or the video one (e14bceyj7rrdxl, $3.49/h); (3) the node pack `filliptm/ComfyUI_Fill-ChatterBox` has no LICENSE
+  file (README says MIT) — acceptable?; (4) weights on the volume (proposed) rather than baked.
+- **Explore findings:** see the plan file's "What the exploration found".
+
 ## CURRENT STATE — the MCP server is a systemd unit; comfy_download live; one branch (2026-10-06 ~17:40 UTC, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
