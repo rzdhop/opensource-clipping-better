@@ -29,6 +29,8 @@ Stdlib only (DEC-012).
 
 from __future__ import annotations
 
+import re
+
 from clipping.providers import generation as gen
 
 from .. import imaging, media_policy, prompts, refimages, schemas
@@ -108,16 +110,46 @@ _PROP_NOTE = ("The last picture showed a character with the object. Draw the obj
               "no hands, no character, no fruit person near it.")
 
 
+_LIVING = re.compile(r"\b(?:person|people|someone|character|figure|creature|human|man|woman|hand|fruit|apple|pear|"
+                     r"banana|face|head|body|standing|sitting)(?:s|es)?\b", re.I)
+_ALSO_FIX = " Also fix: "
+
+
+def _kept_faults(issues) -> list:
+    """The issues that are not about a living thing (a layout or light fault
+    a redraw must still hear); those are what the positive sentence says."""
+    kept = []
+    for item in issues:
+        text = " ".join(str(item).split()).rstrip(".")
+        if text and _LIVING.search(text) is None:
+            kept.append(text)
+    return kept
+
+
+def _positive(base, issues) -> str:
+    """*base*, then ``Also fix: <issue>; <issue>`` for the non-living faults,
+    the tail cut at a word to keep the note within its limit."""
+    kept = _kept_faults(issues)
+    if not kept:
+        return base
+    tail = "; ".join(kept)
+    room = refimages.NOTE_MAX_CHARS - len(base) - len(_ALSO_FIX) - 1  # the closing full stop
+    if len(tail) > room:
+        tail = tail[:max(room, 0)].rsplit(" ", 1)[0].rstrip(" ,;:") if room > 0 else ""
+    return base + _ALSO_FIX + tail + "." if tail else base
+
+
 def _note(issues, kind=CHARACTERS) -> str:
     """The note a redraw carries. A character's is what the judge saw
     (``Fix what the last picture got wrong: ...``); a place's and a prop's
     say what to draw, in positive words, never the fault quoted back (a
-    model told "no fruit characters" draws them -- DEC-308). The issues stay
-    in the log line, where the human reads them."""
+    model told "no fruit characters" draws them -- DEC-308), then the faults
+    not about a living thing (layout, light) as "Also fix: ...". The issues
+    all stay in the log line, where the human reads them."""
     if kind == PLACES:
-        return _PLACE_NOTE
+        return _positive(_PLACE_NOTE, issues)
     if kind == PROPS:
-        return _PROP_NOTE
+        return _positive(_PROP_NOTE, issues)
     text = _NOTE_HEAD + "; ".join(" ".join(str(item).split()).rstrip(".") for item in issues)
     if len(text) <= refimages.NOTE_MAX_CHARS:
         return text

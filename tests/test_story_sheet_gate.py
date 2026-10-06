@@ -403,6 +403,7 @@ def test_a_failed_plate_and_a_failed_prop_are_drawn_again_with_an_empty_set_note
                            look=tsl._d2_look(175))
     store.write_entity(story_id, "characters", owner, now=tsl.NOW)
     fault = "The image contains fruit characters, but it must be an empty set without any persons."
+    light = "Day light is visible casting window shadows on the left wall."
     seen = []
 
     def answer(request):
@@ -410,7 +411,8 @@ def test_a_failed_plate_and_a_failed_prop_are_drawn_again_with_an_empty_set_note
         first = what not in seen
         seen.append(what)
         # Each image fails its first check and passes the second.
-        return json.dumps({"passed": False, "issues": [fault]}) if first else PASS
+        issues = [fault, light] if "the set" in what else [fault]
+        return json.dumps({"passed": False, "issues": issues}) if first else PASS
 
     events = tsl.Events()
     image = tsl.FakeImage(events)
@@ -419,14 +421,29 @@ def test_a_failed_plate_and_a_failed_prop_are_drawn_again_with_an_empty_set_note
     assert "completely empty" not in plate and "Author's note" not in plate
     assert plate_again.endswith(
         "Author's note: The last picture showed someone or something alive in the set. Draw the set completely "
-        "empty: nobody in it, no character, no figure, no fruit person; only the room, its furniture and light.")
+        "empty: nobody in it, no character, no figure, no fruit person; only the room, its furniture and light."
+        " Also fix: " + light)
     assert "fruit characters" not in plate_again and "persons" not in plate_again
+    assert "Also fix" not in prop_again
     assert prop_again.endswith(
         "Author's note: The last picture showed a character with the object. Draw the object alone on a plain "
         "surface: no hands, no character, no fruit person near it.")
     assert "fruit characters" not in prop_again and "Author's note" not in prop
     # The human still reads what the judge saw.
     assert any(fault.rstrip(".") in line and "drawing it again (1 of 2)" in line for line in log)
+
+
+def test_a_place_note_keeps_the_faults_not_about_a_living_thing_and_drops_the_rest():
+    from clipping.aistory.steps import sheet_gate
+
+    mixed = sheet_gate._note(["A person is standing near the back door.",
+                              "Day light is visible casting window shadows on the left wall."], "places")
+    assert mixed == sheet_gate._PLACE_NOTE + " Also fix: Day light is visible casting window shadows on the left wall."
+    assert "person" not in mixed.split("Also fix")[1]
+    assert sheet_gate._note(["Two fruit characters sit by the pool."], "places") == sheet_gate._PLACE_NOTE
+    assert sheet_gate._note(["The object is on a wooden table."], "props").startswith(sheet_gate._PROP_NOTE + " Also fix:")
+    long = sheet_gate._note(["the chair is on the wrong side " * 20], "places")
+    assert long.startswith(sheet_gate._PLACE_NOTE + " Also fix:") and len(long) <= 300
 
 
 def test_a_character_redraw_keeps_the_judge_s_words_in_its_note():
