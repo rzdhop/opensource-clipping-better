@@ -577,7 +577,7 @@ def test_a_failed_plate_and_a_failed_prop_are_drawn_again_with_an_empty_set_note
     image = tsl.FakeImage(events)
     log = _places_run(store, story_id, events, image, SheetVision(answer))
     plate, plate_again, prop, prop_again = (request.prompt for request in image.requests)
-    assert "completely empty" not in plate and "Author's note" not in plate
+    assert "The last picture showed" not in plate and "Author's note" not in plate
     assert plate_again.endswith(
         "Author's note: The last picture showed someone or something alive in the set. Draw the set completely "
         "empty: nobody in it, no character, no figure, no fruit person; only the room, its furniture and light."
