@@ -161,3 +161,40 @@ def test_the_settings_name_the_chat_on_every_chain(make_director):
     d.start("s1", "bible")
     assert seen["LLM_CHAIN"] == seen["STORY_LLM_CHAIN"] == seen["STORY_LLM_PREMIUM_CHAIN"] == director_mod.CHAT_LINK
     assert seen["GROQ_API_KEY"] == "g"
+
+
+def test_the_style_and_fast_track_steps_resolve_to_their_runners():
+    """Plan 32 stage 1: ``style`` (the lock built from its template, no writer), ``fast-track`` and
+    ``story-fast-track`` (the chat answering every prompt) are steps of the director."""
+    for step in ("style", "fast-track", "story-fast-track"):
+        assert step in director_mod.STEP_MODULES, step
+        module = director_mod.load_step_module(director_mod.STEP_MODULES[step])
+        assert callable(module.run), step
+    assert "style" in director_mod.NO_WRITER_STEPS
+    assert "fast-track" not in director_mod.NO_WRITER_STEPS and "story-fast-track" not in director_mod.NO_WRITER_STEPS
+
+
+def test_the_style_step_is_run_without_a_writer_and_the_fast_track_with_one(make_director):
+    seen = []
+
+    def style_run(ctx):  # no runner keyword: a writer handed to it would be a TypeError
+        seen.append(("style", ctx.params))
+        return {"template_id": "fruit_drama"}
+
+    d = make_director(types.SimpleNamespace(run=style_run))
+    done = d.start("s1", "style", params={"template_id": "fruit_drama"})
+    assert done["state"] == "done" and done["result"] == {"template_id": "fruit_drama"}
+    assert seen == [("style", {"template_id": "fruit_drama"})]
+
+    d = make_director(fake_steps([lambda v: []]))
+    waiting = d.start("s2", "fast-track", ep=1)
+    assert waiting["state"] == "waiting" and waiting["ep"] == 1 and waiting["pending"]["handle"]
+
+
+def test_the_chat_counts_as_a_keyed_writer_in_a_run():
+    """Plan 32 stage 1: the key gate a step meets before writing (the agent run's ``llm_route``)
+    sees the chat as a writer it can use, only in the director's settings."""
+    assert director_mod.CHAT_SETTINGS[llm_call.CHAT_WRITER_SETTING]
+    assert llm_call.resolve_keys(dict(director_mod.CHAT_SETTINGS))["chat"]
+    assert "chat" not in llm_call.resolve_keys({"LLM_CHAIN": director_mod.CHAT_LINK})
+

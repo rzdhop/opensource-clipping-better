@@ -95,6 +95,13 @@ STORY_CALL_DEADLINE_SECONDS = 480
 # silent). The ⏭ line and the estimate's "skipped" carry it.
 PAID_SKIP_REASON = "paid link: allow_paid is off (AI Story spends only on opt-in)"
 
+# Plan 32 stage 1: the setting the story MCP server's director (``mcp_server/director.py``) puts in
+# a run's settings when the chat is the writer. The ``chat`` provider has no key (nothing but the
+# director can reach it), so without this every key gate (``workflow.llm_route``: the agent run's
+# estimate and its gate before each writing part) would refuse a chain that names only the chat.
+# Set, :func:`resolve_keys` counts the chat as keyed; no web or CLI job sets it.
+CHAT_WRITER_SETTING = "STORY_CHAT_WRITER"
+
 # How many validator errors the ⚠️ line quotes; the StepFailed quotes more.
 _ERRORS_IN_LOG_LINE = 2
 _ERRORS_IN_FAILURE = 5
@@ -182,6 +189,9 @@ def resolve_keys(settings_env) -> dict:
         value = env.get(env_name, os.environ.get(env_name, ""))
         if value:
             keys[name] = value
+    if env.get(CHAT_WRITER_SETTING):
+        # The chat answers through the director's runner; it needs no key (see CHAT_WRITER_SETTING).
+        keys["chat"] = "chat"
     return keys
 
 

@@ -6,6 +6,11 @@ patches -- every one through ``clipping.aistory.workflow``, the same rules
 the web API applies (minus its job-queue checks: the director is the only
 thing running steps here, one per story). Nothing in this module invents a
 document format: what a step writes is what the app's schemas say.
+
+Plan 32 stage 1: a story can be created from a preset (``presets``), the
+style is a step like the others, ``story_make_episode`` runs one episode's
+fast track in one run, and ``story_estimate`` says what a step would spend
+before it starts (the workflow's own estimates, calling nothing).
 """
 
 from __future__ import annotations
@@ -16,15 +21,19 @@ from typing import Optional
 
 from fastmcp.exceptions import ToolError
 
-from clipping.aistory import defaults, store as story_store, templates, workflow
+from clipping.aistory import defaults, presets, store as story_store, templates, workflow
 from clipping.aistory.steps.entities import CHARACTERS, PLACES, PROPS
 
-from .director import STEP_MODULES, Director, DirectorError
+from .director import CHAT_SETTINGS, STEP_MODULES, Director, DirectorError
 
 ENTITY_KINDS = {"characters": CHARACTERS, "places": PLACES, "props": PROPS}
 EPISODE_DOCS = ("script.json", "storyboard.json", "assets.json", "render_manifest.json", "metadata_pack.json",
                 "memory.json", "feedback.json", "proposals.json", "consistency_report.json")
 APPROVE_ALL_GROUPS = {"cast": (CHARACTERS,), "places": (PLACES, PROPS)}
+# What story_estimate prices (plan 32 stage 1).
+ESTIMATES = ("cast", "episode", "render", "story")
+# The step story_make_episode runs (one episode, script to metadata pack, in one run).
+MAKE_EPISODE_STEP = "fast-track"
 
 
 def now() -> str:
@@ -80,7 +89,7 @@ def _entity_summary(doc: dict) -> dict:
 def _story_overview(backend: StoryBackend, story_id: str) -> dict:
     stories = backend.stories
     story = backend.load(story_id)
-    out = {"story": story}
+    out = {"story": story, "recipe": story.get("recipe")}
     for name in ("style_lock.json", "season.json", "knowledge.json", "places_proposal.json"):
         try:
             doc = stories.read_doc(story_id, name)
@@ -108,6 +117,172 @@ def _story_overview(backend: StoryBackend, story_id: str) -> dict:
     return out
 
 
+def _create_kwargs(*, preset, style, episode_format, generation_profile) -> dict:
+    """``StoryStore.create``'s choices: the preset's (``presets.merge``) with
+    the caller's on top, or the caller's alone. An unknown preset is a tool
+    error naming the known ones."""
+    if preset is None:
+        return {"style_template_id": style, "generation_profile": generation_profile,
+                "episode_template_id": episode_format}
+    try:
+        return presets.merge(preset, style_template_id=style, generation_profile=generation_profile,
+                             episode_template_id=episode_format)
+    except presets.UnknownPreset as exc:
+        raise ToolError(str(exc)) from None
+
+
+def _budget_profiles() -> list:
+    """``[{id, label, cap_usd}]`` from ``templates/budget_profiles.json``."""
+    from clipping.providers import budget as budget_mod
+
+    try:
+        profiles = budget_mod.load_profiles()["profiles"]
+    except (OSError, ValueError) as exc:
+        return [{"error": str(exc)}]
+    return [{"id": pid, "label": doc.get("label") or pid.replace("_", " ").capitalize(),
+             "cap_usd": float(doc.get("cap_usd") or 0.0)}
+            for pid, doc in profiles.items() if pid in defaults.BUDGET_PROFILES]
+
+
+def _episode_formats() -> list:
+    """``[{id, label, window_s: [min, max], target_s, scenes: [min, max]}]``, one per shipped episode
+    template."""
+    out = []
+    for tid in templates.list_episode_template_ids():
+        try:
+            doc = templates.load_episode_template(tid)
+        except Exception:  # noqa: BLE001 - a format that cannot be read is listed by its id
+            out.append({"id": tid})
+            continue
+        label = doc.get("label")
+        out.append({"id": tid, "label": label.get("en") if isinstance(label, dict) else label,
+                    "window_s": list(doc.get("window_s") or []), "target_s": doc.get("target_s"),
+                    "scenes": list(doc.get("scenes") or [])})
+    return out
+
+
+def _estimate_env(backend: StoryBackend) -> dict:
+    """The Settings an estimate reads: the director's, with the chat as the writer (what a run uses)."""
+    return {**backend.director.settings_env, **CHAT_SETTINGS}
+
+
+def _not_yet(what, ep, message) -> dict:
+    return {"what": what, "episode": ep, "ready": False, "est_usd": 0.0, "message": message, "details": None}
+
+
+def _cast_estimate(backend: StoryBackend, story: dict, env: dict) -> dict:
+    """The pictures the cast step would buy for the chosen concept's sketched
+    characters (``workflow.agent_cast_pick``: the sketch within the cast's
+    size limits) and what the story's own still lack (``workflow.cast_units``), priced as the
+    gate prices them (``workflow.generation_budget``). Calls nothing."""
+    stories = backend.stories
+    if not story.get("concept"):
+        return _not_yet("cast", None, "No cost before the pictures: choose a concept first. The cast's pictures "
+                                      "are priced once its characters are known.")
+    # The characters a cast run would make: the concept's sketch, within the cast's size limits.
+    sketch = workflow.agent_cast_pick(stories, story)
+    units = workflow.cast_units(stories, story, selected=sketch)
+    images = workflow.image_verdict(stories, story, units["images"], env=env)
+    edit = workflow.edit_readiness(stories, story, env=env, qty=units["edit_images"])
+    budget = workflow.generation_budget(stories, story, units, images if units["images"] else None,
+                                        edit if units["edit_images"] else None, env=env)
+    usd = float(budget["usd"] or 0.0)
+    if not (units["images"] or units["edit_images"]):
+        message = "Every character already has its pictures: the cast step buys nothing more."
+    else:
+        message = (f"The cast step would draw {units['images']} portrait{'s' if units['images'] != 1 else ''} "
+                   f"and {units['edit_images']} reference sheet{'s' if units['edit_images'] != 1 else ''} "
+                   f"for {len(sketch)} sketched character{'s' if len(sketch) != 1 else ''}: about ${usd:.2f}. "
+                   "You write the characters' texts yourself, at no cost.")
+    refusals = []
+    if units["images"] and not images.get("ready"):
+        refusals.append(str(images.get("message") or ""))
+    if units["edit_images"] and not edit.get("ready"):
+        refusals.append(str(edit.get("message") or ""))
+    if budget.get("refusal") and budget.get("blocks"):
+        refusals.append(str(budget.get("message") or ""))
+    refusals = [text for text in refusals if text]
+    if refusals:
+        message += " It cannot run yet: " + " ".join(refusals)
+    return {"what": "cast", "episode": None, "ready": not refusals, "est_usd": round(usd, 4), "message": message,
+            "details": {"units": units, "budget": budget}}
+
+
+def _episode_estimate(backend: StoryBackend, story: dict, ep: int, env: dict) -> dict:
+    """What story_make_episode would do and spend on episode *ep*
+    (``workflow.fast_track_estimate``: every step from the script to the
+    metadata, an upper bound before the script and storyboard exist), and
+    the pictures-and-clips part alone once the storyboard is approved
+    (``workflow.assets_estimate``). Calls nothing."""
+    stories = backend.stories
+    try:
+        ec = workflow.episode_context(stories, story, ep, step=MAKE_EPISODE_STEP)
+    except workflow.WorkflowError as exc:
+        return _not_yet("episode", ep, f"Episode {ep} cannot be made yet: {exc}")
+    whole = workflow.fast_track_estimate(ec, env=env)
+    try:
+        assets = workflow.assets_estimate(ec, env=env)
+    except workflow.WorkflowError as exc:
+        assets = {"message": f"The pictures and clips alone are priced once the storyboard is approved ({exc})"}
+    usd = float(whole.get("est_usd") or 0.0)
+    exact = bool((whole.get("images") or {}).get("exact"))
+    stop = whole.get("stops_at")
+    paid = whole.get("paid") or {}
+    message = (f"Making episode {ep} would spend {'' if exact else 'up to '}${usd:.2f} on pictures, clips and "
+               f"voices; the writing is yours, at no cost. {paid.get('message') or ''}").strip()
+    if stop:
+        message += f" It would stop at the {stop.get('step')}: {stop.get('reason')}"
+    return {"what": "episode", "episode": ep, "ready": stop is None and paid.get("verdict") != "blocked",
+            "est_usd": round(usd, 4), "message": message, "details": {"episode": whole, "assets": assets}}
+
+
+def _render_estimate(backend: StoryBackend, story: dict, ep: int) -> dict:
+    """``workflow.render_estimate`` of episode *ep* (free, on this server)."""
+    try:
+        ec = workflow.episode_context(backend.stories, story, ep, step="render")
+        body = workflow.render_estimate(ec, {})
+    except workflow.WorkflowError as exc:
+        return _not_yet("render", ep, f"Episode {ep} cannot be rendered yet: {exc}")
+    return {"what": "render", "episode": ep, "ready": bool(body.get("ready", True)), "est_usd": 0.0,
+            "message": str(body.get("message") or ""), "details": body}
+
+
+def _story_estimate(backend: StoryBackend, story: dict, env: dict) -> dict:
+    """``workflow.story_fast_track_estimate``: the one-run story from its
+    seed to episode 1, every part still to do, summed. Calls nothing."""
+    try:
+        body = workflow.story_fast_track_estimate(backend.stories, story, env=env)
+    except workflow.WorkflowError as exc:
+        return _not_yet("story", 1, f"{exc} (create the story with preset 'fruit_drama', or patch its "
+                                    "generation_profile with mode 'agent').")
+    usd = round(float(body.get("est_usd") or 0.0), 4)
+    message = str(body.get("message") or "")
+    stop = body.get("stops_at")
+    if stop:
+        message = (f"The one-run story (from the idea to episode 1) would spend "
+                   f"{'' if body.get('exact') else 'up to '}${usd:.2f}, but it cannot run yet: it would stop at "
+                   f"part {stop.get('number')} ({stop.get('part')}): {stop.get('reason')}")
+    return {"what": "story", "episode": 1, "ready": bool(body.get("ready")), "est_usd": usd, "message": message,
+            "details": body}
+
+
+def estimate(backend: StoryBackend, story_id: str, what: str, episode: Optional[int] = None) -> dict:
+    """story_estimate's answer (see the tool)."""
+    if what not in ESTIMATES:
+        raise ToolError(f"what must be one of {', '.join(ESTIMATES)}")
+    story = _answering(backend.load, story_id)
+    env = _estimate_env(backend)
+    if what == "cast":
+        return _answering(_cast_estimate, backend, story, env)
+    if what == "story":
+        return _answering(_story_estimate, backend, story, env)
+    if episode is None:
+        raise ToolError(f"Name the episode for the {what} estimate (episode=1 for the first).")
+    if what == "episode":
+        return _answering(_episode_estimate, backend, story, episode, env)
+    return _answering(_render_estimate, backend, story, episode)
+
+
 def register(mcp, backend: StoryBackend) -> None:
     stories = backend.stories
     director = backend.director
@@ -121,19 +296,27 @@ def register(mcp, backend: StoryBackend) -> None:
 
     @mcp.tool
     def story_create(language: str, seed_text: Optional[str] = None, style: Optional[str] = None,
-                     episode_format: Optional[str] = None, generation_profile: Optional[dict] = None) -> dict:
+                     episode_format: Optional[str] = None, generation_profile: Optional[dict] = None,
+                     preset: Optional[str] = None) -> dict:
         """Free. Create a draft story. language: 'fr' or 'en'. seed_text: the idea in a few lines (optional).
-        style: one of story_options().styles (optional, pickable later at the style step). episode_format:
-        one of story_options().episode_formats (optional). generation_profile: {tier, route,
-        consistency_mode, budget_profile, pipeline, ...} (optional; the server's defaults otherwise).
-        Returns the story document; its story_id is what every other tool takes."""
-        return _answering(stories.create, language=language, seed_text=seed_text, style_template_id=style,
-                          generation_profile=generation_profile, episode_template_id=episode_format, now=now())
+        preset: one of story_options().presets ids -- e.g. 'fruit_drama': the fruit-drama look, pictures and
+        clips made on your own GPU, a cast of fruits, ready for story_make_episode and the one-run story.
+        Without a preset the story makes no clips (the server's plain defaults). style: one of
+        story_options().styles ids (optional, pickable later at the style step). episode_format: an id of
+        story_options().episode_formats (optional). generation_profile: {budget_profile, route, ...}
+        (optional). What you name wins over the preset: a style or format replaces the preset's, and a
+        generation_profile's keys replace the preset's one by one. Returns the story document; its story_id
+        is what every other tool takes."""
+        kwargs = _create_kwargs(preset=preset, style=style, episode_format=episode_format,
+                                generation_profile=generation_profile)
+        return _answering(stories.create, language=language, seed_text=seed_text, now=now(), **kwargs)
 
     @mcp.tool
     def story_options() -> dict:
-        """Free. The choices a story can be made with: style template ids (with their names), episode format
-        ids, the step names the director runs, the documents and entity kinds the read tools take."""
+        """Free. The choices a story can be made with: presets (id, label, summary, what each sets), styles
+        (id, name), episode formats (id, length window in seconds, number of scenes), budget profiles (id,
+        label, spending cap in dollars), the step names the director runs, the documents and entity kinds
+        the read tools take."""
         styles = []
         for tid in templates.list_style_ids():
             try:
@@ -142,14 +325,16 @@ def register(mcp, backend: StoryBackend) -> None:
                                "summary": str(style.get("summary") or style.get("description") or "")[:160]})
             except Exception:  # noqa: BLE001
                 styles.append({"id": tid})
-        return {"styles": styles, "episode_formats": templates.list_episode_template_ids(),
+        return {"presets": presets.list_presets(), "styles": styles, "episode_formats": _episode_formats(),
+                "budget_profiles": _budget_profiles(),
                 "languages": list(getattr(defaults, "LANGUAGES", None) or ("fr", "en")),
                 "steps": list(STEP_MODULES), "docs": list(story_store.DOC_NAMES), "episode_docs": list(EPISODE_DOCS),
                 "entity_kinds": list(ENTITY_KINDS)}
 
     @mcp.tool
     def story_get(story_id: str) -> dict:
-        """Free. The story at a glance: story.json (bible, approvals, status, concept, profile), style lock,
+        """Free. The story at a glance: story.json (bible, approvals, status, concept, profile), its recipe
+        (the preset's, or null), style lock,
         season, knowledge, the cast/places/props summaries with what each still lacks (progress), the
         episodes, and the director's recent runs on it. Read this before deciding the next step."""
         return _answering(_story_overview, backend, story_id)
@@ -211,15 +396,76 @@ def register(mcp, backend: StoryBackend) -> None:
     @mcp.tool
     def story_step_start(story_id: str, step: str, ep: Optional[int] = None, params: Optional[dict] = None,
                          wait_s: int = 25) -> dict:
-        """Run a story step with YOU as the writer. Steps: concepts, bible, cast, places_proposal, places,
-        season, knowledge, script, storyboard, assets, render, metadata, memory, feedback, propose-next,
-        regenerate (params {target, note}), rerender. ep: the episode number for script/storyboard/assets/
-        render/metadata/memory/feedback/propose-next. The step runs in the background; this returns its
-        first event: state 'waiting' with a 'pending' prompt (system, user, schema, max_tokens) that you
-        answer with story_step_answer, or 'done' with its result, or 'failed' with the error, or 'running'
-        after wait_s (poll with story_step_status). Steps that make images or clips spend GPU seconds
-        (cast, places, assets, style_preview) — say so before starting them. One run per story at a time."""
+        """Run a story step with YOU as the writer. The step runs in the background; this returns its first
+        event: state 'waiting' with a 'pending' prompt (system, user, schema, max_tokens) that you answer
+        with story_step_answer, or 'done' with its result, or 'failed' with the error, or 'running' after
+        wait_s (poll with story_step_status). One run per story at a time. Steps that make pictures or
+        clips spend money (cast, places, style_preview, assets, regenerate of an image or clip, fast-track,
+        story-fast-track) -- say so, with story_estimate's figure, before starting them.
+
+        The steps, in story order, and their params (all optional unless said):
+        - concepts: {count: how many concept cards}. Then story_choose_concept.
+        - bible: none. Then story_approve('bible').
+        - style: {template_id (default: the story's style, else the concept's), overrides: {dotted path:
+          value}, consistency_mode}. Builds the style draft on this server, no writing, no cost. Then
+          story_approve('style') -- cast, places_proposal and places refuse until the style is approved.
+        - style_preview: none. Three sample pictures of the style (costs a few cents).
+        - cast: {selected: [names from the concept's cast sketch], custom: [{name, role, one_line,
+          archetype?}]}. Then story_approve('character:<id>') or story_approve_all('cast').
+        - places_proposal: none. places: {places: [{name}], props: [{name}]} (default: the saved proposal).
+          Then story_approve_all('places').
+        - season: {episodes: 3 to 12}. Then story_approve('season'). knowledge: none (animated stories).
+          Then story_approve('knowledge').
+        - script (ep): {measure_voices, check_only}. Then story_approve('script:<ep>').
+        - storyboard (ep): {fast: true for the plan without writing}. Then story_approve('storyboard:<ep>').
+        - assets (ep): {align_words, animate (default true)}. On an animated story this is TWO passes: the
+          first run makes and checks the keyframes, then stops; you look at them and call
+          story_approve('keyframes:<ep>'); a second assets run buys the clips. Then story_approve('assets:<ep>').
+          story_approve('assets:<ep>') and render refuse while a shot has no clip.
+        - render (ep): {subtitles: style|word_pop|two_line|none, encoder: libx264|auto,
+          fill_failed_with_motion: true to cover a failed clip with a moving still}. Free, on this server.
+        - metadata (ep), memory (ep), feedback (ep), propose-next (ep): none. rerender (ep): none.
+        - regenerate: {target, note (what to change), voice ({provider, voice_id} for a voice target)}.
+          Targets: concepts, bible:<field>, character:<id>:text, character:<id>:image:portrait|turnaround|
+          expressions, character:<id>:voice, place:<id>:text, place:<id>:image:<variant>, prop:<id>:text,
+          prop:<id>:image, season:<ep>, scene:<ep>:<scene_id>, hook:<ep>, cliffhanger:<ep>, teaser:<ep>,
+          shot:<ep>:<shot_id>:plan, shot:<ep>:<shot_id> (its picture), shot:<ep>:<shot_id>:video (its clip),
+          line:<ep>:<line_id> (its voice), metadata:<ep>:<platform>.
+        - fast-track (ep): {storyboard: t1|fast, stop_at_keyframes, stop_on_script_issues}: one episode
+          from its script to its metadata pack in one run (story_make_episode is the short form).
+        - story-fast-track: none. A story in agent mode (preset 'fruit_drama') from its idea to episode 1
+          rendered, in one run, approving each document by rule; you still answer every writing prompt.
+        ep: the episode number, for the steps marked (ep)."""
         return _answering(director.start, story_id, step, ep=ep, params=params, wait=wait_s)
+
+    @mcp.tool
+    def story_make_episode(story_id: str, episode: int, stop_at_keyframes: bool = False,
+                           wait_s: int = 25) -> dict:
+        """Make one episode -- script, storyboard, keyframes, clips, render, metadata pack -- in ONE run
+        instead of eight step starts (the fast-track step, the same run mechanics as story_step_start).
+        You still answer every writing prompt: each one comes back as state 'waiting' with a 'pending'
+        prompt for story_step_answer, exactly as with story_step_start. The run approves the script, the
+        storyboard and the assets itself when they pass their checks. Keyframes: by default the run approves
+        them itself once they are made and checked (a keyframe the check still flags is kept with its
+        warning and named at the end, never a stop) and goes on to buy the clips; with
+        stop_at_keyframes=true it stops there instead (state 'failed' with a sentence saying so) -- look at
+        them, call story_approve('keyframes:<episode>'), then call story_make_episode again. Before the
+        clips it checks the money: a paid part over a cap, or while paid generation is off, stops it before
+        anything is bought. Any stop keeps everything made so far: call story_make_episode again and it
+        picks up where it stopped, repeating nothing. Ask story_estimate(what='episode') first and say the
+        figure. The story must be ready (concept, bible, style, cast, places, season approved)."""
+        params = {"stop_at_keyframes": True} if stop_at_keyframes else {}
+        return _answering(director.start, story_id, MAKE_EPISODE_STEP, ep=episode, params=params, wait=wait_s)
+
+    @mcp.tool
+    def story_estimate(story_id: str, what: str, episode: Optional[int] = None) -> dict:
+        """Free; calls nothing. What a step would spend, in dollars, before you start it. what: 'cast' (the
+        pictures the cast step would buy for the concept's sketched characters), 'episode' (everything
+        story_make_episode would buy for that episode; needs episode), 'render' (the render; free, on this
+        server; needs episode), 'story' (the one-run story from its idea to episode 1; agent-mode stories).
+        Answers {what, episode, ready, est_usd, message (plain words), details (the full estimate)}; when the
+        story is not far enough along, ready is false and the message says what comes first."""
+        return estimate(backend, story_id, what, episode)
 
     @mcp.tool
     def story_step_answer(handle: str, answer: dict, wait_s: int = 25) -> dict:
@@ -250,8 +496,8 @@ def register(mcp, backend: StoryBackend) -> None:
     @mcp.tool
     def story_approve(story_id: str, doc: str, approve_anyway: bool = False, direction: Optional[int] = None) -> dict:
         """Approve one document, by the app's rules (refused with the reason while something is missing).
-        doc: bible | style | season | knowledge | character:<id> | place:<id> | prop:<id> | script:<ep> |
-        storyboard:<ep> | assets:<ep> | keyframes:<ep> | memory:<ep> | feedback:<ep> | proposals:<ep>.
+        doc: bible | style (after the style step) | season | knowledge | character:<id> | place:<id> |
+        prop:<id> | script:<ep> | storyboard:<ep> | assets:<ep> | keyframes:<ep> | memory:<ep> | feedback:<ep> | proposals:<ep>.
         approve_anyway: script/keyframes/entity with a failed check. direction: feedback's chosen
         direction (0, 1, 2) or omitted."""
         story = _answering(backend.load, story_id)

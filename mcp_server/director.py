@@ -34,7 +34,10 @@ from clipping.providers.registry import Link
 CHAT_LINK = "chat/claude"
 # What the step's settings say about the writer: every chain the story steps
 # resolve names the chat, so nothing hosted is ever called from a run here.
-CHAT_SETTINGS = {"STORY_LLM_CHAIN": CHAT_LINK, "STORY_LLM_PREMIUM_CHAIN": CHAT_LINK, "LLM_CHAIN": CHAT_LINK}
+# ``STORY_CHAT_WRITER`` (``llm_call.CHAT_WRITER_SETTING``) counts the chat as keyed, so the key
+# gates a step meets before writing (the agent run's) see a writer they can use.
+CHAT_SETTINGS = {"STORY_LLM_CHAIN": CHAT_LINK, "STORY_LLM_PREMIUM_CHAIN": CHAT_LINK, "LLM_CHAIN": CHAT_LINK,
+                 "STORY_CHAT_WRITER": "1"}
 # How long a step waits for the chat's answer before it gives up (the chat's
 # turn can take minutes; an hour means "the person went away").
 ANSWER_TIMEOUT_SECONDS = 3600.0
@@ -43,15 +46,26 @@ ANSWER_TIMEOUT_SECONDS = 3600.0
 EVENT_WAIT_SECONDS = 25.0
 LOG_TAIL = 30
 STATES = ("running", "waiting", "done", "failed", "cancelled")
+# A bare name is a module of ``clipping.aistory.steps``; a dotted one is imported as it is (the
+# ``style`` step, which the web API and the CLI run synchronously, has its runner here).
 STEP_MODULES = {
-    "concepts": "concepts", "bible": "bible", "regenerate": "regenerate", "style_preview": "style_preview",
-    "cast": "cast", "places_proposal": "places_proposal", "places": "places", "season": "season",
-    "knowledge": "knowledge", "script": "script", "storyboard": "storyboard", "assets": "assets",
-    "render": "render", "metadata": "metadata", "memory": "memory", "feedback": "feedback",
+    "concepts": "concepts", "bible": "bible", "style": "mcp_server.style_step", "regenerate": "regenerate",
+    "style_preview": "style_preview", "cast": "cast", "places_proposal": "places_proposal", "places": "places",
+    "season": "season", "knowledge": "knowledge", "script": "script", "storyboard": "storyboard",
+    "assets": "assets", "render": "render", "metadata": "metadata", "memory": "memory", "feedback": "feedback",
     "propose-next": "propose_next", "rerender": "rerender",
+    # Plan 32 stage 1: one episode from its script to its metadata pack, and (an agent-mode story)
+    # the whole story from its seed to episode 1 -- each one run, the chat answering every prompt.
+    "fast-track": "fast_track", "story-fast-track": "story_fast_track",
 }
-# Steps whose runner takes no LLM runner (no prompt is ever pending).
-NO_WRITER_STEPS = ("render", "rerender", "style_preview", "assets")
+# Steps whose runner takes no LLM runner (no prompt is ever pending). ``style`` builds the lock from
+# its template (``workflow.build_style`` calls no writer).
+NO_WRITER_STEPS = ("render", "rerender", "style_preview", "assets", "style")
+
+
+def load_step_module(name: str):
+    """The module of a :data:`STEP_MODULES` value (see there)."""
+    return importlib.import_module(name if "." in name else f"clipping.aistory.steps.{name}")
 
 
 class DirectorError(Exception):
@@ -172,7 +186,7 @@ class Director:
         self.answer_timeout = answer_timeout
         self.runs: dict = {}
         self._lock = threading.Lock()
-        self._module_loader = module_loader or (lambda name: importlib.import_module(f"clipping.aistory.steps.{name}"))
+        self._module_loader = module_loader or load_step_module
 
     # -- lookups
 

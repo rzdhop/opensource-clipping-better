@@ -838,7 +838,7 @@ class StoryStore:
         return self._upsert_index(doc, now=now)
 
     def create(self, *, language, seed_text=None, style_template_id=None, generation_profile=None,
-               episode_template_id=None, now) -> dict:
+               episode_template_id=None, recipe=None, now) -> dict:
         """Create a draft story. There is no default language (``defaults``).
 
         *episode_template_id* (plan 20 stage 1): the story's own episode
@@ -848,7 +848,13 @@ class StoryStore:
         that speaks in its own clips, a format no plan of its clips fits is
         a ``ValueError`` (``format_fit.FORMAT_REFUSAL``), nothing created;
         named none, the default when it fits, else the first that does
-        (``format_fit.choose_format``)."""
+        (``format_fit.choose_format``).
+
+        *recipe* (plan 32 stage 1): the recipe the story is made with (a
+        preset names it, ``presets.apply``), stored as ``recipe``; None
+        (the default) is stored as null. An id of the shape
+        ``schemas.RECIPE_ID_PATTERN`` (else ``ValueError``); which recipes
+        exist is checked from plan 32 stage 2 on."""
         if not isinstance(language, str) or language not in schemas.LANGUAGES:
             raise ValueError(f"language must be one of {list(schemas.LANGUAGES)}, not {language!r}")
         if seed_text is not None and not isinstance(seed_text, str):
@@ -861,6 +867,8 @@ class StoryStore:
             raise ValueError(
                 f"unknown episode template {episode_template_id!r} "
                 f"(shipped: {', '.join(defaults.EPISODE_TEMPLATE_IDS)})")
+        if recipe is not None and not (isinstance(recipe, str) and re.fullmatch(schemas.RECIPE_ID_PATTERN, recipe)):
+            raise ValueError(f"recipe must be an id of lowercase letters, digits and underscores, not {recipe!r}")
         profile = _merge_generation_profile(generation_profile)
         # Plan 23 stage D2: the universe is one the style accepts.
         check_universe(profile, style_template_id)
@@ -910,6 +918,8 @@ class StoryStore:
             # a native-speech one on the confrontation (plan 28 stage A4: one
             # that fits, format_fit.choose_format).
             "episode_template_id": episode_template_id,
+            # Plan 32 stage 1: the recipe a preset named, else null.
+            "recipe": recipe,
             "generation_profile": profile,
             # Plan 28 stage B1 (DEC-305): every new story opens with the
             # narrator off, whatever its pipeline (phase 7 stage 6c's "on for

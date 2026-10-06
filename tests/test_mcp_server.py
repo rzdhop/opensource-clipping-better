@@ -91,7 +91,9 @@ def test_the_tools_are_listed(backend):
     for name in ("story_list", "story_create", "story_options", "story_get", "story_doc", "story_entities",
                  "story_entity", "episode_get", "episode_doc", "story_step_start", "story_step_answer",
                  "story_step_status", "story_step_cancel", "story_runs", "story_approve", "story_approve_all",
-                 "story_choose_concept", "story_patch", "entity_patch", "episode_patch"):
+                 "story_choose_concept", "story_patch", "entity_patch", "episode_patch",
+                 # Plan 32 stage 1.
+                 "story_make_episode", "story_estimate"):
         assert name in names, name
 
 
@@ -290,3 +292,90 @@ def test_the_concepts_step_parks_its_real_prompt_for_the_chat(backend):
     assert cancelled["state"] == "cancelled"
     bad = call(server, "story_step_answer", handle=pending["handle"], answer={"x": 1})
     assert bad.is_error
+
+
+# ------------------------------------------------------------- plan 32 stage 1
+
+def test_a_preset_story_shows_its_recipe_and_the_own_gpu_profile(backend):
+    server = build_server(backend)
+    story = payload(call(server, "story_create", language="en", seed_text="A jealous pineapple.",
+                         preset="fruit_drama"))
+    assert story["recipe"] == "fruit_drama" and story["style_template_id"] == "fruit_drama"
+    page = payload(call(server, "story_get", story_id=story["story_id"]))
+    assert page["recipe"] == "fruit_drama" and page["story"]["recipe"] == "fruit_drama"
+    profile = page["story"]["generation_profile"]
+    assert profile["budget_profile"] == "own_gpu" and profile["universe"] == "fruits" and profile["tier"] == 3
+    # What the caller names wins, key by key.
+    own = payload(call(server, "story_create", language="fr", preset="fruit_drama",
+                       generation_profile={"budget_profile": "quality"}))
+    assert own["generation_profile"]["budget_profile"] == "quality"
+    assert own["generation_profile"]["universe"] == "fruits"
+    plain = payload(call(server, "story_create", language="en"))
+    assert plain["recipe"] is None and plain["generation_profile"]["budget_profile"] == "free"
+    unknown = call(server, "story_create", language="en", preset="moon_opera")
+    assert unknown.is_error and "fruit_drama" in unknown.content[0].text
+
+
+def test_the_options_list_presets_budget_profiles_and_formats(backend):
+    server = build_server(backend)
+    options = payload(call(server, "story_options"))
+    fruit = next(p for p in options["presets"] if p["id"] == "fruit_drama")
+    assert fruit["label"] and fruit["summary"] and fruit["sets"]
+    caps = {p["id"]: p["cap_usd"] for p in options["budget_profiles"]}
+    assert caps["own_gpu"] == 2.0 and caps["free"] == 0.0
+    formats = {f["id"]: f for f in options["episode_formats"]}
+    assert formats["serial_60s_v2"]["window_s"] == [55, 75] and formats["serial_60s_v2"]["scenes"]
+    assert "style" in options["steps"] and "fast-track" in options["steps"]
+
+
+def test_estimates_answer_on_a_fresh_story_without_keys(backend):
+    server = build_server(backend)
+    sid = payload(call(server, "story_create", language="en", seed_text="A jealous pineapple.",
+                       preset="fruit_drama"))["story_id"]
+    cast = payload(call(server, "story_estimate", story_id=sid, what="cast"))
+    assert cast["ready"] is False and "No cost before the pictures" in cast["message"]
+    episode = payload(call(server, "story_estimate", story_id=sid, what="episode", episode=1))
+    assert episode["ready"] is False and "cannot be made yet" in episode["message"]
+    render = payload(call(server, "story_estimate", story_id=sid, what="render", episode=1))
+    assert render["ready"] is False and render["est_usd"] == 0.0
+    whole = payload(call(server, "story_estimate", story_id=sid, what="story"))
+    assert whole["what"] == "story" and isinstance(whole["est_usd"], float) and whole["message"]
+    assert whole["details"]["parts"]
+    # The chat is the writer: the run does not stop on a missing writing key (the concept is part 1).
+    assert (whole["details"]["stops_at"] or {}).get("part") != "concept", whole["details"]["stops_at"]
+    studio = payload(call(server, "story_estimate", story_id=payload(call(server, "story_create",
+                                                                           language="en"))["story_id"], what="story"))
+    assert studio["ready"] is False and "agent" in studio["message"]
+    assert call(server, "story_estimate", story_id=sid, what="moon").is_error
+    assert call(server, "story_estimate", story_id=sid, what="episode").is_error
+
+
+def test_the_style_step_is_started_from_the_chat_and_approved(backend):
+    from clipping.aistory import workflow
+
+    server = build_server(backend)
+    sid = payload(call(server, "story_create", language="en", seed_text="A jealous pineapple.",
+                       preset="fruit_drama"))["story_id"]
+    early = payload(call(server, "story_step_start", story_id=sid, step="style"))
+    assert early["state"] == "failed" and "bible" in early["error"].lower()
+
+    def approved(doc):
+        doc["approvals"]["concept"] = doc["approvals"]["bible"] = "2026-10-06T12:00:00+00:00"
+
+    workflow.update(backend.story.stories, sid, approved, now="2026-10-06T12:00:00+00:00")
+    run = payload(call(server, "story_step_start", story_id=sid, step="style"))
+    assert run["state"] == "done", run
+    assert run["result"]["template_id"] == "fruit_drama" and "pending" not in run
+    locked = payload(call(server, "story_approve", story_id=sid, doc="style"))
+    assert locked["approvals"]["style"]
+
+
+def test_make_episode_is_the_fast_track_run_of_one_episode(backend):
+    server = build_server(backend)
+    sid = payload(call(server, "story_create", language="en", seed_text="A jealous pineapple.",
+                       preset="fruit_drama"))["story_id"]
+    run = payload(call(server, "story_make_episode", story_id=sid, episode=1))
+    assert run["step"] == "fast-track" and run["ep"] == 1
+    # A story not ready yet: the run ends at once with the step's own sentence (what comes first).
+    assert run["state"] == "failed" and "first" in run["error"].lower(), run
+

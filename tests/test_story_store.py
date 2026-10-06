@@ -161,7 +161,9 @@ def test_every_fixed_object_of_the_bible_is_closed():
     # it gave) is an optional field -- absent on every Studio story, whose story.json stays as it was.
     # Plan 23 stage B5, re-pinned on purpose: so is ``subtitle_style`` (the story's own subtitle look).
     # Plan 28 stage F5 (DEC-305 section 5), re-pinned on purpose: so is ``links`` (the story's one image link).
-    assert set(schema["required"]) == set(schema["properties"]) - {"approved_by", "subtitle_style", "links"}
+    # Plan 32 stage 1, re-pinned on purpose: so is ``recipe`` -- every new story writes it (null without a
+    # preset), but a story.json written before plan 32 has none and must still read.
+    assert set(schema["required"]) == set(schema["properties"]) - {"approved_by", "subtitle_style", "links", "recipe"}
 
 
 @pytest.mark.parametrize("changes", [

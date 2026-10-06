@@ -909,6 +909,9 @@ def _id_array(pattern) -> dict:
     return {"type": "array", "items": {"type": "string", "pattern": pattern}}
 
 # Field order is the order a human reads story.json in (the store never sorts keys).
+# Plan 32 stage 1: a recipe id (``story.json``'s optional ``recipe``).
+RECIPE_ID_PATTERN = r"^[a-z][a-z0-9_]*$"
+
 STORY_BIBLE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -935,6 +938,10 @@ STORY_BIBLE_SCHEMA = {
         "prop_ids": _id_array(PROP_ID_PATTERN),
         "style_template_id": {"type": ["string", "null"], "pattern": _ID_PATTERN},
         "episode_template_id": {"type": "string", "enum": list(defaults.EPISODE_TEMPLATE_IDS)},
+        # Optional (plan 32 stage 1): the recipe the story was made with (a preset names it), or
+        # null; absent on a story created before plan 32, read as null. Stage 2 checks it against
+        # templates/recipes/*.json; here it is only an id's shape.
+        "recipe": {"type": ["string", "null"], "pattern": RECIPE_ID_PATTERN},
         "generation_profile": _GENERATION_PROFILE_SCHEMA,
         "narrator": _NARRATOR_SCHEMA,
         "approvals": _APPROVALS_SCHEMA,
