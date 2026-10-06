@@ -1,30 +1,35 @@
-## CURRENT STATE — plan 28 (the one-click episode: fits every time, ≤ $2, strict consistency, no TTS voices, Approve all, generated concepts, writer prompts upgraded) — phase CLARIFY, plan DRAFT awaiting answers + "Go" (2026-10-05, late local session)
+## CURRENT STATE — plan 28 (the one-click episode: fits every time, ≤ $2 on the human's clips, strict consistency, no voices, Approve all, generated concepts, set-up prompts, simple screens) CODE + DOCS COMPLETE on main; CI replica running; NOT yet deployed (2026-10-06, local session)
 
-- **In-progress header:** phase = IMPLEMENT (plan 28 APPROVED, DEC-305). Checkpoint commit = main (this commit;
-  `FETCH_HEAD` untracked). Live is STILL e2c8b46 (nothing deployed yet; 0 running jobs); deploy only at the end at
-  0 jobs after the 3.11 compile (`rm -sfv` + rebuild: the bundle changed). CI runs on every push (DEC-278).
-  **Merged on main (all pushed):** A5 fc64d1c (dead-link breaker, chain order) · D1 6091510 (generated concepts
-  only) · A1 b37dd00 (feasibility refusal before spend) · B1 3751d1a (no voices, no narrator on new stories) ·
-  C 760ffb4 (Approve all) · E 853e6e0 (+ the cast wiring) (set-up prompts on the plan-26 standard) · A2 511f015
-  (the planner always fits; formats re-slotted; the fit matrix) · F4 3cc4078 + F5 f97a64c (speaker/scene rules, prop
-  phrases, one image link per story) · F1/F2 dcd101d + ee13a10 (the keyframe judge hard; uploads warned) ·
-  A4/S1 1de92f0 (four-choice new story; the format oracle at create and PATCH). **In flight (worktrees):** B2
-  plan28-b2 (edge out, Sonnet) · A3+A6 plan28-a3 (one clock + remedy loop; honest price + Generate button, Opus) ·
-  F3/F6/F7 plan28-f3 (sheet judge; variants + wardrobe; the Handoff gate, Opus). **Left after them:** S2 (plain
-  words everywhere), S3 (one button per step), the fruit_drama environment_rules fix, the SPEND_PATH test fixture,
-  G (docs: docs/AI_STORY.md, VISION, DEC-306 close-out, ASSUMPTIONS, memory), the deploy, the human's Tier 2.
-- **Trigger:** job 13bbb11a5896 (story d71852710962 "Cœurs Sous Clé", agent mode, native_speech on Veo fast,
-  narrator on, serial_60s_v2) failed at the storyboard: 84 s vs 55–75. Root causes, the four context maps and the
-  staged plan: `.claude/plans/ai-story/28-one-click-reliability-plan.md` §1 and §3.
-- **The human's asks this session:** investigate the whole one-click purpose (one click, ≤ $2/episode, works every
-  time); an Approve-all button; no voice generation, never edge; the concept prompt reviewed with generated
-  concepts only; strict rules against consistency problems; every set-up writer prompt upgraded to the plan-26
-  standard.
-- **Answers:** Q1 the human makes the clips + a Generate button at a shown price (A-181); Q2 the narrator and every
-  generated voice removed (A-182); Q3–Q6 defaulted to the recommendations (A-183/A-184).
-- **Next action:** merge A1/B1/A5 as they go green (both envs, exit codes checked), push, then the next three.
-- **Rules in force (unchanged):** worktrees off main; DEC-234 selections both envs; deploy at 0 jobs after the
-  3.11 compile; no full local suite (DEC-278); no source edits on main while a job runs; money only on the go.
+- **In-progress header:** phase = TEST (CI) → DEPLOY → close-out. Checkpoint commit = main (this commit; `FETCH_HEAD`
+  untracked). **Live is STILL e2c8b46** (plan 27): nothing of plan 28 is deployed; 0 running jobs. **CI on main: red
+  from c180060 (B1) to 65313e3 (B2) — annotation-free; the A-096 replica (app image 3.11, `python -S`, pytest alone,
+  archive of 229f041) is running detached as docker `plan28-replica`, output
+  `<scratchpad>/replica/out2.txt`; one F seen at 60 %.** Next action: read the replica's failures, fix forward on
+  main (never loosen), push, confirm CI green, then deploy at 0 jobs: compile with the image's 3.11, `sudo -n docker
+  compose rm -sfv backend && sudo -n docker compose up -d --build backend` (the bundle changed), health 200, then
+  tell the human the walk (below).
+- **Shipped (DEC-305, A-181…A-189; plan `.claude/plans/ai-story/28-one-click-reliability-plan.md`; every stage's
+  line in the action log 2026-10-05/06 "Plan 28 stage …"):** A1 feasibility refusal before spend · A2 the planner
+  always fits (formats re-slotted; fit matrix) · A3 one clock + one remedy · A4/S1 four-choice new story + the
+  format oracle at create/PATCH · A5 dead-link breaker + free Gemini first · A6 the plan-priced estimate + the
+  Generate button · B1 no voices / no narrator on new stories · B2 edge out · C Approve all (cast, places, episode)
+  · D1 generated concepts only · E the set-up block in every set-up writer (s7) · F1/F2 the keyframe judge hard
+  (uploads warned) · F3 the sheet judge · F4 speaker/scene rules + prop phrases · F5 one image link per story ·
+  F6 time plates + wardrobe · F7 the Handoff gate · S2 plain words · S3 one button per step · docs · the
+  fruit_drama set rule · SPEND_PATH fixtures.
+- **The human's walk after the deploy (Tier 2):** (a) New story: four choices, "Me" picked, Create → a confrontation
+  format, no narrator, no voice UI; (b) Make episode 1 → the script and storyboard inside 44–59 s, no stop; the
+  keyframes judged (a failed one says what it saw, Regenerate / Upload, no "Approve anyway"); (c) the Handoff: the
+  check line per clip, "Generate this clip — $x", Copy, Upload refused until the keyframe passed; (d) Approve all on
+  Cast / Places / the episode; (e) Concepts shows generated cards only; (f) Dragon Fruit: run the assets step once
+  more (old verdicts are unchecked), MJ/Chloe species (A-187).
+- **Follow-ups logged (not done):** the action-log DISCOVERY lines of 2026-10-05/06 (B1 switch narrator; F3 unpriced
+  sheet redraws/plates; variants unjudged; Approve all stops at the first image refusal; A4 profile-only PATCH; the
+  keyless default; S2's budget sentences; the '16:9: 16:9:' prefix; template version 1 kept).
+- **Rules in force (unchanged):** worktrees off main; DEC-234 selections in both envs; deploy only at 0 running
+  jobs after the 3.11 compile; no full local suite except the A-096 replica for an annotation-free CI red (DEC-278);
+  money only on the human's go.
+- **Open questions:** none blocking.
 
 ## CURRENT STATE — plan 27 (5–10 s shots carrying an exchange) CODE + DOCS COMPLETE and LIVE; close-out pending the human's regen (2026-10-05, local session)
 

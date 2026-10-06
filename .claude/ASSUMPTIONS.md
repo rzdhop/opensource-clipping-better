@@ -877,3 +877,14 @@ and untested — Stage 11 is where it would be.
   path, not a deliberate pick; the creation rule (A4/S1) makes the question moot. UNCONFIRMED.
 - **A-184** — (plan 28, Q4/Q5/Q6 defaulted) Hiding the concept library (not deleting it), a redraw ceiling of
   shots × 2 × the link price inside the $2 cap, and a v2-only writer-prompt upgrade are acceptable. UNCONFIRMED.
+- **A-185** — (plan 28 A3) Reaction shots are no longer added on scenes whose stored plan names its shots: the
+  storyboard's clip sum equals the plan's (the board said 122 s against a 74 s plan before). UNCONFIRMED.
+- **A-186** — (plan 28 F1) The redraw budget is sized shots × 2 × the link's price but takes what the caps leave once
+  the clips are planned (clips first); on the human's-clips path the clips cost $0 so the ceiling is whole. UNCONFIRMED.
+- **A-187** — (plan 28 F3) Two characters never share a species in a species world (Dragon Fruit's two pears are
+  kept; a text regenerate of either now forces another fruit). The human can set Chloe to another fruit. UNCONFIRMED.
+- **A-188** — (plan 28 F7) A clip can only be uploaded once its app-made keyframe exists and passed its check (the
+  human's own keyframe: warned, allowed); the human makes clips from the keyframe on Flow anyway. UNCONFIRMED.
+- **A-189** — (plan 28 F1/F3) Every verdict stored before plan 28 is "unchecked": an episode awaiting approval
+  (Dragon Fruit's 10 keyframes) needs its assets step run again (free judge; redraws may cost up to the ceiling);
+  entities approved before plan 28 keep their approval until regenerated. UNCONFIRMED.
