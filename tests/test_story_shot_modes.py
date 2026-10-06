@@ -364,7 +364,8 @@ def test_the_mode_route_refuses_what_this_stage_does_not_make(api):
     assert refused.status_code == 400 and "Images: manual" in json.dumps(refused.json())
     api.store.update(story_id, lambda doc: doc["generation_profile"].update(budget_profile="quality"), now=NOW)
     refused = api.client.patch(url.format(story_id, shot_id), json={"clip": "manual"})
-    assert refused.status_code == 400 and "native-speech" in json.dumps(refused.json())
+    # DEC-305 section 9 (plan 28 S2): "a native-speech story" is now said as the characters speaking in their clips.
+    assert refused.status_code == 400 and "characters speak in their clips" in json.dumps(refused.json())
 
 
 # ================================================================ (e) byte identity
@@ -407,3 +408,16 @@ def test_a_mode_names_a_shot_and_one_of_two_values(store):
     assert schemas.episode_assets_errors(dict(doc, shot_modes={"sh01": {}}))
     assert schemas.episode_assets_errors(dict(doc, shot_modes={"x1": {"image": "auto"}}))
     assert "shot_modes" in schemas.EPISODE_ASSETS_SHOT_MAPS
+
+
+def test_the_upload_refusal_of_a_story_that_makes_its_own_clips_is_plain():
+    """Plan 28 stage S2 (DEC-305 section 9): no "native-speech profile" or link id in the sentence a
+    human reads; it names the spending plan to choose."""
+    import types
+
+    from clipping.aistory import manual_uploads
+
+    ec = types.SimpleNamespace(ep=1, story={"generation_profile": {"budget_profile": "free"}})
+    message = manual_uploads.upload_target_refusal(ec, {"shot_id": "sh01"}, {})
+    assert message == ("Episode 1's clips are not yours to upload: the story's spending plan is not one where you make "
+                       "the clips (choose \"Characters speak in your own clips\" under How it's made, Advanced).")

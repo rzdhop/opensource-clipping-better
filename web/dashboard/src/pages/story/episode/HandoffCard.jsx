@@ -43,8 +43,8 @@ const IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp'
 const VIDEO_ACCEPT = 'video/mp4,video/quicktime'
 
 const MODE_LOCKED = {
-  clip: 'Each clip’s own mode needs a story with native speech; the story’s profile decides here.',
-  image: 'Each keyframe’s own mode needs a v2 story; the story’s profile decides here.',
+  clip: 'A single clip can be your own only on a story where the characters speak in their clips; the story’s setting decides here.',
+  image: 'A single keyframe can be your own only on an animated story; the story’s setting decides here.',
 }
 
 /** "1080×1920". */

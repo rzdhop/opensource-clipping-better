@@ -265,7 +265,7 @@ def budget_seconds(*, shots, clips, v2=False, redraws=0) -> float:
 # plan 19 stage 3 amends DEC-162): it approves over one only once the repairs
 # are spent (:func:`script_anyway_issues`).
 _BLOCKING_STOP = ("The fast track never approves over blocking issues before the script step's repair passes are "
-                  "spent on a v2 story: fix them (edit the script, or regenerate the scenes they name) so the check "
+                  "spent on an animated story: fix them (edit the script, or regenerate the scenes they name) so the check "
                   "passes, or approve the script anyway yourself.")
 
 
@@ -315,8 +315,8 @@ def script_refusal(script, ep, *, v2=False, j1_version=None):
         if v2:
             fill = (" -- run the script step again: its fill pass lengthens the shortest scenes --"
                     if state == "under" else "")
-            return (f"Episode {ep}'s script is {state} its length window: {episode_common.timing_line(script)}. A "
-                    f"v2 episode is never approved outside its window: {how} it{fill} (edit it, or regenerate a "
+            return (f"Episode {ep}'s script is {state} its length window: {episode_common.timing_line(script)}. An "
+                    f"episode is never approved outside its window: {how} it{fill} (edit it, or regenerate a "
                     "scene).")
         return (f"Episode {ep}'s script is {state} its length window: {episode_common.timing_line(script)}. The "
                 f"fast track approves only a script inside it: {how} it (edit it, or regenerate a scene), or "
@@ -715,10 +715,10 @@ class _FastTrack:
             raise StepFailed(f"Episode {ec.ep}'s keyframes are not approved. {findings['refusal']}")
         total = len(board["shots"])
         own = [shot_id for shot_id, _text in findings["warnings"]]
-        detail = f"{total} keyframe{_s(total)} checked by J2, every one passed"
+        detail = f"{total} keyframe{_s(total)} checked, every one passed"
         if own:
             # The human's own keyframes: the check's issues are a warning, never a stop.
-            detail = (f"{total} keyframe{_s(total)} checked by J2; your own keyframe{_s(len(own))} kept with the "
+            detail = (f"{total} keyframe{_s(total)} checked; your own keyframe{_s(len(own))} kept with the "
                       "check's warning: " + "; ".join(f"{shot_id} ({text})" for shot_id, text in findings["warnings"]))
         self.approve(ec, "keyframes",
                      lambda workflow, now: workflow.approve_keyframes(ec.store, ec.story_id, ec.ep, now=now,
@@ -944,7 +944,7 @@ class _FastTrack:
         wait = keyframes_wait(ec)
         if wait:
             if self.params[STOP_PARAM]:
-                raise StepFailed(f"Episode {ec.ep}'s keyframes are made and checked (J2), and wait for you: {wait}. "
+                raise StepFailed(f"Episode {ec.ep}'s keyframes are made and checked, and wait for you: {wait}. "
                                  "Look at each keyframe and its check on the storyboard, then Approve keyframes (a "
                                  "shot that does not match: regenerate it, or upload your own); the clips are bought "
                                  "after that.")

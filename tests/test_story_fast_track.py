@@ -271,10 +271,11 @@ def test_a_consistency_check_with_issues_stops_a_legacy_script_and_is_never_appr
 
     # DEC-261, re-pinned on purpose: the s03 voice note is minor (approved over, named in the detail); the
     # continuity issue with no scene is the blocking one that stops the fast track.
+    # DEC-305 section 9 (plan 28 S2): "a v2 story" is now "an animated story"; the meaning is the same.
     assert message.startswith("Fast track stopped at the script (step 1 of 6): Episode 1's consistency check "
                               "found 1 blocking issue: the episode (continuity): Le vote surprise n'est jamais "
                               "expliqué. The fast track never approves over blocking issues before the script "
-                              "step's repair passes are spent on a v2 story: fix them (edit the script, or "
+                              "step's repair passes are spent on an animated story: fix them (edit the script, or "
                               "regenerate the scenes they name) so the check passes, or approve the script anyway "
                               "yourself.")
     assert message.endswith("Then Continue the fast track: it picks up here and repeats nothing already done.")

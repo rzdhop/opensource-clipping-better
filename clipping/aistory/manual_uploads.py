@@ -254,8 +254,8 @@ def upload_target_refusal(ec, shot, doc) -> str | None:
     from .steps import clips
 
     if not media_policy.native_speech(ec.story):
-        return (f"Episode {ec.ep}'s clips are not yours to upload: the story is not on a native-speech profile "
-                f"whose clips are on {gen.MANUAL_LINK} (choose Native speech — your own clips).")
+        return (f"Episode {ec.ep}'s clips are not yours to upload: the story's spending plan is not one "
+                "where you make the clips (choose \"Characters speak in your own clips\" under How it's made, Advanced).")
     link = clips.class_link(ec.story, shot, doc, None)
     if gen.is_manual(link or ""):
         return None

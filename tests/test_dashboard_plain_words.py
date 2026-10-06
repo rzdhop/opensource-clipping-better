@@ -31,6 +31,7 @@ DEFAULT_VIEWS = [
     "pages/story/episode/EpisodeStepper.jsx",
     "pages/story/episode/EpisodeApproveAll.jsx",
     "pages/story/episode/HandoffPage.jsx",
+    "pages/story/episode/HandoffCard.jsx",
     "pages/Settings.jsx",
     "components/EstimateChip.jsx",
     "components/RouteChip.jsx",
