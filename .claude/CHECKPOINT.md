@@ -1,10 +1,13 @@
-## CURRENT STATE — plan 31 (the Chatterbox TTS route on the RunPod worker; episode 1 of "Accès refusé" voiced through it) CODE + DOCS COMPLETE on `feat/comfy-tts-chatterbox`; PR to main open; the GPU steps are the human's (2026-10-06, local session)
+## CURRENT STATE — plan 31 (the Chatterbox TTS route on the RunPod worker; episode 1 of "Accès refusé" voiced through it) CODE + DOCS COMPLETE and PUSHED on `feat/comfy-tts-chatterbox`; the PR to main is the human's click (no gh, no token, the browser pane not signed in); the GPU steps are the human's (2026-10-06, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Branch `feat/comfy-tts-chatterbox`
   (checkpoint 0d39ad6 = main 8f935e5 + render_ep01.py), stages: 17e90d0 plan · 002615c stage 1 (template engine +
   tts_chatterbox.json) · 96f3953 stage 2 (worker image + GHCR workflow + handler patch test) · 35423c1 stage 3 (the
   MCP audio kind end to end) · 39ed532 stage 4 (make_voice_refs, voice_ep01_comfy, --use-existing-voices) · this
-  commit = stage 5 docs (CHANGELOG, DEC-314, A-197…A-201, this file). Plan file
+  commit = stage 5 docs (CHANGELOG, DEC-314, A-197…A-201, this file); 1b66003 pushed. **PR:** open it from the
+  compare page (title and body prefilled; the body is also the PR checklist):
+  https://github.com/rzdhop/opensource-clipping-better/compare/main...feat/comfy-tts-chatterbox?expand=1
+  Plan file
   `.claude/plans/ai-story/31-comfy-tts-chatterbox-plan.md`. Next action = the human's checklist (the PR body):
   run the GHCR workflow + make the package public → point the IMAGE endpoint (aq6qg1pykxa2st) at
   ghcr.io/rzdhop/worker-comfyui-tts:latest (and `fetch_weights.sh` on the dev pod) → restart the MCP unit →
