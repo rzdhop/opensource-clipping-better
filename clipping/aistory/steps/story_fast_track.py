@@ -107,7 +107,8 @@ CONCEPT_COUNT = 1
 # The cast: the concept's sketch, at most five (plan 21 decision 2).
 CAST_PICK_MAX = 5
 # Episode 1 as the one click makes it: never stopped at the keyframes or at
-# the script's leftover issues (the fast track's usual params, DEC-265).
+# the script's leftover issues (the fast track's usual params, DEC-265); a
+# keyframe the check still flags is approved with its warning (DEC-311).
 FAST_TRACK_PARAMS = {fast_track_step.STOP_PARAM: False, fast_track_step.SCRIPT_STOP_PARAM: False}
 # The time budget the estimate shows (plan 21 decision 3): a part of
 # pre-production is given a quarter of an hour; episode 1 the fast track's

@@ -313,10 +313,26 @@ def test_the_keyframe_keys_are_optional_and_checked_when_present():
         "an approval without anyway": (dict(keyframes_approved={"at": NOW, "fingerprint": SHA_C}), "anyway"),
         "an approval's fingerprint not a sha256": (dict(keyframes_approved={"at": NOW, "anyway": False,
                                                                             "fingerprint": "abc"}), "does not match"),
+        # DEC-311: the optional record of the shots the approval went over with the check's warning.
+        "a warned shot key not a shot id": (dict(keyframes_approved={
+            "at": NOW, "anyway": True, "fingerprint": SHA_C,
+            "shots": {"shot1": {"issues": ["x"], "image_hash": SHA_A}}}), "'shot1' is not a shot id"),
+        "a warned shot without its image": (dict(keyframes_approved={
+            "at": NOW, "anyway": True, "fingerprint": SHA_C, "shots": {"sh01": {"issues": ["x"]}}}), "image_hash"),
+        "a warned shot with no issue": (dict(keyframes_approved={
+            "at": NOW, "anyway": True, "fingerprint": SHA_C,
+            "shots": {"sh01": {"issues": [], "image_hash": SHA_A}}}), "issues"),
+        "an extra warned shot key": (dict(keyframes_approved={
+            "at": NOW, "anyway": True, "fingerprint": SHA_C,
+            "shots": {"sh01": {"issues": ["x"], "image_hash": SHA_A, "at": NOW}}}), "additional property"),
     }
     for label, (changes, keyword) in breaks.items():
         errors = schemas.episode_assets_errors(_assets(**changes))
         assert any(keyword in error for error in errors), (label, errors)
+    warned = _assets(keyframes_approved={"at": NOW, "anyway": True, "fingerprint": SHA_C, "flagged": ["sh02"],
+                                         "shots": {"sh02": {"issues": ["does not show the beat"],
+                                                            "image_hash": SHA_B}}})
+    assert schemas.episode_assets_errors(warned) == []
 
 
 def test_a_verdict_carries_the_j2_version_that_judged_it_and_an_old_one_still_validates():

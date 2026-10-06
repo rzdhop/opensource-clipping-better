@@ -319,10 +319,12 @@ function VideoPhaseHeader({ storyId, ep, episode, busy, onChange }) {
  * A v2 episode's keyframe approval (phase 7 stage 6b, DEC-230): the approval
  * no clip is bought before (RC-Q3; `workflow.approve_keyframes`,
  * `episode.assets.keyframes`: approval none | current | stale), for a story
- * that stopped at the keyframes ("Stop at the keyframes for my review"). A
- * refusal shows the server's sentence -- plan 28 F1: the check is a hard
- * gate, nothing goes over it -- and the two ways out: regenerate the shot
- * (the Review tab) or upload your own keyframe (the Handoff). Each shot's
+ * that stopped at the keyframes ("Stop at the keyframes for my review").
+ * DEC-311: the check warns, it never blocks -- a shot it flags is approved
+ * with its warning (no "Approve anyway" button: nothing needs one); a hint
+ * names the two optional ways to another try: regenerate the shot (the
+ * Review tab) or upload your own keyframe (the Handoff). A refusal (a
+ * keyframe still missing) shows the server's sentence. Each shot's
  * check (J2) is read, large, on the Review tab (stage C: `episode.review`,
  * ReviewPane.jsx) -- this card only counts the flagged ones. Null on a legacy
  * episode (no `keyframes` in the payload).
@@ -368,7 +370,7 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
       <p className="form-hint">
         No clip is bought until the keyframes are approved.{' '}
         {review
-          ? `${flagged} keyframe${flagged === 1 ? '' : 's'} still flagged by the check — see each one, large, on the Review tab.`
+          ? `${flagged} keyframe${flagged === 1 ? '' : 's'} still flagged by the check — a warning only: approving keeps ${flagged === 1 ? 'it' : 'them'} as ${flagged === 1 ? 'it is' : 'they are'}. See each one, large, on the Review tab.`
           : 'Check each one shows its beat on the Review tab.'}
       </p>
       <div className="story-step-actions">
@@ -393,10 +395,10 @@ function ApproveKeyframes({ storyId, ep, episode, busy, onChange }) {
         </p>
       )}
       <StepError message={error} errors={errors} className="story-step-error" />
-      {error && !approved && (
+      {flagged > 0 && !approved && (
         <p className="form-hint">
-          Regenerate each shot that does not match on the Review tab, or upload your own keyframe on the Handoff
-          (the shot set to “My own”); then approve again.
+          Want another try first? Regenerate a flagged shot on the Review tab,
+          or upload your own keyframe on the Handoff (the shot set to “My own”). Optional: the check only warns.
         </p>
       )}
       </CardBody>

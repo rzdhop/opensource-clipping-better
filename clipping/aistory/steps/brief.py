@@ -310,8 +310,10 @@ def keyframe_check(ec, storyboard, shot, doc):
     prompt) / ``none`` (no keyframe on disk);
     ``line`` what the card, the zip and the brief say ("The check saw:
     ..."); ``upload_refusal`` why the clip is not taken yet, for an app-made
-    keyframe that is not current and passed (the human's own keyframe is
-    warned about, never refused). None on a legacy story or a stock shot."""
+    keyframe that is missing or out of date (the human's own keyframe is
+    warned about, never refused). DEC-311: a ``failed`` or ``unjudged``
+    check is a warning only -- its line says so, and it never refuses the
+    upload. None on a legacy story or a stock shot."""
     stock = ((shot.get("assets") or {}).get("clip") or {}).get("route") == schemas.STOCK_ROUTE
     if not media_policy.is_v2(getattr(ec, "story", None)) or stock:
         return None
@@ -337,20 +339,19 @@ def keyframe_check(ec, storyboard, shot, doc):
                 "upload_refusal": None if own
                 else f"Shot {shot_id} has no keyframe yet: make it first (the assets step), then upload its clip."}
     entry = ((doc or {}).get(judge.KEYFRAME_VERDICTS) or {}).get(shot_id)
+    # DEC-311: the check's verdict is a warning, never a refusal -- the clip is taken whatever it says.
     if not judge.verdict_current(entry, item[2], item[5]):
         return {"state": "unjudged", "own": own,
-                "line": "The keyframe has no check yet: run the assets step again (it checks it, free).",
-                "upload_refusal": None if own
-                else (f"Shot {shot_id}'s keyframe has no check yet: run the assets step again (it checks it, free), "
-                      "then upload its clip.")}
+                "line": ("No keyframe check yet: a warning only, you can still upload its clip (the assets step "
+                         "checks it, free)."),
+                "upload_refusal": None}
     if judge.verdict_passed(entry):
         return {"state": "passed", "own": own, "line": "The keyframe check passed.", "upload_refusal": None}
     seen = judge.verdict_text(entry)
     return {"state": "failed", "own": own,
-            "line": f"The check saw: {seen}." + (" It is your own keyframe: your call." if own else ""),
-            "upload_refusal": None if own
-            else (f"Shot {shot_id}'s keyframe does not match (the check saw: {seen}): regenerate it, or upload "
-                  "your own, before its clip.")}
+            "line": f"The check saw: {seen}." + (" It is your own keyframe: your call." if own
+                                                 else " A warning only: you can still upload its clip."),
+            "upload_refusal": None}
 
 
 # ------------------------------------------------------------------ the prompt

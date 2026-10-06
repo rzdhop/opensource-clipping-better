@@ -1012,10 +1012,11 @@ class StoryApproveRequest(BaseModel):
     """POST /api/stories/{id}/approve/{doc}'s optional body. ``approve_anyway``
     (``script:<ep>``, phase 7 stage 6b ``keyframes:<ep>`` and, plan 29 stage
     5, ``character:<id>`` / ``place:<id>`` / ``prop:<id>`` only) approves a
-    script whose consistency or first-watch check found issues, a v2
-    episode's keyframes whose check (J2) failed or did not run, or an entity
+    script whose consistency or first-watch check found issues, or an entity
     whose image the sheet judge failed (never one it has not checked); the
-    approval records it.
+    approval records it. On ``keyframes:<ep>`` it is accepted and ignored
+    since DEC-311: a v2 episode's keyframes whose check (J2) failed or did
+    not run are approved with the check's warning whatever it says.
 
     ``direction`` (phase 5, ``feedback:<ep>`` only, required there -- 0, 1, 2
     or null for none) chooses which of F1's three directions steers episode

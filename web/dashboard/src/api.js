@@ -697,8 +697,9 @@ export async function runStoryStep(storyId, step, body = {}) {
  * `storyboard:<ep>`); answers the story (an episode document: the episode
  * page). `body` is only sent for `script:<ep>` (`{approve_anyway}`, to
  * approve over a consistency report with issues) and -- phase 7 stage 6b --
- * `keyframes:<ep>` (`{approve_anyway}`, over a failed or missing keyframe
- * check) and -- plan 29 stage 5 -- `character:<id>` / `place:<id>` /
+ * `keyframes:<ep>` (`{approve_anyway}`, accepted and ignored since DEC-311:
+ * a failed or missing keyframe check is approved with its warning anyway)
+ * and -- plan 29 stage 5 -- `character:<id>` / `place:<id>` /
  * `prop:<id>` (`{approve_anyway}`, over an image the sheet check failed);
  * every other caller keeps posting with no body, exactly as before.
  */

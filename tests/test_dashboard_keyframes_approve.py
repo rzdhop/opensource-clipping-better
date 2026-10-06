@@ -3,9 +3,9 @@ since stage C, the review grid it points to: each shot's keyframe check (J2)
 is read there, per shot, from the page's ``review`` block
 (``workflow.episode_review``); the card keeps "Approve keyframes", before
 which no v2 clip is bought (RC-Q3), for a story that stopped at the
-keyframes -- since plan 28 F1 with no "Approve anyway" (a hard gate): a
-refusal points to Regenerate (the Review tab) and Upload your own (the
-Handoff).
+keyframes -- with no "Approve anyway" button: since DEC-311 the check warns,
+it never blocks, so nothing needs one; a hint names Regenerate (the Review
+tab) and Upload your own (the Handoff) as optional ways to another try.
 
 A text contract over ``StoryboardPane.jsx`` and ``ReviewPane.jsx`` (CI has
 no node, like the other dashboard tests): the names they read from the
@@ -45,11 +45,13 @@ def test_the_pane_approves_with_the_payloads_target_and_the_review_shows_each_ch
     for key in ("approval", "approved_at", "anyway", "target"):
         assert f'"{key}"' in block, key
         assert f"keyframes.{key}" in body, key
-    # Plan 28 F1 (DEC-305 §5), re-pinned on purpose: the keyframe check (J2) is a hard gate -- the card
-    # approves with no "anyway" and, refused, points to the two ways out.
+    # DEC-311, re-pinned on purpose (plan 28 F1 made it a hard gate): the check warns, it never blocks -- the
+    # card approves with no "anyway" (no Approve anyway button: nothing needs one) and, while keyframes are
+    # flagged, a hint names the two optional ways to another try.
     assert "approveStoryDoc(storyId, keyframes.target)" in body
     assert "approve_anyway" not in body and "Approve anyway" not in body and "Approve keyframes" in body
-    assert "Regenerate each shot that does not match on the Review tab, or upload your own keyframe" in body
+    assert "a warning only: approving keeps" in body
+    assert "Regenerate a flagged shot on the Review tab," in body and "Optional: the check only warns." in body
     # Stage C: each shot's check is the review grid's (its verdict per shot), not a text row here.
     assert "assets.doc.keyframe_verdicts" not in body
     review = REVIEW.read_text(encoding="utf-8")

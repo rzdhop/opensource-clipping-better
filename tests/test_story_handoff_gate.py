@@ -3,8 +3,9 @@ consistency problems, and all details"): the Handoff gate.
 
 1. Each shot's row says its keyframe's check (J2) in plain words -- the
    card, the brief's markdown and the shot's zip ("The check saw: ...") --
-   and its clip is not taken until an app-made keyframe is current and
-   passed (the human's own keyframe: warned, allowed).
+   and its clip is not taken until an app-made keyframe exists and is
+   current (DEC-311: what the check says is a warning, never a refusal; the
+   human's own keyframe: warned, allowed).
 2. A shot's references favour identity -- the keyframe, the speaker's
    sheet, the other characters' sheets, the plate, the props -- cut to the
    platform's cap with a plain line saying what was left out.
@@ -39,6 +40,9 @@ NOW = tas.NOW
 # ------------------------------------------------------------ 1. the keyframe check
 
 def test_each_shot_says_its_keyframe_check_and_an_app_keyframe_gates_its_clip(store, tmp_path, built):
+    """DEC-311, re-pinned on purpose: a failed or missing check is a warning
+    on the shot's line (the state unchanged), never the upload's refusal --
+    the missing and the out-of-date keyframe still are (not verdicts)."""
     from clipping.aistory import workflow
     from clipping.aistory.steps import assets, brief
 
@@ -54,15 +58,17 @@ def test_each_shot_says_its_keyframe_check_and_an_app_keyframe_gates_its_clip(st
     failed = brief.keyframe_check(ec, board, by_id["sh02"], doc)
     assert failed == {
         "state": "failed", "own": False,
-        "line": "The check saw: Gaston's head is a pear, the sheet shows a pineapple.",
-        "upload_refusal": ("Shot sh02's keyframe does not match (the check saw: Gaston's head is a pear, the sheet "
-                           "shows a pineapple): regenerate it, or upload your own, before its clip.")}
-    # No current check: the keyframe as it is now was never judged.
+        "line": ("The check saw: Gaston's head is a pear, the sheet shows a pineapple. A warning only: you can still "
+                 "upload its clip."),
+        "upload_refusal": None}
+    # No current check: the keyframe as it is now was never judged -- a warning, never a refusal.
     khg._drop_verdict(store, story_id, "sh03")
     unjudged = brief.keyframe_check(ec, board, by_id["sh03"], assets._read_assets_doc(ec))
-    assert unjudged["state"] == "unjudged" and unjudged["upload_refusal"] == (
-        "Shot sh03's keyframe has no check yet: run the assets step again (it checks it, free), then upload its "
-        "clip.")
+    assert unjudged == {
+        "state": "unjudged", "own": False,
+        "line": ("No keyframe check yet: a warning only, you can still upload its clip (the assets step checks it, "
+                 "free)."),
+        "upload_refusal": None}
     # The human's own keyframe: said, never a refusal.
     workflow.patch_shot_mode(store, story_id, 1, "sh02", {"image": "manual"}, now=kg.LATER, env=kg.SETTINGS)
     own = brief.keyframe_check(ec, board, by_id["sh02"], assets._read_assets_doc(ec))
@@ -136,13 +142,15 @@ def test_the_references_put_identity_first_then_the_set_then_the_props(store):
 def test_the_brief_and_the_shot_zip_say_the_keyframe_check_and_the_cut():
     from clipping.aistory.steps import brief
 
-    data = brief.shot_references_zip(None, [], notes=("The check saw: Gaston's head is a pear.",
+    # DEC-311, re-pinned on purpose: the keyframe check's line says it is a warning only.
+    data = brief.shot_references_zip(None, [], notes=("The check saw: Gaston's head is a pear. A warning only: you "
+                                                       "can still upload its clip.",
                                                        "Flow takes 3 images: the plate was left out, the prompt "
                                                        "describes it.", None))
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         assert archive.read("check.txt").decode("utf-8") == (
-            "The check saw: Gaston's head is a pear.\nFlow takes 3 images: the plate was left out, the prompt "
-            "describes it.\n")
+            "The check saw: Gaston's head is a pear. A warning only: you can still upload its clip.\nFlow takes 3 "
+            "images: the plate was left out, the prompt describes it.\n")
     with zipfile.ZipFile(io.BytesIO(brief.shot_references_zip(None, []))) as archive:
         assert archive.namelist() == []  # no notes: the files alone, as before
     source = pathlib.Path(brief.__file__).read_text(encoding="utf-8")
@@ -189,7 +197,9 @@ def test_an_uploaded_clip_s_first_frame_is_checked_against_its_keyframe_and_warn
 
 # ------------------------------------------------------------------ the card
 
-def test_the_card_says_the_checks_and_holds_the_upload_until_the_keyframe_passed():
+def test_the_card_says_the_checks_and_holds_the_upload_only_while_a_keyframe_is_missing():
+    """DEC-311, renamed on purpose: the card keeps its refusal slot, which
+    the server now fills only for a missing or out-of-date keyframe."""
     src = pathlib.Path(__file__).resolve().parent.parent / "web" / "dashboard" / "src" / "pages" / "story" / "episode"
     checks = (src / "HandoffChecks.jsx").read_text(encoding="utf-8")
     card = (src / "HandoffCard.jsx").read_text(encoding="utf-8")

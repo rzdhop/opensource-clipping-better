@@ -1947,12 +1947,13 @@ async def approve(story_id: str, doc: str, req: Optional[StoryApproveRequest] = 
     ``{approve_anyway?}``): 400 for an episode number the season does not
     plan; 409 while a step job of the episode is queued or running; then
     ``workflow.approve_keyframes`` (409 for a legacy story, until the script
-    and the storyboard are approved and current, naming every shot with no
-    current keyframe, and every shot whose keyframe check (J2) failed or has
-    not run on it -- a hard gate since plan 28 F1: ``approve_anyway`` goes
-    over nothing there); ``assets.json`` gains
-    ``keyframes_approved {at, anyway, fingerprint}``, and until it is current
-    no clip of the episode is bought. No job awaits it.
+    and the storyboard are approved and current, and naming every shot with
+    no current keyframe; DEC-311: a shot whose keyframe check (J2) failed or
+    has not run on it is approved with its warning, never refused, and
+    ``approve_anyway`` is accepted and ignored); ``assets.json`` gains
+    ``keyframes_approved {at, anyway, fingerprint, by, flagged, shots?}``
+    (``shots``: each app-made shot approved with the check's warning), and
+    until it is current no clip of the episode is bought. No job awaits it.
 
     ``memory:<ep>``, ``feedback:<ep>`` (body ``{direction?}``, required and
     only there -- 400 with any other document), ``proposals:<ep>`` (phase 5,

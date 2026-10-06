@@ -277,10 +277,10 @@ def accept_clip(stories, story_id, ep, shot_id, received, *, filename, env=None,
     :class:`UploadRefused` (409) when a step of the story started while the
     file was arriving, so nothing writes the storyboard beside it.
 
-    Plan 28 F7 (DEC-305 section 5): an app-made keyframe must be current
-    and passed by its check before its clip is taken
-    (``brief.keyframe_check``'s ``upload_refusal``; the human's own
-    keyframe is warned about, never refused); once stored, the clip's first
+    Plan 28 F7 (DEC-305 section 5): an app-made keyframe must exist and be
+    current before its clip is taken (``brief.keyframe_check``'s
+    ``upload_refusal``; DEC-311: what its check says is a warning, never a
+    refusal; the human's own keyframe is never refused); once stored, the clip's first
     frame is compared with its keyframe (:func:`first_frame_check`, a
     warning kept on the record, never a refusal). *adapters* and *transport*
     are the vision chain's (tests)."""

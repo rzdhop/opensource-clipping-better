@@ -4385,6 +4385,21 @@ _EPISODE_ASSETS_KEYFRAMES_APPROVED_SCHEMA = _document({
     # -- so the review can show them; absent on a stage-6b approval.
     "by": _APPROVED_BY_SCHEMA,
     "flagged": {"type": "array", "items": {"type": "string", "pattern": SHOT_ID_PATTERN}},
+    # DEC-311 (the DEC-307 rule applied to shots): each app-made shot the
+    # approval went over with the check's warning, keyed by shot id ->
+    # _KEYFRAME_APPROVED_SHOT_SCHEMA, checked in episode_assets_errors;
+    # absent when it went over none.
+    "shots": {"type": "object"},
+})
+# DEC-311: one shot the keyframe approval went over -- what the check saw
+# (judge.verdict_issues, or "no keyframe check yet") and the sha256 of the
+# very keyframe approved: _APPROVED_ANYWAY_SLOT_SCHEMA's shape, with room for
+# every finding a J2 verdict can carry (its sheet issues, the beat, what it
+# misses, the framing, the continuity).
+KEYFRAME_APPROVED_ISSUES_MAX = KEYFRAME_SHEET_ISSUES_MAX + 4
+_KEYFRAME_APPROVED_SHOT_SCHEMA = _document({
+    "issues": {"type": "array", "items": _NON_EMPTY_STRING, "minItems": 1, "maxItems": KEYFRAME_APPROVED_ISSUES_MAX},
+    "image_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
 })
 
 EPISODE_ASSETS_SCHEMA = _document({
@@ -4434,7 +4449,8 @@ def episode_assets_errors(doc) -> list:
     emotions with the dominant one the heaviest, a track's file, sha256
     and licence recorded together, the per-shot overrides (phase 6
     stage 7) keyed by shot ids, none empty, and the keyframe verdicts (phase
-    7 stage 6b) keyed by shot ids."""
+    7 stage 6b) and the shots the keyframe approval went over (DEC-311)
+    keyed by shot ids."""
     errors = validate(doc, EPISODE_ASSETS_SCHEMA)
     if errors:
         return errors
@@ -4485,6 +4501,13 @@ def episode_assets_errors(doc) -> list:
             errors.append(f"$.keyframe_verdicts: {key!r} is not a shot id")
             continue
         errors.extend(validate(entry, _EPISODE_ASSETS_KEYFRAME_VERDICT_SCHEMA, path))
+
+    for key, entry in ((doc.get("keyframes_approved") or {}).get("shots") or {}).items():
+        path = f"$.keyframes_approved.shots.{key}"
+        if not (isinstance(key, str) and _search(SHOT_ID_PATTERN, key)):
+            errors.append(f"$.keyframes_approved.shots: {key!r} is not a shot id")
+            continue
+        errors.extend(validate(entry, _KEYFRAME_APPROVED_SHOT_SCHEMA, path))
 
     for key, entry in (doc.get("keyframe_fixes") or {}).items():
         path = f"$.keyframe_fixes.{key}"

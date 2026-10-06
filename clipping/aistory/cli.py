@@ -159,9 +159,10 @@ numbers).
 
 Phase 7 stage 6b: ``approve <story_id> keyframes:N`` approves a v2 story's
 episode N keyframes (``workflow.approve_keyframes``, the API's own rule:
-every shot with a current keyframe, every keyframe check (J2) passed --
-a hard gate since plan 28 F1: ``--anyway`` is still accepted and goes over
-nothing); no clip of a v2 episode is bought before it is current. It is the one
+every shot with a current keyframe -- a missing one is refused; since
+DEC-311 a keyframe the check (J2) flagged or has not checked is approved
+with its warning, named on the line printed, and ``--anyway`` is accepted
+and ignored); no clip of a v2 episode is bought before it is current. It is the one
 document approved by a command of its own: a person approves keyframes
 after looking at them, so no step's ``--auto-approve`` ever does. Any other
 document is refused, pointing at ``--auto-approve``.
@@ -713,17 +714,17 @@ def build_parser() -> argparse.ArgumentParser:
         "approve", parents=[common], help="approve a v2 episode's keyframes (keyframes:N)",
         description=(
             "Approve episode N's keyframes on a v2 story (keyframes:N), by the API's own rule: every shot "
-            "with a current keyframe and every keyframe check (J2) passed (a failed or missing check is "
-            "refused: regenerate the shot or upload your own keyframe). No clip of a v2 episode is bought "
-            "before its keyframes are approved. The other documents are approved with 'step ... "
+            "needs a current keyframe (a missing one is refused). A keyframe the check (J2) flagged or has "
+            "not checked yet is approved with its warning, named on the approval. No clip of a v2 episode is "
+            "bought before its keyframes are approved. The other documents are approved with 'step ... "
             "--auto-approve'."
         ),
     )
     approve_cmd.add_argument("story_id", help="the story's id (see 'list')")
     approve_cmd.add_argument("doc", metavar="keyframes:N", help="the document to approve: keyframes:N")
     approve_cmd.add_argument("--anyway", action="store_true",
-                             help="accepted, goes over nothing: a failed or missing keyframe check (J2) is "
-                                  "refused (plan 28)")
+                             help="accepted and ignored: a flagged or unchecked keyframe is approved with its "
+                                  "warning anyway (DEC-311)")
 
     # ---- voice-tails (phase 7 follow-up: the Gemini tail guard, read only)
     tails_cmd = commands.add_parser(
@@ -1770,9 +1771,10 @@ def _print_fast_track_summary(result) -> None:
             notes.append(f"{label} written")
     approved = f"; auto-approved {_and(result['auto_approved'])}" if result["auto_approved"] else ""
     keyframes = result.get("keyframes") or {}
-    if keyframes.get("auto_approved") and keyframes.get("flagged"):
-        # Stage C: the one click went over these -- the review screen shows each.
-        approved += f" (keyframes anyway: {_and(keyframes['flagged'])} still flagged, review them)"
+    still = list(keyframes.get("flagged") or []) + list(keyframes.get("unchecked") or [])
+    if keyframes.get("auto_approved") and still:
+        # DEC-311: the one click approved these with the check's warning -- the review screen shows each.
+        approved += f" (keyframes approved for you; still flagged: {_and(still)}, review them)"
     print(f"⏩ Fast track of episode {result['ep']} done in {result['seconds'] / 60:.1f} min: "
           + ", ".join(notes) + approved + ".")
 
@@ -1815,8 +1817,11 @@ def _cmd_approve(args, stories) -> int:
     story_id = story["story_id"]
     doc = workflow.approve_keyframes(stories, story_id, int(ep), approve_anyway=args.anyway, now=_now())
     approved = doc["keyframes_approved"]
+    flagged = list(approved.get("flagged") or [])
+    # DEC-311: a flagged or unchecked keyframe is approved with its warning, named here.
+    still = f" Still flagged, kept with the check's warning: {_and(flagged)}." if flagged else ""
     print(f"✅ Episode {int(ep)}'s keyframes approved{' anyway' if approved['anyway'] else ''} "
-          f"(fingerprint {approved['fingerprint'][:12]}): its clips can be made (the assets step).")
+          f"(fingerprint {approved['fingerprint'][:12]}): its clips can be made (the assets step).{still}")
     print(_line(workflow.load(stories, story_id)))
     return EXIT_OK
 

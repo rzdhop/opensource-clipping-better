@@ -183,7 +183,9 @@ never used by them), and each one names what it left alone, in plain words
 - **Approve all** under the episode's stepper: the script, then the storyboard,
   then the keyframes, then the assets, one after the other, through the same
   approvals their own buttons use. It stops at the first one the app refuses
-  and shows that sentence ("Stopped at the keyframes: …").
+  and shows that sentence ("Stopped at the keyframes: …"). A keyframe the check
+  flagged never stops it: since DEC-311 it is approved with its warning; only a
+  keyframe still missing does.
 
 The first two are one server call (`POST /api/stories/{id}/approve-all/cast`
 or `…/places`, below); the third is the dashboard doing the four approvals in
@@ -262,23 +264,32 @@ most 8 seconds". (E1/E2; `context.setup_context`.)
 
 Everyone who watched the first episodes said the same thing: a face that
 changes, a pear that becomes a pineapple, an outfit that is not the character's,
-a night scene on the day set. Plan 28 turns each of those into a check the app
-cannot talk itself past. Every rule below says what it checks first.
+a night scene on the day set. Plan 28 turns each of those into a check. Every
+rule below says what it checks first.
 
-**The keyframe check is a hard gate.** Each keyframe is looked at by a free
-vision check that compares it to the character sheets, the place plate and
-the props. A keyframe that does not match cannot be approved, and the one-click
-run stops instead of going over it: "Shot sh04 does not match: Gaston's head is
-a pear, the sheet shows a pineapple. Regenerate it, or upload your own." There is
-no "Approve anyway" on keyframes any more; the way past is a keyframe that passes
-(**Regenerate**, or **Upload** your own). A keyframe with no current check says
-"Shot sh05 has no keyframe check yet: run the assets step again (it checks them,
-free)." The redraws the app makes by itself before it stops are capped at
-**shots × 2 × the price of one image on the story's link** (14 shots at 2 redraws
-at $0.04 is $1.12), clips planned first and the redraws taking what the caps
-leave; the episode's, the day's and the story's own caps still stop it first.
-The keyframes **you** uploaded are judged and **warned** about ("The check saw:
-…"), never refused: your own keyframe is your call. (F1, `judge.keyframe_refusal`.)
+**The keyframe check warns, it never blocks (DEC-311).** Each keyframe is
+looked at by a free vision check that compares it to the character sheets, the
+place plate and the props. A keyframe that does not match is redrawn by the app
+up to twice (below); one still flagged after that, or one the check never saw,
+is **approved with its warning** and its clip is made from it: "Shot sh04 does
+not match: Gaston's head is a pear, the sheet shows a pineapple. A warning only:
+the clip is made from it; regenerate it if you want another try." A keyframe
+with no current check is named the same way ("Shot sh05 has no keyframe check
+yet."). Plan 28 made this a hard gate; on the first complete RunPod story it
+stopped an episode with five flagged shots after $1.00 of redraws and no clip,
+and the human chose fun videos over the judge's taste — the cast, places and
+props check had already become warn-and-decide (DEC-307). The approval keeps
+each shot it went over (`keyframes_approved.shots`: what the check saw, or "no
+keyframe check yet", and the very image approved); the Review tab says
+"Approved by you despite: …" (or "for you", when Generate episode approved it)
+while the keyframe is still that image, and a regenerated keyframe clears it.
+Regenerating or uploading your own stays available as another try, never as a
+requirement. The redraws the app makes by itself are capped at **shots × 2 ×
+the price of one image on the story's link** (14 shots at 2 redraws at $0.04 is
+$1.12), clips planned first and the redraws taking what the caps leave; the
+episode's, the day's and the story's own caps still stop them first. The
+keyframes **you** uploaded are judged and **warned** about too ("The check saw:
+…"): your own keyframe is your call. (F1, DEC-311, `judge.keyframe_warning`.)
 
 **What the keyframe check sees.** It is told to look at the head and the
 species (a pear is never drawn with a pineapple's head, nor a human one), skin and material, the written
@@ -345,12 +356,13 @@ the story's continuity -- a shot is never drawn in another outfit." Checked at t
 storyboard and again at the assets step; a legacy story is never checked (F6).
 
 **The Handoff gate.** On the Handoff, each clip row carries the **check line** of
-its keyframe ("The keyframe check passed.", or "The check saw: …", or "The
-keyframe has no check yet: run the assets step again (it checks it, free)."), and
-so does the brief and the zip (in `check.txt`). The **upload of a clip waits** for
-a keyframe that is current and passed: "Shot sh04's keyframe does not match (the
-check saw: …): regenerate it, or upload your own, before its clip." (your own
-keyframe never blocks it). The references the platform is told to attach put
+its keyframe ("The keyframe check passed.", or "The check saw: …. A warning only:
+you can still upload its clip.", or "No keyframe check yet: a warning only, you
+can still upload its clip (the assets step checks it, free)."), and so does the
+brief and the zip (in `check.txt`). The **upload of a clip waits** only for a
+keyframe that exists and is current ("Shot sh04 has no keyframe yet: make it
+first (the assets step), then upload its clip."); since DEC-311 what the check
+saw is a warning, never a refusal (your own keyframe never blocks it either). The references the platform is told to attach put
 **identity first** (the characters' sheets, then the plate, then the props), and
 when the platform's model takes fewer images than the shot has, the cut is said:
 "Flow takes 3 images: the plate was left out, the prompt describes it." And the
@@ -655,11 +667,12 @@ shorter than 150 ms.
   check also sees the character's head and species, the outfit, the place's
   plate and the props ("Strict consistency rules"). The storyboard's
   **Keyframes** card lists each verdict and what was fixed; **Approve
-  keyframes** is the gate, and it is a hard one: a keyframe that failed its
-  check, or has none, cannot be approved ("Shot sh04 does not match: …
-  Regenerate it, or upload your own."), there is no "Approve anyway", and
-  until it is approved and current no clip is bought, and a changed keyframe
-  makes it stale.
+  keyframes** is the gate before any clip: a keyframe that failed its check,
+  or has none, is approved with its warning (DEC-311: "Shot sh04 does not
+  match: …. A warning only: the clip is made from it; regenerate it if you
+  want another try."), no "Approve anyway" is needed, only a missing keyframe
+  is refused; until the approval is current no clip is bought, and a changed
+  keyframe makes it stale.
   Regenerating one shot image by hand runs the check again on it and on the
   shot after it. Then run the assets step with animate on: it buys the clips.
 - *Generate episode* (the one click, "Fast track" below) follows the same
@@ -668,9 +681,9 @@ shorter than 150 ms.
   passes are spent: then it approves the script anyway over the blocking
   issues they could not fix and names them on the **Review** tab (tick "stop
   at the script" to keep the stop). The keyframes likewise: once they
-  are made, checked and auto-fixed it approves them for you when every one
-  passed (your click is the consent, the confirm says so; a shot still flagged
-  stops the run with the check's own sentence, it is never approved anyway), buys the
+  are made, checked and auto-fixed it approves them for you (your click is the
+  consent, the confirm says so; since DEC-311 a shot still flagged is approved
+  with the check's warning and named — "still flagged: sh02" — never a stop), buys the
   clips, approves the assets, renders and ends "ready for review" on the
   **Review** tab. Tick "stop at the keyframes" in the confirm to keep the
   stop — approve them on the Review tab, then **Continue**.
@@ -1158,12 +1171,14 @@ from the story's activity log. The route is `POST
 
 Each clip row of the Handoff, the brief and the zip (`check.txt`) says what the
 shot's keyframe check found, so you do not paste a prompt into Flow for a clip
-that starts from a wrong face: "The keyframe check passed.", "The check saw:
-Gaston's head is a pear, the sheet shows a pineapple.", "The keyframe has no
-check yet: run the assets step again (it checks it, free).", "The keyframe is
-out of date: make it again first (the assets step).". The clip's **upload waits**
-until the app-made keyframe is current and passed; your own keyframe is warned
-about and never blocks. When the platform's model takes fewer images than the
+that starts from a wrong face without knowing it: "The keyframe check passed.",
+"The check saw: Gaston's head is a pear, the sheet shows a pineapple. A warning
+only: you can still upload its clip.", "No keyframe
+check yet: a warning only, you can still upload its clip (the assets step checks
+it, free).", "The keyframe is out of date: make it again first (the assets
+step).". The clip's **upload waits** until the app-made keyframe exists and is
+current; what the check saw is a warning only (DEC-311), and your own keyframe is
+warned about and never blocks. When the platform's model takes fewer images than the
 shot has references, the cut is said ("Flow takes 3 images: the plate was left
 out, the prompt describes it."), and the references are ordered identity first
 (the characters, then the plate, then the props). An uploaded clip's first frame
@@ -3049,10 +3064,11 @@ that covers it; a complete assets grid. On a v2 story it approves one
 thing **anyway**, naming what it went over: the script once the script
 step's two repair passes are spent and only blocking issues remain (both
 checks fresh, the length inside the window) — the same issues found again on
-every pass are a judgement for you, not for a third pass. **It never approves
-keyframes anyway** (plan 28): a keyframe still flagged after its auto-fix, or
-with no check, stops the run with the check's own sentence ("Shot sh04 does not
-match: … Regenerate it, or upload your own."). The Review tab's checklist says
+every pass are a judgement for you, not for a third pass. The keyframes
+likewise (DEC-311): a keyframe still flagged after its auto-fix, or with no
+check, is approved with the check's warning and named — the feed says "kept
+with the check's warning: sh04 (…)", the last line "still flagged: sh04" —
+and the clips are made from it. The Review tab's checklist says
 "Approved anyway by Generate episode — still found: s00 (continuity), …"
 and lists each fix. Tick **Stop at the script if its repairs leave issues**
 (`stop_on_script_issues`, CLI `fast-track --stop-on-script-issues`) to keep
@@ -3087,7 +3103,8 @@ least 86 s of clips on this link, more than the 75 s this format allows. Pick a
 format that fits, or let the app choose one."), and one that fits at the plan but
 runs over after writing gets one remedy, the over-long scenes rewritten, before
 it stops ("A plan that always fits"). A keyframe that does not match its sheet
-stops the run at the keyframes, never approved anyway. A model link that is down
+stopped the run at the keyframes under plan 28; since DEC-311 it is approved
+with its warning instead. A model link that is down
 is skipped for the rest of the job, so a down link no longer costs minutes.
 
 ### Agent mode (one job from the idea to episode 1)
@@ -3129,7 +3146,7 @@ instead of a dozen, in exchange for reviewing the looks afterwards. Open the
 story in Studio when it is done: every document stays editable, every
 regenerate stays available, and your own approval replaces the agent's mark.
 Script and keyframes keep their judges (E4, J1, J2) and the fast track's
-rules.
+rules (the keyframe judge warns, it never blocks: DEC-311).
 
 **One estimate first.** `GET /api/stories/{id}/estimate/story-fast-track`
 sums every part still to do — LLM calls (on the free links first, $0 here as
@@ -3221,9 +3238,9 @@ Keys, chains, caps and `allow_paid` come from the environment (or `.env`);
 add **`--settings`** to any subcommand to read the ones the dashboard's
 Settings stored (`data/settings.json`, or `WEB_SETTINGS_FILE`) over it — the
 run says how many values it read, never a value. A v2 episode's keyframes
-are approved with `approve STORY_ID keyframes:1` (`--anyway` is still accepted
-and goes over nothing since plan 28: a keyframe that failed its check is
-regenerated or replaced), between an
+are approved with `approve STORY_ID keyframes:1` (a keyframe that failed its
+check, or has none, is approved with its warning and named on the line printed;
+`--anyway` is still accepted and ignored since DEC-311), between an
 assets run with `--no-animate` (keyframes, voices and their checks) and one
 without (the clips):
 
@@ -4381,12 +4398,13 @@ you asked for cannot hold the clips this story makes. Leave the format on "the
 app chooses".
 
 **"Shot sh04 does not match: Gaston's head is a pear, the sheet shows a
-pineapple. Regenerate it, or upload your own."** — the keyframe check found the
-keyframe different from the character sheet, and keyframes cannot be approved
-past that (nor by the one-click run). Regenerate the shot's keyframe, or upload
-your own (yours is warned about, never refused). "Shot sh05 has no keyframe check
-yet: run the assets step again (it checks them, free)" means the check has not run
-on the keyframe as it is now.
+pineapple. A warning only: the clip is made from it; regenerate it if you want
+another try."** — the keyframe check found the keyframe different from the
+character sheet after its two automatic redraws. It is a warning, not a stop
+(DEC-311): approving the keyframes (or the one-click run) keeps it and makes its
+clip from it. Regenerate the shot's keyframe, or upload your own, only if you want
+another try. "Shot sh05 has no keyframe check yet." means the check has not run
+on the keyframe as it is now; it is approved with that warning too.
 
 **"Gaston's portrait does not match: the head is a human head, Gaston is a
 pineapple. Regenerate it, or upload your own."** — the sheet check on the cast,
@@ -4402,10 +4420,12 @@ back and try again, or switch the story's image link as the sentence says
 (`PATCH /api/stories/{id}` with `{"links": {"image": "…"}}`); what is already made
 stays as it is.
 
-**"Shot sh04's keyframe does not match (the check saw: …): regenerate it, or
-upload your own, before its clip."** — the Handoff refuses a clip's upload until
-its app-made keyframe is current and passed. Fix the keyframe first; your own
-keyframe never blocks the clip.
+**"Shot sh04 has no keyframe yet: make it first (the assets step), then upload its
+clip."** — the Handoff refuses a clip's upload until its app-made keyframe exists
+and is current ("… is out of date: make it again …" the same way). What the
+keyframe check saw no longer refuses the upload (DEC-311): the row says it as a
+warning ("The check saw: …. A warning only: you can still upload its clip."); your
+own keyframe never blocks the clip.
 
 **"⏭ <model>: failed 3 times on B1, skipped for the rest of this job"** — not an
 error: the model's link was down for a whole retry ladder, so the job stopped

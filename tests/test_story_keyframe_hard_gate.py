@@ -1,16 +1,18 @@
 """Plan 28 F1+F2 (DEC-305 §5, the human: "strict rules to avoid consistency
-problems, and all details"): the keyframe judge (J2) is a hard gate.
+problems, and all details"): the keyframe judge (J2) -- since DEC-311 a
+warning, never a gate (the DEC-307 rule applied to shots; the human: "We
+want fun videos, not exactly the right things").
 
-- A failed or unjudged keyframe check is refused by the keyframe approval
-  even with ``approve_anyway``, in plain sentences naming each shot and
-  what the judge saw ("Shot sh04 does not match: ... Regenerate it, or
-  upload your own.").
+- A failed or unjudged keyframe check no longer refuses the keyframe
+  approval: the shot is approved with its issues kept as a warning
+  (``keyframes_approved.shots``: what the check saw and the very image
+  approved), counted only while the keyframe is that image.
 - The auto-fix's budget is sized to the episode: its shots x the redraws a
   shot x one keyframe on the episode's image link.
 - J2 checks the head, species, skin and material and the outfit, apart from
   the continuity, and sees the set's plate and the props in frame.
 
-(The fast track's stop is ``tests/test_story_fast_track_one_click.py``'s,
+(The fast track's own is ``tests/test_story_fast_track_one_click.py``'s,
 re-pinned; the dashboard's, ``tests/test_dashboard_keyframes_approve.py``'s.)
 
 The episode is stage 6b's v2 fixture (``tests/test_story_keyframe_gate.py``).
@@ -39,32 +41,75 @@ def _sheet_mismatch(shot_id):
     return answer
 
 
-def test_a_failed_check_is_refused_even_with_approve_anyway_naming_what_the_judge_saw(store, tmp_path, built):
-    from clipping.aistory import workflow
-
+def test_a_failed_check_is_approved_with_its_warning_naming_what_the_judge_saw(store, tmp_path, built):
+    """DEC-311, re-pinned on purpose (it was refused, plan 28 F1): the shot
+    is approved with what the judge saw kept on the approval, and
+    ``approve_anyway`` is accepted and ignored -- the same record either way."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
     kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")), params={"animate": False})
+    sha = kg._doc(store, story_id)["keyframe_verdicts"]["sh02"]["image_sha256"]
 
     for anyway in (False, True):
-        with pytest.raises(workflow.WorkflowError) as caught:
-            kg._approve_keyframes(store, story_id, approve_anyway=anyway)
-        assert str(caught.value) == ("Episode 1's keyframes are not approved. Shot sh02 does not match: Gaston's "
-                                     "head is a pear, the sheet shows a pineapple. Regenerate it, or upload your "
-                                     "own.")
-    assert "keyframes_approved" not in kg._doc(store, story_id)
+        approved = kg._approve_keyframes(store, story_id, approve_anyway=anyway)["keyframes_approved"]
+        assert approved["anyway"] is True and approved["flagged"] == ["sh02"]
+        assert approved["shots"] == {"sh02": {"issues": ["Gaston's head is a pear, the sheet shows a pineapple"],
+                                              "image_hash": sha}}
+    assert kg._doc(store, story_id)["keyframes_approved"]["shots"]["sh02"]["image_hash"] == sha
 
 
-def test_an_unjudged_keyframe_is_refused_even_with_approve_anyway(store, tmp_path, built):
-    from clipping.aistory import workflow
-
+def test_an_unjudged_keyframe_is_approved_with_the_warning_no_keyframe_check_yet(store, tmp_path, built):
+    """DEC-311, re-pinned on purpose (it was refused, plan 28 F1): unlike an
+    entity's image, a shot never checked is approved too, its warning "no
+    keyframe check yet"."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
     kg._run(store, story_id, params={"animate": False})
     _drop_verdict(store, story_id, "sh03")
 
-    with pytest.raises(workflow.WorkflowError) as caught:
-        kg._approve_keyframes(store, story_id, approve_anyway=True)
-    assert str(caught.value) == ("Episode 1's keyframes are not approved. Shot sh03 has no keyframe check yet: run "
-                                 "the assets step again (it checks them, free).")
+    approved = kg._approve_keyframes(store, story_id, approve_anyway=True)["keyframes_approved"]
+
+    assert approved["anyway"] is True and approved["flagged"] == ["sh03"]
+    assert approved["shots"]["sh03"]["issues"] == ["no keyframe check yet"]
+    assert set(approved["shots"]) == {"sh03"}
+
+
+def test_a_keyframe_approved_with_its_warning_counts_only_while_it_is_that_very_image(store, tmp_path, built):
+    """DEC-311 (``judge.keyframe_approved_anyway``, the entities' rule of
+    ``tests/test_story_sheet_gate.py``): the record of a shot approved with
+    the check's warning counts while its keyframe is the image approved; a
+    regenerated keyframe clears it, and approving again records the new one."""
+    import hashlib
+
+    import test_story_fast_track_one_click as oc
+    from clipping.aistory import workflow
+    from clipping.aistory.steps import assets, judge
+
+    story_id = kg._v2_keyframes(store, tmp_path, built)
+    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")), params={"animate": False})
+    approved = kg._approve_keyframes(store, story_id)["keyframes_approved"]
+    sha = approved["shots"]["sh02"]["image_hash"]
+    assert judge.keyframe_approved_anyway(approved, "sh02", sha) is True
+    assert judge.keyframe_approved_anyway(approved, "sh01", sha) is False  # a shot it never went over
+    shots = workflow.episode_review(oc._page(store, story_id))["approvals"]["keyframes"]["shots"]
+    assert shots == {"sh02": {"issues": ["Gaston's head is a pear, the sheet shows a pineapple"], "image_hash": sha,
+                              "current": True}}
+
+    # What a regenerate leaves: another file for sh02's keyframe -- the record no longer counts.
+    ec = kg.tas._ec(store, story_id)
+    shot = next(item for item in kg.tas._board(store, story_id)["shots"] if item["shot_id"] == "sh02")
+    path = assets.shot_image_path(ec, shot)
+    with open(path, "ab") as handle:
+        handle.write(b"a new drawing")
+    with open(path, "rb") as handle:
+        fresh = hashlib.sha256(handle.read()).hexdigest()
+    assert fresh != sha and judge.keyframe_approved_anyway(approved, "sh02", fresh) is False
+    review = workflow.episode_review(oc._page(store, story_id))
+    assert review["approvals"]["keyframes"]["approval"] == "stale"
+    assert review["approvals"]["keyframes"]["shots"]["sh02"]["current"] is False
+
+    # Approved again, the record follows the new image (not checked yet: its warning says so).
+    again = kg._approve_keyframes(store, story_id, now="2026-10-06T10:00:00+00:00")["keyframes_approved"]
+    assert again["shots"]["sh02"] == {"issues": ["no keyframe check yet"], "image_hash": fresh}
+    assert judge.keyframe_approved_anyway(again, "sh02", fresh) is True
 
 
 def _drop_verdict(store, story_id, shot_id):

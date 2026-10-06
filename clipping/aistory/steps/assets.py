@@ -116,7 +116,11 @@ while it is missing or stale, or a keyframe is still to make in this run,
 the clips' plan is held -- shown, priced, but out of this run's total, its
 caps and its readiness, exactly like ``animate`` off -- and the run makes
 the keyframes and stops before the video phase, saying so; a clip
-regenerate is refused the same way (:func:`clip_target_refusal`).
+regenerate is refused the same way (:func:`clip_target_refusal`). DEC-311:
+the verdicts never refuse that approval -- a flagged or unchecked keyframe is
+approved with the check's warning (:func:`keyframe_findings`), which the step
+says in the feed when it ends ("⚠️ Episode 1's keyframes kept with the
+check's warning: ...").
 
 **A v2 shot's continuity** (phase 8 stage B): every v2 shot but the first
 of its scene carries a continuity slot among its references
@@ -2365,34 +2369,54 @@ def keyframe_context(ec, storyboard, *, ledger=None):
 
 
 def keyframe_findings(ec, storyboard, doc) -> dict:
-    """What stands between episode *ec.ep*'s keyframes and their approval,
-    shot by shot (``workflow.keyframe_findings``' reading, here so the
-    assets step says it too): ``{"failed": [(shot_id, what J2 found)],
-    "unjudged": [shot_id, ...], "refusal": sentence | None, "warnings":
-    [(shot_id, what J2 found)]}`` -- a current verdict (J2) that failed, a
-    shot with no current verdict (none, or one of other images or of an
-    older J2: ``judge.verdict_current``), and (plan 28 F1) the plain
-    sentences that refuse them (``judge.keyframe_refusal``), None when
-    every shot passed. A keyframe the human uploaded themselves
-    (:func:`image_mode` ``manual``) is their own consistency decision: still
-    judged, its failed verdict is a warning, never a refusal, and an
-    unjudged one never blocks. Hashes every image."""
+    """What the keyframe check says of episode *ec.ep*'s keyframes, shot by
+    shot (``workflow.keyframe_findings``' reading, here so the assets step
+    says it too). DEC-311 (the DEC-307 rule applied to shots): nothing here
+    refuses the approval any more -- every finding is a warning::
+
+        {"failed": [(shot_id, what J2 found)],   # app-made, a current verdict that failed
+         "unjudged": [shot_id, ...],              # app-made, no current verdict
+         "own": [(shot_id, what J2 found)],       # the human's own keyframe, flagged
+         "warnings": [(shot_id, what J2 found)],  # all three, in storyboard order
+         "warning": sentence | None,              # judge.keyframe_warning of the app-made ones
+         "record": {shot_id: {"issues", "image_hash"}},  # what the approval keeps of them
+         "refusal": None}                         # kept for older readers: never set
+
+    A shot with no current verdict is one with none, or one of other images
+    or of an older J2 (``judge.verdict_current``); its issues read
+    ``judge.NO_KEYFRAME_CHECK``. A keyframe the human uploaded themselves
+    (:func:`image_mode` ``manual``) is their own consistency decision:
+    still judged, its failed verdict is a warning, an unjudged one says
+    nothing, and the approval never counts it as gone over. Hashes every
+    image."""
     verdicts = (doc or {}).get(judge.KEYFRAME_VERDICTS) or {}
-    unjudged, failed, entries, warnings = [], [], [], []
+    unjudged, failed, own_flagged, entries, warnings, record = [], [], [], [], [], {}
     for shot, _path, sha, _prev_id, _prev_path, prev_sha in keyframe_items(ec, storyboard, doc):
-        entry = verdicts.get(shot["shot_id"])
+        shot_id = shot["shot_id"]
+        entry = verdicts.get(shot_id)
         own = image_mode(ec.story, shot, doc) == video_plan.MANUAL
         if not judge.verdict_current(entry, sha, prev_sha):
-            if not own:
-                unjudged.append(shot["shot_id"])
-        elif not judge.verdict_passed(entry):
             if own:
-                warnings.append((shot["shot_id"], judge.verdict_text(entry)))
-            else:
-                failed.append((shot["shot_id"], judge.verdict_text(entry)))
-                entries.append((shot["shot_id"], entry))
-    refusal = judge.keyframe_refusal(entries, unjudged) if entries or unjudged else None
-    return {"failed": failed, "unjudged": unjudged, "refusal": refusal, "warnings": warnings}
+                continue
+            unjudged.append(shot_id)
+            warnings.append((shot_id, judge.NO_KEYFRAME_CHECK))
+            issues = [judge.NO_KEYFRAME_CHECK]
+        elif judge.verdict_passed(entry):
+            continue
+        else:
+            text = judge.verdict_text(entry)
+            warnings.append((shot_id, text))
+            if own:
+                own_flagged.append((shot_id, text))
+                continue
+            failed.append((shot_id, text))
+            entries.append((shot_id, entry))
+            issues = judge.verdict_issues(entry)
+        if sha:
+            record[shot_id] = {"issues": issues, "image_hash": sha}
+    warning = judge.keyframe_warning(entries, unjudged) if entries or unjudged else None
+    return {"failed": failed, "unjudged": unjudged, "own": own_flagged, "warnings": warnings, "warning": warning,
+            "record": record, "refusal": None}
 
 
 def keyframes_fingerprint(ec, storyboard) -> str:
@@ -5118,13 +5142,12 @@ class _Assets(voice_lines.LineMeasurement):
             # A v2 story (phase 7 stage 6b): what J2 did, and where the keyframes' approval stands.
             result["keyframes"] = dict(self.keyframe_check, approval=keyframes_state(ec, board, doc))
             if result["keyframes"]["approval"] != "current":
-                # Plan 28 F1: what the hard gate will refuse, said now -- never a silent stop.
+                # DEC-311: what the check still flags, said now as a warning -- the approval never refuses it.
                 findings = keyframe_findings(ec, board, doc)
-                refusal = findings["refusal"]
-                if refusal:
-                    result["keyframes"]["refusal"] = refusal
-                    ctx.on_log(f"⛔ Episode {ec.ep}'s keyframes cannot be approved yet. {refusal}")
-                for shot_id, text in findings["warnings"]:
+                if findings["warning"]:
+                    result["keyframes"]["warnings"] = findings["warning"]
+                    ctx.on_log(f"⚠️ Episode {ec.ep}'s keyframes kept with the check's warning: {findings['warning']}")
+                for shot_id, text in findings["own"]:
                     # The human's own keyframe: the check's issues, a warning.
                     ctx.on_log(f"⚠️ Shot {shot_id} is your own keyframe. The check saw: {text}.")
             if self.keyframe_fix is not None:
