@@ -35,6 +35,26 @@ class FakeTransport:
         return Response(status, {}, json.dumps(payload).encode())
 
 
+def wav_bytes(seconds, *, rate=24000, tone=False):
+    """A mono 16-bit WAV of *seconds*: silence, or a 220 Hz tone when *tone*."""
+    import math
+    import wave
+
+    buf = io.BytesIO()
+    n = int(rate * seconds)
+    if tone:
+        frames = b"".join(int(12000 * math.sin(2 * math.pi * 220 * i / rate)).to_bytes(2, "little", signed=True)
+                          for i in range(n))
+    else:
+        frames = b"\x00\x00" * n
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(frames)
+    return buf.getvalue()
+
+
 def png_bytes(color=(200, 40, 40), size=(640, 1152)):
     from PIL import Image
 
@@ -86,7 +106,9 @@ def test_the_tools_are_listed(backend):
     server = build_server(backend)
     names = tool_names(server)
     for name in ("comfy_cancel", "comfy_fetch", "comfy_jobs", "comfy_status", "comfy_submit", "cost_ledger",
-                 "list_files", "runpod_health", "templates_list", "view_file", "comfy_download"):
+                 "list_files", "runpod_health", "templates_list", "view_file", "comfy_download",
+                 # Plan 33 stage 2.
+                 "file_upload"):
         assert name in names, name
     for name in ("story_list", "story_create", "story_options", "story_get", "story_doc", "story_entities",
                  "story_entity", "episode_get", "episode_doc", "story_step_start", "story_step_answer",
@@ -160,17 +182,6 @@ def test_a_clip_is_fetched_as_a_contact_sheet(backend, tmp_path):
 
 @pytest.mark.skipif(shutil.which("ffprobe") is None, reason="ffprobe not installed")
 def test_a_voice_line_is_fetched_with_its_duration(backend, tmp_path):
-    import wave
-
-    def wav_bytes(seconds):
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(24000)
-            w.writeframes(b"\x00\x00" * int(24000 * seconds))
-        return buf.getvalue()
-
     ref = tmp_path / "outputs" / "ref_rida.wav"
     ref.parent.mkdir(parents=True, exist_ok=True)
     ref.write_bytes(wav_bytes(8))
@@ -239,6 +250,42 @@ def test_comfy_download_hands_back_the_bytes_and_stays_inside_the_roots(backend,
         assert "outside" in refused.content[0].text or "no such file" in refused.content[0].text
     too_big = call(server, "comfy_download", path="cast/big.bin", max_mib=1)
     assert too_big.is_error and "over the 1 MiB limit" in too_big.content[0].text
+
+
+def test_file_upload_writes_under_the_outputs_dir_only(backend, tmp_path):
+    """Plan 33 stage 2: a reference voice or a line list from the chat lands under outputs/; '..',
+    an absolute path elsewhere, a sibling of the outputs dir, a bad extension and an oversized
+    payload are refused; an existing file needs overwrite."""
+    server = build_server(backend)
+    wav = wav_bytes(seconds=0.2)
+    got = payload(call(server, "file_upload", dest_path="faille_damour/ep01/voices/ref.wav",
+                       content_base64=base64.b64encode(wav).decode("ascii"), kind="audio"))
+    saved = tmp_path / "outputs" / "faille_damour" / "ep01" / "voices" / "ref.wav"
+    assert saved.read_bytes() == wav and got["path"] == str(saved) and got["kind"] == "audio"
+    assert got["size_bytes"] == len(wav) and got["relative"] == "faille_damour/ep01/voices/ref.wav"
+    if shutil.which("ffprobe"):
+        assert abs(got["duration_s"] - 0.2) < 0.05
+    again = call(server, "file_upload", dest_path="faille_damour/ep01/voices/ref.wav",
+                 content_base64=base64.b64encode(wav).decode("ascii"))
+    assert again.is_error and "overwrite=true" in again.content[0].text
+    replaced = payload(call(server, "file_upload", dest_path="faille_damour/ep01/voices/ref.wav",
+                            content_base64=base64.b64encode(b"RIFF" + wav[4:]).decode("ascii"), overwrite=True))
+    assert replaced["overwritten"] is True
+    lines = base64.b64encode(b'[{"id": "l01"}]').decode("ascii")
+    assert payload(call(server, "file_upload", dest_path="x/lines.json", content_base64=lines))["kind"] == "json"
+    outputs_evil = tmp_path / "outputs_evil"
+    for bad, why in (("../escape.wav", "outside"), ("/etc/evil.wav", "outside"),
+                     (str(outputs_evil / "a.wav"), "outside"), ("x/run.sh", "not allowed"),
+                     ("x/.hidden.wav", "dotfile"), ("x/a.wav", "takes")):
+        refused = call(server, "file_upload", dest_path=bad, content_base64=lines,
+                       kind="image" if why == "takes" else None)
+        assert refused.is_error and why in refused.content[0].text, (bad, refused.content[0].text)
+    assert not outputs_evil.exists()
+    big = "A" * (25 * 1024 * 1024 * 4 // 3 + 100)
+    too_big = call(server, "file_upload", dest_path="x/big.wav", content_base64=big)
+    assert too_big.is_error and "25 MiB" in too_big.content[0].text
+    junk = call(server, "file_upload", dest_path="x/junk.wav", content_base64="not base64!!")
+    assert junk.is_error and "base64" in junk.content[0].text
 
 
 def test_a_bad_submit_is_a_tool_error_with_the_reason(backend):

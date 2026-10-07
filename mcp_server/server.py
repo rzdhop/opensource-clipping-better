@@ -17,6 +17,7 @@ from fastmcp.utilities.types import Image
 
 from . import auth as auth_mod, episode_tools, media, story_tools
 from .comfy_download import register_comfy_download
+from .file_upload import register_file_upload
 from .config import ROOT, Settings, load_settings
 from .runpod_jobs import JobClient, JobError, list_templates, normalise_bill
 
@@ -223,6 +224,8 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
     episode_tools.register(mcp, backend.story)
     # The file itself (view_file and comfy_fetch only show previews); the same two roots as view_file.
     register_comfy_download(mcp, outputs_dir=settings.outputs_dir, repo_root=ROOT)
+    # Plan 33 stage 2: the way in, outputs dir only.
+    register_file_upload(mcp, outputs_dir=settings.outputs_dir, probe=media.probe_audio)
     return mcp
 
 
