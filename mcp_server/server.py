@@ -20,6 +20,7 @@ from .comfy_download import register_comfy_download
 from .file_upload import register_file_upload
 from .config import ROOT, Settings, load_settings
 from .runpod_jobs import JobClient, JobError, list_templates, normalise_bill
+from .voice_tools import VoiceTools, register_voice_tools
 
 INSTRUCTIONS = """rzdhop story backend. You (Claude) are the writer and director; these tools are the
 muscle: RunPod Serverless ComfyUI for images, clips and voice lines, the story store on disk, the
@@ -34,10 +35,12 @@ class Backend:
     startup; tests build their own with a fake transport."""
 
     def __init__(self, settings: Optional[Settings] = None, *, client: Optional[JobClient] = None,
-                 story: Optional[story_tools.StoryBackend] = None):
+                 story: Optional[story_tools.StoryBackend] = None, voice: Optional[VoiceTools] = None):
         self.settings = settings or load_settings()
         self.client = client or JobClient(self.settings)
         self.story = story or story_tools.StoryBackend(self.settings.outputs_dir)
+        # Plan 33 stage 3: the voice engines (tests pass one with fakes).
+        self.voice = voice or VoiceTools(self.client, outputs_dir=self.settings.outputs_dir)
 
 
 def _public(record: dict) -> dict:
@@ -185,8 +188,9 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
         RunPod bills); delay_seconds is the queue wait + cold start and wall_seconds their sum, shown beside
         it with wall_usd_if_delay_were_billed so a queued job is never counted as its own GPU time. Dollars
         need RUNPOD_GPU_USD_PER_HOUR (and the image rate) in .env; unpriced_jobs counts the ones without a
-        rate."""
-        return client.ledger(since)
+        rate. voice_lines: the lines spoken through tts_line / tts_batch (gemini and edge dollars; a
+        chatterbox line is an audio job already counted above)."""
+        return {**client.ledger(since), "voice_lines": backend.voice.ledger.summary(since)}
 
     # ------------------------------------------------------------- media
 
@@ -226,6 +230,8 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
     register_comfy_download(mcp, outputs_dir=settings.outputs_dir, repo_root=ROOT)
     # Plan 33 stage 2: the way in, outputs dir only.
     register_file_upload(mcp, outputs_dir=settings.outputs_dir, probe=media.probe_audio)
+    # Plan 33 stage 3: tts_line, tts_batch, voice_ref_make.
+    register_voice_tools(mcp, backend.voice)
     return mcp
 
 

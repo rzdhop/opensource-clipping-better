@@ -9,6 +9,7 @@ import asyncio
 import base64
 import io
 import json
+import pathlib
 import shutil
 
 import pytest
@@ -107,8 +108,8 @@ def test_the_tools_are_listed(backend):
     names = tool_names(server)
     for name in ("comfy_cancel", "comfy_fetch", "comfy_jobs", "comfy_status", "comfy_submit", "cost_ledger",
                  "list_files", "runpod_health", "templates_list", "view_file", "comfy_download",
-                 # Plan 33 stage 2.
-                 "file_upload"):
+                 # Plan 33 stages 2 and 3.
+                 "file_upload", "tts_line", "tts_batch", "voice_ref_make"):
         assert name in names, name
     for name in ("story_list", "story_create", "story_options", "story_get", "story_doc", "story_entities",
                  "story_entity", "episode_get", "episode_doc", "story_step_start", "story_step_answer",
@@ -286,6 +287,36 @@ def test_file_upload_writes_under_the_outputs_dir_only(backend, tmp_path):
     assert too_big.is_error and "25 MiB" in too_big.content[0].text
     junk = call(server, "file_upload", dest_path="x/junk.wav", content_base64="not base64!!")
     assert junk.is_error and "base64" in junk.content[0].text
+
+
+def test_the_voice_tools_answer_through_the_server_and_the_ledger_sums_them(backend, tmp_path):
+    """Plan 33 stage 3: tts_line through the MCP client with a fake Gemini adapter; a bad provider
+    is a tool error with the reason; cost_ledger carries the voice lines beside the GPU jobs."""
+    from clipping.providers.generation import GenResult
+    from mcp_server.voice_tools import VoiceTools
+
+    class FakeGemini:
+        def generate(self, link, request, *, credentials, on_log, **_):
+            wav = str(pathlib.Path(request.out_dir) / f"{request.extra['name']}.wav")
+            pathlib.Path(wav).write_bytes(wav_bytes(1.1, tone=True))
+            return GenResult(provider="gemini", model="flash-lite-tts", paths=(wav, wav), meta={"duration_s": 1.1})
+
+    backend.voice = VoiceTools(backend.client, outputs_dir=backend.settings.outputs_dir,
+                               env={"GOOGLE_API_KEY": "k"}, gemini=FakeGemini())
+    server = build_server(backend)
+    got = payload(call(server, "tts_line", text="Pardon !", provider="gemini", voice="Kore",
+                       dest="faille_damour/ep01/voices", name="l02_marie_jeanne"))
+    assert got["duration_s"] == 1.1 and got["path"].endswith("ep01/voices/l02_marie_jeanne.wav")
+    bad = call(server, "tts_line", text="x", provider="polly", voice="Kore", dest="v", name="l")
+    assert bad.is_error and "provider must be one of" in bad.content[0].text
+    ledger = payload(call(server, "cost_ledger"))
+    assert ledger["voice_lines"]["lines"] == 1 and ledger["voice_lines"]["by_provider"]["gemini"]["seconds"] == 1.1
+    batch = payload(call(server, "tts_batch", dest="faille_damour/ep01/voices",
+                         lines=[{"id": "l02", "who": "marie_jeanne", "text": "Pardon !"},
+                                {"id": "l06", "who": "paloma", "text": "Tu souris."}],
+                         provider="gemini", voices={"paloma": "Aoede"}))
+    assert batch["skipped"] == ["l02_marie_jeanne"] and [m["name"] for m in batch["made"]] == ["l06_paloma"]
+    assert json.loads(pathlib.Path(batch["durations_json"]).read_text()) == {"l02_marie_jeanne": 1.1, "l06_paloma": 1.1}
 
 
 def test_a_bad_submit_is_a_tool_error_with_the_reason(backend):
