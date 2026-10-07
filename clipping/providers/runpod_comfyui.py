@@ -52,7 +52,7 @@ from . import video
 from .errors import ProviderError
 from .gencache import RequestFailed
 from .generation import VIDEO, GenResult, register_adapter
-from .local_comfyui import frames_for, load_template, render_template
+from .local_comfyui import frames_for, load_template, render_template, with_default_negative
 from .registry import describe
 from .transport import (
     APIConnectionError, APITimeoutError, DEFAULT_TIMEOUT, HttpStatusError, data_url, request_json,
@@ -244,7 +244,8 @@ class RunPodComfyAdapter:
                                 f"RUNPOD_IMAGE_ENDPOINT_ID or {ENV_ENDPOINT} with its key in .env.")
         headers = auth_headers(key)
         image = inline_image(request.references[0])
-        values = {"image_path": image["name"], "prompt": request.prompt, "negative": request.negative or "",
+        values = {"image_path": image["name"], "prompt": request.prompt,
+                  "negative": with_default_negative(template, request.negative),
                   "seed": request.seed, "width": rule["width"], "height": rule["height"], "frames": frames,
                   "fps": rule["fps"]}
         images = [image]

@@ -28,7 +28,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from clipping.providers.local_comfyui import WORKFLOWS_DIR, frames_for, load_template, render_template
+from clipping.providers.local_comfyui import (WORKFLOWS_DIR, frames_for, load_template, render_template,
+                                              with_default_negative)
 from clipping.providers.runpod_comfyui import TERMINAL, auth_headers, endpoint_url, gpu_seconds, inline_image
 from clipping.providers.transport import (
     APIConnectionError, APITimeoutError, DEFAULT_TIMEOUT, HttpStatusError, request_json, urllib_transport,
@@ -282,7 +283,7 @@ class JobClient:
         served_by = template.get("served_by") or kind
         placeholders = set(template.get("placeholders", []))
         seed = int(seed) if seed is not None else self.rng.randrange(1, 2**31 - 1)
-        values = {"prompt": prompt, "negative": negative or "", "seed": seed}
+        values = {"prompt": prompt, "negative": with_default_negative(template, negative), "seed": seed}
         images = []
         frames = None
         rule = template.get("frame_rule")

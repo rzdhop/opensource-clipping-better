@@ -92,9 +92,10 @@ def clip_request(tmp_path, **changes):
 def test_each_video_template_takes_the_keyframe_prompt_and_typed_numbers(name, seconds, frames, fps, size):
     template = local_comfyui.load_template(name)
     rule = template["frame_rule"]
-    # DEC-310: i2v_wan22_14b_lightning ran live on 2026-10-06 (an RTX 5090 pod, an L40S RunPod worker); the
-    # other two are still proven against a fake ComfyUI only (A-035 stays open for them).
-    assert template["verified_live"] is (name == "i2v_wan22_14b_lightning") and template["task"] == "i2v"
+    # DEC-310: i2v_wan22_14b_lightning ran live on 2026-10-06 (an RTX 5090 pod, an L40S RunPod worker); plan 34
+    # (2026-10-07) changed its sampler recipe against the slow-motion artefact, so it is unverified again until
+    # one clip runs on the worker; the other two are still proven against a fake ComfyUI only (A-035).
+    assert template["verified_live"] is False and template["task"] == "i2v"
     assert (rule["fps"], (rule["width"], rule["height"])) == (fps, size)
     assert local_comfyui.frames_for(template, seconds) == frames and (frames - 1) % rule["frame_step"] == 0
     values = {"image_path": "rzdhop/shot_03.png", "prompt": "a kiwi waves", "negative": "flicker", "seed": 7,
@@ -246,3 +247,24 @@ def test_the_profile_picks_the_video_workflow_and_its_lengths():
     lengths = local_comfyui.video_clip_lengths("i2v_wan22_5b")
     assert lengths == (2, 3, 4, 5)
     assert video_plan.requested_seconds("local/comfyui", 3.2, lengths=lengths) == 4
+
+
+def test_the_lightning_recipe_keeps_its_motion_fix_and_its_default_negative():
+    """Plan 34 (2026-10-07): the 4-step Lightning recipe (LoRA 1.0 on the high-noise model, cfg 1) made every
+    clip look like slow motion; the fix is 8 steps, the high-noise stage at cfg 3.0 with its LoRA at 0.7, the
+    low-noise stage at cfg 1.0 with its LoRA at 1.0, and a default negative every planner appends."""
+    template = local_comfyui.load_template("i2v_wan22_14b_lightning")
+    graph = template["graph"]
+    loras = {n["inputs"]["lora_name"]: n["inputs"]["strength_model"] for n in graph.values()
+             if n["class_type"] == "LoraLoaderModelOnly"}
+    assert loras == {"wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors": 0.7,
+                     "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors": 1.0}
+    samplers = sorted((n["inputs"]["start_at_step"], n["inputs"]["end_at_step"], n["inputs"]["steps"], n["inputs"]["cfg"])
+                      for n in graph.values() if n["class_type"] == "KSamplerAdvanced")
+    assert samplers == [(0, 4, 8, 3.0), (4, 8, 8, 1.0)]
+    assert template["default_negative"].startswith("slow motion")
+    assert local_comfyui.with_default_negative(template, "") == template["default_negative"]
+    assert local_comfyui.with_default_negative(template, "flicker") == "flicker, " + template["default_negative"]
+    assert local_comfyui.with_default_negative(template, "x, " + template["default_negative"]) == "x, " + template["default_negative"]
+    assert local_comfyui.with_default_negative({"name": "t"}, "flicker") == "flicker"
+

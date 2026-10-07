@@ -196,6 +196,20 @@ def install_message(name: str, base_url: str, problems: list) -> str:
     return f"{name} cannot run on {base_url}:\n  " + "\n  ".join(problems)
 
 
+def with_default_negative(template: dict, negative) -> str:
+    """The negative prompt a job sends: the caller's, with the template's
+    ``default_negative`` appended when it declares one (plan 34: the Wan2.2
+    Lightning recipe names "slow motion, static..." so no caller forgets
+    it); the caller's words come first and are never dropped."""
+    given = (negative or "").strip()
+    default = (template.get("default_negative") or "").strip()
+    if not default:
+        return given
+    if given and default.lower() in given.lower():
+        return given
+    return f"{given}, {default}" if given else default
+
+
 def frames_for(template: dict, seconds) -> int:
     """The frame count of a *seconds*-long clip under the template's
     ``frame_rule``: ``fps x seconds`` rounded up to a multiple of
@@ -599,7 +613,7 @@ class ComfyUIImageAdapter:
         if problems:
             raise ComfyUIError(f"{template_name} cannot run on {client.base_url}:\n  " + "\n  ".join(problems))
         seed = request.seed if request.seed is not None else random.randrange(1, 2**31 - 1)
-        values = {"prompt": request.prompt, "negative": request.negative or "", "seed": seed,
+        values = {"prompt": request.prompt, "negative": with_default_negative(template, request.negative), "seed": seed,
                   "width": request.width, "height": request.height}
         if template.get("ref_slots"):
             if not request.references:
@@ -697,7 +711,7 @@ class ComfyUIVideoAdapter:
         if problems:
             raise ComfyUIError(install_message(name, client.base_url, problems))
         image = client.upload_image(request.references[0], subfolder="rzdhop")
-        values = {"image_path": image, "prompt": request.prompt, "negative": request.negative or "",
+        values = {"image_path": image, "prompt": request.prompt, "negative": with_default_negative(template, request.negative),
                   "seed": request.seed, "width": rule["width"], "height": rule["height"], "frames": frames,
                   "fps": rule["fps"]}
         prompt_id = client.queue_prompt(render_template(template, values))
