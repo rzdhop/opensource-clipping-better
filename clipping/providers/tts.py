@@ -650,9 +650,13 @@ def audio_endpoint(credentials: dict) -> str:
 
 
 def audio_key(credentials: dict) -> str:
-    """The audio endpoint's own key when one is set, else the account key
-    (``mcp_server.config.Settings.key``)."""
-    return credentials.get(ENV_AUDIO_KEY) or credentials.get(ENV_API_KEY) or ""
+    """The key of the endpoint that serves the voice lines: the audio
+    endpoint's own, the image endpoint's own when the lines fall back to it,
+    else the account key (``mcp_server.config.Settings.key``; the image
+    endpoint has a key of its own on the deployed box, found on plan 32's
+    first live line)."""
+    own = {"audio": ENV_AUDIO_KEY, "image": "RUNPOD_IMAGE_API_KEY", "video": ENV_API_KEY}[_audio_serving(credentials)]
+    return credentials.get(own) or credentials.get(ENV_API_KEY) or ""
 
 
 def audio_rate(credentials: dict):

@@ -224,9 +224,14 @@ def test_the_endpoint_falls_back_audio_then_image_then_video_billed_at_the_servi
     assert (tts.audio_endpoint(video_only), tts.audio_rate(video_only)) == ("vid1", "3.49")
     # A kind with an endpoint of its own but no price of its own is unpriced, never billed at another's rate.
     assert tts.audio_rate({**ENV, "RUNPOD_AUDIO_GPU_USD_PER_HOUR": ""}) is None
-    # The audio endpoint's own key, else the account key (never the image endpoint's).
+    # The key follows the serving endpoint: the audio endpoint's own (the image endpoint's key is not it),
+    # the image endpoint's own when the lines fall back to it (plan 32's first live line: 403 otherwise),
+    # the account key when neither has one.
     assert tts.audio_key({**ENV, "RUNPOD_IMAGE_API_KEY": "img-key"}) == "rpa_fake"
     assert tts.audio_key({**ENV, "RUNPOD_AUDIO_API_KEY": "aud-key"}) == "aud-key"
+    assert tts.audio_key({**no_audio, "RUNPOD_IMAGE_API_KEY": "img-key"}) == "img-key"
+    assert tts.audio_key(no_audio) == "rpa_fake"
+    assert tts.audio_key({**video_only, "RUNPOD_IMAGE_API_KEY": "img-key"}) == "rpa_fake"
     assert tts.audio_endpoint({}) == ""
 
 

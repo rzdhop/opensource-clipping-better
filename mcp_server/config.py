@@ -68,8 +68,12 @@ class Settings:
         return endpoint
 
     def key(self, kind: str) -> str:
-        """The key that opens *kind*'s endpoint: its own, else the account key."""
-        return self.keys.get(kind) or self.api_key
+        """The key that opens the endpoint serving *kind*: that endpoint's own
+        key, else the account key. A kind served by a fallback endpoint (audio
+        on the image endpoint) needs the fallback's key: found on the first live
+        voice line of plan 32, where the image endpoint has a key of its own."""
+        serving = self.serving_kind(kind) if kind in KINDS else kind
+        return self.keys.get(serving) or self.api_key
 
     def rate(self, kind: str):
         """The USD-per-hour of the endpoint that serves *kind* (a kind without

@@ -317,6 +317,10 @@ def test_the_audio_endpoint_falls_back_to_the_image_then_the_video_one(tmp_path)
                        "RUNPOD_AUDIO_API_KEY": "ka", "RUNPOD_AUDIO_GPU_USD_PER_HOUR": "0.9"})
     assert (s.endpoint("audio"), s.key("audio"), s.rate("audio")) == ("aud1", "ka", 0.9)
     assert (s.endpoint("image"), s.key("image"), s.rate("image")) == ("img1", "k", None)  # untouched
+    # Plan 32 (the first live voice line): a kind served by a fallback endpoint opens it with that endpoint's own
+    # key -- the image endpoint has one on the deployed box and refused the account key (HTTP 403).
+    s = load_settings({**env, "RUNPOD_IMAGE_ENDPOINT_ID": "img1", "RUNPOD_IMAGE_API_KEY": "ki"})
+    assert (s.endpoint("audio"), s.key("audio")) == ("img1", "ki") and s.key("video") == "k"
     with pytest.raises(RuntimeError, match="RUNPOD_AUDIO_ENDPOINT_ID"):
         load_settings({"RZDHOP_OUTPUTS_DIR": str(tmp_path)}).endpoint("audio")
 
