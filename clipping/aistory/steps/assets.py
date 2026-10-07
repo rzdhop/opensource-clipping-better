@@ -2001,7 +2001,8 @@ def clip_seed(shot, *, story_id, ep) -> int:
     return seed if seed is not None else derive_seed(story_id, ep, shot["shot_id"])
 
 
-def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags, tier, out_dir="", audio=None):
+def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags, tier, out_dir="", audio=None,
+                 keyframe=None, name=None):
     """``(parts, request)``: the prompt parts of *shot*'s clip
     (``clips.clip_request_parts``) and the ``GenRequest`` the video phase
     sends for it -- its keyframe the shot's image, its length *clip_s*, its
@@ -2017,12 +2018,16 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
 
     Plan 32 stage 8: a clip on ``talking.TALKING_LINK`` is made from the
     shot's dialogue track, *audio* (``GenRequest.audio``, keyed by its
-    bytes); ``ValueError`` without it. Every other clip takes none."""
+    bytes); ``ValueError`` without it. Every other clip takes none.
+
+    Plan 35: a talking part's request (``talking.split``) sends its
+    close-up *keyframe* in place of the shot's and is named *name*
+    (``shot_NN.lNN``); every other request is the one it always was."""
     if link == talking.TALKING_LINK and not audio:
         raise ValueError(f"a talking clip on {link} is made from its dialogue track; none was built")
     parts = clips.clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=note, link=link)
     parts["sent"] = clips.sent_clip_prompt(ec, shot, script, parts, link=link, template=template)
-    extra = {"name": f"shot_{shot['shot_id'][2:]}"}
+    extra = {"name": name or f"shot_{shot['shot_id'][2:]}"}
     if template:
         extra["template"] = template
     resolution = media_policy.video_resolution(ec.story)
@@ -2037,7 +2042,7 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
         extra["aspect"] = frame
     width, height = shot_size(ec.story)
     request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["sent"]["text"], negative=parts["negative"], width=width,
-                             height=height, seed=seed, references=(shot_image_path(ec, shot),),
+                             height=height, seed=seed, references=(keyframe or shot_image_path(ec, shot),),
                              duration_s=int(clip_s), native_audio=parts["native_audio"], out_dir=out_dir, extra=extra,
                              audio=audio if link == talking.TALKING_LINK else None)
     return parts, request
@@ -2056,7 +2061,8 @@ def clip_key(ec, shot, script, *, link, template, clip_s, seed, note, flags, tie
                                        note=note, flags=flags, tier=tier)
         return gencache.request_key(gen.VIDEO, link, request)
     found = talking.verdict_now(ec, script, shot, storyboard=storyboard)
-    if not found.get("talks"):
+    if not found.get("talks") or talking.is_split(found):
+        # Plan 35: a shot cut per line is several requests, each keyed by its own part (never booked here).
         return None
     with talking.track_file(found, name=f"shot_{shot['shot_id'][2:]}.talk") as track:
         if track is None:
@@ -4087,8 +4093,9 @@ class _Assets(voice_lines.LineMeasurement):
             raise fail(self.video_gone_reason())
         talk = None
         if link == talking.TALKING_LINK:
-            # Plan 32 stage 8: a talking clip is made from the shot's dialogue track, as it stands now.
-            talk = talking.verdict(ec, self.script, self.storyboard, shot)
+            # Plan 32 stage 8: a talking clip is made from the shot's dialogue track, as it stands now --
+            # plan 35: or cut into one talking clip per line (talking.split).
+            talk = talking.shot_verdict(ec, self.script, self.storyboard, shot)
             if not talk.get("talks"):
                 raise fail(f"it does not talk on {link} now ({talking.why_text(talk)}); no clip was asked")
         try:
@@ -4107,6 +4114,10 @@ class _Assets(voice_lines.LineMeasurement):
         if not pinned:
             raise self.clip_gone(f"it is not a link of {gen.ENV_NAMES[gen.VIDEO]} any more", record)
         route = ec.story["generation_profile"]["route"]
+        if talking.is_split(talk):
+            return self.make_talk_parts(shot, talk, record=record, link=link, pinned=pinned, route=route,
+                                        template=template, seed=seed, note=note, flags=flags, tier=tier,
+                                        image_link=image_link, fail=fail)
         cache = self.cache(gen.VIDEO, unit="second", qty=int(clip_s))
         with tempfile.TemporaryDirectory(prefix="shot-clip-") as incoming:
             track = None
@@ -4169,6 +4180,189 @@ class _Assets(voice_lines.LineMeasurement):
                 "label": label, "seed": seed}
         return record, info
 
+    def make_talk_parts(self, shot, talk, *, record, link, pinned, route, template, seed, note, flags, tier,
+                        image_link, fail):
+        """Plan 35 (DEC-318): *shot*'s clip as one talking clip per line
+        (*talk*: ``talking.split``'s verdict), each from a close-up keyframe
+        of its line's speaker (:meth:`make_closeup`) and that line alone on
+        its track, on the S2V link (*pinned*), through the generation cache
+        and the paid gates; ``(record, info)`` as :meth:`make_clip`'s, the
+        record carrying ``parts`` (each part's span, close-up and clip, with
+        their sha256) and ``talk`` (``talking.record_parts``). A part that
+        cannot be made fails the whole clip (:class:`ClipFailed`; the parts
+        made before are kept in the journal: a retry collects them at $0)."""
+        ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
+        shot_id = shot["shot_id"]
+        old = {part["line_id"]: part for part in (shot["assets"].get("clip") or {}).get("parts") or ()}
+        parts, tracks = [], []
+        total, wall, states, label = 0.0, 0.0, [], link
+        for part in talk["parts"]:
+            ctx.cancel.check()
+            line_id = part["line_id"]
+            closeup = self.make_closeup(shot, part, old=old.get(line_id), image_link=image_link, fail=fail)
+            total += closeup["est_usd"]
+            cache = self.cache(gen.VIDEO, unit="second", qty=talking.TALK_CLIP_S)
+            name = talking.part_name(shot_id, line_id)
+            with tempfile.TemporaryDirectory(prefix="shot-talk-") as incoming:
+                try:
+                    track = talking.build(part, os.path.join(incoming, f"{name[:-4]}.talk.wav"),
+                                          run=self.lipsync_run)
+                except lipsync_step.LipsyncError as exc:
+                    raise fail(f"the dialogue track of its line {line_id} could not be built ({exc}); no clip "
+                               "was asked") from None
+                tracks.append(track)
+                sent, request = clip_request(ec, shot, self.script, link=link, template=template,
+                                             clip_s=talking.TALK_CLIP_S, seed=seed, note=note, flags=flags, tier=tier,
+                                             out_dir=incoming, audio=track["path"], keyframe=closeup["path"],
+                                             name=name[:-4])
+                if sent["sent"]["dropped"]:
+                    ctx.on_log(_fit_line(shot_id, link, sent["sent"]))
+                key = gencache.request_key(gen.VIDEO, link, request)
+                started = tools.time_fn()
+                try:
+                    result, answered = gen.run_generation_chain(
+                        gen.VIDEO, pinned, request, env=gates.merged, allow_paid=gates.budget.allow_paid, route=route,
+                        on_log=ctx.on_log, budget_check=gates.check, limiter=gates.limiter, adapters=tools.adapters,
+                        transport=tools.transport, sleep_fn=tools.sleep_fn, time_fn=tools.time_fn,
+                        cancel=ctx.cancel, cache=cache)
+                except gencache.JournalError:
+                    raise
+                except gen.NoRunnableLink as exc:
+                    why = sticky_link.gone_why(exc.failures, link)
+                    if why is not None:
+                        raise self.clip_gone(why, record) from None
+                    held = [str(reason) for _label, reason in exc.failures if "kept for the next run" in str(reason)]
+                    if held:
+                        raise fail(f"its line {line_id}'s talking clip is still generating on {link} ({held[0]}): "
+                                   f"{CONTINUE_ONLY}", still=True) from None
+                    reasons = "; ".join(f"{item}: {reason}" for item, reason in exc.failures) or str(exc)
+                    raise fail(f"its line {line_id}'s talking clip: {reasons}; no other link was tried") from None
+                except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this clip, named
+                    raise fail(f"its line {line_id}'s talking clip: {type(exc).__name__}: {exc}; no other link "
+                               "was tried") from None
+                wall += tools.time_fn() - started
+                meta = result.meta or {}
+                label = describe(answered)
+                if "booked" not in meta:
+                    est = _book_answer(gates, result, answered, gen.VIDEO, unit="second", qty=talking.TALK_CLIP_S)
+                else:
+                    est = round(float((meta.get("booked") or {}).get("est_usd") or 0.0), 4) if result.paid else 0.0
+                produced = next((str(path) for path in result.paths if str(path).lower().endswith(".mp4")), None)
+                if produced is None:
+                    raise fail(f"{label} answered without an .mp4 clip for its line {line_id} (the call is booked)")
+                try:
+                    dest = ec.store.episode_asset_path(ec.story_id, ec.ep, clips.CLIPS_KIND, name, create=True)
+                except KeyError:
+                    raise fail(f"{clips.CLIPS_DIR}/{name} is not a real file or folder; it is never followed (the "
+                               "call is booked and cached: move it away and run the step again)") from None
+                _atomic_copy(produced, dest)
+            states.append("cached" if meta.get("cached") else "resumed" if meta.get("resumed") else "fresh")
+            total += est
+            parts.append({"line_id": line_id, "speaker": part["speaker"], "start_s": part["start_s"],
+                          "duration_s": part["duration_s"], "closeup": closeup["rel"],
+                          "closeup_sha256": closeup["sha256"], "closeup_seed": closeup["seed"],
+                          "closeup_cache_key": closeup["cache_key"], "closeup_note": closeup["note"],
+                          "video": f"{clips.CLIPS_DIR}/{name}", "video_sha256": _sha256_file(dest),
+                          "cache_key": meta.get("cache_key") or key, "track_hash": part["spec"]["hash"],
+                          "audio_sha256": track["sha256"], "est_usd": round(est + closeup["est_usd"], 4),
+                          "seed": int(seed)})
+        record.update(state="current", est_usd=round(total, 4), cache_key=parts[-1]["cache_key"],
+                      generated_at=llm_call.utc_now(), note=note, pending=None, parts=parts,
+                      talk=talking.record_parts(talk, tracks))
+        cached = all(state == "cached" for state in states)
+        fresh = "fresh" in states
+        info = {"cached": cached, "resumed": not cached and not fresh, "fresh": fresh, "wall_s": wall,
+                "label": label, "seed": seed}
+        ctx.on_log(f"🗣️ {shot_id} cut into {len(parts)} talking clips, one per line "
+                   f"({', '.join(part['line_id'] + ' ' + part['speaker'] for part in parts)})")
+        return record, info
+
+    def make_closeup(self, shot, part, *, old, image_link, fail) -> dict:
+        """Plan 35 (DEC-318): the close-up keyframe of one talking *part* of
+        *shot* -- a multi-reference edit (the speaker's identity sheet, then
+        the shot's keyframe) on the episode's keyframe link (*image_link*,
+        else the keyframe chain's first), through the generation cache (a
+        current one costs nothing again), stored beside the shot's keyframe
+        as ``shot_NN.lNN.<ext>``: ``{"rel", "path", "sha256", "seed",
+        "cache_key", "note", "est_usd"}``. Its seed is the part's recorded
+        one (*old*: a regenerate's fresh seed), else derived from the shot
+        and the line. :class:`ClipFailed` (via *fail*) when it cannot be
+        made."""
+        ec, ctx, tools, gates = self.ec, self.ctx, self.tools, self.gates
+        shot_id, line_id, speaker = shot["shot_id"], part["line_id"], part["speaker"]
+        sheet = talking.closeup_reference(ec, speaker)
+        if sheet is None:
+            raise fail(f"its line {line_id}'s speaker {speaker} has no identity sheet on disk to draw a close-up "
+                       "from; no clip was asked")
+        keyframe = shot_image_path(ec, shot)
+        if keyframe is None:
+            raise fail("its keyframe is not on disk; no clip was asked")
+        seed = (old or {}).get("closeup_seed")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            seed = derive_seed(ec.story_id, ec.ep, f"{shot_id}.{line_id}")
+        note = (old or {}).get("closeup_note")
+        kind = gen.IMAGE_EDIT
+        try:
+            chain = image_chain(ec, kind, gates.merged)
+        except ChainError as exc:
+            raise fail(f"{chain_name(ec, kind)} cannot be used for its close-ups: {exc}") from None
+        if image_link:
+            pinned = [candidate for candidate in chain if describe(candidate) == image_link][:1]
+            if not pinned:
+                try:
+                    pinned = gen.parse_generation_chain(kind, [image_link])[:1]
+                except ChainError:
+                    pinned = []
+            chain = pinned or chain
+        prompt = talking.closeup_prompt(ec, speaker)
+        if note:
+            prompt = f"{prompt} {note}"
+        route = ec.story["generation_profile"]["route"]
+        cache = self.cache(kind, unit="image", qty=1)
+        width, height = shot_size(ec.story)
+        stem = talking.closeup_name(shot_id, line_id, "png").rsplit(".", 1)[0]
+        with tempfile.TemporaryDirectory(prefix="shot-closeup-") as incoming:
+            request = gen.GenRequest(kind=kind, prompt=prompt, negative=shot.get("negative_prompt"), width=width,
+                                     height=height, seed=seed, references=(sheet, keyframe), out_dir=incoming,
+                                     extra={"name": stem})
+            try:
+                result, answered = gen.run_generation_chain(
+                    kind, chain, request, env=gates.merged, allow_paid=gates.budget.allow_paid, route=route,
+                    on_log=ctx.on_log, budget_check=gates.check, limiter=gates.limiter, adapters=tools.adapters,
+                    transport=tools.transport, sleep_fn=tools.sleep_fn, time_fn=tools.time_fn, cancel=ctx.cancel,
+                    cache=cache)
+            except gencache.JournalError:
+                raise
+            except gen.NoRunnableLink as exc:
+                reasons = "; ".join(f"{label}: {reason}" for label, reason in exc.failures) or str(exc)
+                raise fail(f"its line {line_id}'s close-up could not be drawn ({reasons}); no clip was asked") \
+                    from None
+            except Exception as exc:  # noqa: BLE001 - an adapter's bug fails this clip, named
+                raise fail(f"its line {line_id}'s close-up: {type(exc).__name__}: {exc}; no clip was asked") \
+                    from None
+            meta = result.meta or {}
+            label = describe(answered)
+            if "booked" not in meta:
+                est = _book_answer(gates, result, answered, kind)
+            else:
+                est = round(float((meta.get("booked") or {}).get("est_usd") or 0.0), 4) if result.paid else 0.0
+            try:
+                produced, ext = imaging.produced_image(result)
+            except imaging.NotKept as exc:
+                raise fail(f"{label}: its line {line_id}'s close-up: {exc} (the call is booked)") from None
+            name = talking.closeup_name(shot_id, line_id, ext)
+            try:
+                dest = ec.store.episode_asset_path(ec.story_id, ec.ep, "shots", name, create=True)
+            except KeyError:
+                raise fail(f"{SHOTS_DIR}/{name} is not a real file or folder; it is never followed (the call is "
+                           "booked and cached: move it away and run the step again)") from None
+            produced = v2_keyframe_source(ec.story, produced, out_dir=incoming, run=self.crop_run)
+            _atomic_copy(produced, dest)
+        if not meta.get("cached"):
+            ctx.on_log(f"🖼️ {shot_id} close-up of {speaker} for {line_id} via {label} (seed {seed})")
+        return {"rel": f"{SHOTS_DIR}/{name}", "path": dest, "sha256": _sha256_file(dest), "seed": seed,
+                "cache_key": meta.get("cache_key"), "note": note, "est_usd": est}
+
     def apply_clip(self, shot, record, info, *, video) -> None:
         """*record* as the shot's ``assets.clip`` and its file as
         ``assets.video`` -- next to its image, the storyboard written with
@@ -4177,7 +4371,8 @@ class _Assets(voice_lines.LineMeasurement):
         ec, ctx = self.ec, self.ctx
         shot_id = shot["shot_id"]
         shot["assets"]["clip"] = record
-        shot["assets"]["video"] = clips.clip_rel(shot_id)
+        # Plan 35: a shot cut per line names its first talking part (the render reads them all).
+        shot["assets"]["video"] = record["parts"][0]["video"] if record.get("parts") else clips.clip_rel(shot_id)
         self.write_board()
         speaking = bool(shot.get("speaks")) and media_policy.native_speech(ec.story)
         if record["link"] == talking.TALKING_LINK and talking.enabled(ec.story):
@@ -5383,7 +5578,57 @@ def regenerate_shot_image(ctx, ec, target, shot_id, note, *, tools, refuse) -> d
     return result
 
 
-def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> dict:
+def closeup_target_refusal(shot, line_id):
+    """Why ``shot:<ep>:<shid>:closeup:<line_id>`` (plan 35) cannot run on
+    *shot*, calling nothing, or None: its clip must be cut per line and hold
+    a talking part for *line_id*."""
+    parts = (shot["assets"].get("clip") or {}).get("parts") or ()
+    if not parts:
+        return (f"shot {shot['shot_id']}'s clip is not cut into one talking clip per line, so it has no close-up; "
+                f"regenerate its clip (:video) instead.")
+    if not any(part["line_id"] == line_id for part in parts):
+        return (f"shot {shot['shot_id']} has no talking part for {line_id} (its parts: "
+                f"{', '.join(part['line_id'] for part in parts)}).")
+    return None
+
+
+def regenerate_shot_closeup(ctx, ec, target, shot_id, line_id, note, *, tools, refuse) -> dict:
+    """``shot:<ep>:<shot_id>:closeup:<line_id>`` (kind ``shot_closeup``,
+    plan 35): the close-up keyframe of that talking part drawn again -- a
+    fresh seed and *note*, recorded on the part before any call -- then the
+    shot's clip made again (:func:`regenerate_shot_clip` with the clip's own
+    seed and note kept): the other parts are the same requests, served by
+    the generation journal at $0; only this part's close-up and clip are
+    bought. Refused before any call as ``:video`` is, and when the shot is
+    not cut per line or has no part for *line_id*
+    (:func:`closeup_target_refusal`)."""
+    host = _Assets(ctx, ec, tools=tools)
+    try:
+        host.script, host.storyboard = require_approved(ec)
+    except StepFailed as exc:
+        raise refuse(str(exc)) from None
+    shot = next((s for s in host.storyboard["shots"] if s["shot_id"] == shot_id), None)
+    if shot is None:
+        raise refuse(f"episode {ec.ep}'s storyboard has no shot {shot_id!r} (it has "
+                     f"{shots_mod.shot_ids_phrase(host.storyboard['shots'])}).")
+    if note is not None and len(note) > schemas.REGENERATE_NOTE_MAX:
+        raise refuse(f"a note is at most {schemas.REGENERATE_NOTE_MAX} characters ({len(note)} given).")
+    reason = clip_target_refusal(ec, shot) or closeup_target_refusal(shot, line_id)
+    if reason is not None:
+        raise refuse(reason)
+    clip = shot["assets"]["clip"]
+    seed = entities.fresh_seed()
+    clip["parts"] = [dict(part, closeup_seed=seed, closeup_note=note) if part["line_id"] == line_id else part
+                     for part in clip["parts"]]
+    host.write_board()
+    ctx.on_log(f"🖼️ Shot {shot_id}'s close-up for {line_id} again (seed {seed}){_noted(note)}")
+    result = regenerate_shot_clip(ctx, ec, target, shot_id, clip.get("note"), tools=tools, refuse=refuse,
+                                  keep_seed=True)
+    result.update(line=line_id, closeup_seed=seed)
+    return result
+
+
+def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse, keep_seed=False) -> dict:
     """``shot:<ep>:<shot_id>:video`` (kind ``shot_video``, phase 6 stage 8):
     that shot's clip again, one clip, with *note* at its prompt's tail and a
     fresh seed -- persisted as the clip's ``pending{seed, note,
@@ -5395,7 +5640,9 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
     would go over a cap (:func:`clip_quote`). The episode's video link alone
     (the planner's when none is recorded, then recorded), the gates and the
     journal of the video phase; nothing else is tried. *refuse(reason)* is
-    the caller's ``StepFailed`` builder."""
+    the caller's ``StepFailed`` builder. *keep_seed* (plan 35, a close-up
+    drawn again): the clip's own seed -- its parts' -- is asked again, not a
+    fresh one, so the parts that did not change are served at $0."""
     host = _Assets(ctx, ec, tools=tools)
     try:
         host.script, host.storyboard = require_approved(ec)
@@ -5431,6 +5678,9 @@ def regenerate_shot_clip(ctx, ec, target, shot_id, note, *, tools, refuse) -> di
         # seed, so a paid clip the provider holds is resumed, not bought
         # twice; a new note is a new request with a fresh seed.
         seed = pending["seed"] if pending and pending.get("note") == note else entities.fresh_seed()
+        if keep_seed:
+            kept = [part.get("seed") for part in (clip or {}).get("parts") or () if isinstance(part.get("seed"), int)]
+            seed = kept[0] if kept else clip_seed(shot, story_id=ec.story_id, ep=ec.ep)
         requested = {"seed": seed, "note": note, "requested_at": llm_call.utc_now()}
         if clip:
             shot["assets"]["clip"] = dict(clip, pending=requested)

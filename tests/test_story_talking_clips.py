@@ -332,16 +332,30 @@ def test_an_own_gpu_episode_prices_its_talking_shots_on_s2v_and_every_other_on_i
     assert talks and "sh03" in talks and "sh04" not in talks
     assert video["link"] == WAN and video["ready"] is True
     rows = {row["shot_id"]: row for row in video["plan"]}
+    # Plan 35: a shot of two lines past one chunk is cut into one talking clip per line, each with its close-up
+    # (an edit on the episode's keyframe link, runpod/edit_flux2_klein_multiref at $0.015).
+    cut = {shot_id: len(found[shot_id]["parts"]) for shot_id in talks if m.talking.is_split(found[shot_id])}
+    assert cut and all(count >= 2 for count in cut.values())
+    closeup = m.pricing.price_for(trc.link("runpod/edit_flux2_klein_multiref")).usd
     for shot_id in talks:
         row = rows[shot_id]
-        assert (row["link"], row["talks"], row["clip_s"], row["est_usd"]) == (S2V, True, 5, 0.1)
-        assert "cover" not in row
+        count = cut.get(shot_id, 1)
+        est = 0.1 * count + (closeup * count if shot_id in cut else 0.0)
+        assert (row["link"], row["talks"], row["clip_s"]) == (S2V, True, 5 * count)
+        assert row["est_usd"] == pytest.approx(est)
+        assert "cover" not in row and "stretch" not in row
+        if shot_id in cut:
+            assert (row["parts"], row["closeups"]) == (count, count) and "held_s" not in row
     others = [row for row in video["plan"] if row["shot_id"] not in talks]
     assert others and all("link" not in row and "talks" not in row for row in others)
     assert video["est_usd"] == pytest.approx(sum(row["est_usd"] for row in video["plan"]))
     assert video["seconds"] == sum(row["clip_s"] for row in video["plan"])
     part = video["talking"]
-    assert part["shots"] == talks and part["count"] == len(talks) and part["est_usd"] == pytest.approx(0.1 * len(talks))
+    clips_made = len(talks) - len(cut) + sum(cut.values())
+    assert part["shots"] == talks and part["count"] == clips_made
+    assert part["split"] == list(cut) and part["closeups"] == sum(cut.values())
+    assert part["est_usd"] == pytest.approx(0.1 * clips_made + closeup * sum(cut.values()))
+    assert f"{len(cut)} of them cut into one talking clip per line ({sum(cut.values())} clips" in part["message"]
     assert part["link"] == S2V and part["status"] == "keyed"
     too_long = [shot_id for shot_id, item in found.items() if item["why"] == m.talking.TOO_LONG]
     assert part["too_long"] == too_long
@@ -416,14 +430,24 @@ def test_the_one_click_buys_a_talking_shot_on_s2v_with_its_track_and_every_other
     found = m.talking.verdicts(ec, script, board)
     talks = sorted(shot_id for shot_id, item in found.items() if item["talks"])
     assert talks and "sh03" in talks
+    # Plan 35: the shots cut per line ask one S2V clip per line (shot_NN.lNN), checked in
+    # test_story_talking_parts.py; the others ask one clip each, as before.
+    cut = sorted(shot_id for shot_id in talks if m.talking.is_split(found[shot_id]))
+    single = [shot_id for shot_id in talks if shot_id not in cut]
+    assert single and "sh03" in single
+    names = [f"shot_{s[2:]}" for s in single] + [m.talking.part_name(s, part["line_id"])[:-4] for s in cut
+                                                  for part in found[s]["parts"]]
     links = dict(zip(seams.video.names(), seams.video.links))
-    assert sorted(name for name, link in links.items() if link == S2V) == [f"shot_{s[2:]}" for s in talks]
-    assert all(link == tce.SEEDANCE for name, link in links.items() if f"sh{name[5:]}" not in talks)
-    assert len(seams.video.requests) == len(board["shots"])
+    assert sorted(name for name, link in links.items() if link == S2V) == sorted(names)
+    assert all(link == tce.SEEDANCE for name, link in links.items() if f"sh{name[5:7]}" not in talks)
+    assert len(seams.video.requests) == len(board["shots"]) - len(cut) + sum(len(found[s]["parts"]) for s in cut)
     for shot in board["shots"]:
         clip = shot["assets"]["clip"]
         if shot["shot_id"] not in talks:
             assert clip["link"] == tce.SEEDANCE and "talk" not in clip
+            continue
+        if shot["shot_id"] in cut:
+            assert clip["link"] == S2V and len(clip["parts"]) == len(found[shot["shot_id"]]["parts"])
             continue
         name = f"shot_{shot['shot_id'][2:]}"
         request = seams.video.requests[seams.video.names().index(name)]

@@ -95,15 +95,21 @@ EPISODE_TARGETS = (
     "shot:<ep>:<shot_id>:plan",
     "shot:<ep>:<shot_id>",
     "shot:<ep>:<shot_id>:video",
+    "shot:<ep>:<shot_id>:closeup:<line_id>",
     "line:<ep>:<line_id>",
     f"metadata:<ep>:{'|'.join(schemas.PLATFORMS)}",
 )
 FRAMING_TARGETS = ("hook", "cliffhanger", "teaser")
 SHOT_IMAGE_KIND = "shot_image"
 SHOT_VIDEO_KIND = "shot_video"
+# Plan 35 (DEC-318): one talking part's close-up keyframe of a shot cut per line, drawn again (a fresh
+# seed, the note), then that part's clip made again from it -- the other parts are kept.
+SHOT_CLOSEUP_KIND = "shot_closeup"
+CLOSEUP_WORD = "closeup"
 LINE_KIND = "line"
 METADATA_KIND = "metadata"
-EPISODE_KINDS = ("scene",) + FRAMING_TARGETS + ("shot", SHOT_IMAGE_KIND, SHOT_VIDEO_KIND, LINE_KIND, METADATA_KIND)
+EPISODE_KINDS = ("scene",) + FRAMING_TARGETS + ("shot", SHOT_IMAGE_KIND, SHOT_VIDEO_KIND, SHOT_CLOSEUP_KIND,
+                                                LINE_KIND, METADATA_KIND)
 
 # The entity and episode target shapes (spec 9.2) -- every shape
 # :func:`parse_target` reads -- as a refusal names them.
@@ -151,6 +157,8 @@ def parse_episode_target(target):
     """``("scene", ep, scene_id)``, ``("hook"|"cliffhanger"|"teaser", ep)``,
     ``("shot", ep, shot_id)`` (its ``:plan``), ``("shot_image", ep,
     shot_id)``, ``("shot_video", ep, shot_id)`` (its ``:video``, phase 6),
+    ``("shot_closeup", ep, shot_id, line_id)`` (its ``:closeup:<line_id>``,
+    plan 35),
     ``("line", ep, line_id)`` or ``("metadata", ep, platform)`` for an
     episode target, None for anything else -- another
     ``shot:<ep>:<shid>:<word>`` among them (a later phase's). The shape only
@@ -173,6 +181,9 @@ def parse_episode_target(target):
             return ("shot", ep, parts[2])
         if parts[3] == "video":
             return (SHOT_VIDEO_KIND, ep, parts[2])
+    if (kind == "shot" and len(parts) == 5 and _SHOT.fullmatch(parts[2]) and parts[3] == CLOSEUP_WORD
+            and _LINE.fullmatch(parts[4])):
+        return (SHOT_CLOSEUP_KIND, ep, parts[2], parts[4])
     if kind == LINE_KIND and len(parts) == 3 and _LINE.fullmatch(parts[2]):
         return (LINE_KIND, ep, parts[2])
     if kind == METADATA_KIND and len(parts) == 3 and parts[2] in schemas.PLATFORMS:

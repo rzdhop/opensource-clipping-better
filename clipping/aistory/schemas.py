@@ -3812,13 +3812,18 @@ _STORYBOARD_MOTION_SCHEMA = _document({
 # shot_112: a stable id, never the shot's position). The only names
 # store.EPISODE_ASSET_NAME_PATTERNS["shots"] holds.
 SHOT_IMAGE_DIR = "assets/shots"
-SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})\.(png|jpg|jpeg|webp)$"
+# Plan 35 (DEC-318): beside it, the close-up keyframe of each talking part of
+# the shot, shot_NN.lNN.<ext> (its line's id) -- never the shot's own
+# ``assets.image`` (storyboard_errors checks that name has no line part).
+SHOT_IMAGE_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.l[0-9]{2})?\.(png|jpg|jpeg|webp)$"
 # A shot's clip (phase 6 stage 7, tier >= 2): assets/clips/shot_NN.mp4, named
 # the image's way -- and (DEC-258) its lip-synced take beside it,
 # shot_NN.lipsync.mp4. The only names store.EPISODE_ASSET_NAME_PATTERNS["clips"]
 # holds.
 SHOT_CLIP_DIR = "assets/clips"
-SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.lipsync|\.manual|\.stock)?\.mp4$"
+# Plan 35 (DEC-318): a shot cut into one talking clip per line keeps each
+# part as shot_NN.lNN.mp4 (its line's id); its ``assets.video`` is the first.
+SHOT_CLIP_NAME_PATTERN = r"^shot_(0[1-9]|[1-9][0-9]{1,2})(\.lipsync|\.manual|\.stock|\.l[0-9]{2})?\.mp4$"
 SHOT_LIPSYNC_SUFFIX = ".lipsync"
 # Plan 22 stage 5: a clip the human uploaded (``manual/upload``) is kept as
 # shot_NN.manual.mp4, named only while its clip record's link is that one.
@@ -3959,6 +3964,29 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
         "lines": {"type": "array", "items": _NON_EMPTY_STRING, "minItems": 1, "maxItems": 12},
         "speech_s": {"type": "number", "minimum": 0},
     }),
+    # Plan 35 (DEC-318): a shot cut into one talking clip per line (steps/talking.split): each part's
+    # line and speaker, its span in the shot (the render cuts the parts back to back, never slowed), its
+    # close-up keyframe (the speaker's sheet + the shot's keyframe, a multi-reference edit) and its clip.
+    "parts": {"type": "array", "minItems": 1, "maxItems": 12, "items": _document({
+        "line_id": {"type": "string", "pattern": LINE_ID_PATTERN},
+        "speaker": {"type": "string", "pattern": CHAR_ID_PATTERN},
+        "start_s": {"type": "number", "minimum": 0},
+        "duration_s": {"type": "number", "minimum": 0.001},
+        "closeup": {"type": "string", "maxLength": 200},
+        "closeup_sha256": _SHA256,
+        "closeup_seed": {"type": "integer", "minimum": 0},
+        "video": {"type": "string", "maxLength": 200},
+        "video_sha256": _SHA256,
+        "track_hash": _SHA256,
+        "audio_sha256": _SHA256,
+        "est_usd": {"type": "number", "minimum": 0},
+    }, optional={
+        "closeup_cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+        "cache_key": {"type": ["string", "null"], "pattern": SHA256_PATTERN},
+        "closeup_note": _NOTE_OR_NULL,
+        # The seed its clip was asked with (a close-up drawn again keeps it: the other parts stay cached).
+        "seed": {"type": "integer", "minimum": 0},
+    })},
     # Plan 28 F7: the first frame of the human's clip against its keyframe (judge.check_first_frame), a
     # warning on the Handoff card, never a refusal.
     "first_frame": _document({
@@ -4181,7 +4209,7 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
         if image is not None:
             folder, _, name = image.rpartition("/")
             if (folder != SHOT_IMAGE_DIR or _search(SHOT_IMAGE_NAME_PATTERN, name) is None
-                    or not name.startswith(f"shot_{shot['shot_id'][2:]}.")):
+                    or not name.startswith(f"shot_{shot['shot_id'][2:]}.") or name.count(".") != 1):
                 errors.append(
                     f"$.shots[{i}].assets.image: {image!r} is not {shot['shot_id']}'s image "
                     f"({SHOT_IMAGE_DIR}/shot_NN.<png|jpg|jpeg|webp>)"
@@ -4194,8 +4222,11 @@ def storyboard_errors(doc, *, min_shot_s=0.8) -> list:
             manual = f"shot_{shot['shot_id'][2:]}{SHOT_MANUAL_SUFFIX}.mp4"
             stock = f"shot_{shot['shot_id'][2:]}{SHOT_STOCK_SUFFIX}.mp4"
             clip = shot["assets"].get("clip") or {}
+            # Plan 35: a shot cut per line names its first talking part.
+            parts = tuple(f"shot_{shot['shot_id'][2:]}.{part.get('line_id')}.mp4"
+                          for part in (clip.get("parts") or ())[:1] if isinstance(part, dict))
             if (folder != SHOT_CLIP_DIR or _search(SHOT_CLIP_NAME_PATTERN, name) is None
-                    or name not in (plain, synced, manual, stock)):
+                    or name not in (plain, synced, manual, stock) + parts):
                 errors.append(
                     f"$.shots[{i}].assets.video: {video!r} is not {shot['shot_id']}'s clip "
                     f"({SHOT_CLIP_DIR}/shot_NN.mp4)"

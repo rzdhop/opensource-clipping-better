@@ -524,7 +524,8 @@ LIPSYNC_KLING = "kling"
 assert defaults.LIPSYNC_MODES == budget_mod.LIPSYNC_MODES
 # The longest clip Kling LipSync takes (fal: 2-10 s of input video): a
 # lipsyncing story buys no longer clip, so its storyboard plans a scene past
-# it as two shots (DEC-250's stretch still covers a shot up to 12.5 s).
+# it as two shots (a clip is never slowed to cover a longer one: DEC-250 as
+# amended by plan 35).
 LIPSYNC_MAX_CLIP_S = 10
 
 

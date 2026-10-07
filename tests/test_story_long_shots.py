@@ -1,5 +1,5 @@
-"""A shot longer than the longest clip its link sells is covered, not
-refused (AI Story, DEC-250; the human's report of 2026-10-03: "shots sh04
+"""A shot longer than the longest clip its link sells (AI Story, DEC-250 as
+amended by plan 35 / DEC-318; the human's report of 2026-10-03: "shots sh04
 (12.767 s) and sh03 (14.133 s) run longer than the 12 s clip
 fal/seedance-1-pro-fast sells, and every shot of this story is one clip: plan
 the storyboard again" -- the storyboard had planned one shot a scene on the
@@ -9,16 +9,19 @@ Two layers. At plan time the storyboard step decides one or two beat shots
 on the scene's length as its voices will measure it
 (``storyboard.expected_scene_seconds``: the estimate plus each unmeasured
 line's provider overrun, ``voices.SPEECH_OVERRUN``), not on the estimate
-alone. At run time a fully animated shot still longer than the longest clip
-is covered by that clip slowed to the shot's length (``cover: stretch``, at
-most ``clips.MAX_STRETCH`` 1.25x) -- recorded on the clip, read by the render
-(``filtergraph.tier2_clip_argv(clip_s=)``: ``setpts`` before the fps
-resample) -- and refused only past that, naming the most a clip can cover.
-DEC-208's held last frame stays for every other story.
+alone. At run time a fully animated shot longer than the longest clip by
+more than DEC-208's hold is refused, naming it and its regenerate target:
+DEC-250's slowed clip (``cover: stretch``, up to 1.25x) is gone since plan 35
+-- the human watched a two-line shot's 5-s clip stretched under 7 s of
+speech, the mouths out of step -- so ``clips.MAX_STRETCH`` is 1.0 and no new
+clip is slowed (on the own_gpu profile a speaking shot is cut into one
+talking clip per line instead: test_story_talking_parts.py). A clip recorded
+``cover: stretch`` before still renders as it did
+(``filtergraph.tier2_clip_argv(clip_s=)``). DEC-208's held last frame stays
+for every other story.
 
 Offline and hermetic but for the one real-ffmpeg check (ffmpeg is on PATH
-here and in CI); stdlib + pytest (DEC-012). Each test reaches the new
-behaviour, so on the parent commit it fails on its own.
+here and in CI); stdlib + pytest (DEC-012).
 """
 
 from __future__ import annotations
@@ -60,10 +63,12 @@ def _without_lipsync(store, story_id):
 
 # ======================================================== 1. the estimate
 
-def test_the_live_shots_are_covered_by_their_clips_slowed_and_the_estimate_says_so(store, tmp_path):
+def test_the_live_shots_are_refused_never_slowed_naming_each_and_its_regenerate_target(store, tmp_path):
     """The human's episode: 14.133 s and 12.767 s shots on seedance (12 s).
-    The plan is ready, each long shot's row says its clip is slowed and by
-    how much, the message says it in plain words, and nothing is refused."""
+    Plan 35 (DEC-250 amended): no clip is slowed -- the plan is not ready,
+    the long shots' rows hold (``held_s``) with no ``cover``, and the
+    refusal names each with its length, its ``shot:<ep>:<shot_id>:plan``
+    target and the fix; the assets step refuses before any call."""
     from clipping.aistory.steps import assets
 
     story_id = _without_lipsync(store, amb._story(store, tmp_path))
@@ -73,41 +78,42 @@ def test_the_live_shots_are_covered_by_their_clips_slowed_and_the_estimate_says_
 
     units = amb._too_long_units(store, story_id, board, **tas.FAL)
     video = units["video"]
-    assert video["link"] == SEEDANCE and video["ready"] is True
-    assert "too_long" not in video and video["refused"] is None
+    assert video["link"] == SEEDANCE and video["ready"] is False
     rows = {row["shot_id"]: row for row in video["plan"]}
-    assert rows[long_a["shot_id"]]["clip_s"] == 12 and rows[long_a["shot_id"]]["cover"] == "stretch"
-    assert rows[long_a["shot_id"]]["stretch"] == pytest.approx(14.133 / 12, abs=1e-4)
-    assert rows[long_a["shot_id"]]["held_s"] == pytest.approx(2.133)
-    assert rows[long_b["shot_id"]]["cover"] == "stretch" and rows[long_b["shot_id"]]["stretch"] == pytest.approx(
-        12.767 / 12, abs=1e-4)
+    for shot, held in ((long_a, 2.133), (long_b, 0.767)):
+        row = rows[shot["shot_id"]]
+        assert row["clip_s"] == 12 and row["held_s"] == pytest.approx(held)
+        assert "cover" not in row and "stretch" not in row
     assert "cover" not in rows[short["shot_id"]] and "held_s" not in rows[short["shot_id"]]
-    assert (f"{long_a['shot_id']} runs 14.133 s: its 12 s clip is slowed to cover it (0.85x speed)."
-            in video["message"])
-    assert f"{long_b['shot_id']} runs 12.767 s: its 12 s clip is slowed to cover it (0.94x speed)." in video["message"]
-    assert "held on its last frame" not in video["message"]
+    sentence = video["too_long"]
+    assert sentence.startswith(f"shots {long_a['shot_id']} (14.133 s) and {long_b['shot_id']} (12.767 s) run longer "
+                               f"than the 12 s clip {SEEDANCE} sells, a clip is never slowed")
+    assert (f"(regenerate shot:1:{long_a['shot_id']}:plan and shot:1:{long_b['shot_id']}:plan)" in sentence)
+    assert sentence.endswith("or shorten the scene's lines") and short["shot_id"] not in sentence
+    assert "slowed to cover it" not in video["message"]
     refusal = assets.plan_refusal(tas._ec(store, story_id), units)
-    assert not refusal or "clips cannot be made" not in refusal
+    assert refusal and sentence in refusal and "Nothing was generated or spent" in refusal
 
 
-def test_a_shot_no_clip_can_cover_even_slowed_is_refused_naming_the_most_a_clip_covers(store, tmp_path):
-    """Past 1.25x the longest clip (15 s on seedance) the plan is refused as
-    before, the sentence naming the shot, the most a slowed clip covers and
-    the two remedies; the shots a slowed clip covers are not named."""
+def test_a_shot_within_the_hold_is_held_and_only_the_one_past_it_is_named(store, tmp_path):
+    """DEC-208's half second still holds a clip's last frame (12.4 s on a
+    12 s clip); past it (16 s, and 12.9 s which DEC-250 once slowed) a shot
+    is named -- the most a clip covers is its own length."""
     story_id = _without_lipsync(store, amb._story(store, tmp_path))
     board = copy.deepcopy(tas._board(store, story_id))
-    too_long, slowed = board["shots"][1], board["shots"][2]
-    too_long["duration_s"], slowed["duration_s"] = 16.0, 14.9
+    too_long, once_slowed, held = board["shots"][1], board["shots"][2], board["shots"][0]
+    too_long["duration_s"], once_slowed["duration_s"], held["duration_s"] = 16.0, 12.9, 12.4
 
     video = amb._too_long_units(store, story_id, board, **tas.FAL)["video"]
     assert video["ready"] is False
     sentence = video["too_long"]
-    assert sentence.startswith(f"shot {too_long['shot_id']} (16 s) runs longer than the 12 s clip {SEEDANCE} sells "
-                               "can cover even slowed (at most 15 s)")
-    assert slowed["shot_id"] not in sentence
+    assert f"{too_long['shot_id']} (16 s)" in sentence and f"{once_slowed['shot_id']} (12.9 s)" in sentence
+    assert held["shot_id"] not in sentence and "even slowed" not in sentence
     assert "plan the storyboard again" in sentence and sentence.endswith("or shorten the scene's lines")
     rows = {row["shot_id"]: row for row in video["plan"]}
-    assert rows[slowed["shot_id"]]["cover"] == "stretch" and "cover" not in rows[too_long["shot_id"]]
+    assert rows[held["shot_id"]]["held_s"] == pytest.approx(0.4) and not any(row.get("cover")
+                                                                              for row in video["plan"])
+    assert "held on its last frame for 0.4 s" in video["message"]
 
 
 def test_guard_a_story_that_does_not_animate_every_shot_holds_and_never_slows(store, tmp_path):
@@ -122,11 +128,12 @@ def test_guard_a_story_that_does_not_animate_every_shot_holds_and_never_slows(st
     assert "held on its last frame for 2 s" in video["message"]
 
 
-def test_stretch_of_is_none_within_the_hold_and_past_the_most_a_clip_is_slowed():
-    assert clips.stretch_of(12.0, 12) is None and clips.stretch_of(12.5, 12) is None
-    assert clips.stretch_of(12.6, 12) == 1.05 and clips.stretch_of(15.0, 12) == 1.25
-    assert clips.stretch_of(15.1, 12) is None and clips.stretch_of(9.4, 8) == 1.175
-    assert clips.stretch_of(14.133, 0) is None and clips.MAX_STRETCH == 1.25
+def test_no_clip_is_slowed_any_more_max_stretch_is_one():
+    """Plan 35 (DEC-250 amended): ``stretch_of`` never slows a clip -- None
+    within the hold and past it alike."""
+    assert clips.MAX_STRETCH == 1.0
+    for duration, clip_s in ((12.0, 12), (12.5, 12), (12.6, 12), (15.0, 12), (15.1, 12), (9.4, 8), (14.133, 0)):
+        assert clips.stretch_of(duration, clip_s) is None, (duration, clip_s)
 
 
 # ======================================================= 2. the plan time
@@ -306,7 +313,8 @@ def test_a_slowed_clip_keeps_moving_to_the_shots_last_frame_where_a_held_one_fre
 
 def test_a_clip_record_may_say_how_the_render_covers_the_shot():
     """``storyboard`` schema: ``assets.clip.cover`` is optional -- absent
-    (every stored story) or ``stretch``; anything else is refused."""
+    (every stored story) or ``stretch`` (a clip recorded before plan 35);
+    anything else is refused."""
     base = {"state": "current", "link": SEEDANCE, "route": "paid", "clip_s": 12, "est_usd": 0.48,
             "prompt_hash": "a" * 64, "image_sha256": "b" * 64, "cache_key": None, "generated_at": None}
     assert schemas.validate(base, schemas._STORYBOARD_CLIP_SCHEMA) == []
@@ -318,14 +326,13 @@ def test_a_clip_record_may_say_how_the_render_covers_the_shot():
 
 # ============================================ 4. the one click, end to end
 
-def test_the_one_click_buys_a_slowed_clip_for_a_long_shot_records_it_and_renders_with_it(store, tmp_path, monkeypatch):
+def test_the_one_click_never_buys_a_clip_for_a_shot_longer_than_its_link_sells(store, tmp_path, monkeypatch):
     """The human's scenario on the quality episode: every shot is one clip,
     the voices are measured, and the link's longest clip is shorter than the
     longest shots (the sold lengths narrowed under this fixture's re-timed
-    shots). The fast track completes: the long shots' clips are bought at the
-    longest length, recorded ``cover: stretch``, and the render's S stage
-    slows them (``setpts``); the shots a clip covers whole keep the record
-    and argv they had; Continue repeats nothing."""
+    shots). Plan 35: the fast track stops at the assets plan -- no clip is
+    bought, none slowed -- naming the long shots and their regenerate
+    targets."""
     story_id = oc._v2_unmade(store, tmp_path)
     # The voices first (stop at the keyframes): the shots are re-timed from them, as live.
     fakes, _image = oc._quality_fakes(tmp_path, video=tvp.FakeVideo(), vision=kg.FakeVision())
@@ -333,7 +340,7 @@ def test_the_one_click_buys_a_slowed_clip_for_a_long_shot_records_it_and_renders
     assert "keyframes are made" in message and fakes.adapters[("video", "fal")].requests == []
     durations = {shot["shot_id"]: float(shot["duration_s"]) for shot in tas._board(store, story_id)["shots"]}
     longest_shot = max(durations.values())
-    sold = next(n for n in range(2, 13) if longest_shot / n <= clips.MAX_STRETCH and longest_shot - n > 0.5)
+    sold = next(n for n in range(12, 1, -1) if longest_shot - n > clips.HOLD_TOLERANCE_S)
     monkeypatch.setitem(video_plan.CLIP_LENGTHS, SEEDANCE, tuple(range(2, sold + 1)))
     long_ids = sorted(sid for sid, value in durations.items() if value - sold > clips.HOLD_TOLERANCE_S)
     assert long_ids and len(long_ids) < len(durations), durations
@@ -341,31 +348,10 @@ def test_the_one_click_buys_a_slowed_clip_for_a_long_shot_records_it_and_renders
     video, vision = tvp.FakeVideo(), kg.FakeVision()
     fakes, _image = oc._quality_fakes(tmp_path, video=video, vision=vision)
 
-    summary, log = tft.run(store, story_id, fakes, settings=oc.QUALITY_SETTINGS)
+    message = tft.stopped(store, story_id, fakes, settings=oc.QUALITY_SETTINGS)
 
-    assert summary["steps"]["render"]["state"] == "completed" and summary["auto_approved"] == ["assets"]
-    assert len(video.requests) == len(durations)
-    asked = {f"sh{request.extra['name'][5:]}": int(request.duration_s) for request in video.requests}
-    assert all(asked[sid] == sold for sid in long_ids)
-    board = tas._board(store, story_id)
-    for shot in board["shots"]:
-        clip = shot["assets"]["clip"]
-        assert clip["state"] == "current" and clip["clip_s"] == asked[shot["shot_id"]]
-        if shot["shot_id"] in long_ids:
-            assert clip["cover"] == "stretch"
-        else:
-            assert "cover" not in clip
-    assert any("is slowed to cover it" in line for line in log)
-    manifest = tft._doc(store, story_id, "render_manifest.json")
-    stages = {stage["id"]: stage for stage in manifest["stages"]}
-    for shot in board["shots"]:
-        argv = " ".join(stages[f"S:{shot['shot_id']}"]["argv"])
-        if shot["shot_id"] in long_ids:
-            factor = round(durations[shot["shot_id"]] / sold, 4)
-            assert re.search(rf"setpts={re.escape(filtergraph._num(factor))}\*PTS,fps=30", argv), argv
-        else:
-            assert "setpts" not in argv
-    # Continue repeats nothing: the slowed clips stand.
-    again, _image = oc._quality_fakes(tmp_path, video=tvp.FakeVideo(), vision=kg.FakeVision(), llm=False)
-    summary, _log = tft.run(store, story_id, again, settings=oc.QUALITY_SETTINGS)
-    assert again.adapters[("video", "fal")].requests == [] and summary["auto_approved"] == []
+    assert video.requests == []
+    assert "a clip is never slowed" in message and "is slowed to cover it" not in message
+    for shot_id in long_ids:
+        assert f"shot:1:{shot_id}:plan" in message, message
+    assert all(not (shot["assets"].get("clip") or {}).get("cover") for shot in tas._board(store, story_id)["shots"])
