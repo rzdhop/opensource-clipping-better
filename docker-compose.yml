@@ -100,6 +100,11 @@ services:
       - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
       - RUNPOD_COMFY_ENDPOINT_ID=${RUNPOD_COMFY_ENDPOINT_ID:-}
       - RUNPOD_GPU_USD_PER_HOUR=${RUNPOD_GPU_USD_PER_HOUR:-}
+      # Plan 32 close-out: the image endpoint's three names (DEC-312: images run there when set; the voice
+      # lines' fallback too) were never forwarded -- the container sent every image to the video endpoint.
+      - RUNPOD_IMAGE_ENDPOINT_ID=${RUNPOD_IMAGE_ENDPOINT_ID:-}
+      - RUNPOD_IMAGE_API_KEY=${RUNPOD_IMAGE_API_KEY:-}
+      - RUNPOD_IMAGE_GPU_USD_PER_HOUR=${RUNPOD_IMAGE_GPU_USD_PER_HOUR:-}
       # The voice lines (runpod/tts_chatterbox, plan 32): an endpoint of their own when set.
       - RUNPOD_AUDIO_ENDPOINT_ID=${RUNPOD_AUDIO_ENDPOINT_ID:-}
       - RUNPOD_AUDIO_API_KEY=${RUNPOD_AUDIO_API_KEY:-}
