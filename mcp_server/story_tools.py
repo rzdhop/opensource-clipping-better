@@ -60,6 +60,9 @@ class StoryBackend:
         self.outputs_dir = outputs_dir
         self.stories = story_store.StoryStore(outputs_dir, on_log=lambda *_: None)
         env = stored_settings() if settings_env is None else dict(settings_env)
+        # Plan 33 stage 3: the voice tools read the same keys (GOOGLE_API_KEY
+        # lives in the app's stored settings, not in .env, on the live host).
+        self.settings_env = env
         self.director = director or Director(outputs_dir, settings_env=env)
 
     def load(self, story_id: str) -> dict:

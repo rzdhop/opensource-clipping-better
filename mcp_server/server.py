@@ -39,8 +39,19 @@ class Backend:
         self.settings = settings or load_settings()
         self.client = client or JobClient(self.settings)
         self.story = story or story_tools.StoryBackend(self.settings.outputs_dir)
-        # Plan 33 stage 3: the voice engines (tests pass one with fakes).
-        self.voice = voice or VoiceTools(self.client, outputs_dir=self.settings.outputs_dir)
+        # Plan 33 stage 3: the voice engines (tests pass one with fakes). The
+        # keys: the process environment (.env) first, else the app's stored
+        # settings (data/settings.json), where GOOGLE_API_KEY lives on the host.
+        self.voice = voice or VoiceTools(self.client, outputs_dir=self.settings.outputs_dir,
+                                         env=voice_env(self.story))
+
+
+def voice_env(story: story_tools.StoryBackend) -> dict:
+    """What the voice tools read keys from: a non-empty process variable
+    wins, the app's stored settings fill the rest."""
+    env = dict(getattr(story, "settings_env", None) or {})
+    env.update({k: v for k, v in os.environ.items() if v})
+    return env
 
 
 def _public(record: dict) -> dict:

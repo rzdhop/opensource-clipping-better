@@ -289,6 +289,19 @@ def test_file_upload_writes_under_the_outputs_dir_only(backend, tmp_path):
     assert junk.is_error and "base64" in junk.content[0].text
 
 
+def test_the_voice_key_comes_from_env_or_the_stored_settings(backend, monkeypatch):
+    """Plan 33: GOOGLE_API_KEY is empty in .env on the host and set in the app's stored settings;
+    the voice tools read both, a non-empty process variable first."""
+    from mcp_server.server import voice_env
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "")
+    backend.story.settings_env = {"GOOGLE_API_KEY": "stored-key"}
+    assert voice_env(backend.story)["GOOGLE_API_KEY"] == "stored-key"
+    monkeypatch.setenv("GOOGLE_API_KEY", "env-key")
+    assert voice_env(backend.story)["GOOGLE_API_KEY"] == "env-key"
+    assert Backend(backend.settings, client=backend.client, story=backend.story).voice.env["GOOGLE_API_KEY"] == "env-key"
+
+
 def test_the_voice_tools_answer_through_the_server_and_the_ledger_sums_them(backend, tmp_path):
     """Plan 33 stage 3: tts_line through the MCP client with a fake Gemini adapter; a bad provider
     is a tool error with the reason; cost_ledger carries the voice lines beside the GPU jobs."""
