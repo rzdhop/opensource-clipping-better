@@ -1898,6 +1898,9 @@ def target_units(stories, story, parsed) -> dict:
     prompt_only = story["generation_profile"]["consistency_mode"] == refimages.PROMPT_ONLY
     if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
         return _units()
+    if parsed[0] == regenerate_step.SHOT_CLOSEUP_KIND:
+        # Plan 35: one close-up (an edit); its part's clip is priced by regenerate_clip_estimate.
+        return _units(edit_images=1)
     if parsed[0] == regenerate_step.SHOT_IMAGE_KIND:
         return _units(images=1) if prompt_only else _units(edit_images=1)
     if parsed[0] == regenerate_step.LINE_KIND:
@@ -2906,7 +2909,8 @@ ASSETS_SHOT_FLAG_FIELDS = schemas.SHOT_OVERRIDE_FLAGS
 # has none: its job ends completed (DEC-161).
 EPISODE_TARGET_DOCS = {"scene": "script", "hook": "script", "cliffhanger": "script", "teaser": "script",
                        "shot": "storyboard", regenerate_step.SHOT_IMAGE_KIND: "assets",
-                       regenerate_step.SHOT_VIDEO_KIND: "assets", regenerate_step.LINE_KIND: "assets"}
+                       regenerate_step.SHOT_VIDEO_KIND: "assets", regenerate_step.SHOT_CLOSEUP_KIND: "assets",
+                       regenerate_step.LINE_KIND: "assets"}
 
 # What an edit may set (the API's ScriptPatchRequest / StoryboardPatchRequest
 # and their items). An item names what it edits by its id (``line_id``,
@@ -4458,7 +4462,7 @@ def check_episode_target(stories, story, parsed) -> None:
                                            "plan it again first (the storyboard step)."))
     elif kind in (regenerate_step.SHOT_IMAGE_KIND, regenerate_step.LINE_KIND):
         _check_asset_target(stories, story_id, ep, parsed, script)
-    elif kind == regenerate_step.SHOT_VIDEO_KIND:
+    elif kind in (regenerate_step.SHOT_VIDEO_KIND, regenerate_step.SHOT_CLOSEUP_KIND):
         _check_clip_target(stories, story_id, ep, parsed)
     elif kind == regenerate_step.METADATA_KIND:
         ec = _context(stories, story_id, ep)
@@ -4520,8 +4524,11 @@ def _clip_shot(stories, story_id, ep, parsed):
         raise WorkflowError(CONFLICT, str(exc)) from None
     shot = next(s for s in board["shots"] if s["shot_id"] == parsed[2])
     reason = assets_step.clip_target_refusal(ec, shot)
+    if reason is None and parsed[0] == regenerate_step.SHOT_CLOSEUP_KIND:
+        reason = assets_step.closeup_target_refusal(shot, parsed[3])
     if reason is not None:
-        raise WorkflowError(CONFLICT, f"Cannot regenerate 'shot:{ep}:{parsed[2]}:video': {reason}")
+        word = f"closeup:{parsed[3]}" if parsed[0] == regenerate_step.SHOT_CLOSEUP_KIND else "video"
+        raise WorkflowError(CONFLICT, f"Cannot regenerate 'shot:{ep}:{parsed[2]}:{word}': {reason}")
     return ec, script, board, shot
 
 

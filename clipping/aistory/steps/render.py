@@ -425,6 +425,7 @@ def shot_clips(ec, script, board, assets_doc):
     ambient = tier == 3 and media_policy.ambience(ec.story)
     speech = tier == 3 and media_policy.native_speech(ec.story)
     videos, keep_still, blocked, unmade, native, ambience, notes = {}, {}, [], [], [], [], []
+    parts = {}
     for shot in board["shots"]:
         shot_id = shot["shot_id"]
         flags = clips.shot_flags(shot, assets_doc)
@@ -441,6 +442,11 @@ def shot_clips(ec, script, board, assets_doc):
         if state == "current":
             path = clips.shot_clip_path(ec, shot)
             videos[shot_id] = runner_mod.file_record(path, shot["assets"]["video"])
+            if (shot["assets"].get("clip") or {}).get("parts"):
+                # Plan 35 (DEC-318): a shot cut into one talking clip per line: every part, in order.
+                parts[shot_id] = [runner_mod.file_record(clips.part_clip_path(ec, shot_id, part["line_id"]),
+                                                         part["video"])
+                                  for part in shot["assets"]["clip"]["parts"]]
             if stock_cutaways.is_stock_clip(shot):
                 # Plan 23 stage B8: a stock cutaway is plain video at every tier -- its own sound (if
                 # any) is never the shot's, ambience or native.
@@ -468,8 +474,11 @@ def shot_clips(ec, script, board, assets_doc):
             blocked.append((shot, state))
     if blocked or unmade:
         raise StepFailed(clip_refusal(ec, blocked, unmade, script=script, doc=assets_doc, link=link))
-    return {"videos": videos, "keep_still": keep_still, "filled": [], "native_audio": native, "ambience": ambience,
-            "notes": notes}
+    resolved = {"videos": videos, "keep_still": keep_still, "filled": [], "native_audio": native,
+                "ambience": ambience, "notes": notes}
+    if parts:
+        resolved["video_parts"] = parts
+    return resolved
 
 
 def stock_shot_clips(ec, script, board, assets_doc):
@@ -581,6 +590,9 @@ def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, shot_
     resolved = shot_clips(ec, script, board, assets_doc) if shot_clips_now is _RESOLVE else shot_clips_now
     if resolved is not None:
         inputs.update(videos=resolved["videos"], keep_still=resolved["keep_still"], filled=resolved["filled"])
+        if resolved.get("video_parts"):
+            # Plan 35: the talking parts of the shots cut per line (render.plan cuts them back to back).
+            inputs["video_parts"] = dict(resolved["video_parts"])
         if resolved.get("native_audio"):
             inputs["native_audio"] = list(resolved["native_audio"])
         if resolved.get("ambience"):

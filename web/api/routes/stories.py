@@ -2198,7 +2198,7 @@ async def regenerate(story_id: str, req: StoryRegenerateRequest) -> JobResponse:
         voice = workflow.check_entity_target(stories, story, parsed, voice=voice, env=env)
         units = workflow.target_units(stories, story, parsed)
         needs_editor = workflow.target_needs_editor(story, parsed)
-    if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
+    if parsed[0] in (regenerate_step.SHOT_VIDEO_KIND, regenerate_step.SHOT_CLOSEUP_KIND):
         clip = await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
         gate = _clip_gate(clip, stories, story, env=env)
     else:
@@ -2451,7 +2451,7 @@ async def _estimate_body(story_id, step, *, target=None, selected=None, episodes
             parsed = regenerate_step.parse_target(target)
             workflow.check_entity_target(stories, story, parsed)
             units = workflow.target_units(stories, story, parsed)
-        if parsed[0] == regenerate_step.SHOT_VIDEO_KIND:
+        if parsed[0] in (regenerate_step.SHOT_VIDEO_KIND, regenerate_step.SHOT_CLOSEUP_KIND):
             return await run_in_threadpool(_clip_estimate, stories, story, parsed, env)
         if parsed[0] == "character" and parsed[2] == regenerate_step.VARIANT_WORD:
             # Plan 23 stage D5: an appearance variant's sheets, priced like the sheets.

@@ -606,7 +606,10 @@ def test_a_lipsyncing_story_buys_no_clip_past_10_s_and_its_storyboard_plans_a_10
     assert m.storyboard.beat_shot_count(ec, script, scene, limit_s=12, rhythm=False) == (1, 1)
 
 
-def test_the_plan_buys_10_s_at_most_and_slows_it_over_an_11_s_shot(store, tmp_path, media):
+def test_the_plan_buys_10_s_at_most_and_refuses_an_11_s_shot_never_slowing_its_clip(store, tmp_path, media):
+    """DEC-258's 10 s cap holds; plan 35 (DEC-250 amended): an 11 s shot is
+    no longer covered by a 10 s clip slowed -- it is held past the hold and
+    the plan is refused, naming it."""
     m = _mods()
     story_id = oc._v2_unmade(store, tmp_path)
     board = copy.deepcopy(tas._board(store, story_id))
@@ -615,8 +618,9 @@ def test_the_plan_buys_10_s_at_most_and_slows_it_over_an_11_s_shot(store, tmp_pa
     video = m.clips.video_units(tas._ec(store, story_id), eps._script(store, story_id), board, None, env=QUALITY,
                                 caps={}, committed_usd=0.0, adapters=adapters)
     row = video["plan"][0]
-    assert (row["clip_s"], row["cover"], row["stretch"]) == (10, "stretch", 1.1)  # seedance sells 11 and 12 s
-    assert max(item["clip_s"] for item in video["plan"]) <= 10 and video["ready"] is True
+    assert (row["clip_s"], row["held_s"]) == (10, 1.0) and "cover" not in row  # seedance sells 11 and 12 s
+    assert max(item["clip_s"] for item in video["plan"]) <= 10 and video["ready"] is False
+    assert f"{row['shot_id']} (11 s)" in video["too_long"] and "a clip is never slowed" in video["too_long"]
 
 
 # ================================================================ 5. the estimate and the cap

@@ -69,11 +69,12 @@ from .regenerate import (  # noqa: F401 -- re-exported
     LINE_KIND,
     METADATA_KIND,
     SHOT_IMAGE_KIND,
+    SHOT_CLOSEUP_KIND,
     SHOT_VIDEO_KIND,
     parse_episode_target,
 )
 
-ASSET_KINDS = (SHOT_IMAGE_KIND, SHOT_VIDEO_KIND, LINE_KIND)
+ASSET_KINDS = (SHOT_IMAGE_KIND, SHOT_VIDEO_KIND, SHOT_CLOSEUP_KIND, LINE_KIND)
 
 
 def _noted(note) -> str:
@@ -109,6 +110,10 @@ def run(ctx, target, parsed, note, *, runner=None, time_fn=time.monotonic, sleep
         # never need.
         from . import assets as assets_step
 
+        if parsed[0] == SHOT_CLOSEUP_KIND:
+            # Plan 35: one talking part's close-up, then that part's clip.
+            return assets_step.regenerate_shot_closeup(ctx, ec, target, parsed[2], parsed[3], note, tools=tools,
+                                                       refuse=refuse)
         regenerate = {SHOT_IMAGE_KIND: assets_step.regenerate_shot_image,
                       SHOT_VIDEO_KIND: assets_step.regenerate_shot_clip,
                       LINE_KIND: assets_step.regenerate_line_voice}[parsed[0]]

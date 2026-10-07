@@ -136,6 +136,53 @@ def shot_clip_path(ec, shot):
     return path if os.path.isfile(path) else None
 
 
+def part_clip_path(ec, shot_id, line_id):
+    """The real path of a talking part's clip (plan 35:
+    ``assets/clips/shot_NN.lNN.mp4``), or None when it is not on disk."""
+    try:
+        path = ec.store.episode_asset_path(ec.story_id, ec.ep, CLIPS_KIND, talking.part_name(shot_id, line_id))
+    except KeyError:
+        return None
+    return path if os.path.isfile(path) and not os.path.islink(path) else None
+
+
+def closeup_path(ec, rel):
+    """The real path of a talking part's close-up keyframe *rel*
+    (``assets/shots/shot_NN.lNN.<ext>``, plan 35), or None when it is not on
+    disk."""
+    if not rel:
+        return None
+    try:
+        path = ec.store.episode_asset_path(ec.story_id, ec.ep, "shots", rel.rpartition("/")[2])
+    except KeyError:
+        return None
+    return path if os.path.isfile(path) and not os.path.islink(path) else None
+
+
+def _file_sha256(path):
+    if not path:
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def parts_intact(ec, shot) -> bool:
+    """Whether every talking part of *shot*'s clip (plan 35, ``parts``) is
+    on disk as it was made: its clip and its close-up keyframe, each with
+    the sha256 recorded (a close-up drawn again makes its part stale). True
+    for a clip with no parts."""
+    for part in (shot["assets"].get("clip") or {}).get("parts") or ():
+        video = part_clip_path(ec, shot["shot_id"], part["line_id"])
+        if video is None or _file_sha256(video) != part.get("video_sha256"):
+            return False
+        if _file_sha256(closeup_path(ec, part.get("closeup"))) != part.get("closeup_sha256"):
+            return False
+    return True
+
+
 # The boxes from an MP4's top level down to a track's handler (ISO/IEC
 # 14496-12): moov > trak > mdia > hdlr, whose handler type names the track's
 # kind -- ``soun`` for a sound track.
@@ -616,6 +663,9 @@ def clip_state(ec, shot, script, *, link, tier, flags, image_sha, talk=None) -> 
         return "failed"
     if clip["state"] != "current" or shot_clip_path(ec, shot) is None:
         return "stale" if clip["state"] == "stale" else "none"
+    if clip.get("parts") and not parts_intact(ec, shot):
+        # Plan 35: a part or its close-up gone or drawn again since.
+        return "stale"
     if clip.get("route") == schemas.STOCK_ROUTE:
         # Plan 23 stage B8: a stock cutaway is no link's clip (before the link check): current only
         # while the switch is on, the shot is still eligible and its query hash still matches.
@@ -942,13 +992,16 @@ def episode_budgets(ec, env, *, assets_doc=None) -> prompting.Budgets:
 # ----------------------------------------------------------- the estimate
 
 # How much longer than its clip a shot of a fully animated story may run, its
-# clip held on its last frame (DEC-208); past it the clip is slowed to cover
-# the shot (``cover: stretch``, DEC-250), at most :data:`MAX_STRETCH` times
-# its length -- a quarter slower, which a cartoon clip takes without a visible
-# seam (the live story's 14.133 s shot on a 12 s clip is 1.18x); past THAT
-# the plan is refused (stage E, ``too_long``).
+# clip held on its last frame (DEC-208); past it the plan is refused (stage E,
+# ``too_long``). DEC-250 as amended by plan 35 (DEC-318): a clip is never
+# slowed -- :data:`MAX_STRETCH` is 1.0 for every story, so no new clip is
+# recorded ``cover: stretch`` (the human heard a two-line shot's 5-s clip
+# stretched under 7 s of speech, the mouths out of step); on the own_gpu
+# profile a speaking shot longer than one clip is cut into one talking clip
+# per line instead (``talking.split``). A clip recorded ``cover: stretch``
+# before is still rendered as it was (its record, not a new plan).
 HOLD_TOLERANCE_S = 0.5
-MAX_STRETCH = 1.25
+MAX_STRETCH = 1.0
 
 
 def stretch_of(duration_s, clip_s) -> float | None:
@@ -963,38 +1016,50 @@ def stretch_of(duration_s, clip_s) -> float | None:
 
 def cover_sentence(row) -> str:
     """How the render covers the shot of a plan *row* longer than its clip:
-    slowed to the shot's length (``cover: stretch``, DEC-250) or held on
-    its last frame (DEC-208), with the numbers."""
+    held on its last frame (DEC-208) -- never slowed (DEC-250 as amended by
+    plan 35) -- or, a shot cut into one talking clip per line (plan 35), by
+    those clips back to back; with the numbers."""
+    if row.get("parts"):
+        count = int(row["parts"])
+        return f"{row['shot_id']} is cut from {count} talking clips back to back, one per line (never slowed)."
     runs = f"{row['shot_id']} runs {row['clip_s'] + row['held_s']:g} s: its {row['clip_s']} s clip"
     if row.get("cover") == "stretch":
+        # A record made before plan 35 (DEC-250): no new plan row says it.
         return f"{runs} is slowed to cover it ({1 / row['stretch']:.2f}x speed)."
     return f"{runs} is held on its last frame for {row['held_s']:g} s."
 
 
-def _too_long(rows, link, *, story=None) -> str | None:
+def _too_long(rows, link, *, story=None, ep=None) -> str | None:
     """The refusal of a fully animated story's plan whose shots *rows*
     (``plan`` rows) run longer than *link*'s longest clip by more than
-    :data:`HOLD_TOLERANCE_S` and more than a clip can be slowed to cover
-    (:data:`MAX_STRETCH`, DEC-250), naming them and the fix, or None."""
+    :data:`HOLD_TOLERANCE_S` (a clip is never slowed: DEC-250 as amended by
+    plan 35), naming them, each one's regenerate target (*ep*: the
+    episode's number) and the fix, or None. A talking clip held after its
+    speech (:func:`_talk_held`) is not refused."""
     long = [row for row in rows if (row.get("held_s") or 0.0) > HOLD_TOLERANCE_S and row.get("cover") != "stretch"
             and not _talk_held(row)]
     if not long:
         return None
     longest = longest_clip_s(link, story=story)
     named = _and([f"{row['shot_id']} ({row['clip_s'] + row['held_s']:g} s)" for row in long])
-    most = f"{longest * MAX_STRETCH:g}"
+    targets = ""
+    if ep is not None:
+        targets = f" (regenerate {_and([f'shot:{ep}:' + row['shot_id'] + ':plan' for row in long])})"
+    how = "the storyboard step plans such a scene as two shots"
+    if talking.enabled(story):
+        how += ("; a speaking shot of two lines or more is cut into one talking clip per line when each line fits "
+                "one clip")
     return (f"shot{_s(len(long))} {named} {'runs' if len(long) == 1 else 'run'} longer than the {longest} s clip "
-            f"{link} sells can cover even slowed (at most {most} s), and every shot of this story is one clip: "
-            f"plan the storyboard again (the storyboard step plans such a scene as two shots), approve it, then run "
-            f"the assets step again -- or shorten the scene's lines")
+            f"{link} sells, a clip is never slowed, and every shot of this story is one clip: plan the storyboard "
+            f"again{targets} ({how}), approve it, then run the assets step again -- or shorten the scene's lines")
 
 
 def _talk_held(row) -> bool:
-    """Whether a plan *row* is a talking clip (plan 32 stage 8) held over a
-    shot no longer than a clip slowed to cover it could be: its speech ends
-    inside the clip, so its last frame is held rather than the mouth slowed
+    """Whether a plan *row* is a single talking clip (plan 32 stage 8) held
+    after its speech over a shot at most ``talking.MAX_HOLD_S`` longer: its
+    speech ends inside the clip, so its last frame is held -- never slowed
     away from its voice."""
-    return bool(row.get("talks")) and float(row.get("held_s") or 0.0) <= row["clip_s"] * (MAX_STRETCH - 1) + 1e-9
+    return bool(row.get("talks")) and float(row.get("held_s") or 0.0) <= talking.MAX_HOLD_S + 1e-9
 
 
 def _local_note(note) -> str:
@@ -1079,7 +1144,15 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     row, and the units carry ``talking`` (``talking.plan_part``: the shots
     that talk, the speaking ones too long for one chunk, the sentence the
     message ends with). Every other story: no such key, the units byte for
-    byte as before."""
+    byte as before.
+
+    Plan 35 (DEC-318): a speaking shot cut into one talking clip per line
+    (``talking.split``) is one row of ``parts`` clips of
+    ``talking.TALK_CLIP_S`` s each and as many close-up keyframes
+    (``closeups``, priced at the episode's keyframe link, :func:`closeup_price`)
+    -- both in the row's ``est_usd``, so the episode's cap sees them; and no
+    clip is slowed any more (:data:`MAX_STRETCH` 1.0): a shot past its clip
+    by more than :data:`HOLD_TOLERANCE_S` is refused (``too_long``)."""
     tier = tier_of(ec)
     profile_name = ec.story["generation_profile"]["budget_profile"]
     route = ec.story["generation_profile"]["route"]
@@ -1251,8 +1324,8 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     tier_for_prompt = tier if tier in (2, 3) else 2
     # Plan 32 stage 8: on a story that makes talking clips, which shots talk (on one timeline) -- each on the
     # S2V link at its one length, every other on the episode's link. None on every other story.
-    talk = _talk_verdicts(ec, script, storyboard, merged, adapters, resolution=resolution, aspect=frame) \
-        if not local and talking.enabled(ec.story) else None
+    talk = _talk_verdicts(ec, script, storyboard, merged, adapters, resolution=resolution, aspect=frame,
+                          env=env, assets_doc=assets_doc) if not local and talking.enabled(ec.story) else None
 
     def talks(shot_id) -> bool:
         return talk is not None and bool(talk["verdicts"][shot_id].get("talks"))
@@ -1342,8 +1415,8 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         units.update(eta_s=0.0, eta_note="no clip to make")
 
     # Stage E: a story that animates every shot buys no clip that cannot cover its shot.
-    too_long = (_too_long(rows_out, link, story=ec.story) if not local and media_policy.fully_animated(ec.story)
-                else None)
+    too_long = (_too_long(rows_out, link, story=ec.story, ep=ec.ep)
+                if not local and media_policy.fully_animated(ec.story) else None)
     if too_long and count:
         units["too_long"] = too_long
     units["refused"] = (too_long or refusal) if count else None
@@ -1362,16 +1435,38 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     return units
 
 
-def _talk_verdicts(ec, script, storyboard, merged, adapters, *, resolution, aspect) -> dict:
+def _talk_verdicts(ec, script, storyboard, merged, adapters, *, resolution, aspect, env=None,
+                   assets_doc=None) -> dict:
     """Plan 32 stage 8: ``{"verdicts": {shot_id: talking verdict}, "row",
-    "part"}`` -- each shot's verdict (``talking.verdicts``), turned down
+    "part", "closeup_usd"}`` -- each shot's verdict (``talking.verdicts``:
+    plan 35's per-line split included), turned down
     (``talking.unavailable``) when the S2V link cannot run now (its row,
-    :func:`link_row`, not keyed): every shot then stays on the episode's link."""
+    :func:`link_row`, not keyed): every shot then stays on the episode's
+    link. ``closeup_usd`` is the price of one close-up keyframe (plan 35) on
+    the episode's keyframe link (:func:`closeup_price`)."""
     row = link_row(talking.TALKING_LINK, merged, adapters, resolution=resolution, aspect=aspect)
     found = talking.verdicts(ec, script, storyboard)
     if row["status"] != "keyed":
         found = {shot_id: talking.unavailable(item) for shot_id, item in found.items()}
-    return {"verdicts": found, "row": row, "part": talking.plan_part(found, row)}
+    closeup = (closeup_price(ec, env if env is not None else merged, assets_doc=assets_doc)
+               if any(talking.is_split(item) for item in found.values()) else 0.0)
+    return {"verdicts": found, "row": row, "part": talking.plan_part(found, row), "closeup_usd": closeup}
+
+
+def closeup_price(ec, env, *, assets_doc=None) -> float:
+    """What one close-up keyframe of a talking part costs (plan 35): one
+    image on the episode's keyframe link (:func:`planned_image_link`), at
+    its table price; 0.0 when that link or its price cannot be read (the
+    assets step says why when it runs)."""
+    label = planned_image_link(ec, env, assets_doc=assets_doc)
+    if not label:
+        return 0.0
+    try:
+        link = gen.parse_generation_chain(gen.IMAGE_EDIT, [label])[0]
+        price = pricing.price_for(link)
+    except (ChainError, pricing.PriceUnknown, IndexError, ValueError, KeyError):
+        return 0.0
+    return float(price.usd) if price.unit == "image" else 0.0
 
 
 def _talk_rows(rows, plan, talk, *, durations, kept) -> tuple:
@@ -1380,29 +1475,45 @@ def _talk_rows(rows, plan, talk, *, durations, kept) -> tuple:
     (a kept or booked clip at $0), held on its last frame over a longer shot
     (never slowed); *plan* (``video_plan.VideoPlan``) with its seconds, its
     estimate and its cap verdict following them. ``talk["part"]`` counts the
-    talking clips to make."""
+    talking clips to make.
+
+    Plan 35 (DEC-318): a shot cut per line (``talking.is_split``) is one
+    row of ``parts`` clips -- ``talking.TALK_CLIP_S`` seconds each on the
+    S2V link -- and as many close-up keyframes (``closeups``), priced
+    together on the row; the parts cover the shot end to end, so it holds
+    nothing (no ``held_s``)."""
     price = float(talk["row"]["price_per_second"] or 0.0)
+    closeup_usd = float(talk.get("closeup_usd") or 0.0)
     seconds, usd = float(plan.seconds), float(plan.video_usd)
     part = talk["part"]
     out = []
     for row in rows:
-        if not talk["verdicts"][row["shot_id"]].get("talks"):
+        found = talk["verdicts"][row["shot_id"]]
+        if not found.get("talks"):
             out.append(row)
             continue
         new = row["shot_id"] not in kept
-        clip_s = talking.TALK_CLIP_S
-        est = round(clip_s * price, 4) if new else 0.0
+        cut = talking.is_split(found)
+        count = len(found["parts"]) if cut else 1
+        clip_s = talking.TALK_CLIP_S * count
+        est = round(clip_s * price + (count * closeup_usd if cut else 0.0), 4) if new else 0.0
         moved = {key: value for key, value in row.items() if key not in ("cover", "stretch", "held_s")}
         moved.update(clip_s=clip_s, est_usd=est, link=talking.TALKING_LINK, talks=True)
-        held = round(durations[row["shot_id"]] - clip_s, 3)
-        if held > 0:
-            moved["held_s"] = held
+        if cut:
+            moved.update(parts=count, closeups=count)
+        else:
+            held = round(durations[row["shot_id"]] - clip_s, 3)
+            if held > 0:
+                moved["held_s"] = held
         if new:
             seconds += clip_s - row["clip_s"]
             usd += est - row["est_usd"]
-            part["count"] += 1
+            part["count"] += count
             part["seconds"] += clip_s
             part["est_usd"] = round(part["est_usd"] + est, 4)
+            if cut:
+                part["closeups"] += count
+                part["closeup_usd"] = round(part["closeup_usd"] + count * closeup_usd, 4)
         out.append(moved)
     if int(round(seconds)) == int(plan.seconds) and abs(usd - float(plan.video_usd)) < 1e-9:
         return out, plan  # the same seconds at the same price: the plan's own numbers stand

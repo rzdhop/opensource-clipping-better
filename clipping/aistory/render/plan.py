@@ -391,6 +391,8 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
     board_shots = {shot["shot_id"]: shot for shot in storyboard["shots"]}
     shot_inputs = inputs.get("shots") or {}
     video_inputs = inputs.get("videos") or {}
+    # Plan 35: the talking parts of a shot cut per line ({shot_id: [file record, ...]}, in its clip's order).
+    part_inputs = inputs.get("video_parts") or {}
     # tier >= 2 (phase 6 stage 9): the step's effective flags, and the shots
     # whose clip is filled with motion; tier 1 hands neither.
     keep_still_of = inputs.get("keep_still")
@@ -412,10 +414,27 @@ def _build(*, script, storyboard, assets, style_lock, template, story, ep, input
             still = bool(keep_still_of[shot_id])
         else:
             still = bool(board_shot.get("keep_still"))
-        if video and not still and shot_id in video_inputs:
+        clip = (board_shot.get("assets") or {}).get("clip") or {}
+        parts_in = part_inputs.get(shot_id)
+        if video and not still and shot_id in video_inputs and parts_in and clip.get("parts"):
+            # Plan 35 (DEC-318): one talking clip per line, cut back to back to the shot's frames -- never slowed.
+            if len(parts_in) != len(clip["parts"]):
+                raise PlanError(f"shot {shot_id!r} records {len(clip['parts'])} talking parts but "
+                                f"{len(parts_in)} files were given")
+            rels = [add_input("shot", f"{shot_id}_{part['line_id']}", entry)
+                    for part, entry in zip(clip["parts"], parts_in)]
+            try:
+                frames = filtergraph.part_frames([part["duration_s"] for part in clip["parts"]], tl_shot["frames"])
+            except ValueError as exc:
+                raise PlanError(f"shot {shot_id!r}: {exc}") from None
+            argv0 = filtergraph.tier2_parts_argv(rels, frames, tl_shot, shot_profile, _OUT_TOKEN, geometry=geometry)
+            input_shas = {rel: entry["sha256"] for rel, entry in zip(rels, parts_in)}
+            shot_modes[shot_id] = ("video_native_audio" if shot_id in native
+                                   else "video_ambience" if shot_id in ambience else "video")
+        elif video and not still and shot_id in video_inputs:
             rel = add_input("shot", shot_id, video_inputs[shot_id])
-            # DEC-250: a clip recorded ``cover: stretch`` is slowed to its shot's length.
-            clip = (board_shot.get("assets") or {}).get("clip") or {}
+            # DEC-250: a clip recorded ``cover: stretch`` (before plan 35 amended it: no new clip is) is
+            # slowed to its shot's length, as it was rendered then.
             stretched = clip.get("clip_s") if clip.get("cover") == "stretch" else None
             argv0 = filtergraph.tier2_clip_argv(rel, tl_shot, shot_profile, _OUT_TOKEN, clip_s=stretched,
                                                 geometry=geometry)

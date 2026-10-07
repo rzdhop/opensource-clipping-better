@@ -502,7 +502,8 @@ def register(mcp, backend: StoryBackend) -> None:
           expressions, character:<id>:voice, place:<id>:text, place:<id>:image:<variant>, prop:<id>:text,
           prop:<id>:image, season:<ep>, scene:<ep>:<scene_id>, hook:<ep>, cliffhanger:<ep>, teaser:<ep>,
           shot:<ep>:<shot_id>:plan, shot:<ep>:<shot_id> (its picture), shot:<ep>:<shot_id>:video (its clip),
-          line:<ep>:<line_id> (its voice), metadata:<ep>:<platform>.
+          shot:<ep>:<shot_id>:closeup:<line_id> (on your own GPU, a shot cut into one talking clip per line:
+          that line's close-up picture and its clip), line:<ep>:<line_id> (its voice), metadata:<ep>:<platform>.
         - fast-track (ep): {storyboard: t1|fast, stop_at_keyframes, stop_on_script_issues}: one episode
           from its script to its metadata pack in one run (story_make_episode is the short form).
         - story-fast-track: none. A story in agent mode (preset 'fruit_drama') from its idea to episode 1

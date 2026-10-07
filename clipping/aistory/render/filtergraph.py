@@ -277,11 +277,12 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel, *, clip_s=None, geometry=
     bought for, when the story animates every shot and the shot runs longer
     than the longest clip its link sells (``assets.clip.cover ==
     "stretch"``): the clip is slowed (``setpts``, before the fps resample)
-    by ``duration_s / clip_s`` -- at most ``clips.MAX_STRETCH``, the
-    estimate's rule -- so its motion covers the whole shot instead of a
-    frozen last frame; the hold and the trim after it still pin the exact
-    frames. None, or a clip at least as long as the shot: the argv it always
-    was.
+    by ``duration_s / clip_s`` -- at most 1.25x, the estimate's rule then --
+    so its motion covers the whole shot instead of a frozen last frame; the
+    hold and the trim after it still pin the exact frames. None, or a clip
+    at least as long as the shot: the argv it always was. Since plan 35
+    (DEC-250 amended, ``clips.MAX_STRETCH`` 1.0) no new clip is recorded
+    so: only a clip made before is still rendered this way.
 
     *shot* is a ``render.timeline`` entry, read here for ``duration_s`` and
     ``frames`` only (a Tier >= 2 clip carries no Tier-1 ``motion``).
@@ -306,6 +307,60 @@ def tier2_clip_argv(video_rel, shot, profile, out_rel, *, clip_s=None, geometry=
     argv += profile.global_bitexact_args()
     argv += ["-i", video_rel]
     argv += ["-vf", vf]
+    argv += profile.video_encode_args()
+    argv += ["-r", str(profiles.FPS), "-frames:v", str(shot["frames"]), "-an", out_rel]
+    return argv
+
+
+def part_frames(durations, frames) -> list:
+    """How many of a shot's *frames* each talking part (plan 35) fills, its
+    seconds *durations* in order: cumulative rounding at ``profiles.FPS``
+    (``render.timeline``'s rule), the last part taking what the others
+    leave so the parts sum to the shot's exact frames; every part at least
+    one frame."""
+    out, cum, before = [], 0.0, 0
+    for seconds in durations[:-1]:
+        cum += float(seconds)
+        now = max(before + 1, round(cum * profiles.FPS))
+        out.append(now - before)
+        before = now
+    out.append(int(frames) - before)
+    if any(count < 1 for count in out):
+        raise ValueError(f"talking parts {list(durations)} do not fit the shot's {frames} frames")
+    return out
+
+
+def tier2_parts_argv(video_rels, frames, shot, profile, out_rel, *, geometry=profiles.PORTRAIT) -> list:
+    """The argv for a Tier >= 2 shot cut into one talking clip per line
+    (plan 35, DEC-318): each part's ``.mp4`` (*video_rels*, in order) covers
+    *geometry*'s frame as :func:`tier2_clip_argv`'s clip does, is resampled
+    to a 30 fps CFR stream, held on its last frame when it runs short and
+    cut to its own *frames* (:func:`part_frames`); the parts are then
+    concatenated back to back -- never slowed -- and ``-frames:v`` pins the
+    shot's exact frames (their sum); ``-an`` drops any sound. One part is
+    :func:`tier2_clip_argv`'s graph on that part, cut to the shot."""
+    for rel in video_rels:
+        _assert_relative(rel, what="video_rel")
+    _assert_relative(out_rel, what="out_rel")
+    if len(video_rels) != len(frames) or not video_rels:
+        raise ValueError("one frame count per talking part is needed")
+    if sum(frames) != int(shot["frames"]):
+        raise ValueError(f"the parts' frames {list(frames)} do not sum to the shot's {shot['frames']}")
+    chains, labels = [], []
+    for index, count in enumerate(frames):
+        hold = _num(round(count / profiles.FPS + 1.0, 3))
+        chains.append(
+            f"[{index}:v]{_cover_fill(geometry=geometry)},fps={profiles.FPS},"
+            f"tpad=stop_mode=clone:stop_duration={hold},trim=end_frame={int(count)},setpts=PTS-STARTPTS,"
+            f"format={profile.pix_fmt}[p{index}]")
+        labels.append(f"[p{index}]")
+    graph = ";".join(chains + [f"{''.join(labels)}concat=n={len(frames)}:v=1:a=0[out]"])
+
+    argv = list(_ARGV_PREFIX)
+    argv += profile.global_bitexact_args()
+    for rel in video_rels:
+        argv += ["-i", rel]
+    argv += ["-filter_complex", graph, "-map", "[out]"]
     argv += profile.video_encode_args()
     argv += ["-r", str(profiles.FPS), "-frames:v", str(shot["frames"]), "-an", out_rel]
     return argv

@@ -563,12 +563,12 @@ def _too_long_units(store, story_id, board, **keys):
 def test_the_clip_estimate_refuses_a_shot_longer_than_the_links_longest_clip_and_says_how_to_fix_it(
         store, tmp_path):
     """Fail-first. A fully animated story on Veo: a shot of 10.5 s cannot be
-    one 8 s clip even slowed (DEC-250: at most 1.25x, 10 s) -- the estimate
-    names it, its length and the link's longest clip, says to plan the
-    storyboard again, and is not ready; the assets step refuses before any
-    call (keyframes included). A shot a few frames past 8 s keeps DEC-208's
-    held last frame (``held_s``); one of 9.4 s is covered by its clip slowed
-    (re-pinned on purpose from the refusal, DEC-250)."""
+    one 8 s clip -- the estimate names it, its length and the link's longest
+    clip, says to plan the storyboard again, and is not ready; the assets
+    step refuses before any call (keyframes included). A shot a few frames
+    past 8 s keeps DEC-208's held last frame (``held_s``); one of 9.4 s,
+    which DEC-250 once covered by its clip slowed, is named too since plan 35
+    (DEC-250 amended: a clip is never slowed)."""
     import copy
 
     from clipping.aistory.steps import assets
@@ -583,12 +583,12 @@ def test_the_clip_estimate_refuses_a_shot_longer_than_the_links_longest_clip_and
     assert video["link"] == VEO and video["ready"] is False and units["ready"] is False
     sentence = video["too_long"]
     assert f"{long_shot['shot_id']} (10.5 s)" in sentence and "8 s" in sentence and VEO in sentence
-    assert "even slowed (at most 10 s)" in sentence
-    assert close_shot["shot_id"] not in sentence and slowed_shot["shot_id"] not in sentence
+    assert "a clip is never slowed" in sentence and "even slowed" not in sentence
+    assert close_shot["shot_id"] not in sentence and f"{slowed_shot['shot_id']} (9.4 s)" in sentence
     assert "plan the storyboard again" in sentence and sentence in video["message"]
     rows = {row["shot_id"]: row for row in video["plan"]}
     assert rows[close_shot["shot_id"]]["held_s"] == pytest.approx(0.3) and "cover" not in rows[close_shot["shot_id"]]
-    assert rows[slowed_shot["shot_id"]]["cover"] == "stretch" and rows[slowed_shot["shot_id"]]["stretch"] == 1.175
+    assert rows[slowed_shot["shot_id"]]["held_s"] == pytest.approx(1.4) and "cover" not in rows[slowed_shot["shot_id"]]
     refusal = assets.plan_refusal(tas._ec(store, story_id), units)
     assert refusal and sentence in refusal and "Nothing was generated or spent" in refusal
 
