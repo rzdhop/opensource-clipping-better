@@ -434,16 +434,19 @@ def write_text(ctx, store, char_id, *, tools, note=None, regenerate=False, annou
     # other story is asked exactly what it always was.
     clone = voice_clone.applies(story, ctx.settings_env)
     max_tokens = None
+    taken_voices = []
     if clone:
-        user, schema = voice_clone.extend_k1(
-            user, schema, taken=voice_clone.taken_picks(store, ctx.story_id, exclude=char_id))
+        taken_voices = voice_clone.taken_picks(store, ctx.story_id, exclude=char_id)
+        user, schema = voice_clone.extend_k1(user, schema, taken=taken_voices)
         max_tokens = prompts.MAX_TOKENS["K1"] + voice_clone.K1_EXTRA_TOKENS
 
     def validate(reply):
         core = voice_clone.k1_part(reply) if clone else reply
         errors = schemas.k1_errors(core, character["name"]) or universes.brand_gate(story, reply)
         if clone:
-            errors = list(errors) + voice_clone.reply_errors(reply)
+            errors = list(errors) + voice_clone.reply_errors(
+                reply, name=character["name"], taken=taken_voices,
+                gender=(character.get("voice_hints") or {}).get("gender"))
         if errors:
             return errors
         trial = copy.deepcopy(character)

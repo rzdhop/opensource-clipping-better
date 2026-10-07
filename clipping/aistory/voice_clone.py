@@ -148,10 +148,21 @@ def voice_names() -> list:
     return [entry["voice_id"] for entry in gemini_voices()]
 
 
-def _voice_line(entry) -> str:
-    gender = _GENDERS.get(entry.get("gender"), entry.get("gender") or "any")
-    tags = ", ".join(entry.get("style_tags") or ())
-    return f"{entry['voice_id']} ({gender}, {entry.get('age') or 'adult'}{', ' + tags if tags else ''})"
+def _voice_part(entry, taken=()) -> str:
+    """One voice as the ask prints it: ``Kore (adult, firm)``, ``taken`` marked."""
+    bits = [entry.get("age") or "adult", *(entry.get("style_tags") or ())]
+    if entry["voice_id"] in taken:
+        bits.append("taken")
+    return f"{entry['voice_id']} ({', '.join(bits)})"
+
+
+def voices_by_gender(taken=()) -> str:
+    """The catalogue grouped by gender, as the ask prints it: ``female: Kore
+    (adult, firm), ...; male: ...`` (a voice with no gender under ``any``)."""
+    groups = {}
+    for entry in gemini_voices():
+        groups.setdefault(_GENDERS.get(entry.get("gender"), "any"), []).append(_voice_part(entry, taken))
+    return "; ".join(f"{label}: {', '.join(parts)}" for label, parts in groups.items())
 
 
 def ask_addendum(taken=()) -> str:
@@ -162,8 +173,8 @@ def ask_addendum(taken=()) -> str:
              f"{'is' if len(taken) == 1 else 'are'} taken)") if taken else ""
     return (
         "\n\nThis character gets one fixed voice, made once and kept for every episode. Also give:\n"
-        f"- voice_pick: the voice it is made from, one of {', '.join(_voice_line(e) for e in gemini_voices())}"
-        f"{avoid}\n"
+        f"- voice_pick: the voice it is made from, a voice of the character's gender (a neutral character may "
+        f"take any): {voices_by_gender(taken)}{avoid}\n"
         f"- voice_sample_text: {lo} to {hi} words the character says aloud, in the story's language, in "
         "character, about 12 seconds of natural speech in one or two sentences; no name, no stage direction, "
         "no emoji"
@@ -186,13 +197,47 @@ def k1_part(reply) -> dict:
     return {key: value for key, value in (reply or {}).items() if key not in (PICK, TEXT)}
 
 
-def reply_errors(reply) -> list:
-    """What is wrong with the two fields of a gated K1 *reply*."""
+def _reply_gender(reply, fallback=None) -> str:
+    """The character's gender as the K1 *reply* itself states it (its voice
+    brief), else *fallback*: ``"female"``, ``"male"`` or ``""`` (neutral or
+    unknown: any voice is allowed)."""
+    voice = (reply or {}).get("voice")
+    gender = voice.get("gender") if isinstance(voice, dict) else None
+    if gender not in ("female", "male", "neutral"):
+        gender = fallback
+    return gender if gender in _GENDERS.values() else ""
+
+
+def gender_error(pick, gender, *, name=None, taken=()):
+    """One sentence when the voice *pick* is of the other gender than the
+    character's (*gender*: ``"female"`` or ``"male"``), listing the voices
+    that fit (those already taken left out, unless none is left); else None."""
+    if gender not in _GENDERS.values():
+        return None
+    entry = next((e for e in gemini_voices() if e["voice_id"] == pick), None)
+    voice_gender = _GENDERS.get((entry or {}).get("gender"))
+    if voice_gender is None or voice_gender == gender:
+        return None
+    fits = [e["voice_id"] for e in gemini_voices() if _GENDERS.get(e.get("gender")) == gender]
+    free = [voice for voice in fits if voice not in set(taken)] or fits
+    return (f"$.{PICK}: {pick!r} is a {voice_gender} voice; {name or 'this character'} is {gender} -- "
+            f"pick one of {', '.join(free)}")
+
+
+def reply_errors(reply, *, name=None, taken=(), gender=None) -> list:
+    """What is wrong with the two fields of a gated K1 *reply*. A pick whose
+    gender is the opposite of the character's is refused: the character's
+    gender is the reply's own voice brief, else *gender* (what is already
+    known of it); a neutral or unknown one takes any voice."""
     errors = []
     names = voice_names()
     pick = (reply or {}).get(PICK)
     if pick not in names:
         errors.append(f"$.{PICK}: {pick!r} is not one of {', '.join(names)}")
+    else:
+        mismatch = gender_error(pick, _reply_gender(reply, gender), name=name, taken=taken)
+        if mismatch:
+            errors.append(mismatch)
     text = (reply or {}).get(TEXT)
     if not isinstance(text, str) or not text.strip():
         errors.append(f"$.{TEXT}: write what the character says ({SAMPLE_WORDS[0]}-{SAMPLE_WORDS[1]} words)")

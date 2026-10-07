@@ -1313,7 +1313,10 @@ def test_a_clone_story_asks_k1_for_a_voice_and_its_text_and_freezes_one_referenc
 
     # K1 is asked for the two fields, with room for them, and told the voices already taken.
     first, second, _third = llm.of("K1")
-    assert "- voice_pick: the voice it is made from, one of Kore (female, adult, firm), Puck" in first["user"]
+    assert ("- voice_pick: the voice it is made from, a voice of the character's gender (a neutral character may "
+            "take any): female: Kore (adult, firm), Aoede (adult, breezy), Leda (young, youthful), Zephyr (adult, "
+            "bright); male: Puck (adult, upbeat), Charon (adult, informative), Fenrir (adult, excitable), "
+            "Orus (adult, firm)") in first["user"]
     assert "voice_sample_text: 25 to 40 words" in first["user"] and "taken" not in first["user"].split("voice_pick")[1]
     assert "prefer one no other character has (Puck is taken)" in second["user"]
     assert {"voice_pick", "voice_sample_text"} <= set(first["schema"]["required"])
@@ -1463,3 +1466,50 @@ def test_a_k1_reply_without_the_two_fields_is_refused_and_told_why(store, clone_
     retry = llm.of("K1")[1]["user"]
     assert "$.voice_pick: 'Nobody' is not one of Kore" in retry and "$.voice_sample_text: 2 words" in retry
     assert clone_tools.read_plan(store, story_id, "char_kiwilo")["voice_pick"] == "Puck"
+
+
+def test_the_ask_groups_the_voices_by_gender_and_marks_the_taken_ones(clone_tools):
+    ask = clone_tools.ask_addendum(taken=["Puck", "Kore"])
+    assert "a voice of the character's gender" in ask
+    assert "female: Kore (adult, firm, taken), Aoede (adult, breezy)" in ask
+    assert "; male: Puck (adult, upbeat, taken), Charon (adult, informative)" in ask
+    assert ask.index("female: ") < ask.index("male: ")
+    assert "prefer one no other character has (Puck, Kore are taken)" in ask
+
+
+def test_a_pick_of_the_other_gender_is_refused_and_told_why_and_the_retry_carries_it(store, clone_tools):
+    story_id = _clone_story(store)
+    fakes = _clone_fakes()
+    # Kiwilo is male and picks a female voice; Mangella is female and picks a male one.
+    llm = FakeLLM(K1=[_clone(K1_KIWI, "Kore", KIWI_TEXT), _clone(K1_KIWI, "Puck", KIWI_TEXT),
+                      _clone(K1_MANGO, "Fenrir", MANGO_TEXT), _clone(K1_MANGO, "Kore", MANGO_TEXT),
+                      _clone(K1_FIG, "Leda", FIG_TEXT)])
+    _summary, _log, llm = _cast(store, story_id, fakes, settings=CLONE_SETTINGS, llm=llm)
+    calls = llm.of("K1")
+    assert "'Kore' is a female voice; Kiwilo is male -- pick one of Puck, Charon, Fenrir, Orus" in calls[1]["user"]
+    # Puck is Kiwilo's by then: Mangella's list is the female voices, and the sentence names hers.
+    assert ("'Fenrir' is a male voice; Mangella is female -- pick one of Kore, Aoede, Leda, Zephyr"
+            in calls[3]["user"])
+    assert clone_tools.read_plan(store, story_id, "char_kiwilo")["voice_pick"] == "Puck"
+    assert clone_tools.read_plan(store, story_id, "char_mangella")["voice_pick"] == "Kore"
+
+
+def test_the_refusal_leaves_out_the_voices_already_taken_unless_none_is_left(clone_tools):
+    reply = dict(K1_KIWI, voice_pick="Kore", voice_sample_text=KIWI_TEXT)
+    errors = clone_tools.reply_errors(reply, name="Kiwilo", taken=["Puck", "Orus"])
+    assert errors == ["$.voice_pick: 'Kore' is a female voice; Kiwilo is male -- pick one of Charon, Fenrir"]
+    everyone = ["Puck", "Charon", "Fenrir", "Orus"]
+    assert clone_tools.reply_errors(reply, name="Kiwilo", taken=everyone) == [
+        "$.voice_pick: 'Kore' is a female voice; Kiwilo is male -- pick one of Puck, Charon, Fenrir, Orus"]
+
+
+def test_a_neutral_or_unknown_gender_takes_any_voice(clone_tools):
+    neutral = dict(K1_KIWI, voice=dict(K1_KIWI["voice"], gender="neutral"))
+    for pick in clone_tools.voice_names():
+        assert clone_tools.reply_errors(dict(neutral, voice_pick=pick, voice_sample_text=KIWI_TEXT)) == []
+    # No gender in the reply and none known: nothing to compare. A known one (a regenerate) is used.
+    bare = {"voice_pick": "Kore", "voice_sample_text": KIWI_TEXT}
+    assert clone_tools.reply_errors(bare) == []
+    assert clone_tools.reply_errors(bare, gender="male", name="Kiwilo")[0].startswith("$.voice_pick: 'Kore' is a female")
+    # What the reply says wins over what was known.
+    assert clone_tools.reply_errors(dict(K1_MANGO, **bare), gender="male") == []
