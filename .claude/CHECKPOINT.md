@@ -1,16 +1,15 @@
-## CURRENT STATE — plan 33 (MCP voice tools, file_upload, honest ledger, the "no still" guard, ep01 voices) COMPLETE on main + plan 34 (the Lightning motion fix) CODE DONE, its GPU check awaiting the human (2026-10-07, local session)
+## CURRENT STATE — plan 33 COMPLETE + plan 34 (the Lightning motion fix) COMPLETE: the final "Faille d'amour" ep01 delivered (2026-10-07, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out; nothing running. Checkpoint commit = main (this commit).
-  Plan file `.claude/plans/ai-story/33-mcp-voice-tools-honest-ledger-plan.md` (+ "Stage 4 as shipped"). Commits:
-  f4615ea stage 1 (honest ledger) · 2e2a778 stage 2 (file_upload) · 39ac268 + 1e97ef4 stage 3 (voice tools; the key
-  from the stored settings) · 3f0ce83 docs · f9c64ca plan 34 (the motion fix) · 7cb55d2 + 7364cbb stage 4 (the
-  "no still" rule, an Opus agent's worktree merged) · this commit (DEC-317, CHANGELOG, the two MCP tests). The MCP
-  unit restarted on the merged code (39 tools). **Waiting on the human (asked in chat 2026-10-07):** (a) the go for
-  ONE paid test clip with the plan-34 recipe (≈ $0.20 cold) → flip `verified_live` true, then the 13 clips of
-  "Faille d'amour" ep01 again (≈ $1) if the motion is right; (b) lowering the render's stretch cap
-  (`clips.MAX_STRETCH` 1.25 → 1.0, DEC-250); (c) optionally speeding the existing ep01 clips 1.3x with ffmpeg
-  (free). **Next action otherwise:** the dashboard bundle rebuild (`sudo -n docker compose rm -sfv backend && up -d
-  --build backend`, the agent removed two checkboxes; the API refuses the old flags meanwhile), not done here.
+  Plan 33 commits f4615ea · 2e2a778 · 39ac268 · 1e97ef4 · 3f0ce83 · 7cb55d2+7364cbb · 94b8135; plan 34: f9c64ca (the
+  recipe) · b15df9c (verified live, job 43b0b564) · 05e1560 · b2bb298 (the edit tool) · this commit (the regen
+  script, the log). **Delivered to the human in chat:** `outputs/faille_damour/ep01/faille_damour_ep01_final.mp4`
+  (67.3 s, 13 clips of the 8-step recipe incl. three continuation clips, 13 Gemini lines, burned subtitles, the
+  Team end card); plan-34 spend $1.45 (15 jobs, $0.48 of it one slow cold start). **Still the human's calls
+  (asked in chat):** the render's stretch cap (`clips.MAX_STRETCH` 1.25 → 1.0, DEC-250); the backend restart +
+  dashboard rebuild for DEC-317's removed checkboxes; tier 1 / `free` / `one_dollar` kept or removed; the S2V
+  template keeps the 4-step recipe (talking clips may look slow too — revisit after the first voiced episode).
+  **Next action if nothing else:** none; the next story from the chat with the skill.
 - **Delivered:** `tts_line` / `tts_batch` / `voice_ref_make` / `file_upload` live; `cost_ledger` bills executionTime
   (today: $0.78 billed vs $3.17 wall); the 13 Gemini WAVs + `durations.json` at
   `outputs/faille_damour/ep01/voices/` (1.96–4.06 s, tail bursts cut, $0 per the price table); no still from any
