@@ -131,7 +131,8 @@ def test_an_image_job_is_submitted_then_fetched_as_a_thumbnail(backend):
     texts = [json.loads(b.text) for b in result.content if type(b).__name__ == "TextContent"]
     assert texts[0]["shown_at"] == "569x1024" and texts[0]["path"].endswith("cast/kiwi.png")
     record = texts[-1]
-    assert record["state"] == "COMPLETED" and record["gpu_seconds"] == 10.0 and record["billed_usd"] > 0
+    assert record["state"] == "COMPLETED" and record["gpu_seconds"] == 9.0 and record["billed_usd"] > 0
+    assert record["delay_seconds"] == 1.0 and record["wall_seconds"] == 10.0  # plan 33: shown, not billed
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
@@ -191,7 +192,7 @@ def test_a_voice_line_is_fetched_with_its_duration(backend, tmp_path):
         texts = texts[0]
     assert texts[0]["path"].endswith("ep01/voices/l03.wav") and texts[0]["duration_s"] == 1.5
     assert texts[0]["sample_rate"] == 24000 and texts[0]["channels"] == 1 and texts[0]["size_bytes"] > 44
-    assert texts[-1]["state"] == "COMPLETED" and texts[-1]["gpu_seconds"] == 9.0
+    assert texts[-1]["state"] == "COMPLETED" and texts[-1]["gpu_seconds"] == 8.0
 
 
 def test_a_still_running_job_comes_back_as_its_record_only(backend):

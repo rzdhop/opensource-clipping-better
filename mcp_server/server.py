@@ -18,7 +18,7 @@ from fastmcp.utilities.types import Image
 from . import auth as auth_mod, episode_tools, media, story_tools
 from .comfy_download import register_comfy_download
 from .config import ROOT, Settings, load_settings
-from .runpod_jobs import JobClient, JobError, list_templates
+from .runpod_jobs import JobClient, JobError, list_templates, normalise_bill
 
 INSTRUCTIONS = """rzdhop story backend. You (Claude) are the writer and director; these tools are the
 muscle: RunPod Serverless ComfyUI for images, clips and voice lines, the story store on disk, the
@@ -42,8 +42,9 @@ class Backend:
 def _public(record: dict) -> dict:
     """A journal record as a tool answer: no graph, no base64, short prompt."""
     keys = ("job_id", "kind", "template", "name", "state", "dest_dir", "outputs", "error", "submitted_at",
-            "finished_at", "gpu_seconds", "billed_usd", "seed", "width", "height", "seconds", "frames", "fps",
-            "note", "worker_id", "endpoint")
+            "finished_at", "gpu_seconds", "billed_usd", "delay_seconds", "wall_seconds", "seed", "width", "height",
+            "seconds", "frames", "fps", "note", "worker_id", "endpoint")
+    record = normalise_bill(record)
     return {k: record.get(k) for k in keys if k in record}
 
 
@@ -179,8 +180,11 @@ def build_server(backend: Optional[Backend] = None) -> FastMCP:
     @mcp.tool
     def cost_ledger(since: Optional[str] = None) -> dict:
         """Free. GPU seconds and dollars of the finished jobs (all, and per kind), from an ISO date
-        when given (e.g. '2026-10-01'). Dollars need RUNPOD_GPU_USD_PER_HOUR (and the image rate) in .env;
-        unpriced_jobs counts the ones without a rate."""
+        when given (e.g. '2026-10-01'). gpu_seconds and billed_usd are the workers' execution time only (what
+        RunPod bills); delay_seconds is the queue wait + cold start and wall_seconds their sum, shown beside
+        it with wall_usd_if_delay_were_billed so a queued job is never counted as its own GPU time. Dollars
+        need RUNPOD_GPU_USD_PER_HOUR (and the image rate) in .env; unpriced_jobs counts the ones without a
+        rate."""
         return client.ledger(since)
 
     # ------------------------------------------------------------- media

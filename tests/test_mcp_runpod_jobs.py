@@ -195,7 +195,9 @@ def test_a_completed_job_is_settled_once_its_files_written_and_priced(settings):
     paths = [pathlib.Path(p) for p in record["outputs"]]
     assert [p.name for p in paths] == ["kiwi_1.png", "kiwi_2.png"]
     assert paths[0].read_bytes() == PNG and paths[1].read_bytes() == PNG + b"2"
-    assert record["gpu_seconds"] == 15.0 and record["billed_usd"] == round(15 * 1.58 / 3600, 4)
+    # Plan 33 (DEC-316): the bill is the execution time alone; the 3 s delay is shown, never priced.
+    assert record["gpu_seconds"] == 12.0 and record["billed_usd"] == round(12 * 1.58 / 3600, 4)
+    assert record["delay_seconds"] == 3.0 and record["wall_seconds"] == 15.0
     assert record["worker_id"] == "w-1" and record["finished_at"]
     # Settled: no further call to RunPod.
     assert client.status("job-1") == record
@@ -210,7 +212,7 @@ def test_a_single_file_keeps_the_plain_name_and_a_clip_its_mp4_extension(setting
     client.submit("i2v_wan22_14b_lightning", prompt="x", image_path="still.png", name="sh01", dest="ep01")
     record = client.status("job-1")
     assert [pathlib.Path(p).name for p in record["outputs"]] == ["sh01.mp4"]
-    assert record["billed_usd"] == round(15 * 3.49 / 3600, 4)  # the video rate
+    assert record["billed_usd"] == round(12 * 3.49 / 3600, 4)  # the video rate, on the execution time
 
 
 def test_a_job_that_ends_without_a_file_or_fails_is_settled_with_its_error(settings):
@@ -278,9 +280,30 @@ def test_cancel_posts_once_and_the_journal_lists_newest_first_and_sums_the_bill(
     assert transport.urls()[-1] == ("POST", "https://api.runpod.ai/v2/img1/cancel/job-2")
     assert [r["job_id"] for r in client.recent(10)] == ["job-2", "job-1"]
     ledger = client.ledger()
-    assert ledger["jobs"] == 1 and ledger["gpu_seconds"] == 15.0
-    assert ledger["by_kind"]["image"]["billed_usd"] == round(15 * 1.58 / 3600, 3)
+    assert ledger["jobs"] == 1 and ledger["gpu_seconds"] == 12.0 and ledger["wall_seconds"] == 15.0
+    assert ledger["by_kind"]["image"]["billed_usd"] == round(12 * 1.58 / 3600, 3)
+    assert ledger["by_kind"]["image"]["wall_usd_if_delay_were_billed"] == round(15 * 1.58 / 3600, 3)
     assert client.ledger(since="2999-01-01")["jobs"] == 0
+
+
+def test_a_row_settled_before_plan_33_is_read_with_the_honest_split(settings):
+    """The 79 rows of the live journal carry gpu_seconds = execution + delay and a bill on that sum;
+    the ledger and the tool answers rebuild the split from the stored milliseconds (DEC-316)."""
+    from mcp_server.runpod_jobs import normalise_bill
+
+    old = {"job_id": "old-1", "kind": "video", "state": "COMPLETED", "finished_at": "2026-10-07T10:00:00Z",
+           "gpu_seconds": 113.2, "billed_usd": round(113.213 * 3.49 / 3600, 4), "execution_ms": 24638,
+           "delay_ms": 88575}
+    honest = normalise_bill(old)
+    assert honest["gpu_seconds"] == 24.6 and honest["delay_seconds"] == 88.6 and honest["wall_seconds"] == 113.2
+    assert honest["billed_usd"] == round(24.638 * 3.49 / 3600, 4)
+    assert old["gpu_seconds"] == 113.2  # the journal row itself is not rewritten
+    client, _ = make_client(settings, [])
+    client.journal.put(old)
+    ledger = client.ledger()
+    assert ledger["jobs"] == 1 and ledger["gpu_seconds"] == 24.6 and ledger["wall_seconds"] == 113.2
+    assert ledger["billed_usd"] == round(24.638 * 3.49 / 3600, 3)
+    assert normalise_bill({"gpu_seconds": 5.0, "billed_usd": None}) == {"gpu_seconds": 5.0, "billed_usd": None}
 
 
 def test_the_journal_survives_a_restart_and_a_corrupt_file(settings, tmp_path):
@@ -347,6 +370,6 @@ def test_a_voice_line_uploads_the_reference_and_its_flac_lands_in_dest(settings,
     settled = client.status("job-1")
     assert [pathlib.Path(p).name for p in settled["outputs"]] == ["l03.flac"]
     assert pathlib.Path(settled["outputs"][0]).read_bytes() == FLAC
-    assert settled["billed_usd"] == round(9 * 1.58 / 3600, 4)  # the image endpoint's rate
+    assert settled["billed_usd"] == round(8 * 1.58 / 3600, 4)  # the image endpoint's rate, execution only
     with pytest.raises(JobError, match="audio_path"):
         client.plan("tts_chatterbox", prompt="x")

@@ -64,6 +64,37 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# ------------------------------------------------------------------ billing
+
+def bill_fields(execution_ms, delay_ms, rate) -> dict:
+    """The honest cost fields of a settled job (plan 33, DEC-316):
+    ``gpu_seconds`` is RunPod's ``executionTime`` (the worker's run, what is
+    billed), ``delay_seconds`` its ``delayTime`` (queue wait + cold start),
+    ``wall_seconds`` their sum; ``billed_usd`` prices the execution alone and
+    ``wall_usd`` what the sum would cost, kept so the two can be compared."""
+    execution = float(execution_ms or 0) / 1000.0
+    delay = float(delay_ms or 0) / 1000.0
+    priced = (lambda seconds: round(seconds * rate / 3600.0, 4)) if rate else (lambda seconds: None)
+    return {"gpu_seconds": round(execution, 1), "delay_seconds": round(delay, 1),
+            "wall_seconds": round(execution + delay, 1), "billed_usd": priced(execution),
+            "wall_usd": priced(execution + delay)}
+
+
+def normalise_bill(record: dict) -> dict:
+    """*record* with the honest cost fields whatever its age: a row settled
+    before plan 33 carries ``gpu_seconds`` = execution + delay and a
+    ``billed_usd`` priced on that sum (``execution_ms`` / ``delay_ms`` were
+    stored all along), so the split is rebuilt from the stored milliseconds
+    and the implied rate. A row that already has ``wall_seconds`` is returned
+    as is; a row without the milliseconds is left alone."""
+    if "wall_seconds" in record or record.get("gpu_seconds") is None or record.get("execution_ms") is None:
+        return record
+    total = float(record.get("execution_ms") or 0) + float(record.get("delay_ms") or 0)
+    usd = record.get("billed_usd")
+    rate = (float(usd) * 3600.0 / (total / 1000.0)) if usd is not None and total > 0 else None
+    return {**record, **bill_fields(record.get("execution_ms"), record.get("delay_ms"), rate)}
+
+
 # ----------------------------------------------------------------- templates
 
 def list_templates() -> list:
@@ -331,10 +362,14 @@ class JobClient:
     # -- status and outputs
 
     def _billed(self, record: dict, status: dict) -> dict:
-        seconds = gpu_seconds(status)
+        """The honest bill (plan 33, DEC-316): ``gpu_seconds`` and
+        ``billed_usd`` are the worker's ``executionTime`` alone; the queue
+        wait and the cold start (``delayTime``) are kept as ``delay_seconds``
+        and the sum as ``wall_seconds``, never priced -- three clips queued
+        on one worker used to show each other's run as their own cost."""
         rate = self.settings.rate(record.get("served_by") or record.get("kind", "video"))
-        usd = round(seconds * rate / 3600.0, 4) if rate else None
-        return {"gpu_seconds": round(seconds, 1), "billed_usd": usd, "worker_id": status.get("workerId"),
+        return {**bill_fields(status.get("executionTime"), status.get("delayTime"), rate),
+                "worker_id": status.get("workerId"),
                 "execution_ms": status.get("executionTime"), "delay_ms": status.get("delayTime")}
 
     def _save_outputs(self, record: dict, output: dict) -> list:
@@ -427,23 +462,34 @@ class JobClient:
 
     def ledger(self, since: str | None = None) -> dict:
         """GPU seconds and dollars of the finished jobs, per kind and in all,
-        from *since* (ISO date) when given."""
-        totals = {"jobs": 0, "gpu_seconds": 0.0, "billed_usd": 0.0, "unpriced_jobs": 0, "by_kind": {}}
-        for record in self.journal.all():
-            if record.get("gpu_seconds") is None:
+        from *since* (ISO date) when given. ``gpu_seconds`` / ``billed_usd``
+        are execution time (what is billed); ``wall_seconds`` adds the queue
+        and cold-start delay, and ``wall_usd_if_delay_were_billed`` says what
+        the old sum would have charged (a row settled before plan 33 is read
+        through :func:`normalise_bill`)."""
+        zero = {"jobs": 0, "gpu_seconds": 0.0, "wall_seconds": 0.0, "delay_seconds": 0.0, "billed_usd": 0.0,
+                "wall_usd_if_delay_were_billed": 0.0}
+        totals = {**zero, "unpriced_jobs": 0, "by_kind": {}}
+        for raw in self.journal.all():
+            if raw.get("gpu_seconds") is None:
                 continue
-            if since and (record.get("finished_at") or "") < since:
+            if since and (raw.get("finished_at") or "") < since:
                 continue
+            record = normalise_bill(raw)
             kind = record.get("kind", "video")
-            bucket = totals["by_kind"].setdefault(kind, {"jobs": 0, "gpu_seconds": 0.0, "billed_usd": 0.0})
+            bucket = totals["by_kind"].setdefault(kind, dict(zero))
             for b in (totals, bucket):
                 b["jobs"] += 1
-                b["gpu_seconds"] += float(record["gpu_seconds"] or 0)
+                for key in ("gpu_seconds", "wall_seconds", "delay_seconds"):
+                    b[key] += float(record.get(key) or 0)
                 if record.get("billed_usd") is not None:
                     b["billed_usd"] += float(record["billed_usd"])
+                    b["wall_usd_if_delay_were_billed"] += float(record.get("wall_usd") or 0)
             if record.get("billed_usd") is None:
                 totals["unpriced_jobs"] += 1
         for b in [totals, *totals["by_kind"].values()]:
-            b["gpu_seconds"] = round(b["gpu_seconds"], 1)
-            b["billed_usd"] = round(b["billed_usd"], 3)
+            for key in ("gpu_seconds", "wall_seconds", "delay_seconds"):
+                b[key] = round(b[key], 1)
+            for key in ("billed_usd", "wall_usd_if_delay_were_billed"):
+                b[key] = round(b[key], 3)
         return totals

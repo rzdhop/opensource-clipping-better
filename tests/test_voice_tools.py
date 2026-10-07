@@ -117,7 +117,8 @@ def test_each_line_is_one_tts_job_with_the_frozen_reference_and_the_speakers_see
     assert body["input"]["images"][0]["name"].endswith(".wav")
     manifest = json.loads((voices_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["l01"]["speaker"] == "ANANAS" and manifest["l01"]["stamp"]["voice"] == "chatterbox:ananas"
-    assert manifest["l02"]["gpu_seconds"] == 9.0 and manifest["l02"]["billed_usd"] == round(9 * 1.58 / 3600, 4)
+    # Plan 33 (DEC-316): the job client bills the execution time alone (8 s), the 1 s delay is shown beside it.
+    assert manifest["l02"]["gpu_seconds"] == 8.0 and manifest["l02"]["billed_usd"] == round(8 * 1.58 / 3600, 4)
     assert voice_ep01.plan_lines(refs, voices_dir)[0]["done"] is True  # the WAV exists: skipped next time
 
 
