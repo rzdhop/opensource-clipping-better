@@ -1,11 +1,14 @@
-## CURRENT STATE — plan 32 LIVE-TESTED, stage 8 (talking clips) IN PROGRESS on main (2026-10-07, local session)
+## CURRENT STATE — plan 32 COMPLETE (stages 0–9 incl. stage 8 talking clips) on main and DEPLOYED (2026-10-07, local session)
 
-- **In-progress header:** phase = IMPLEMENT, stage 8 (Opus agent, main tree: talking_clips runpod_s2v on own_gpu,
-  GenRequest.audio, the s2v link in the app adapter on the audio-serving endpoint, the video/pricing tables, the
-  assets video phase, the ambience exclusion) + a follow-up (Sonnet agent, worktree: the cast's voice pick must
-  match the character's gender — the human's ask). Next action = verify both, cherry-pick the follow-up, run the
-  selections, commit, push, deploy (container restart + MCP unit), log, A-212…, CHANGELOG (DEC-315 §6 amended),
-  memory; then the first fruit-drama story from the chat with the skill. Checkpoint commit = main 64ac352.
+- **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
+  commit). Stage 8 bd542cc (talking clips on own_gpu through s2v_wan22) + d3db7fc (the voice pick's gender) verified
+  (local 1412 / CI-like 1304+108s / venv 78) and deployed: backend restarted (Python-only), MCP unit restarted.
+  **Next action = the first fruit-drama story from the chat with the skill** (story_create preset → concepts →
+  bible → style → cast → places → season → story_estimate → story_make_episode → episode_sheet → episode_export);
+  A-212…A-214 are its checks (a talking clip in a rendered episode, the warm S2V cost, the gender pick). Open
+  follow-ups: the S2V extend node for shots whose speech runs past 4.8 s; the shared hermetic test fixture should
+  clear RUNPOD_* (clipping/config.py's load_dotenv leaks the host's values into tests); the cosmetic "set
+  RUNPOD_GPU_USD_PER_HOUR" log line on S2V clips.
 - **Live tests 2026-10-07 (the human's go):** weights on the volume (the human, through the fixed fetch scripts:
   Chatterbox 3.2 GB, S2V 16.4 + 0.63 + 1.2 GB under models/unet, audio_encoders, loras), the image endpoint
   aq6qg1pykxa2st on ghcr.io/rzdhop/worker-comfyui-tts:latest (the human), the package public. S2V job 99289971

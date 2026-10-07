@@ -90,11 +90,40 @@ All notable changes to the **rzdhop AI** project will be documented in this file
   re-pinned with a dated comment (`tests/test_aistory_prompting.py`, the prompt
   fixtures, and the guards that follow them).
 
+- **Talking clips on `own_gpu`** (stage 8, after the live test of 2026-10-07:
+  one S2V clip on a mango close-up with a French line, the mouth moves, identity
+  kept, $0.097 cold): `talking_clips: runpod_s2v` on the profile
+  (`templates/budget_profiles.json`, `media_policy.talking_clips`,
+  `clipping/providers/budget.py`); a speaking shot whose lines belong to one
+  character framed alone (`close_up` / `medium_single`) and whose speech ends
+  within 4.8 s of the shot gets its clip from `runpod/s2v_wan22` with the shot's
+  dialogue track (`steps/talking.py`, `steps/assets.py`, `steps/clips.py`,
+  `GenRequest.audio`, the adapter in `clipping/providers/runpod_comfyui.py`: the
+  wav uploaded like the keyframe, the audio-serving endpoint and its key, the
+  clip's own sound stripped so the render lays the line itself); every other shot
+  keeps the i2v link; the estimate and the step summary say how many shots talk
+  and how many are too long for one chunk; price row $0.02 a second (placeholder
+  until a warm clip is measured). A story without the key plans its clips as
+  before.
+- **The cast's voice pick must match the character's gender**
+  (`clipping/aistory/voice_clone.py`, `steps/cast.py`): the ask lists the voices
+  by gender with the taken ones marked; a pick of the opposite gender is refused
+  with a sentence the retry carries; a neutral character takes any.
+- **A template may name the endpoint kind that runs it** (`served_by`,
+  `mcp_server/runpod_jobs.py`): `s2v_wan22` runs where the voice lines run (the
+  worker image with the `audio_encoders` mapping). **The key follows the serving
+  endpoint** (`mcp_server/config.py`, `clipping/providers/tts.py`): voice lines
+  on the image endpoint opened it with the account key before (HTTP 403, found
+  live). `docker-compose.yml` forwards the `RUNPOD_IMAGE_*` names (images went
+  to the video endpoint in the container). The weight scripts use the `hf` CLI
+  else curl, and the S2V diffusion model lands under `models/unet/`.
+
 #### Known limitation
 
-- The talking mouth is not in an episode: `s2v_wan22` has never run on a GPU
-  (nothing is known about cartoon faces or French, and no timing or price is
-  measured). Publishing stays by hand.
+- Shots whose speech runs past one S2V chunk (4.8 s) keep the silent i2v clip
+  until the extend node is wired (a later stage). A voice reference must be ONE
+  continuous take: a concatenation of lines runs away to 40 s of sound (found
+  live). Publishing stays by hand.
 
 ### A text-to-speech route on the RunPod worker: Chatterbox Multilingual (French), and "Accès refusé" episode 1 voiced through it (DEC-314)
 
