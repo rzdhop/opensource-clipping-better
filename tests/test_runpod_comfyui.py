@@ -124,6 +124,22 @@ def test_the_runpod_links_sell_what_their_templates_frame_rules_make():
         assert pricing.price_for(Link("runpod", name)).unit == "second"
 
 
+def test_the_talking_template_is_a_sibling_link_selling_one_chunk_of_its_frame_rule():
+    """Plan 32 stage 8: runpod/s2v_wan22 sells 5 s (one chunk) of the 2-5 s its template makes."""
+    assert runpod_comfyui.S2V_TEMPLATES == ("s2v_wan22",) and not set(runpod_comfyui.S2V_TEMPLATES) & set(
+        runpod_comfyui.TEMPLATES)
+    for name in runpod_comfyui.S2V_TEMPLATES:
+        rule = load_template(name)["frame_rule"]
+        assert set(video.CLIP_LENGTHS[f"runpod/{name}"]) <= set(rule["lengths"])
+        assert video.AUDIO[f"runpod/{name}"] == "never" and f"runpod/{name}" in video.SEED_HONOURED
+        assert pricing.price_for(Link("runpod", name)).unit == "second"
+    env = dict(ENV, RUNPOD_AUDIO_ENDPOINT_ID="aud9", RUNPOD_AUDIO_API_KEY="rpa_audio")
+    assert runpod_comfyui.serving("s2v_wan22", env) == ("aud9", "rpa_audio", None)
+    assert runpod_comfyui.serving("i2v_wan22_14b_lightning", env) == ("ep123", "rpa_fake", "1.58")
+    checked = video.check_key(link("runpod/s2v_wan22"), env, transport=FakeTransport([(401, {"error": "bad"})]))
+    assert checked["status"] == "bad_key" and checked["endpoint"] == "aud9" and "RUNPOD_AUDIO_API_KEY" in checked["text"]
+
+
 def test_runpod_is_a_paid_video_provider_keyed_by_api_key_and_endpoint_outside_the_shipped_chain():
     runpod = Link("runpod", "i2v_wan22_14b_lightning")
     assert gen.is_paid(runpod) and gen.missing_keys(runpod, {}) == ["RUNPOD_API_KEY", "RUNPOD_COMFY_ENDPOINT_ID"]

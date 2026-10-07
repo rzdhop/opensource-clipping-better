@@ -69,6 +69,10 @@ CLIP_LENGTHS: dict[str, tuple[int, ...]] = {
     "runpod/i2v_wan22_5b": (2, 3, 4, 5),
     "runpod/i2v_wan22_14b_lightning": (2, 3, 4, 5),
     "runpod/i2v_ltx2": (2, 3, 4),
+    # Plan 32 stage 8 (DEC-315 §6): the talking clip, one 77-latent chunk (78 kept frames, 4.875 s at
+    # 16 fps) a shot of 5 s or more is bought at; the template's own 2-4 s are not sold here (a talking
+    # shot is never shorter than DEC-304's 5 s). The render holds its last frame to the shot's end.
+    "runpod/s2v_wan22": (5,),
 }
 
 # Links kept parseable (an existing .env) and priced, but never sent: no silent swap.
@@ -95,6 +99,9 @@ AUDIO = {
     "runpod/i2v_wan22_5b": "never",
     "runpod/i2v_wan22_14b_lightning": "never",
     "runpod/i2v_ltx2": "never",
+    # Plan 32 stage 8: the worker muxes the dialogue track into the talking clip; the adapter drops it
+    # (the render lays the lines itself), so the clip keeps no sound of its own.
+    "runpod/s2v_wan22": "never",
 }
 # Plan 23 stage B7: the frames each link makes (``GenRequest.extra["aspect"]``,
 # absent = 9:16). Veo makes 9:16 and 16:9 (ai.google.dev; Higgsfield's Veo 3.1
@@ -117,6 +124,7 @@ ASPECTS = {
     "runpod/i2v_wan22_5b": ("9:16",),
     "runpod/i2v_wan22_14b_lightning": ("9:16",),
     "runpod/i2v_ltx2": ("9:16",),
+    "runpod/s2v_wan22": ("9:16",),
 }
 LOCAL_ASPECTS = ("9:16",)
 # Why a link cannot make a frame, by the kind of link.
@@ -130,7 +138,7 @@ _ASPECT_REASONS = {
 
 # Only seedance takes a seed; kling and LTX (2.3, 2.5) have no field, Veo is "not deterministic".
 SEED_HONOURED = frozenset({"fal/seedance-1-pro-fast", "runpod/i2v_wan22_5b", "runpod/i2v_wan22_14b_lightning",
-                           "runpod/i2v_ltx2"})
+                           "runpod/i2v_ltx2", "runpod/s2v_wan22"})
 
 FAL_VIDEO_POLL_BUDGET_SECONDS = 600.0
 
@@ -560,10 +568,13 @@ def _check_key(link, credentials, *, transport) -> dict:
         # DEC-310: the endpoint's /health (free): 401 is a refused key, 404 an endpoint id that is not
         # this account's; the answer counts the workers (ready / idle / throttled), never a job.
         from . import runpod_comfyui  # noqa: PLC0415 - sibling module; imported here to keep video.py's imports flat
-        endpoint = credentials["RUNPOD_COMFY_ENDPOINT_ID"]
+        # Plan 32 stage 8: a talking clip's endpoint is the voice lines' (its own key there).
+        endpoint, key, _rate = runpod_comfyui.serving(link.model, credentials)
         url = runpod_comfyui.endpoint_url(endpoint, "health")
-        headers = runpod_comfyui.auth_headers(credentials["RUNPOD_API_KEY"])
+        headers = runpod_comfyui.auth_headers(key)
         key_name = "RUNPOD_API_KEY"
+        if runpod_comfyui.talks(link.model) and endpoint != credentials.get("RUNPOD_COMFY_ENDPOINT_ID"):
+            key_name = "the voice lines' endpoint key (RUNPOD_AUDIO_API_KEY, else RUNPOD_IMAGE_API_KEY, else RUNPOD_API_KEY)"
     else:
         raise ValueError(f"{label}: no key check for this video link")
     result = {"status": "failed", "text": "", "endpoint": endpoint, "price": None}

@@ -26,7 +26,18 @@ seconds, cold start included -- is logged per clip and kept in
 ``GenResult.meta`` next to the table's estimate (A-194); the ledger keeps
 the estimate, as for every paid link.
 
-Stdlib only, REST through ``transport.py`` (DEC-012).
+Plan 32 stage 8 (DEC-315 §6): ``runpod/s2v_wan22`` is a talking clip -- the
+keyframe and the shot's dialogue track (``GenRequest.audio``, a WAV) both
+travel inline under content-addressed names, as the MCP's job client sends
+them (``mcp_server/runpod_jobs.py``), and the mouth follows the voice. The
+template is ``served_by: audio``: it runs where the voice lines run (the
+audio endpoint, else the image one, else the video one; ``tts.audio_endpoint``),
+on that endpoint's key, billed at its rate. Its mp4 carries the track the
+worker muxed in; that sound is the dialogue the render lays itself, so the
+adapter strips it (ffmpeg, the picture copied) before the clip is kept: the
+clip has no sound of its own and is never mixed as ambience.
+
+Stdlib only (ffmpeg on PATH for a talking clip), REST through ``transport.py`` (DEC-012).
 """
 
 from __future__ import annotations
@@ -34,6 +45,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import subprocess
 import time
 
 from . import video
@@ -55,6 +67,11 @@ ENV_RATE = "RUNPOD_GPU_USD_PER_HOUR"   # optional: the GPU tier's flex price, fo
 # The templates a runpod link may name (the link's model). The same files
 # local/comfyui runs; ``local_comfyui.VIDEO_TEMPLATES`` is the source of truth.
 TEMPLATES = ("i2v_wan22_5b", "i2v_wan22_14b_lightning", "i2v_ltx2")
+# Plan 32 stage 8: the talking template (a keyframe and a dialogue track); a
+# sibling tuple, since it sells one length and runs on the voice lines' endpoint.
+S2V_TEMPLATES = ("s2v_wan22",)
+FFMPEG_INSTALL = "install ffmpeg (apt-get install ffmpeg)"
+_FFMPEG_TIMEOUT_S = 120
 
 POLL_INTERVAL_SECONDS = 5.0
 # Cold start (a worker boots and reads 35 GB of weights from the volume, 2-5
@@ -107,6 +124,48 @@ def billed_usd(status: dict, credentials: dict):
         return None
 
 
+def talks(name) -> bool:
+    """Whether the template *name* makes a talking clip (keyframe + dialogue track)."""
+    return name in S2V_TEMPLATES
+
+
+def serving(name, credentials) -> tuple:
+    """``(endpoint, key, rate)`` of the endpoint that runs the template
+    *name*: a talking template runs where the voice lines run (its
+    ``served_by: audio``, ``tts.audio_endpoint`` / ``audio_key`` /
+    ``audio_rate``), every other one on the video endpoint, as always."""
+    credentials = credentials or {}
+    if talks(name):
+        from . import tts  # noqa: PLC0415 - tts imports this module: a cycle at import time
+
+        return tts.audio_endpoint(credentials), tts.audio_key(credentials), tts.audio_rate(credentials)
+    return credentials.get(ENV_ENDPOINT, ""), credentials.get(ENV_API_KEY, ""), credentials.get(ENV_RATE) or None
+
+
+def strip_audio_argv(src, dest) -> list:
+    """The ffmpeg command that keeps *src*'s picture alone (copied, never
+    re-encoded) in *dest*: a talking clip's muxed dialogue dropped."""
+    return ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", os.fspath(src), "-map", "0:v:0", "-c", "copy", "-an",
+            "-map_metadata", "-1", "-movflags", "+faststart", os.fspath(dest)]
+
+
+def strip_audio(label, src, dest, *, run=None) -> str:
+    """*src* written to *dest* without its sound (:func:`strip_audio_argv`;
+    *run*: ``subprocess.run``, the seam the tests replace). ``RunPodError``
+    naming what went wrong."""
+    runner = run or subprocess.run
+    try:
+        result = runner(strip_audio_argv(src, dest), capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                        timeout=_FFMPEG_TIMEOUT_S)
+    except FileNotFoundError:
+        raise RunPodError(f"{label}: the talking clip came back with its dialogue muxed in and ffmpeg is not "
+                          f"installed to drop it: {FFMPEG_INSTALL}") from None
+    if result.returncode != 0 or not os.path.isfile(dest) or os.path.getsize(dest) == 0:
+        detail = (getattr(result, "stderr", "") or "").strip()[:200]
+        raise RunPodError(f"{label}: ffmpeg could not drop the talking clip's sound{': ' + detail if detail else ''}")
+    return os.fspath(dest)
+
+
 class RunPodComfyAdapter:
     """One clip from one keyframe on a RunPod Serverless ComfyUI endpoint."""
 
@@ -123,6 +182,10 @@ class RunPodComfyAdapter:
         are ready, idle or throttled. Free; never a job."""
         transport = transport or urllib_transport
         label = describe(link)
+        if talks(link.model):
+            # Plan 32 stage 8: a talking clip runs on the voice lines' endpoint, with its key.
+            endpoint, key, _rate = serving(link.model, credentials)
+            credentials = dict(credentials, **{ENV_ENDPOINT: endpoint, ENV_API_KEY: key})
         try:
             answer = request_json(transport, "GET", endpoint_url(credentials[ENV_ENDPOINT], "health"),
                                   headers=auth_headers(credentials[ENV_API_KEY]), timeout=HEALTH_TIMEOUT)
@@ -148,12 +211,22 @@ class RunPodComfyAdapter:
         the fps are the template's ``frame_rule``."""
         label = describe(link)
         name = link.model
-        if name not in TEMPLATES:
+        if name not in TEMPLATES + S2V_TEMPLATES:
             raise ValueError(f"{label}: no workflow template of that name; the runpod links are "
-                             + ", ".join(f"runpod/{t}" for t in TEMPLATES))
+                             + ", ".join(f"runpod/{t}" for t in TEMPLATES + S2V_TEMPLATES))
         seconds = video.clip_seconds(link, request)
         if not os.path.isfile(request.references[0]):
             raise ValueError(f"{label}: keyframe {request.references[0]} not found")
+        audio = getattr(request, "audio", None)
+        if talks(name):
+            if not audio:
+                raise ValueError(f"{label} makes a talking clip: its dialogue track is missing (GenRequest.audio)")
+            if not os.path.isfile(audio):
+                raise ValueError(f"{label}: the dialogue track {audio} is not there")
+            if os.path.splitext(audio)[1].lower() != ".wav":
+                raise ValueError(f"{label}: the dialogue track must be a .wav file, not {audio}")
+        elif audio:
+            raise ValueError(f"{label} makes a silent clip from a keyframe: it takes no dialogue track")
         template = load_template(name)
         rule = template["frame_rule"]
         if request.fps is not None and int(request.fps) != int(rule["fps"]):
@@ -161,17 +234,26 @@ class RunPodComfyAdapter:
         return name, template, seconds, frames_for(template, seconds)
 
     def generate(self, link, request, *, credentials, on_log, transport=None, sleep_fn=time.sleep,
-                 time_fn=time.monotonic, on_submit=None, **_):
+                 time_fn=time.monotonic, on_submit=None, run=None, **_):
         name, template, seconds, frames = self.plan(link, request)  # refused here, before any call
         rule = template["frame_rule"]
         transport = transport or urllib_transport
-        endpoint = credentials[ENV_ENDPOINT]
-        headers = auth_headers(credentials[ENV_API_KEY])
+        endpoint, key, _rate = serving(name, credentials)
+        if not endpoint or not key:
+            raise ProviderError(f"{describe(link)}: no RunPod endpoint or key serves it; set RUNPOD_AUDIO_ENDPOINT_ID, "
+                                f"RUNPOD_IMAGE_ENDPOINT_ID or {ENV_ENDPOINT} with its key in .env.")
+        headers = auth_headers(key)
         image = inline_image(request.references[0])
         values = {"image_path": image["name"], "prompt": request.prompt, "negative": request.negative or "",
                   "seed": request.seed, "width": rule["width"], "height": rule["height"], "frames": frames,
                   "fps": rule["fps"]}
-        body = {"input": {"workflow": render_template(template, values), "images": [image]}}
+        images = [image]
+        if talks(name):
+            # The track travels like the keyframe, under a content-addressed .wav name (the MCP's job client).
+            track = inline_image(request.audio)
+            values["audio_path"] = track["name"]
+            images = [track, image]
+        body = {"input": {"workflow": render_template(template, values), "images": images}}
         # Billed from here on (once a worker takes it), whatever happens next.
         answer = request_json(transport, "POST", endpoint_url(endpoint, "run"), headers=headers, json_body=body,
                               timeout=DEFAULT_TIMEOUT)
@@ -181,16 +263,18 @@ class RunPodComfyAdapter:
         status_url = endpoint_url(endpoint, f"status/{job_id}")
         queued = {"request_id": job_id, "status_url": status_url, "response_url": status_url, "endpoint": endpoint}
         on_log(f"   🔁 RunPod: queued {name} ({seconds} s = {frames} frames at {rule['fps']} fps, "
-               f"{rule['width']}x{rule['height']}) as job {job_id} on endpoint {endpoint}")
+               f"{rule['width']}x{rule['height']}{', with its dialogue track' if talks(name) else ''}) as job "
+               f"{job_id} on endpoint {endpoint}")
         if on_submit is not None:
             # Journaled between RunPod's answer and the first poll (DEC-151).
             on_submit(dict(queued))
         status = self._poll(link, queued, headers=headers, transport=transport, on_log=on_log, sleep_fn=sleep_fn,
                             time_fn=time_fn)
-        return self._finish(link, request, credentials, queued, status, name, template, seconds, frames, on_log)
+        return self._finish(link, request, credentials, queued, status, name, template, seconds, frames, on_log,
+                            run=run)
 
     def resume(self, link, request, entry, *, credentials, on_log, transport=None, sleep_fn=time.sleep,
-               time_fn=time.monotonic, **_):
+               time_fn=time.monotonic, run=None, **_):
         """Follow the job a journal *entry* holds until its clip is there.
         Never a new ``/run``; a job RunPod no longer knows answers 404 on its
         own status URL, which the runner reads as never run (``gencache.resume_verdict``)."""
@@ -199,12 +283,14 @@ class RunPodComfyAdapter:
         queued = dict(entry.get("request") or {})
         if not queued.get("request_id"):
             raise RunPodError(f"{describe(link)}: the journal holds no job to resume")
-        queued.setdefault("endpoint", credentials[ENV_ENDPOINT])
-        headers = auth_headers(credentials[ENV_API_KEY])
+        endpoint, key, _rate = serving(name, credentials)
+        queued.setdefault("endpoint", endpoint)
+        headers = auth_headers(key)
         on_log(f"   ↩️ RunPod: following job {queued['request_id']} on endpoint {queued['endpoint']} (not submitted again)")
         status = self._poll(link, queued, headers=headers, transport=transport, on_log=on_log, sleep_fn=sleep_fn,
                             time_fn=time_fn)
-        return self._finish(link, request, credentials, queued, status, name, template, seconds, frames, on_log)
+        return self._finish(link, request, credentials, queued, status, name, template, seconds, frames, on_log,
+                            run=run)
 
     def _poll(self, link, queued, *, headers, transport, on_log, sleep_fn, time_fn) -> dict:
         """Ask ``/status`` until the job ends. :class:`RequestFailed` when it
@@ -241,7 +327,8 @@ class RunPodComfyAdapter:
         clips = [f for f in files if str(f.get("filename", "")).lower().endswith(".mp4")]
         return (clips or [None])[0]
 
-    def _finish(self, link, request, credentials, queued, status, name, template, seconds, frames, on_log):
+    def _finish(self, link, request, credentials, queued, status, name, template, seconds, frames, on_log, *,
+                run=None):
         label = describe(link)
         output = status.get("output") or {}
         clip = self._clip(output)
@@ -260,11 +347,24 @@ class RunPodComfyAdapter:
         if not data:
             raise RunPodError(f"{label}: {clip.get('filename')} came back empty")
         out_name = (request.extra or {}).get("name") or f"runpod_{name}_{request.seed}"
-        path = write_output(request.out_dir, out_name, data, "mp4")
+        if talks(name):
+            # The worker muxed the dialogue track in: the render lays the lines itself, so the clip keeps
+            # its picture alone (never mixed as ambience: ``clips.clip_has_audio`` finds no sound).
+            answered = write_output(request.out_dir, f"{out_name}.answer", data, "mp4")
+            try:
+                path = strip_audio(label, answered, os.path.join(request.out_dir, f"{out_name}.mp4"), run=run)
+            finally:
+                try:
+                    os.unlink(answered)
+                except OSError:
+                    pass
+        else:
+            path = write_output(request.out_dir, out_name, data, "mp4")
         seconds_billed = gpu_seconds(status)
-        usd = billed_usd(status, credentials)
+        _endpoint, _key, rate = serving(name, credentials)
+        usd = billed_usd(status, {ENV_RATE: rate})
         on_log(f"   💸 RunPod: job {queued['request_id']} took {seconds_billed:.0f} GPU-s"
-               f"{f' = ${usd:.3f} at ${credentials[ENV_RATE]}/h' if usd is not None else ' (set RUNPOD_GPU_USD_PER_HOUR to price it)'}")
+               f"{f' = ${usd:.3f} at ${rate}/h' if usd is not None else ' (set RUNPOD_GPU_USD_PER_HOUR to price it)'}")
         rule = template["frame_rule"]
         return GenResult(provider="runpod", model=link.model, paths=(path,), seed=request.seed, meta={
             "template": name, "job_id": queued["request_id"], "endpoint": queued["endpoint"],
@@ -273,6 +373,7 @@ class RunPodComfyAdapter:
             "worker_id": status.get("workerId"),
             "clip_s": seconds, "frames": frames, "fps": int(rule["fps"]),
             "width": int(rule["width"]), "height": int(rule["height"]),
+            **({"served_by": "audio", "audio_stripped": True} if talks(name) else {}),
             **video._meta(link, request),
         })
 

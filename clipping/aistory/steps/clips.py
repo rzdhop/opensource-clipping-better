@@ -64,6 +64,7 @@ from .. import video_plan
 from .. import shots as shots_mod
 from . import episode_common, sticky_link
 from . import lipsync as lipsync_step
+from . import talking
 from .llm_call import StepFailed
 
 CLIPS_KIND = "clips"
@@ -594,10 +595,20 @@ def sent_clip_prompt(ec, shot, script, parts, *, link, live=None, template=None,
                                              wardrobe=wardrobe if wardrobe is not None else wardrobe_of(ec))
 
 
-def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
+def clip_state(ec, shot, script, *, link, tier, flags, image_sha, talk=None) -> str:
     """One of :data:`CLIP_DERIVED_STATES` for *shot* now: *link* is the
     episode's video link (None: any), *image_sha* the sha256 of the shot's
-    image on disk (None: none)."""
+    image on disk (None: none).
+
+    Plan 32 stage 8: on a story that makes talking clips
+    (``talking.enabled``), *talk* is the shot's talking verdict as the plan
+    decided it (``talking.verdict``; ``talking.unavailable`` when the S2V
+    link cannot run): a shot that talks is current only on
+    ``talking.TALKING_LINK`` with the dialogue track it would build now, any
+    other on *link*. Without *talk* (a caller holding the shot alone: the
+    render, the pages) a clip on the talking link is checked against the
+    shot's verdict now (the storyboard on disk), and a clip on *link* is
+    judged as always."""
     clip = shot["assets"].get("clip")
     if not clip:
         return "none"
@@ -612,6 +623,14 @@ def clip_state(ec, shot, script, *, link, tier, flags, image_sha) -> str:
     if link is not None and shot.get("speaks") and media_policy.native_speech(getattr(ec, "story", None)):
         # Plan 22: a speaking shot's clip is on the episode's speech link, never its silent one.
         link = class_link(ec.story, shot, _assets_doc_of(ec), link)
+    if (link is not None and (talk is not None or clip["link"] == talking.TALKING_LINK)
+            and talking.enabled(getattr(ec, "story", None))):
+        # Plan 32 stage 8: a talking shot's clip is on the S2V link, made from the track it would build now.
+        found = talk if talk is not None else talking.verdict_now(ec, script, shot)
+        if found.get("talks"):
+            link = talking.TALKING_LINK
+            if clip["link"] == link and not talking.track_current(clip, found):
+                return "stale"
     if link is not None and not sticky_link.on_link(clip["link"], link):
         return "stale"
     if gen.is_manual(clip["link"]):
@@ -957,7 +976,8 @@ def _too_long(rows, link, *, story=None) -> str | None:
     (``plan`` rows) run longer than *link*'s longest clip by more than
     :data:`HOLD_TOLERANCE_S` and more than a clip can be slowed to cover
     (:data:`MAX_STRETCH`, DEC-250), naming them and the fix, or None."""
-    long = [row for row in rows if (row.get("held_s") or 0.0) > HOLD_TOLERANCE_S and row.get("cover") != "stretch"]
+    long = [row for row in rows if (row.get("held_s") or 0.0) > HOLD_TOLERANCE_S and row.get("cover") != "stretch"
+            and not _talk_held(row)]
     if not long:
         return None
     longest = longest_clip_s(link, story=story)
@@ -967,6 +987,14 @@ def _too_long(rows, link, *, story=None) -> str | None:
             f"{link} sells can cover even slowed (at most {most} s), and every shot of this story is one clip: "
             f"plan the storyboard again (the storyboard step plans such a scene as two shots), approve it, then run "
             f"the assets step again -- or shorten the scene's lines")
+
+
+def _talk_held(row) -> bool:
+    """Whether a plan *row* is a talking clip (plan 32 stage 8) held over a
+    shot no longer than a clip slowed to cover it could be: its speech ends
+    inside the clip, so its last frame is held rather than the mouth slowed
+    away from its voice."""
+    return bool(row.get("talks")) and float(row.get("held_s") or 0.0) <= row["clip_s"] * (MAX_STRETCH - 1) + 1e-9
 
 
 def _local_note(note) -> str:
@@ -1041,7 +1069,17 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     priced on LIPSYNC_CHAIN's link); when that link could run it
     (``counted``), its price is in ``est_usd`` and the message says
     "+ $0.280 lip-sync (8 clips)". Every other story: no such key, the
-    units byte for byte as before."""
+    units byte for byte as before.
+
+    Plan 32 stage 8 (DEC-315 §6): on a story that makes talking clips
+    (``talking.enabled``: the own_gpu profile) with a hosted episode link,
+    each shot that talks (``talking.verdicts``) is planned on
+    ``talking.TALKING_LINK`` at its one length (``link``, ``talks`` on its
+    row; held, never slowed, over a longer shot), priced at that link's
+    row, and the units carry ``talking`` (``talking.plan_part``: the shots
+    that talk, the speaking ones too long for one chunk, the sentence the
+    message ends with). Every other story: no such key, the units byte for
+    byte as before."""
     tier = tier_of(ec)
     profile_name = ec.story["generation_profile"]["budget_profile"]
     route = ec.story["generation_profile"]["route"]
@@ -1211,11 +1249,22 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
     units.update(link=link, route_class="local" if local else "paid", price_per_second=price)
 
     tier_for_prompt = tier if tier in (2, 3) else 2
+    # Plan 32 stage 8: on a story that makes talking clips, which shots talk (on one timeline) -- each on the
+    # S2V link at its one length, every other on the episode's link. None on every other story.
+    talk = _talk_verdicts(ec, script, storyboard, merged, adapters, resolution=resolution, aspect=frame) \
+        if not local and talking.enabled(ec.story) else None
+
+    def talks(shot_id) -> bool:
+        return talk is not None and bool(talk["verdicts"][shot_id].get("talks"))
+
+    def state_kwargs(shot_id) -> dict:
+        return {"talk": talk["verdicts"][shot_id]} if talk is not None else {}
+
     current_ids = []
     for shot in shots:
         if shot["assets"].get("clip") and image_sha is not None:
             state = clip_state(ec, shot, script, link=link, tier=tier_for_prompt, flags=flags[shot["shot_id"]],
-                               image_sha=image_sha(shot))
+                               image_sha=image_sha(shot), **state_kwargs(shot["shot_id"]))
             if state == "current":
                 current_ids.append(shot["shot_id"])
     booked_ids = []
@@ -1223,6 +1272,10 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         for shot in shots:
             shot_id = shot["shot_id"]
             if shot_id in current_ids or flags[shot_id]["keep_still"]:
+                continue
+            if talks(shot_id):
+                if booked(shot, link=talking.TALKING_LINK, clip_s=talking.TALK_CLIP_S, template=None):
+                    booked_ids.append(shot_id)
                 continue
             try:
                 clip_s = video_plan.requested_seconds(link, max(float(shot["duration_s"] or 0.0), _UNTIMED_S),
@@ -1264,6 +1317,9 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
                     row["cover"] = "stretch"
                     row["stretch"] = factor
         rows_out.append(row)
+    if talk is not None:
+        rows_out, plan = _talk_rows(rows_out, plan, talk, durations=durations, kept=current_ids + booked_ids)
+        count, seconds, est = len(new), int(plan.seconds), round(float(plan.video_usd), 4)
     units.update(plan=rows_out, still=list(plan.still), count=count, seconds=seconds, est_usd=est,
                  over_cap=video_plan.all_shots_refusal(plan, link=link, mode=mode))
     if not local and media_policy.lipsync(ec.story):
@@ -1297,10 +1353,63 @@ def video_units(ec, script, storyboard, assets_doc, *, env, caps, committed_usd,
         units["ambience"] = {"sound": sound, "note": None if sound else _silent_note(
             ec, link, source=units["source"], chain=chain, merged=merged)}
     units["message"] = _message(units, plan, current_ids, profile_name, booked_ids, resolution=resolution)
+    if talk is not None:
+        units["talking"] = talk["part"]
+        units["message"] += f" {talk['part']['message']}."
     if hold and count:
         units["hold"] = hold
         units["message"] += f" Held: {hold}."
     return units
+
+
+def _talk_verdicts(ec, script, storyboard, merged, adapters, *, resolution, aspect) -> dict:
+    """Plan 32 stage 8: ``{"verdicts": {shot_id: talking verdict}, "row",
+    "part"}`` -- each shot's verdict (``talking.verdicts``), turned down
+    (``talking.unavailable``) when the S2V link cannot run now (its row,
+    :func:`link_row`, not keyed): every shot then stays on the episode's link."""
+    row = link_row(talking.TALKING_LINK, merged, adapters, resolution=resolution, aspect=aspect)
+    found = talking.verdicts(ec, script, storyboard)
+    if row["status"] != "keyed":
+        found = {shot_id: talking.unavailable(item) for shot_id, item in found.items()}
+    return {"verdicts": found, "row": row, "part": talking.plan_part(found, row)}
+
+
+def _talk_rows(rows, plan, talk, *, durations, kept) -> tuple:
+    """``(rows, plan)``: the plan *rows* whose shot talks moved to the S2V
+    link (``link``, ``talks``) at its one length, priced at its row's price
+    (a kept or booked clip at $0), held on its last frame over a longer shot
+    (never slowed); *plan* (``video_plan.VideoPlan``) with its seconds, its
+    estimate and its cap verdict following them. ``talk["part"]`` counts the
+    talking clips to make."""
+    price = float(talk["row"]["price_per_second"] or 0.0)
+    seconds, usd = float(plan.seconds), float(plan.video_usd)
+    part = talk["part"]
+    out = []
+    for row in rows:
+        if not talk["verdicts"][row["shot_id"]].get("talks"):
+            out.append(row)
+            continue
+        new = row["shot_id"] not in kept
+        clip_s = talking.TALK_CLIP_S
+        est = round(clip_s * price, 4) if new else 0.0
+        moved = {key: value for key, value in row.items() if key not in ("cover", "stretch", "held_s")}
+        moved.update(clip_s=clip_s, est_usd=est, link=talking.TALKING_LINK, talks=True)
+        held = round(durations[row["shot_id"]] - clip_s, 3)
+        if held > 0:
+            moved["held_s"] = held
+        if new:
+            seconds += clip_s - row["clip_s"]
+            usd += est - row["est_usd"]
+            part["count"] += 1
+            part["seconds"] += clip_s
+            part["est_usd"] = round(part["est_usd"] + est, 4)
+        out.append(moved)
+    if int(round(seconds)) == int(plan.seconds) and abs(usd - float(plan.video_usd)) < 1e-9:
+        return out, plan  # the same seconds at the same price: the plan's own numbers stand
+    total = plan.image_usd + usd
+    plan = plan._replace(seconds=int(round(seconds)), video_usd=round(usd, 4),
+                         left_usd=plan.cap_usd - total, over_cap=total > plan.cap_usd + 1e-9)
+    return out, plan
 
 
 def _silent_note(ec, link, *, source, chain, merged) -> str:

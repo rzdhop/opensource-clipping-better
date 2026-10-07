@@ -195,7 +195,8 @@
         "max_redraws_per_shot": 2,
         "cap_rule": "shots_x_redraws_x_price"
       },
-      "lipsync": "none"
+      "lipsync": "none",
+      "talking_clips": "runpod_s2v"
     }
   }
 }

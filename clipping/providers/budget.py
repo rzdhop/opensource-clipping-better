@@ -205,6 +205,12 @@ _LINK_LABEL = re.compile(r"^[a-z][a-z0-9_-]*/[^\s,*]+$")
 # ``kling`` (Kling LipSync on fal, LIPSYNC_CHAIN). A profile without the key
 # never lipsyncs.
 LIPSYNC_MODES = ("none", "kling")
+# Plan 32 stage 8 (DEC-315 §6): ``talking_clips`` -- whether a speaking shot's
+# clip is made by a talking-clip model (a keyframe and the shot's dialogue
+# track: the mouth follows the voice) instead of the episode's video link:
+# ``none``, or ``runpod_s2v`` (``runpod/s2v_wan22`` on the human's own GPU).
+# A profile without the key never makes one (``media_policy.talking_clips``).
+TALKING_CLIPS_MODES = ("none", "runpod_s2v")
 # Phase 8 stage B: ``keyframe_fix`` -- a v2 story's keyframes flagged by the
 # keyframe check (J2) are redrawn by the assets step, at most
 # ``max_redraws_per_shot`` times a shot and ``cap_usd`` an episode. A profile
@@ -243,7 +249,7 @@ def _profile_errors(name, profile) -> list:
         errors.append(f"profile {name!r}: video_resolution must be one of {', '.join(VIDEO_RESOLUTIONS)}, "
                       f"not {resolution!r}")
     for key, known in (("video_link_policy", VIDEO_LINK_POLICY_VALUES), ("tier3_native_audio", TIER3_AUDIO_VALUES),
-                       ("lipsync", LIPSYNC_MODES)):
+                       ("lipsync", LIPSYNC_MODES), ("talking_clips", TALKING_CLIPS_MODES)):
         if key in profile and profile[key] not in known:
             errors.append(f"profile {name!r}: {key} must be one of {', '.join(known)}, not {profile[key]!r}")
     if "keyframe_fix" in profile:

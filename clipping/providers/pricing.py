@@ -76,6 +76,10 @@ PRICES = {
     # low); what RunPod really billed is logged per clip from executionTime + delayTime (A-194).
     "runpod/i2v_wan22_14b_lightning": Price("second", 0.02, "Wan 2.2 14B fp8 + Lightning 4-step on a RunPod L40S/RTX 5090 worker: $0.018 a second measured warm at 720p on 2026-10-06, 480p default; the first clip after an idle also pays the cold start"),
     "runpod/i2v_wan22_5b": Price("second", 0.012, "Wan 2.2 5B ti2v on a RunPod worker: not measured; about 0.6x the 14B Lightning figure (one 5B pass against two 14B passes at 4 steps); the highest plausible figure is kept"),
+    # Plan 32 stage 8: the talking clip (Wan 2.2 S2V 14B fp8 + the 4-step Lightning LoRA, one 77-latent chunk)
+    # on the voice lines' endpoint. First live clip $0.097 cold for 4.875 s (220.3 GPU-s, the 16 GB load
+    # included, 2026-10-07); warm unmeasured. Same per-second shape as the i2v row.
+    "runpod/s2v_wan22": Price("second", 0.02, "Wan 2.2 S2V 14B fp8 + Lightning 4-step on a RunPod worker, one 77-latent chunk (4.875 s, sold as 5 s): first live clip $0.097 cold for 4.875 s (220.3 GPU-s, the 16 GB load included) on 2026-10-07; warm unmeasured"),
     "runpod/i2v_ltx2": Price("second", 0.03, "LTX-2 fp8 distilled on a RunPod worker: not measured; about 1.5x the 14B Lightning figure (a 22B model at 25 fps); the highest plausible figure is kept"),
     # --- the lipsync post-process of a made clip (DEC-258), per second of
     # input video; the adapter's estimate rounds the clip up to 5 s.

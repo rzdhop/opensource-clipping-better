@@ -116,6 +116,9 @@ def test_the_shipped_profiles_match_the_spec():
     assert own["images"] == "quality_roles" and own["cap_usd"] == 2.0 and own["video_link_policy"] == "first_in_chain"
     assert own["roles"]["sheet"][:2] == ["runpod/t2i_flux2_klein", "runpod/edit_flux2_klein_multiref"]
     assert own["roles"]["keyframe"][0] == "runpod/edit_flux2_klein_multiref"
+    # Plan 32 stage 8 (DEC-315 §6): own_gpu's speaking shots talk on runpod/s2v_wan22; no other profile names it.
+    assert own["talking_clips"] == "runpod_s2v"
+    assert [name for name, profile in profiles["profiles"].items() if "talking_clips" in profile] == ["own_gpu"]
     one = profiles["profiles"]["one_dollar"]
     assert one["cap_usd"] == 1.0
     assert one["animate_priority"] == ["hook", "cliffhanger", "peak", "turn", "longest_dialogue"]

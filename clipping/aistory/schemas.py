@@ -3950,6 +3950,15 @@ _STORYBOARD_CLIP_SCHEMA = _or_null(_document({
     # Plan 23 stage B8: a stock clip's credit record (route stock, link stock/<provider>):
     # who made it and under what licence (clipping/stock/credits.credit_record).
     "source": {"type": "object"},
+    # Plan 32 stage 8: a talking clip's dialogue track (runpod/s2v_wan22, steps/talking.py): what the
+    # track was made of (its spec hash: each line's audio, offset and trim), its bytes, its lines and
+    # where the speech ends in the shot. A re-voiced or re-timed line makes the clip stale.
+    "talk": _document({
+        "track_hash": _SHA256,
+        "audio_sha256": _SHA256,
+        "lines": {"type": "array", "items": _NON_EMPTY_STRING, "minItems": 1, "maxItems": 12},
+        "speech_s": {"type": "number", "minimum": 0},
+    }),
     # Plan 28 F7: the first frame of the human's clip against its keyframe (judge.check_first_frame), a
     # warning on the Handoff card, never a refusal.
     "first_frame": _document({

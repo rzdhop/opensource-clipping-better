@@ -190,6 +190,14 @@ def key_payload(kind, link, request):
         aspect = extra.get("aspect")
         if aspect and aspect != "9:16":
             payload["aspect"] = aspect
+        # Plan 32 stage 8: a talking clip's dialogue track (``GenRequest.audio``), keyed by its bytes,
+        # never its path -- only when there is one, so every other clip's key is the one it always was.
+        audio = getattr(request, "audio", None)
+        if audio:
+            try:
+                payload["audio"] = _sha256_file(audio)
+            except OSError:
+                return None
     if kind == LIPSYNC:
         # A new kind (DEC-258): no older key to keep. The clip is the one
         # reference; the dialogue track is keyed by its bytes, never its path.

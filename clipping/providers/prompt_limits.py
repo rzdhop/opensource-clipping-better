@@ -156,6 +156,8 @@ TABLE = {
     # DEC-310: the same templates on RunPod are addressed by their link (the template is the model).
     "runpod/i2v_wan22_5b": Limit(window_tokens=512, source=_UMT5, verified=False),
     "runpod/i2v_wan22_14b_lightning": Limit(window_tokens=512, source=_UMT5, verified=False),
+    # Plan 32 stage 8: the talking clip reads its prompt through the same umt5-xxl encoder.
+    "runpod/s2v_wan22": Limit(window_tokens=512, source=_UMT5, verified=False),
     "runpod/i2v_ltx2": Limit(
         5000, source=f"no API limit (our own ComfyUI workflow on RunPod); assumed equal to {_LTX2}, the cap fal "
                      "puts on the same model's prompt; its Gemma text encoder reads far more", verified=False),

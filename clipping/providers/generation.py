@@ -196,7 +196,7 @@ GEN_PROVIDERS = {
               "while a clip or an image renders; the models live on a network volume (runbook 11-INFRA). "
               "Images run on RUNPOD_IMAGE_ENDPOINT_ID when set (DEC-312), else on the video endpoint. "
               "Voice lines (runpod/tts_chatterbox, plan 32) run on RUNPOD_AUDIO_ENDPOINT_ID, else the image "
-              "endpoint, else the video one.",
+              "endpoint, else the video one; so do talking clips (runpod/s2v_wan22, plan 32 stage 8).",
         optional_keys=("RUNPOD_GPU_USD_PER_HOUR", "RUNPOD_IMAGE_ENDPOINT_ID", "RUNPOD_IMAGE_API_KEY",
                        "RUNPOD_IMAGE_GPU_USD_PER_HOUR", "RUNPOD_AUDIO_ENDPOINT_ID", "RUNPOD_AUDIO_API_KEY",
                        "RUNPOD_AUDIO_GPU_USD_PER_HOUR"),
@@ -399,6 +399,10 @@ class GenRequest:
     native_audio: bool = False    # the clip carries the model's own audio (video)
     out_dir: str = ""
     extra: dict = field(default_factory=dict)
+    # Plan 32 stage 8: the sound a clip is made from (video: a talking clip's
+    # dialogue track, a WAV); None for every other request, whose key it never
+    # enters (``gencache.key_payload``).
+    audio: str | None = None
 
 
 @dataclass

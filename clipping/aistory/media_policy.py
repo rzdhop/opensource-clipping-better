@@ -551,6 +551,32 @@ def lipsync(story) -> bool:
     return settings.get("lipsync") == LIPSYNC_KLING
 
 
+# ------------------------------------------------------------ talking clips
+
+# Plan 32 stage 8 (DEC-315 §6): the budget profiles' ``talking_clips``.
+TALKING_NONE = "none"
+TALKING_S2V = "runpod_s2v"
+
+
+def talking_clips(story) -> str:
+    """How *story*'s speaking shots get their clips (plan 32 stage 8, DEC-315
+    §6; the human heard the first S2V line on 2026-10-07: "c'est très bien
+    pour le lipsync"): ``runpod_s2v`` -- a speaking shot's clip is a talking
+    clip on ``runpod/s2v_wan22`` (its keyframe and its dialogue track; which
+    shots qualify is ``steps/talking.py``'s) -- or ``none``: every clip on the
+    episode's video link, as always. Read from the budget profile's
+    ``talking_clips`` (the ``own_gpu`` profile) for a v2 story at tier 2 or 3
+    that animates its shots and is not native speech (its clips speak their
+    own lines); a profile without the key, or that cannot be read, says
+    ``none``."""
+    if not is_v2(story) or native_speech(story):
+        return TALKING_NONE
+    if int(((story or {}).get("generation_profile") or {}).get("tier") or 1) < 2:
+        return TALKING_NONE
+    chosen = _profile_of(story).get("talking_clips")
+    return chosen if chosen in budget_mod.TALKING_CLIPS_MODES else TALKING_NONE
+
+
 # ------------------------------------------------------------ native speech
 
 # Plan 22: ``tier3_native_audio``'s value of the native-speech profile.

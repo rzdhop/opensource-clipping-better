@@ -191,6 +191,7 @@ from . import lipsync as lipsync_step
 from . import native_take as take_mod
 from . import script as script_step
 from . import storyboard as storyboard_step
+from . import talking
 from .episode_common import SCRIPT_DOC, STORYBOARD_DOC
 from .llm_call import StepFailed
 from .pacing import RATE_LIMIT_PAUSE_S, _paid_sent, is_rate_limit, rate_limited_by
@@ -1935,7 +1936,7 @@ def _video_units(ec, script, storyboard, doc, *, env, ledger, adapters, probe_lo
     return clips.video_units(ec, script, storyboard, doc, env=env, caps=caps, committed_usd=spent + committed,
                              adapters=adapters, probe_local=probe_local, transport=transport,
                              image_sha=lambda shot: _sha256_file(shot_image_path(ec, shot)),
-                             booked=_clip_booked(ec, script, doc), hold=clip_hold(ec, storyboard, doc))
+                             booked=_clip_booked(ec, script, doc, storyboard), hold=clip_hold(ec, storyboard, doc))
 
 
 # -------------------------------------------------------------- the clips
@@ -1953,6 +1954,11 @@ def _video_summary(video, *, animate) -> dict:
                "failed": [], "seconds": 0, "usd": 0.0, "link": video["link"], "route": video["route_class"]}
     if video.get("lipsync") is not None:
         summary["lipsync"] = _lipsync_summary(video["lipsync"])
+    if video.get("talking") is not None:
+        # Plan 32 stage 8: the shots that talk on the S2V link, the speaking ones too long for one chunk.
+        part = video["talking"]
+        summary["talking"] = {"link": part["link"], "shots": list(part["shots"]), "too_long": list(part["too_long"]),
+                              "made": [], "message": part["message"]}
     return summary
 
 
@@ -1980,7 +1986,7 @@ def clip_seed(shot, *, story_id, ep) -> int:
     return seed if seed is not None else derive_seed(story_id, ep, shot["shot_id"])
 
 
-def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags, tier, out_dir=""):
+def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags, tier, out_dir="", audio=None):
     """``(parts, request)``: the prompt parts of *shot*'s clip
     (``clips.clip_request_parts``) and the ``GenRequest`` the video phase
     sends for it -- its keyframe the shot's image, its length *clip_s*, its
@@ -1992,7 +1998,13 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
     on a v2 story the master and the scene template before the core, fitted
     to *link* (and a local *template*'s window) -- and that fit is
     ``parts["sent"]`` (``{text, words, full_words, limit, dropped}``);
-    ``parts["prompt"]`` and ``parts["hash"]`` stay the core's."""
+    ``parts["prompt"]`` and ``parts["hash"]`` stay the core's.
+
+    Plan 32 stage 8: a clip on ``talking.TALKING_LINK`` is made from the
+    shot's dialogue track, *audio* (``GenRequest.audio``, keyed by its
+    bytes); ``ValueError`` without it. Every other clip takes none."""
+    if link == talking.TALKING_LINK and not audio:
+        raise ValueError(f"a talking clip on {link} is made from its dialogue track; none was built")
     parts = clips.clip_request_parts(ec, shot, script, tier=tier, flags=flags, note=note, link=link)
     parts["sent"] = clips.sent_clip_prompt(ec, shot, script, parts, link=link, template=template)
     extra = {"name": f"shot_{shot['shot_id'][2:]}"}
@@ -2011,11 +2023,35 @@ def clip_request(ec, shot, script, *, link, template, clip_s, seed, note, flags,
     width, height = shot_size(ec.story)
     request = gen.GenRequest(kind=gen.VIDEO, prompt=parts["sent"]["text"], negative=parts["negative"], width=width,
                              height=height, seed=seed, references=(shot_image_path(ec, shot),),
-                             duration_s=int(clip_s), native_audio=parts["native_audio"], out_dir=out_dir, extra=extra)
+                             duration_s=int(clip_s), native_audio=parts["native_audio"], out_dir=out_dir, extra=extra,
+                             audio=audio if link == talking.TALKING_LINK else None)
     return parts, request
 
 
-def _clip_booked(ec, script, doc):
+def clip_key(ec, shot, script, *, link, template, clip_s, seed, note, flags, tier, storyboard=None):
+    """The generation-journal key of *shot*'s clip request (:func:`clip_request`)
+    on *link*, or None. A talking clip's (plan 32 stage 8) is keyed by its
+    dialogue track's bytes: the track is built in a folder of its own for the
+    key and dropped (``talking.track_file``; *storyboard* the episode's, read
+    from disk unless given) -- None when the shot does not talk now or the
+    track cannot be built. ``ValueError``/``KeyError``/``OSError`` pass
+    through, as from :func:`clip_request`."""
+    if link != talking.TALKING_LINK:
+        _parts, request = clip_request(ec, shot, script, link=link, template=template, clip_s=clip_s, seed=seed,
+                                       note=note, flags=flags, tier=tier)
+        return gencache.request_key(gen.VIDEO, link, request)
+    found = talking.verdict_now(ec, script, shot, storyboard=storyboard)
+    if not found.get("talks"):
+        return None
+    with talking.track_file(found, name=f"shot_{shot['shot_id'][2:]}.talk") as track:
+        if track is None:
+            return None
+        _parts, request = clip_request(ec, shot, script, link=link, template=template, clip_s=clip_s, seed=seed,
+                                       note=note, flags=flags, tier=tier, audio=track)
+        return gencache.request_key(gen.VIDEO, link, request)
+
+
+def _clip_booked(ec, script, doc, storyboard=None):
     """``booked(shot, *, link, clip_s, template)`` for ``clips.video_units``:
     whether the story's generation journal holds *shot*'s next clip request
     -- the very one the video phase would send (:func:`clip_request`) --
@@ -2034,10 +2070,9 @@ def _clip_booked(ec, script, doc):
         if shot_image_path(ec, shot) is None:
             return False
         try:
-            _parts, request = clip_request(ec, shot, script, link=link, template=template, clip_s=clip_s,
-                                           seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
-                                           note=clip_note(shot), flags=clips.shot_flags(shot, doc), tier=tier)
-            key = gencache.request_key(gen.VIDEO, link, request)
+            key = clip_key(ec, shot, script, link=link, template=template, clip_s=clip_s,
+                           seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep), note=clip_note(shot),
+                           flags=clips.shot_flags(shot, doc), tier=tier, storyboard=storyboard)
             entry = cache.lookup(key) if key else None
         except (gencache.JournalError, KeyError, ValueError, OSError):
             return False
@@ -2593,9 +2628,8 @@ def pending_clip_keys(ec, script, shot, doc, *, link=None) -> list:
             pass
         for clip_s in dict.fromkeys(seconds):
             try:
-                _parts, request = clip_request(ec, shot, script, link=link, template=template, clip_s=clip_s,
-                                               seed=pending["seed"], note=pending.get("note"), flags=flags, tier=tier)
-                key = gencache.request_key(gen.VIDEO, link, request)
+                key = clip_key(ec, shot, script, link=link, template=template, clip_s=clip_s, seed=pending["seed"],
+                               note=pending.get("note"), flags=flags, tier=tier)
             except (KeyError, ValueError, OSError):
                 continue
             if key:
@@ -2682,11 +2716,10 @@ def clip_quote(ec, script, storyboard, shot, *, env, adapters=None, probe_local=
         return quote
     keys = [(shot["assets"].get("clip") or {}).get("cache_key")]
     try:
-        _parts, request = clip_request(ec, shot, script, link=video["link"], template=video.get("template"),
-                                       clip_s=row["clip_s"], seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
-                                       note=clip_note(shot), flags=clips.shot_flags(shot, doc),
-                                       tier=clips.tier_of(ec))
-        keys.append(gencache.request_key(gen.VIDEO, video["link"], request))
+        keys.append(clip_key(ec, shot, script, link=video["link"], template=video.get("template"),
+                             clip_s=row["clip_s"], seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
+                             note=clip_note(shot), flags=clips.shot_flags(shot, doc), tier=clips.tier_of(ec),
+                             storyboard=storyboard))
     except (KeyError, ValueError, OSError):
         pass
     entry = open_clip_request(ec, keys)
@@ -3651,12 +3684,20 @@ class _Assets(voice_lines.LineMeasurement):
         tier = clips.tier_of(ec)
         by_id = {shot["shot_id"]: shot for shot in self.storyboard["shots"]}
         native = video.get("speech") is not None
+        # Plan 32 stage 8: the plan's talking verdicts, so a kept clip is judged on the link the plan put it on.
+        talk = None
+        if video.get("talking") is not None:
+            planned = {row["shot_id"] for row in video["plan"] if row.get("talks")}
+            talk = {shot_id: found if shot_id in planned else talking.unavailable(found)
+                    for shot_id, found in talking.verdicts(ec, self.script, self.storyboard).items()}
+            ctx.on_log(f"🗣️ {video['talking']['message']}.")
         todo, kept_ids = [], []
         for row in video["plan"]:
             shot = by_id[row["shot_id"]]
-            state = clips.clip_state(ec, shot, self.script, link=row.get("link") or video["link"], tier=tier,
-                                     flags=clips.shot_flags(shot, doc),
-                                     image_sha=_sha256_file(shot_image_path(ec, shot)))
+            state = clips.clip_state(ec, shot, self.script, link=video["link"] if row.get("talks") else
+                                     row.get("link") or video["link"], tier=tier, flags=clips.shot_flags(shot, doc),
+                                     image_sha=_sha256_file(shot_image_path(ec, shot)),
+                                     **({"talk": talk[row["shot_id"]]} if talk is not None else {}))
             if state == "current":
                 self.video["reused"] += 1
                 kept_ids.append(row["shot_id"])
@@ -3711,7 +3752,7 @@ class _Assets(voice_lines.LineMeasurement):
                 continue
             self.clip_todo = todo_ids[todo_ids.index(row["shot_id"]):]
             self.before_clip(self.clip_todo)
-            shot_video = dict(video, link=row["link"]) if native else video
+            shot_video = dict(video, link=row["link"]) if native or row.get("talks") else video
             try:
                 record, info = self.make_clip(shot, video=shot_video, clip_s=row["clip_s"], est_usd=row["est_usd"],
                                               seed=clip_seed(shot, story_id=ec.story_id, ep=ec.ep),
@@ -4030,14 +4071,21 @@ class _Assets(voice_lines.LineMeasurement):
             raise fail(f"its {problem}; no clip was asked")
         if self.video_gone is not None:
             raise fail(self.video_gone_reason())
+        talk = None
+        if link == talking.TALKING_LINK:
+            # Plan 32 stage 8: a talking clip is made from the shot's dialogue track, as it stands now.
+            talk = talking.verdict(ec, self.script, self.storyboard, shot)
+            if not talk.get("talks"):
+                raise fail(f"it does not talk on {link} now ({talking.why_text(talk)}); no clip was asked")
         try:
             chain = gen.chain_from_env(gen.VIDEO, gates.merged)
         except ChainError as exc:
             raise fail(f"{gen.ENV_NAMES[gen.VIDEO]} cannot be used: {exc}") from None
         # The plan's link alone (A-087): never the next link of the chain.
         pinned = [candidate for candidate in chain if describe(candidate) == link][:1]
-        if not pinned and media_policy.native_speech(ec.story):
-            # Plan 22: a native-speech episode's links are its budget profile's, by name.
+        if not pinned and (media_policy.native_speech(ec.story) or talk is not None):
+            # Plan 22: a native-speech episode's links are its budget profile's, by name;
+            # plan 32 stage 8: so is the talking clips' link.
             try:
                 pinned = gen.parse_generation_chain(gen.VIDEO, [link])[:1]
             except ChainError:
@@ -4047,8 +4095,17 @@ class _Assets(voice_lines.LineMeasurement):
         route = ec.story["generation_profile"]["route"]
         cache = self.cache(gen.VIDEO, unit="second", qty=int(clip_s))
         with tempfile.TemporaryDirectory(prefix="shot-clip-") as incoming:
+            track = None
+            if talk is not None:
+                try:
+                    track = talking.build(talk, os.path.join(incoming, f"shot_{shot_id[2:]}.talk.wav"),
+                                          run=self.lipsync_run)
+                except lipsync_step.LipsyncError as exc:
+                    raise fail(f"its dialogue track could not be built ({exc}); no clip was asked") from None
+                record["talk"] = talking.record(talk, track)
             sent_parts, request = clip_request(ec, shot, self.script, link=link, template=template, clip_s=clip_s,
-                                               seed=seed, note=note, flags=flags, tier=tier, out_dir=incoming)
+                                               seed=seed, note=note, flags=flags, tier=tier, out_dir=incoming,
+                                               audio=track["path"] if track else None)
             if sent_parts["sent"]["dropped"]:
                 ctx.on_log(_fit_line(shot_id, link, sent_parts["sent"]))
             record["cache_key"] = gencache.request_key(gen.VIDEO, link, request)
@@ -4109,7 +4166,12 @@ class _Assets(voice_lines.LineMeasurement):
         shot["assets"]["video"] = clips.clip_rel(shot_id)
         self.write_board()
         speaking = bool(shot.get("speaks")) and media_policy.native_speech(ec.story)
-        if not clips.off_class(ec.story, shot, _read_assets_doc(ec)):
+        if record["link"] == talking.TALKING_LINK and talking.enabled(ec.story):
+            # Plan 32 stage 8: a talking clip is never the episode's video link (the other shots stay on theirs).
+            talked = (self.video or {}).get("talking")
+            if talked is not None and shot_id not in talked["made"]:
+                talked["made"].append(shot_id)
+        elif not clips.off_class(ec.story, shot, _read_assets_doc(ec)):
             # Plan 25 stage 1: a shot its mode moved to another link never becomes its class's sticky link.
             self.keep_video_link(record["link"], kind=sticky_link.VIDEO_SPEECH if speaking else sticky_link.VIDEO)
         summary = self.video
