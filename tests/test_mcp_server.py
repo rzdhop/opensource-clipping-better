@@ -404,8 +404,13 @@ def test_a_preset_story_shows_its_recipe_and_the_own_gpu_profile(backend):
                        generation_profile={"budget_profile": "quality"}))
     assert own["generation_profile"]["budget_profile"] == "quality"
     assert own["generation_profile"]["universe"] == "fruits"
+    # Plan 33 stage 4 (DEC-317): a plain story from the chat is fully animated (own_gpu, tier 3), never a
+    # tier-1 "no clips" one; a still-based profile or tier is refused.
     plain = payload(call(server, "story_create", language="en"))
-    assert plain["recipe"] is None and plain["generation_profile"]["budget_profile"] == "free"
+    assert plain["recipe"] is None and plain["generation_profile"]["budget_profile"] == "own_gpu"
+    assert plain["generation_profile"]["tier"] == 3
+    still = call(server, "story_create", language="en", generation_profile={"budget_profile": "free"})
+    assert still.is_error and "own_gpu" in still.content[0].text
     unknown = call(server, "story_create", language="en", preset="moon_opera")
     assert unknown.is_error and "fruit_drama" in unknown.content[0].text
 
@@ -416,7 +421,7 @@ def test_the_options_list_presets_budget_profiles_and_formats(backend):
     fruit = next(p for p in options["presets"] if p["id"] == "fruit_drama")
     assert fruit["label"] and fruit["summary"] and fruit["sets"]
     caps = {p["id"]: p["cap_usd"] for p in options["budget_profiles"]}
-    assert caps["own_gpu"] == 2.0 and caps["free"] == 0.0
+    assert caps["own_gpu"] == 2.0 and "free" not in caps and "one_dollar" not in caps  # DEC-317: no still-based profile offered
     formats = {f["id"]: f for f in options["episode_formats"]}
     assert formats["serial_60s_v2"]["window_s"] == [55, 75] and formats["serial_60s_v2"]["scenes"]
     assert "style" in options["steps"] and "fast-track" in options["steps"]

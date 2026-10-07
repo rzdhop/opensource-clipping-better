@@ -1,23 +1,38 @@
-## CURRENT STATE — plan 33 (MCP voice tools, file_upload, honest ledger, the "no still" guard, ep01 voices) IN PROGRESS (2026-10-07, local session, the human away)
+## CURRENT STATE — plan 33 (MCP voice tools, file_upload, honest ledger, the "no still" guard, ep01 voices) COMPLETE on main + plan 34 (the Lightning motion fix) CODE DONE, its GPU check awaiting the human (2026-10-07, local session)
 
-- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = ba145e7 (clean tree; untracked `reports/`,
-  `research_notes/`, `FETCH_HEAD` left as is). Plan file `.claude/plans/ai-story/33-mcp-voice-tools-honest-ledger-plan.md`
-  (the pasted brief is the approved plan, A-215). Stages: 1 ledger → 2 file_upload → 3 voice tools (inline, this
-  session) ∥ 4 the "no still" guard (an Opus agent in a worktree) → 5 MCP restart + the 13 Gemini lines of
-  "Faille d'amour" ep01 → 6 docs. Current stage = 1. Next action = `_billed` bills executionTime only.
-- **Tier-1 baseline (ba145e7, venv):** see the stage-1 log line (test_mcp_server, test_mcp_runpod_jobs,
-  test_runpod_comfyui, test_voice_tools, test_tts_adapters, test_tts_chatterbox_template).
-- **Regression contract (plan 33):** (1) image/video/audio jobs submit, settle once, save files —
-  test_mcp_runpod_jobs, test_mcp_server; (2) comfy_download containment — test_comfy_download_hands_back…;
-  (3) the tool list never shrinks — test_the_tools_are_listed; (4) the Gemini adapter's request/WAV shape and
-  the tail guard — test_tts_adapters, test_tts_tail; (5) the seven workflow templates byte-identical —
-  test_tts_chatterbox_template, test_comfyui_video; (6) tier-1 and tier-2 render goldens unchanged —
-  test_aistory_render_golden*; (7) the fully-animated refusals of DEC-236 — test_story_fully_animated_render;
-  (8) the app's spend ledger untouched (runpod_comfyui.gpu_seconds not edited) — test_runpod_comfyui.
-- **Open questions (for the human, not blocking):** tier 1 and the `free`/`one_dollar` profiles are stills by
-  construction and stay in the app (unreachable from the MCP after stage 4) — remove them from the product?
-  `keep_still` (DEC-236's one exemption) kept in the app, not offered by the MCP. Does RunPod bill the cold
-  start inside delayTime? The wall figure stays visible beside the billed one.
+- **In-progress header:** phase = DOCUMENT / close-out; nothing running. Checkpoint commit = main (this commit).
+  Plan file `.claude/plans/ai-story/33-mcp-voice-tools-honest-ledger-plan.md` (+ "Stage 4 as shipped"). Commits:
+  f4615ea stage 1 (honest ledger) · 2e2a778 stage 2 (file_upload) · 39ac268 + 1e97ef4 stage 3 (voice tools; the key
+  from the stored settings) · 3f0ce83 docs · f9c64ca plan 34 (the motion fix) · 7cb55d2 + 7364cbb stage 4 (the
+  "no still" rule, an Opus agent's worktree merged) · this commit (DEC-317, CHANGELOG, the two MCP tests). The MCP
+  unit restarted on the merged code (39 tools). **Waiting on the human (asked in chat 2026-10-07):** (a) the go for
+  ONE paid test clip with the plan-34 recipe (≈ $0.20 cold) → flip `verified_live` true, then the 13 clips of
+  "Faille d'amour" ep01 again (≈ $1) if the motion is right; (b) lowering the render's stretch cap
+  (`clips.MAX_STRETCH` 1.25 → 1.0, DEC-250); (c) optionally speeding the existing ep01 clips 1.3x with ffmpeg
+  (free). **Next action otherwise:** the dashboard bundle rebuild (`sudo -n docker compose rm -sfv backend && up -d
+  --build backend`, the agent removed two checkboxes; the API refuses the old flags meanwhile), not done here.
+- **Delivered:** `tts_line` / `tts_batch` / `voice_ref_make` / `file_upload` live; `cost_ledger` bills executionTime
+  (today: $0.78 billed vs $3.17 wall); the 13 Gemini WAVs + `durations.json` at
+  `outputs/faille_damour/ep01/voices/` (1.96–4.06 s, tail bursts cut, $0 per the price table); no still from any
+  client (DEC-317).
+- **Tier 1:** stage 1 venv 69 / local+CI 47+1s · stage 2 venv 23 · stage 3 venv 141 / 117+1s / 117+1s · plan 34 venv
+  156 / 131+1s / 131+1s · stage 4 (the agent, 256 files) local 7339+12s / CI-like 6370+950s, then after the merge
+  venv 72 (test_mcp_no_still, server, director, voice_tools, runpod_jobs) / local 170 / CI-like 115+55s — exit 0
+  everywhere (DEC-278: CI runs the full suite at the push). **Tier 2:** DEFERRED — the live checks are the human's:
+  the plan-34 clip, a chatterbox line through `tts_line` (never run paid here), the dashboard rebuild. **Tier 3:**
+  tests/test_mcp_voice_tools.py (8), tests/test_mcp_no_still.py (5), +4 in test_mcp_server.py, +1 test_mcp_runpod_jobs,
+  +1 test_comfyui_video (the motion recipe), 22 test files migrated by the agent.
+- **Regression contract (plan 33) — intact:** (1) jobs submit/settle/save — test_mcp_runpod_jobs, test_mcp_server;
+  (2) comfy_download containment; (3) the tool list never shrinks (39 now); (4) the Gemini adapter's shape and the
+  tail guard — test_tts_adapters, test_tts_tail untouched; (5) the templates: six byte-identical, the seventh
+  (`i2v_wan22_14b_lightning`) changed ON PURPOSE by plan 34 (its placeholders/frame rule unchanged); (6) tier-1 and
+  tier-2 render goldens unchanged; (7) DEC-236's refusals kept and widened; (8) `runpod_comfyui.gpu_seconds` not
+  edited (the app's spend ledger unchanged — follow-up: align it with DEC-316).
+- **Open questions (the human):** tier 1 / `free` / `one_dollar` stay in the app (unreachable from the MCP) —
+  remove them? `keep_still` kept. RunPod's billing of the cold start (A-216). The plan-34 recipe's real GPU
+  seconds and motion (A-218). S2V (`s2v_wan22`) keeps the 4-step Lightning recipe (its speed is bound to the
+  audio) — revisit if talking clips look slow too.
+- **Untracked, left as is:** `reports/`, `research_notes/`, `FETCH_HEAD`.
 
 ## CURRENT STATE — plan 32 COMPLETE (stages 0–9 incl. stage 8 talking clips) on main and DEPLOYED (2026-10-07, local session)
 

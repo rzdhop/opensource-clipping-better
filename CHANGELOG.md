@@ -34,8 +34,23 @@ All notable changes to the **rzdhop AI** project will be documented in this file
   atomic write, no silent overwrite; answers size, sha256 and a sound file's
   duration.
 
+- **`file_upload`'s sibling, the "no still" rule, is enforced everywhere** (DEC-317):
+  `animate: false` is refused by the assets step and the API (the keyframe hold is
+  the way to look at pictures first), `fill_failed_with_motion` is gone from the
+  render params, the API, the CLI and the dashboard, a shot without a current
+  clip stops the render for every tier-2+ story and names its
+  `regenerate shot:<ep>:<shot_id>:video` target, and the MCP creates fully
+  animated stories only (`own_gpu`, tier 3 by default; still-based profiles and
+  tiers refused; `story_options` lists animated profiles only).
+
 #### Changed
 
+- **The Wan 2.2 Lightning clips no longer play like slow motion** (plan 34):
+  the `i2v_wan22_14b_lightning` template runs 8 steps, the high-noise stage at
+  cfg 3.0 with its Lightning LoRA at 0.7, the low-noise stage at cfg 1 with its
+  LoRA at 1.0; a `default_negative` ("slow motion, static, frozen…") is appended
+  by every planner (the MCP, the RunPod adapter, the local one). About three
+  times the GPU seconds of a clip; `verified_live` is false until one clip runs.
 - **The MCP ledger is honest** (DEC-316): `gpu_seconds` / `billed_usd` are
   RunPod's `executionTime` alone; `delay_seconds` (queue + cold start) and
   `wall_seconds` are shown beside them, `cost_ledger` adds
