@@ -1,15 +1,15 @@
-## CURRENT STATE — plan 33 COMPLETE + plan 34 (the Lightning motion fix) COMPLETE: the final "Faille d'amour" ep01 delivered (2026-10-07, local session)
+## CURRENT STATE — plans 33, 34 and 35 COMPLETE: the talking "Faille d'amour" ep01 (v3) delivered; the fix is in the pipeline (2026-10-07, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out; nothing running. Checkpoint commit = main (this commit).
-  Plan 33 commits f4615ea · 2e2a778 · 39ac268 · 1e97ef4 · 3f0ce83 · 7cb55d2+7364cbb · 94b8135; plan 34: f9c64ca (the
-  recipe) · b15df9c (verified live, job 43b0b564) · 05e1560 · b2bb298 (the edit tool) · this commit (the regen
-  script, the log). **Delivered to the human in chat:** `outputs/faille_damour/ep01/faille_damour_ep01_final.mp4`
-  (67.3 s, 13 clips of the 8-step recipe incl. three continuation clips, 13 Gemini lines, burned subtitles, the
-  Team end card); plan-34 spend $1.45 (15 jobs, $0.48 of it one slow cold start). **Still the human's calls
-  (asked in chat):** the render's stretch cap (`clips.MAX_STRETCH` 1.25 → 1.0, DEC-250); the backend restart +
-  dashboard rebuild for DEC-317's removed checkboxes; tier 1 / `free` / `one_dollar` kept or removed; the S2V
-  template keeps the 4-step recipe (talking clips may look slow too — revisit after the first voiced episode).
-  **Next action if nothing else:** none; the next story from the chat with the skill.
+  Today's commits: plan 33 (f4615ea…94b8135), plan 34 (f9c64ca, b15df9c, 05e1560, b2bb298, 4f2d989), plan 35
+  (16eb89f episode_cut · 0a417ab+0a82281 the pipeline, an Opus agent's worktree merged · 88f4edd DEC-318 · this
+  commit). **Delivered in chat:** `outputs/faille_damour/ep01/faille_damour_ep01_v3.mp4` (65 s: hook, 13 S2V
+  talking close-ups cut to their lines, wide beats, subtitles, Team card; −16.6 LUFS). Spend today for the
+  episode: plan 34 $1.45 + plan 35 $1.05 (close-ups $0.10, S2V $0.89, voices $0). **Pending the human:** the voice
+  cast (my pick Puck/Kore/Alnilam/Aoede/Algenib; a change = that character's S2V clips again, $0.066 a line);
+  the backend restart + dashboard rebuild (DEC-317/318 not yet live in the app container; the MCP unit is);
+  tier 1 / free / one_dollar kept or removed; the S2V template's 4-step recipe. **Next action if nothing else:**
+  the first own_gpu episode through `story_make_episode` with the plan-35 pipeline (its live proof, A-219).
 - **Delivered:** `tts_line` / `tts_batch` / `voice_ref_make` / `file_upload` live; `cost_ledger` bills executionTime
   (today: $0.78 billed vs $3.17 wall); the 13 Gemini WAVs + `durations.json` at
   `outputs/faille_damour/ep01/voices/` (1.96–4.06 s, tail bursts cut, $0 per the price table); no still from any
