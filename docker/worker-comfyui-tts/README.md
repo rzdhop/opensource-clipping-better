@@ -50,7 +50,7 @@ volume, next to the Wan 2.2 I2V files already there (`umt5_xxl_fp8_e4m3fn_scaled
 
 | File | Size | Goes in |
 |---|---|---|
-| `diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors` | 16.4 GB | `models/diffusion_models` |
+| `diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors` | 16.4 GB | `models/unet` (the volume's folder for diffusion models; UNETLoader reads it) |
 | `audio_encoders/wav2vec2_large_english_fp16.safetensors` | 0.63 GB | `models/audio_encoders` (the new symlink) |
 | `loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors` | 1.2 GB | `models/loras` (the T2V v1.1 LoRA, not the two I2V ones already there) |
 

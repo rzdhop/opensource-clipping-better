@@ -8,7 +8,8 @@
 #
 # Creates the folder (the worker's /comfyui/models/chatterbox is a symlink to
 # <volume>/models/chatterbox, which must exist). Files already present are skipped.
-# Uses huggingface-cli when installed, plain curl otherwise.
+# Uses the `hf` CLI when installed (the old `huggingface-cli` shim on the dev pod only prints
+# hints and exits 1), plain curl otherwise.
 set -eu
 
 DEST=${1:-/workspace/models/chatterbox/chatterbox_multilingual}
@@ -27,9 +28,9 @@ for f in $FILES; do
 done
 
 if [ -n "$missing" ]; then
-    if command -v huggingface-cli >/dev/null 2>&1; then
+    if command -v hf >/dev/null 2>&1; then
         # shellcheck disable=SC2086
-        huggingface-cli download "$REPO" $missing --local-dir "$DEST"
+        hf download "$REPO" $missing --local-dir "$DEST"
     else
         for f in $missing; do
             echo "download: $f"
