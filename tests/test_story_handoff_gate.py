@@ -47,7 +47,7 @@ def test_each_shot_says_its_keyframe_check_and_an_app_keyframe_gates_its_clip(st
     from clipping.aistory.steps import assets, brief
 
     story_id = kg._v2_keyframes(store, tmp_path, built)
-    kg._run(store, story_id, vision=kg.FakeVision(khg._sheet_mismatch("sh02")), params={"animate": False})
+    kg._run(store, story_id, vision=kg.FakeVision(khg._sheet_mismatch("sh02")))
     ec = tas._ec(store, story_id)
     board = tas._board(store, story_id)
     doc = assets._read_assets_doc(ec)

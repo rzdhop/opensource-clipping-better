@@ -28,10 +28,6 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
   const hasAssets = Boolean(episode.assets && episode.assets.doc)
   const tier = episode.assets ? episode.assets.tier : 1
   const [alignWords, setAlignWords] = useState(false)
-  // Phase 6 stage 8's own default (assets.animate_param): on, so a tier >= 2
-  // run makes the clips right after the images and voices unless turned off
-  // here (stage 12's own toggle, test_story_defaults.py pins this default).
-  const [animate, setAnimate] = useState(true)
   const [estimate, setEstimate] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
@@ -60,7 +56,8 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
     setError('')
     setErrors(null)
     try {
-      const assetsParams = { align_words: alignWords, animate }
+      // Plan 33 stage 4: always animate -- every shot is a video clip (the step refuses animate false).
+      const assetsParams = { align_words: alignWords, animate: true }
       await runStoryStep(storyId, 'assets', { ep, params: assetsParams })
       onChange()
     } catch (err) {
@@ -136,23 +133,11 @@ function AssetsHeader({ storyId, ep, episode, busy, onChange }) {
           {estimate.alignment.requests} line{estimate.alignment.requests === 1 ? '' : 's'} would be aligned.
         </p>
       )}
-      {tier >= 2 && (
-        <>
-          <label className="story-checkbox">
-            <input
-              type="checkbox"
-              checked={animate}
-              onChange={(e) => setAnimate(e.target.checked)}
-              disabled={busy || running}
-            />
-            Animate (make the clips right after the images and voices)
-          </label>
-          {!hasAssets && (
-            <p className="form-hint">
-              Make the keyframes first (animate off), then animate — the clip lengths follow the measured voices.
-            </p>
-          )}
-        </>
+      {tier >= 2 && !hasAssets && (
+        <p className="form-hint">
+          Every shot becomes a video clip, made after its picture and voices — the clip lengths follow the measured
+          voices.
+        </p>
       )}
       {reason && <p className="form-hint">{reason}</p>}
       <StepError message={error} errors={errors} className="story-step-error" />

@@ -669,7 +669,7 @@ def test_line_row_offers_its_own_voice_regenerate():
 
 def test_the_readers_see_phase4_stage15_things():
     """A broken regex would make every assertion below pass for free."""
-    assert len(workflow.RENDER_PARAMS) == 3  # phase 6 stage 9: fill_failed_with_motion
+    assert len(workflow.RENDER_PARAMS) == 2  # plan 33 stage 4, re-pinned on purpose: fill_failed_with_motion retired
     assert len(workflow.METADATA_PARAMS) == 0
     assert len(render_step.SUBTITLE_CHOICES) == 4
     assert len(schemas.PLATFORMS) == 3

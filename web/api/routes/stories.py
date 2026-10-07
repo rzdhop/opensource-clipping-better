@@ -85,7 +85,8 @@ A story is a folder under ``outputs/stories/<story_id>/`` kept by
   ``links {image?, video?}`` -- the sticky offers' switch, checked against
   the Settings chains; ``GET /estimate/assets?route=`` prices another route
   without patching the story; the render meets its clip refusal before a job
-  exists (409) unless ``fill_failed_with_motion`` is sent; a shot's clip is
+  exists (409; plan 33 stage 4: every shot is a video clip, nothing fills a
+  shot with motion); a shot's clip is
   served by ``GET /{id}/episodes/{ep}/clips/{name}`` behind the router's
   token like the shot images (DEC-113; open while ``API_TOKEN`` is unset,
   DEC-173), and the episode page carries each shot's clip, the tier, the
@@ -1662,11 +1663,9 @@ def _phase4_checks(stories, story, step, params, ep, env):
     model = _STEP_PARAMS.get(step)
     sent = _sent(model(**params)) if model is not None else {}
     if step == "assets":
-        animate = params.get("animate") is not False  # the step's own default: on
-
-        def gate():  # the plan's own stop, before the first call
+        def gate():  # the plan's own stop, before the first call (animate false: refused above)
             with _answering():
-                workflow.assets_gate(ec, env=env, animate=animate)
+                workflow.assets_gate(ec, env=env)
     elif step == "render":
         def gate():  # it calls nothing: no gate
             return None
@@ -1688,8 +1687,8 @@ async def _phase4_step(stories, story, step, params, ep) -> JobResponse:
     ``{subtitles?, encoder?}``, ``fast-track`` ``{storyboard?}``, ``metadata``
     none), then what the step is made from (409 with the step's own sentence:
     ``workflow.require_step_inputs`` -- for the render at tier >= 2 also its
-    clip refusal, unless ``fill_failed_with_motion`` is sent: phase 6 stage
-    11), then what every job meets
+    clip refusal: phase 6 stage 11; plan 33 stage 4, a shot without a current
+    clip), then what every job meets
     (``_create_step_job``: 409 while a step of the story is in flight; the
     step's gate -- the key gate for ``metadata`` and ``fast-track`` (400), the
     plan's own stop for ``assets`` (409: ``workflow.assets_gate``), none for
@@ -2279,15 +2278,13 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
                    place: Optional[list[str]] = Query(None), prop: Optional[list[str]] = Query(None),
                    ep: Optional[int] = None, measure: bool = False, align_words: bool = False,
                    subtitles: Optional[str] = None, encoder: Optional[str] = None,
-                   storyboard: Optional[str] = None, route: Optional[str] = None,
-                   fill_failed_with_motion: bool = False) -> dict:
+                   storyboard: Optional[str] = None, route: Optional[str] = None) -> dict:
     """:func:`_estimate_body` (what a step would cost and where it would
     run), with ``today`` added in this one place (plan 23 A4): today's paid
     spending against the daily cap, ``routes/budget.today_block``."""
     body = await _estimate_body(story_id, step, target=target, selected=selected, episodes=episodes, place=place,
                                 prop=prop, ep=ep, measure=measure, align_words=align_words, subtitles=subtitles,
-                                encoder=encoder, storyboard=storyboard, route=route,
-                                fill_failed_with_motion=fill_failed_with_motion)
+                                encoder=encoder, storyboard=storyboard, route=route)
     if isinstance(body, dict):
         body = dict(body, today=await run_in_threadpool(budget_routes.today_block, worker.get_settings_env()))
     return body
@@ -2295,7 +2292,7 @@ async def estimate(story_id: str, step: str, target: Optional[str] = None,
 
 async def _estimate_body(story_id, step, *, target=None, selected=None, episodes=None, place=None, prop=None,
                          ep=None, measure=False, align_words=False, subtitles=None, encoder=None,
-                         storyboard=None, route=None, fill_failed_with_motion=False) -> dict:
+                         storyboard=None, route=None) -> dict:
     """What a step would cost and where it would run::
 
         {"step", "est_usd", "units": {"llm_calls": n},
@@ -2358,9 +2355,9 @@ async def _estimate_body(story_id, step, *, target=None, selected=None, episodes
     ``message``; at tier >= 2 also ``video`` (the clips, phase 6), and
     ``?route=auto|local|api`` (stage 11) prices it all on that route instead
     of the story's own without patching the story (400 for another value).
-    ``render`` (``?subtitles=``, ``?encoder=``, ``?fill_failed_with_motion=1``
-    -- phase 6 stage 12 follow-up: priced as the real render params would be,
-    so a clip refusal here clears exactly when the real run's would):
+    ``render`` (``?subtitles=``, ``?encoder=``: priced as the real render
+    params would be, so a clip refusal here is the real run's -- plan 33
+    stage 4: no param clears it, every shot is a video clip):
     ``units {llm_calls: 0, shots}``, ``needed`` (false while the last render
     is the one it would make), ``seconds``/``minutes`` (an authored estimate,
     A-069), ``params``, $0 and ``local``. ``metadata``: the LLM steps' estimate of
@@ -2439,7 +2436,7 @@ async def _estimate_body(story_id, step, *, target=None, selected=None, episodes
         return _episode_estimate(stories, story, step, ep, measure=measure, env=env)
     if step in workflow.PHASE4_STEPS:
         options = {"align_words": align_words, "subtitles": subtitles, "encoder": encoder, "storyboard": storyboard,
-                   "route": route, "fill_failed_with_motion": fill_failed_with_motion}
+                   "route": route}
         return await run_in_threadpool(_phase4_estimate, stories, story, step, ep, env=env, **options)
     if step in workflow.SERIES_STEPS:
         return _series_estimate(stories, story, step, ep, env=env)
@@ -2504,7 +2501,7 @@ def _episode_estimate(stories, story, step, ep, *, measure, env) -> dict:
 
 
 def _phase4_estimate(stories, story, step, ep, *, env, align_words, subtitles, encoder, storyboard,
-                     route=None, fill_failed_with_motion=False) -> dict:
+                     route=None) -> dict:
     """The phase-4 estimate of episode *ep* (see ``estimate``), after the
     step's own refusals. Blocking (it hashes files; the assets' asks a local
     editor), so it runs off the event loop."""
@@ -2513,16 +2510,8 @@ def _phase4_estimate(stories, story, step, ep, *, env, align_words, subtitles, e
         if step == "assets":
             return workflow.assets_estimate(ec, env=env, align_words=align_words, probe_local=True, route=route)
         if step == "render":
-            # fill_failed_with_motion (phase 6 stage 12 follow-up): priced
-            # the same way the real render params would be, so the Preview
-            # pane's checkbox can clear a clip refusal here too, before any
-            # job exists -- render.read_params/require_clips already honor
-            # this key (workflow.RENDER_PARAMS); only the query param itself
-            # was missing from this route.
-            params = {name: value for name, value in (
-                ("subtitles", subtitles), ("encoder", encoder),
-                ("fill_failed_with_motion", fill_failed_with_motion or None),
-            ) if value is not None}
+            params = {name: value for name, value in (("subtitles", subtitles), ("encoder", encoder))
+                      if value is not None}
             return workflow.render_estimate(ec, params)
         if step == "metadata":
             units = workflow.metadata_units(ec)

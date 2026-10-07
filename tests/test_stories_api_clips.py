@@ -7,8 +7,8 @@ DEC-173, DEC-204, DEC-209, A-087).
   chains, never the process's.
 - ``GET /estimate/assets?ep=&route=`` prices the episode on another route
   without patching the story.
-- ``POST /steps/render`` meets the clip refusal before a job exists (409),
-  unless ``fill_failed_with_motion`` is sent.
+- ``POST /steps/render`` meets the clip refusal before a job exists (409);
+  plan 33 stage 4: ``fill_failed_with_motion`` is retired (400, unknown).
 - ``GET /episodes/{ep}/clips/{name}`` is the shot-image route's twin for a
   clip, open while ``API_TOKEN`` is unset (RC-M9); the episode page carries
   each shot's clip, the tier, the episode's links and the video estimate.
@@ -105,17 +105,18 @@ def test_the_assets_estimate_prices_another_route_and_leaves_the_story_as_it_was
     assert api.client.get(path, params={"ep": 1, "route": "cloud"}).status_code == 400
 
 
-def test_the_render_is_refused_before_a_job_with_the_clip_refusal_unless_it_is_filled(api, tmp_path):
+def test_the_render_is_refused_before_a_job_with_the_clip_refusal_and_nothing_fills_it(api, tmp_path):
     """A failed clip: ``POST /steps/render`` answers 409 with the render's
-    own sentence (the shot's target, the param), and creates no job; sent
-    with ``fill_failed_with_motion`` the job is queued with it."""
+    own sentence (the shot's target), and creates no job. Plan 33 stage 4,
+    re-pinned on purpose: the sentence offers no fill, and
+    ``fill_failed_with_motion`` is an unknown parameter now (400, no job)."""
     shot_ids = {}
 
     def video(planned):
         shot_ids["failed"] = planned[0]
         return tvp.FakeVideo(fail_for={f"shot_{planned[0][2:]}"})
 
-    story_id, _planned = trc._animated(api.store, tmp_path, video=video)
+    story_id, _planned = trc._animated(api.store, tmp_path, video=video, still_unplanned=True)
     failed = shot_ids["failed"]
 
     refused = _post_step(api, story_id, "render", ep=1)
@@ -123,29 +124,30 @@ def test_the_render_is_refused_before_a_job_with_the_clip_refusal_unless_it_is_f
     assert refused.status_code == 409, refused.text
     detail = refused.json()["detail"]
     assert f"shot {failed}'s clip failed" in detail and f"shot:1:{failed}:video" in detail
-    assert "fill_failed_with_motion" in detail and api.jobs.list_jobs() == []
+    assert "fill_failed_with_motion" not in detail and api.jobs.list_jobs() == []
 
-    queued = _post_step(api, story_id, "render", ep=1, params={"fill_failed_with_motion": True})
+    filled = _post_step(api, story_id, "render", ep=1, params={"fill_failed_with_motion": True})
 
-    assert queued.status_code == 201, queued.text
-    assert api.jobs.get_job(queued.json()["id"])["params"] == {"fill_failed_with_motion": True}
+    assert filled.status_code == 400, filled.text
+    assert filled.json()["detail"] == ("Unknown render parameter(s) fill_failed_with_motion (known: subtitles, "
+                                       "encoder).")
+    assert api.jobs.list_jobs() == []
 
 
-def test_the_render_estimate_meets_the_same_clip_refusal_unless_the_flag_is_sent(api, tmp_path):
-    """Phase 6 stage 12 follow-up: ``GET /estimate/render`` gains
-    ``?fill_failed_with_motion=1`` (default off), priced the same way the
-    real render params would be -- a failed clip refuses the estimate (409,
-    the same sentence ``POST /steps/render`` gives) unless the flag clears
-    it, so the Preview pane's checkbox can make the estimate chip's own
-    refusal go away before the real request does. No job is ever created by
-    an estimate, filled or not."""
+def test_the_render_estimate_meets_the_same_clip_refusal_and_no_flag_clears_it(api, tmp_path):
+    """``GET /estimate/render`` is priced the same way the real render params
+    would be -- a failed clip refuses the estimate (409, the same sentence
+    ``POST /steps/render`` gives). Plan 33 stage 4, re-pinned on purpose: the
+    phase 6 stage 12 follow-up's ``?fill_failed_with_motion=1`` is gone -- the
+    route reads no such query any more, so it clears nothing. No job is ever
+    created by an estimate."""
     shot_ids = {}
 
     def video(planned):
         shot_ids["failed"] = planned[0]
         return tvp.FakeVideo(fail_for={f"shot_{planned[0][2:]}"})
 
-    story_id, _planned = trc._animated(api.store, tmp_path, video=video)
+    story_id, _planned = trc._animated(api.store, tmp_path, video=video, still_unplanned=True)
     failed = shot_ids["failed"]
     path = _url(story_id, "/estimate/render")
 
@@ -154,12 +156,12 @@ def test_the_render_estimate_meets_the_same_clip_refusal_unless_the_flag_is_sent
     assert refused.status_code == 409, refused.text
     detail = refused.json()["detail"]
     assert f"shot {failed}'s clip failed" in detail and f"shot:1:{failed}:video" in detail
-    assert "fill_failed_with_motion" in detail
+    assert "fill_failed_with_motion" not in detail
 
     filled = api.client.get(path, params={"ep": 1, "fill_failed_with_motion": 1})
 
-    assert filled.status_code == 200, filled.text
-    assert filled.json()["params"] == {"subtitles": "style", "encoder": "libx264", "fill_failed_with_motion": True}
+    assert filled.status_code == 409, filled.text
+    assert filled.json()["detail"] == detail
     assert api.jobs.list_jobs() == []
 
 
@@ -171,7 +173,8 @@ def test_the_clip_route_serves_a_stored_clip_open_without_a_token_and_nothing_el
     folder's file or a missing clip is a 404."""
     from web.api import auth
 
-    story_id, planned = trc._animated(api.store, tmp_path)
+    # Plan 33 stage 4: the unplanned shots kept still, so nothing blocks the render (render_blocked None).
+    story_id, planned = trc._animated(api.store, tmp_path, still_unplanned=True)
     monkeypatch.delenv("API_TOKEN", raising=False)
     monkeypatch.delenv("DISABLE_AUTH", raising=False)
     monkeypatch.setattr(auth, "_TOKEN", None)

@@ -46,7 +46,7 @@ def test_a_failed_check_is_approved_with_its_warning_naming_what_the_judge_saw(s
     is approved with what the judge saw kept on the approval, and
     ``approve_anyway`` is accepted and ignored -- the same record either way."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
-    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")), params={"animate": False})
+    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")))
     sha = kg._doc(store, story_id)["keyframe_verdicts"]["sh02"]["image_sha256"]
 
     for anyway in (False, True):
@@ -62,7 +62,7 @@ def test_an_unjudged_keyframe_is_approved_with_the_warning_no_keyframe_check_yet
     entity's image, a shot never checked is approved too, its warning "no
     keyframe check yet"."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
-    kg._run(store, story_id, params={"animate": False})
+    kg._run(store, story_id)
     _drop_verdict(store, story_id, "sh03")
 
     approved = kg._approve_keyframes(store, story_id, approve_anyway=True)["keyframes_approved"]
@@ -84,7 +84,7 @@ def test_a_keyframe_approved_with_its_warning_counts_only_while_it_is_that_very_
     from clipping.aistory.steps import assets, judge
 
     story_id = kg._v2_keyframes(store, tmp_path, built)
-    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")), params={"animate": False})
+    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")))
     approved = kg._approve_keyframes(store, story_id)["keyframes_approved"]
     sha = approved["shots"]["sh02"]["image_hash"]
     assert judge.keyframe_approved_anyway(approved, "sh02", sha) is True
@@ -187,7 +187,7 @@ def test_a_keyframe_the_human_uploaded_is_judged_and_warned_about_never_refused(
     own = tmp_path / "own.png"
     Image.new("RGB", (1080, 1920), (200, 40, 40)).save(own, format="PNG")
     manual_uploads.accept_keyframe(store, story_id, 1, "sh02", str(own), env=kg.SETTINGS)
-    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")), params={"animate": False})
+    kg._run(store, story_id, vision=kg.FakeVision(_sheet_mismatch("sh02")))
     assert kg._doc(store, story_id)["keyframe_verdicts"]["sh02"]["sheet_issues"] == [
         "Gaston's head is a pear, the sheet shows a pineapple"]
 

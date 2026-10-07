@@ -81,7 +81,8 @@ def test_the_phase_4_request_models_declare_exactly_the_workflows_closed_lists()
     from clipping.aistory import workflow
 
     assert workflow.ASSETS_PARAMS == ("align_words", "animate")
-    assert workflow.RENDER_PARAMS == ("subtitles", "encoder", "fill_failed_with_motion")  # phase 6 stage 9
+    # Phase 6 stage 9 added fill_failed_with_motion; plan 33 stage 4, re-pinned on purpose: retired.
+    assert workflow.RENDER_PARAMS == ("subtitles", "encoder")
     assert workflow.METADATA_PARAMS == ()
     # Phase 7 follow-up stage C; plan 19 stage 3, re-pinned on purpose: stop_on_script_issues joins them.
     assert workflow.FAST_TRACK_PARAMS == ("storyboard", "stop_at_keyframes", "stop_on_script_issues")
@@ -390,7 +391,10 @@ def test_a_step_is_refused_before_any_job_outside_its_episode(api, episodes, ste
 @pytest.mark.parametrize("step, params, needle", [
     ("assets", {"nope": 1}, "Unknown assets parameter(s) nope (known: align_words, animate)."),
     ("assets", {"align_words": "yes"}, "params.align_words is true or false, not 'yes'."),
-    ("render", {"nope": 1}, "Unknown render parameter(s) nope (known: subtitles, encoder, fill_failed_with_motion)."),
+    # Plan 33 stage 4, re-pinned on purpose: fill_failed_with_motion is retired -- an unknown parameter now.
+    ("render", {"nope": 1}, "Unknown render parameter(s) nope (known: subtitles, encoder)."),
+    ("render", {"fill_failed_with_motion": True},
+     "Unknown render parameter(s) fill_failed_with_motion (known: subtitles, encoder)."),
     ("render", {"subtitles": "karaoke"},
      "The subtitles must be one of style, word_pop, two_line, none, not 'karaoke'."),
     ("render", {"encoder": "nvenc"}, "The encoder must be one of libx264, auto, not 'nvenc'."),
@@ -407,6 +411,20 @@ def test_a_steps_params_are_its_closed_list(api, episodes, step, params, needle)
     response = _post_step(api, story_id, step, ep=1, params=params)
     assert response.status_code == 400, response.text
     assert response.json()["detail"] == needle
+    assert api.jobs.list_jobs() == []
+
+
+def test_animate_false_is_refused_before_a_job_exists(api, episodes):
+    """Plan 33 stage 4: every shot is a video clip -- ``animate: false`` is a
+    400 with the step's own sentence (the keyframe hold is the pause), and no
+    job; ``animate: true`` is still taken."""
+    from clipping.aistory.steps import assets
+
+    story_id = episode(api, episodes, "rendered")
+    response = _post_step(api, story_id, "assets", ep=1, params={"animate": False})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == assets.ANIMATE_OFF_REFUSAL
+    assert "keyframe hold" in assets.ANIMATE_OFF_REFUSAL and "stop_at_keyframes" in assets.ANIMATE_OFF_REFUSAL
     assert api.jobs.list_jobs() == []
 
 

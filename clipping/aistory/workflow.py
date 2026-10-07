@@ -3094,7 +3094,9 @@ def phase4_request(step, params) -> dict:
     """A phase-4 step's *params*, checked as its runner reads them (closed
     lists; ``invalid`` otherwise, naming the choices): ``assets``
     ``{align_words?, animate?}`` (true or false; ``animate``, phase 6 stage
-    8, is on unless sent false), ``render`` ``{subtitles?, encoder?}``
+    8, is on, and sent false it is refused since plan 33 stage 4 --
+    ``assets.animate_param``: every shot is a video clip), ``render``
+    ``{subtitles?, encoder?}``
     (``render.SUBTITLE_CHOICES``, ``render.ENCODER_CHOICES``), ``fast-track``
     ``{storyboard?}`` (``fast_track.STORYBOARD_CHOICES``); ``metadata`` takes
     none. Returns them as sent."""
@@ -3106,7 +3108,9 @@ def phase4_request(step, params) -> dict:
         _flag(params, assets_step.ALIGN_PARAM)
         _flag(params, assets_step.ANIMATE_PARAM)
     try:
-        if step == "render":
+        if step == "assets":
+            assets_step.animate_param(params)
+        elif step == "render":
             render_step.read_params(params)
         elif step == "fast-track":
             fast_track_step.read_params(params)
@@ -3122,8 +3126,8 @@ def require_step_inputs(ec, step, *, params=None) -> None:
     storyboard (``assets.require_approved``); the render the assets approved
     with a current fingerprint, every image and voice on disk
     (``render.require_renderable``) and -- phase 6 stage 11 -- at tier >= 2
-    every shot's clip it would cut current, unless *params* (the render's)
-    fill the others with motion (``render.require_clips``); the metadata a
+    every shot not kept still with a current clip (``render.require_clips``,
+    plan 33 stage 4: nothing fills a shot with motion); the metadata a
     finished render (``metadata.require_render``). The fast track starts
     from what there is."""
     check = {"assets": assets_step.require_approved,
@@ -3187,18 +3191,17 @@ def reedit_changes(ec) -> dict:
         raise WorkflowError(CONFLICT, str(exc)) from None
 
 
-def assets_gate(ec, *, env, animate=True) -> None:
+def assets_gate(ec, *, env) -> None:
     """The assets step's own stop before its first call
     (``assets.plan_refusal``) checked before a job exists, calling nothing (a
     local editor is not asked: the step asks it): ``conflict`` when the shot
     images cannot run on the story's route -- in ``references`` mode, no
-    editor: DEC-117's stop and ask -- the clips cannot (tier >= 2, *animate*
-    -- the step's param -- on; clips that wait only on a local ComfyUI's
-    answer are the step's to refuse), or a paid part is over a cap, with the
-    numbers."""
+    editor: DEC-117's stop and ask -- the clips cannot (tier >= 2; clips that
+    wait only on a local ComfyUI's answer are the step's to refuse), or a
+    paid part is over a cap, with the numbers."""
     try:
         script, board = assets_step.require_approved(ec)
-        units = assets_step.asset_units(ec, script, board, env=env, animate=animate)
+        units = assets_step.asset_units(ec, script, board, env=env)
     except StepFailed as exc:
         raise WorkflowError(CONFLICT, str(exc)) from None
     refusal = assets_step.plan_refusal(ec, units, unprobed=True)
@@ -4105,7 +4108,7 @@ def _video_view(ec, script, board, doc, *, env):
         view["speech"] = {key: copy.deepcopy(value) for key, value in video["speech"].items() if key != "classes"}
         view["over_cap"] = video.get("over_cap")
     try:
-        render_step.shot_clips(ec, script, board, doc or {}, fill_failed=False)
+        render_step.shot_clips(ec, script, board, doc or {})
         view["render_blocked"] = None
     except StepFailed as exc:
         view["render_blocked"] = str(exc)
@@ -4163,7 +4166,7 @@ def episode_clips(stories, story, ep, *, env=None) -> dict:
     (``overrides`` the ones ``assets.json`` sets). ``video``: the assets
     estimate's video part on the story's route (*env* -- the Settings
     values; a local ComfyUI is not asked), ``render_blocked`` the render's
-    clip refusal while ``fill_failed_with_motion`` is off, ``offer`` the
+    clip refusal (plan 33 stage 4: a shot without a current clip), ``offer`` the
     stop-and-ask of a recorded video link that cannot serve (its ``switch``
     is the assets edit that takes the next link); None while the script and
     a current storyboard are not approved. Calls nothing; remembered while
@@ -5906,7 +5909,7 @@ def _step_refusal(call, *args, **kwargs):
         raise WorkflowError(CONFLICT, str(exc)) from None
 
 
-def assets_estimate(ec, *, env, align_words=False, probe_local=False, animate=True, route=None) -> dict:
+def assets_estimate(ec, *, env, align_words=False, probe_local=False, route=None) -> dict:
     """What the assets step would do and spend now (``GET
     /estimate/assets``): ``assets.asset_units``' shape -- ``images``,
     ``voices``, ``alignment``, ``paid_links``, ``caps``, ``est_usd``,
@@ -5915,14 +5918,15 @@ def assets_estimate(ec, *, env, align_words=False, probe_local=False, animate=Tr
     paid, blocked), whose sentence is ``message``. ``conflict`` with the
     step's own sentence while the script and a current storyboard are not
     approved (it makes nothing then). Calls nothing but, with *probe_local*,
-    a local editor's status probe. *animate* is the step's param (phase 6
-    stage 8); *route* (stage 11, ``?route=``) prices another route than the
+    a local editor's status probe. Every planned clip is counted (plan 33
+    stage 4: no run makes the keyframes without their clips but the
+    keyframe hold); *route* (stage 11, ``?route=``) prices another route than the
     story's own, writing nothing (``invalid`` for one that is not a route)."""
     if route is not None and route not in defaults.ROUTES:
         raise WorkflowError(INVALID, f"The route must be one of {', '.join(defaults.ROUTES)}, not {route!r}.")
     script, board = _step_refusal(assets_step.require_approved, ec)
     units = _step_refusal(assets_step.asset_units, ec, script, board, env=env, align_words=align_words,
-                          probe_local=probe_local, animate=animate, route=route)
+                          probe_local=probe_local, route=route)
     verdict = fast_track_step.paid_verdict(units, ep=ec.ep, fully_animated=media_policy.fully_animated(ec.story))
     return dict(units, step="assets", ep=ec.ep, paid=verdict, message=verdict["message"])
 

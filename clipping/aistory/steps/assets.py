@@ -78,9 +78,10 @@ cancel token is checked before every call. It fills only what is missing
    (``episode_assets_v1``), keeping its approval: that is derived stale by
    :func:`assets_fingerprint`, never cleared here.
 6. **The clips** (phase 6 stage 8, DEC-202), last, at the story's
-   ``generation_profile.tier`` >= 2 with the ``animate`` param on (its
-   default; a tier-1 story never reaches this and its run is unchanged,
-   RC-V1). The plan is :func:`asset_units`' ``video`` part, derived again
+   ``generation_profile.tier`` >= 2 (the ``animate`` param is on, and sent
+   false it is refused since plan 33 stage 4, :func:`animate_param`: every
+   shot is a video clip; a tier-1 story never reaches this and its run is
+   unchanged, RC-V1). The plan is :func:`asset_units`' ``video`` part, derived again
    **once** when the phase starts and animated exactly, in its order; a
    plan that moved since the step's own check (prices, spend or caps)
    stops the phase before any clip with both lists (RC-V6). Each clip is
@@ -101,7 +102,7 @@ cancel token is checked before every call. It fills only what is missing
    stale. A poll that runs out leaves the request ``submitted``:
    the next run collects it, never buying it again (DEC-152). The plan
    cannot run at all (no link, ``allow_paid`` off, a cap): the step stops
-   before its first call, images included, unless ``animate`` is off.
+   before its first call, images included.
 7. **The episode's ledger view** (``CostLedger.episode_view``) is written to
    ``cost_ledger.json`` in the episode's folder after the step, whatever
    happened.
@@ -114,7 +115,7 @@ vision call each -- and the verdicts are written to ``assets.json``'s
 (``workflow.approve_keyframes``) is current (RC-Q3, :func:`clip_hold`):
 while it is missing or stale, or a keyframe is still to make in this run,
 the clips' plan is held -- shown, priced, but out of this run's total, its
-caps and its readiness, exactly like ``animate`` off -- and the run makes
+caps and its readiness -- and the run makes
 the keyframes and stops before the video phase, saying so; a clip
 regenerate is refused the same way (:func:`clip_target_refusal`). DEC-311:
 the verdicts never refuse that approval -- a flagged or unchecked keyframe is
@@ -341,10 +342,24 @@ def clip_target(ep, shot_id) -> str:
     return f"shot:{ep}:{shot_id}:video"
 
 
+# Plan 33 stage 4: no run makes the keyframes and voices without their clips;
+# the keyframe hold (:func:`clip_hold`) is the one pause before the clips.
+ANIMATE_OFF_REFUSAL = (
+    "animate false is no longer an option: every shot of an episode is a video clip, never a still with camera "
+    "motion. To look at the keyframes before any clip is bought, use the keyframe hold: on an animated story the "
+    "assets step makes and checks the keyframes, then stops until they are approved (keyframes:<ep>), and the "
+    "next assets run buys the clips; the fast track (story_make_episode) takes stop_at_keyframes for the same "
+    "pause. Send animate true, or leave it out.")
+
+
 def animate_param(params) -> bool:
-    """The step's ``animate`` param: on unless sent false."""
+    """The step's ``animate`` param: on when not sent (or sent true);
+    ``StepFailed`` (:data:`ANIMATE_OFF_REFUSAL`) when sent false -- plan 33
+    stage 4: every shot is a video clip, the keyframe hold is the pause."""
     value = (params or {}).get(ANIMATE_PARAM)
-    return True if value is None else bool(value)
+    if value is None or value:
+        return True
+    raise StepFailed(ANIMATE_OFF_REFUSAL)
 
 
 def image_name(shot_id, ext) -> str:
@@ -2781,8 +2796,7 @@ def plan_refusal(ec, units, *, unprobed=False):
     if (video is not None and video.get("animate", True) and not video.get("hold") and not video["ready"]
             and not (unprobed and clips.local_unasked(video))):
         return (f"Episode {ec.ep}'s clips cannot be made now: {video['message'].strip()} Nothing was generated "
-                "or spent: run the assets step with animate off to make the keyframes first, or fix that and run "
-                "it again.")
+                "or spent: fix that and run it again (every shot is a video clip).")
     if units["over_cap"]:
         # The quality profile's every-shot plan is refused whole (DEC-227): its numbers too.
         whole = f" {video['over_cap']}." if video is not None and video.get("animate", True) and video.get(
@@ -5044,6 +5058,8 @@ class _Assets(voice_lines.LineMeasurement):
 
     def run(self) -> dict:
         ec, ctx = self.ec, self.ctx
+        # Plan 33 stage 4: animate false is refused before anything is read or bought.
+        animate = animate_param(ctx.params)
         self.script, self.storyboard = require_approved(ec)
         # Plan 28 F6: refused before any keyframe is bought; the missing plates are made before them.
         refusal = wardrobe_refusal(ec, self.storyboard)
@@ -5052,7 +5068,6 @@ class _Assets(voice_lines.LineMeasurement):
             raise StepFailed(f"Episode {ec.ep}'s keyframes are not drawn. {refusal}")
         self.make_missing_plates()
         align = bool((ctx.params or {}).get(ALIGN_PARAM))
-        animate = animate_param(ctx.params)
         gates = self.open_asset_gates()
         try:
             # Before the estimate and the keyframes: a shot filled with stock is neither drawn nor bought.
@@ -5123,7 +5138,7 @@ class _Assets(voice_lines.LineMeasurement):
         # still to buy (held for the keyframes' approval: not this run's), a failure once its clip is there.
         untaken = [line["line_id"] for scene in self.script["scenes"] for line in scene["lines"]
                    if native and voice_lines.spoken_by_clip(ec, line) and not voice_lines.is_measured(ec, line)]
-        held = bool((self.video or {}).get("hold")) or not animate_param(self.ctx.params)
+        held = bool((self.video or {}).get("hold"))
         for shot in board["shots"] if native else ():
             clip = shot["assets"].get("clip") or {}
             missing = [line_id for line_id in shot["lines"] if line_id in untaken]
@@ -5252,6 +5267,8 @@ def run(ctx, *, adapters=None, transport=None, time_fn=time.monotonic, sleep_fn=
     on_log, cancel) -> (words, aligned_by)``) are for tests. *budget*: an
     ``episode_common.Budget`` shared with a caller running this step inside
     its own (the fast track); None gives the step its own."""
+    # Plan 33 stage 4: animate false is refused first, whoever sends it (the MCP passes the params raw).
+    animate_param(ctx.params)
     ec = episode_common.load_episode_context(ctx)
     # Made from an approved script and storyboard, which met the memory gate
     # when they were written: this step never meets it (plan 11 stage 4).

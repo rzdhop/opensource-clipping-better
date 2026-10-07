@@ -649,8 +649,8 @@ shorter than 150 ms.
   render too (measured) — there is no "anyway". A script that comes out short
   gets a fill pass (at most two rewrites of its shortest scenes) when the
   script step runs.
-- *The keyframes.* The assets step with **animate off** makes every keyframe
-  and voice. Each keyframe is drawn with the previous keyframe of its scene
+- *The keyframes.* The first assets run makes every keyframe and voice and
+  holds the clips until the keyframes are approved (the keyframe hold). Each keyframe is drawn with the previous keyframe of its scene
   among its references (set, light and positions carry over) and with the
   character's outfit of that moment named — the sheets show the first
   wardrobe set, the text says which set is worn now. Then a free vision
@@ -2999,10 +2999,9 @@ keeping whatever images and voices it already made. In practice this means a
 hits this refusal once, after making every image and voice but before buying
 any clip; running the step again (the "Continue" you'd press anyway) now
 sees the real, measured durations, and that second plan matches what's
-actually there — it animates. Unticking **Animate** (or `--no-animate` on
-the CLI) for that first pass makes this deliberate: images and voices only,
-reviewed, then animated as a second, separate pass once everything is
-settled.
+actually there — it animates. Every shot is a video clip: there is no run
+that makes the images and voices alone any more (`animate: false` is refused);
+on an animated story the keyframe hold is the pause before the clips.
 
 ### 11. Render
 
@@ -3349,11 +3348,11 @@ run says how many values it read, never a value. A v2 episode's keyframes
 are approved with `approve STORY_ID keyframes:1` (a keyframe that failed its
 check, or has none, is approved with its warning and named on the line printed;
 `--anyway` is still accepted and ignored since DEC-311), between an
-assets run with `--no-animate` (keyframes, voices and their checks) and one
-without (the clips):
+assets run that stops at the keyframe hold (keyframes, voices and their checks)
+and a second one (the clips):
 
 ```
-python main.py --ai-story step STORY_ID assets --ep 1 --no-animate --settings
+python main.py --ai-story step STORY_ID assets --ep 1 --settings
 python main.py --ai-story approve STORY_ID keyframes:1
 python main.py --ai-story step STORY_ID assets --ep 1 --settings --auto-approve
 ```
@@ -3423,17 +3422,14 @@ when a paid part is over a cap, with the numbers — never a wasted call.
 At tier ≥ 2 it also takes `--tier N` and `--route local|api|auto`, which
 patch the story's own `generation_profile` before the step runs and print
 the result — the same profile the dashboard's story page edits, never a
-run-only override — `--no-animate` (images, voices, SFX and BGM only;
-nothing video-related is attempted or spent — the same switch as the
-dashboard's Animate checkbox), and `--estimate`, which prints the step's
+run-only override — and `--estimate`, which prints the step's
 plan (including any clips, their seconds and their dollars) and calls
 nothing — no job is even created. `render` takes `--subtitles` (`style`,
 `word_pop`, `two_line` or `none`, default `style`, the style lock's own),
-`--encoder` (`libx264` or `auto`, default `libx264`) and, at tier ≥ 2,
-`--fill-failed-with-motion` (default off; lets a shot whose clip is failed,
-stale or missing render with Tier-1 motion instead of refusing — the same
-box as "Fill failed shots with motion" in the dashboard); `render` calls no
-API. `metadata` takes no parameters. There is no CLI command to regenerate
+`--encoder` (`libx264` or `auto`, default `libx264`). At tier ≥ 2 every
+shot is a video clip: a shot whose clip is failed, stale or missing stops the
+render, naming its `shot:<ep>:<shot_id>:video` target (only a shot kept still
+is cut from its picture); `render` calls no API. `metadata` takes no parameters. There is no CLI command to regenerate
 one shot's clip (`shot:<ep>:<shid>:video`) — that's dashboard/API only.
 `fast-track` takes `--storyboard` (`t1`, the default, or
 `fast`) and meets the LLM key gate exactly as the API does for every

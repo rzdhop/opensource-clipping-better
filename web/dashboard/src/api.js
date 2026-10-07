@@ -749,14 +749,9 @@ export async function regenerateStory(storyId, payload) {
  * priced as the render would use them; PreviewPane.jsx sends `subtitles` only).
  * `route` only for `assets` (phase 6 stage 11): `auto|local|api` prices that
  * route instead of the story's own, without patching the story.
- * `fillFailedWithMotion` only for `render` (phase 6 stage 12 follow-up):
- * priced as the real render params would be, so a failed/stale/still-
- * generating clip's refusal here clears exactly when the real run's would --
- * PreviewPane.jsx re-fetches with it on every toggle of its own checkbox.
  */
 export async function fetchStoryEstimate(storyId, step, {
   target, selected, episodes, places, props, ep, measure, alignWords, storyboard, subtitles, encoder, route,
-  fillFailedWithMotion,
 } = {}) {
   const params = new URLSearchParams()
   if (target) params.set('target', target)
@@ -789,7 +784,6 @@ export async function fetchStoryEstimate(storyId, step, {
   if (subtitles) params.set('subtitles', subtitles)
   if (encoder) params.set('encoder', encoder)
   if (route) params.set('route', route)
-  if (fillFailedWithMotion) params.set('fill_failed_with_motion', '1')
   const qs = params.toString()
   const res = await request(`/stories/${storyId}/estimate/${step}${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw await apiError(res, 'Failed to fetch the estimate')

@@ -138,20 +138,38 @@ def _adapters(video=None, *, image=None, edge=None):
 
 
 def _keyframes(store, tmp_path, *, settings):
-    """A tier-2 story whose episode 1 has its images and voices, made with
-    ``animate`` off (no clip, no video call): the estimate now is the one a
-    run sees."""
+    """A tier-2 story whose episode 1 has its images and voices and no clip,
+    no video call: the estimate now is the one a run sees. Plan 33 stage 4:
+    ``animate`` off is refused, so the images and voices are made while the
+    story is still at tier 1 (no video part at all), then the story moves
+    to tier 2 -- the state ``animate`` off used to leave."""
     story_id = tas._episode(store, tmp_path)
-    tce._tier(store, story_id)
     never = tce.NeverVideo()
-    summary, _log = tas._run(store, story_id, adapters=_adapters(never), params={"animate": False},
-                             settings=settings)
+    summary, _log = tas._run(store, story_id, adapters=_adapters(never), settings=settings)
     assert summary["complete"] is True
+    tce._tier(store, story_id)
     return story_id
 
 
 def _plan(store, story_id, settings, adapters):
     return tce._units(store, story_id, settings, adapters=adapters)["video"]
+
+
+def planned_ids(store, story_id, settings):
+    """The shot ids the episode's clip plan animates now (no adapter is asked)."""
+    return [row["shot_id"] for row in _plan(store, story_id, settings, _adapters(FakeVideo()))["plan"]]
+
+
+def keep_unplanned_still(store, story_id, planned):
+    """Every shot of episode 1 not in *planned* pinned ``keep_still``
+    (``assets.json``'s override, DEC-236's one exemption). Plan 33 stage 4:
+    every shot is a video clip, so a key-shots episode (the ``one_dollar``
+    profile these fixtures use) reaches the render only with the shots its
+    plan leaves out kept still -- the tests that render one say so here."""
+    others = [{"shot_id": shot["shot_id"], "keep_still": True} for shot in tas._shots(store, story_id)
+              if shot["shot_id"] not in planned]
+    if others:
+        tce._patch(store, story_id, *others)
 
 
 def _video_rows(store, story_id):
@@ -399,11 +417,13 @@ def test_the_first_served_clip_records_the_video_link_and_a_link_gone_stops_the_
     assert gone["message"] in "\n".join(log)
 
 
-def test_a_tier_2_plan_that_cannot_animate_stops_before_any_call_unless_animate_is_off(store, tmp_path):
+def test_a_tier_2_plan_that_cannot_animate_stops_before_any_call_and_animate_off_is_refused(store, tmp_path):
     """Tier 2, animate on, the only video link paid and allow_paid off: the
     step stops before its first call -- no voice, no image, no clip -- with
-    the clips' reason and the way out. With ``animate`` off the images and
-    voices are made and no clip is asked."""
+    the clips' reason and the way out. Plan 33 stage 4, re-pinned on
+    purpose: ``animate`` off is no way out any more -- refused before
+    anything is read or made, pointing at the keyframe hold; nothing is
+    made either way."""
     settings = tce._settings()
     story_id = tas._episode(store, tmp_path)
     tce._tier(store, story_id)
@@ -413,13 +433,14 @@ def test_a_tier_2_plan_that_cannot_animate_stops_before_any_call_unless_animate_
 
     assert (edge.calls, image.requests, video.requests) == ([], [], [])
     assert "clips cannot be made" in message and "allow_paid is off" in message
-    assert "animate off" in message and "Nothing was generated or spent" in message
+    assert "animate off" not in message and "Nothing was generated or spent" in message
 
-    summary, _log = tas._run(store, story_id, adapters=_adapters(video, image=image, edge=edge),
-                             params={"animate": False}, settings=settings)
+    message = tas._failed(store, story_id, adapters=_adapters(video, image=image, edge=edge), settings=settings,
+                          params={"animate": False})
 
-    assert edge.calls and image.requests and video.requests == []
-    assert summary["complete"] is True and summary["video"]["animate"] is False
+    assert (edge.calls, image.requests, video.requests) == ([], [], [])
+    assert message.startswith("animate false is no longer an option: every shot of an episode is a video clip")
+    assert "keyframe hold" in message and "stop_at_keyframes" in message
     assert all("clip" not in shot["assets"] for shot in tas._shots(store, story_id))
 
 

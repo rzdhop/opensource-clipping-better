@@ -1043,7 +1043,8 @@ class AssetsStepParams(BaseModel):
     """``POST /steps/assets``'s params: ``align_words`` opts in to forced
     alignment of the lines whose voice timed no words (DEC-165); ``animate``
     (tier >= 2, phase 6 stage 8) makes the clips after the images and
-    voices unless sent false."""
+    voices: true or unsent; sent false it is refused (400, plan 33 stage 4:
+    every shot is a video clip; the keyframe hold is the pause)."""
     align_words: Optional[bool] = None
     animate: Optional[bool] = None
 
@@ -1052,12 +1053,10 @@ class RenderStepParams(BaseModel):
     """``POST /steps/render``'s params: ``subtitles`` (``style`` -- the style
     lock's own --, ``word_pop``, ``two_line``, ``none``; DEC-164),
     ``encoder`` (``libx264``, or ``auto``: a hardware encoder for the final
-    pass, opt-in) and ``fill_failed_with_motion`` (phase 6 stage 9: at tier
-    >= 2 a shot whose clip failed, went stale or is still generating gets
-    Tier-1 motion instead of refusing the render; off by default)."""
+    pass, opt-in). Plan 33 stage 4: ``fill_failed_with_motion`` is retired --
+    every shot is a video clip; sent, it is an unknown parameter (400)."""
     subtitles: Optional[str] = None
     encoder: Optional[str] = None
-    fill_failed_with_motion: Optional[bool] = None
 
 
 class FastTrackStepParams(BaseModel):

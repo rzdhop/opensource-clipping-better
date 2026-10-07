@@ -142,6 +142,8 @@ def test_the_budget_is_derived_from_the_plan_under_a_ceiling():
 def test_the_one_click_approves_the_keyframes_buys_the_clips_approves_the_assets_and_renders(store, tmp_path,
                                                                                             built):
     story_id = kg._v2_keyframes(store, tmp_path, built)
+    # Plan 33 stage 4: every shot is a video clip -- the shots the key-shots plan leaves out are kept still.
+    tvp.keep_unplanned_still(store, story_id, tvp.planned_ids(store, story_id, kg.SETTINGS))
     video = tvp.FakeVideo()
     fakes = _fakes(tmp_path, video=video)
 
@@ -174,6 +176,8 @@ def test_flagged_keyframes_do_not_stop_the_one_click_and_are_named(store, tmp_pa
     check's warning -- named on the record, in the feed and at the end --
     and the clips are bought and the episode rendered in the same run."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
+    # Plan 33 stage 4: every shot is a video clip -- the shots the key-shots plan leaves out are kept still.
+    tvp.keep_unplanned_still(store, story_id, tvp.planned_ids(store, story_id, kg.SETTINGS))
     video = tvp.FakeVideo()
     fakes = _fakes(tmp_path, video=video, vision=kg.FakeVision(kg._failing("sh02")))
 
@@ -311,6 +315,8 @@ def test_the_review_block_reads_the_finished_episode_and_what_is_still_pending(s
 
     wf = _wf()
     story_id = kg._v2_keyframes(store, tmp_path, built)
+    # Plan 33 stage 4: every shot is a video clip -- the shots the key-shots plan leaves out are kept still.
+    tvp.keep_unplanned_still(store, story_id, tvp.planned_ids(store, story_id, kg.SETTINGS))
     video = tvp.FakeVideo()
     # DEC-311, re-pinned on purpose: the one click approves over a flagged keyframe again, with the check's
     # warning (sh02 flagged, its verdict a failure) -- the review reads the record it keeps.
@@ -417,6 +423,8 @@ def test_a_legacy_episode_s_review_has_no_keyframe_approval(store, tmp_path):
 
 def test_the_episode_page_carries_the_review_and_the_step_takes_the_param(api, tmp_path, built):
     story_id = kg._v2_keyframes(api.store, tmp_path, built)
+    # Plan 33 stage 4: every shot is a video clip -- the shots the key-shots plan leaves out are kept still.
+    tvp.keep_unplanned_still(api.store, story_id, tvp.planned_ids(api.store, story_id, kg.SETTINGS))
     tft.run(api.store, story_id, _fakes(tmp_path), settings=kg.SETTINGS)
 
     page = api.client.get(f"/api/stories/{story_id}/episodes/1").json()

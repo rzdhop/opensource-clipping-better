@@ -5,10 +5,11 @@ At tier 2 or 3 the render reads the clips the assets step's video phase made
 (stage 8): a shot whose clip is current, and which is not kept still by its
 **effective** flags (``assets.json``'s ``shots`` overrides win over the
 storyboard's own), is cut from its clip (``filtergraph.tier2_clip_argv``);
-a shot kept still, or never planned (no clip record), keeps its Tier-1
-motion. A shot whose clip failed, went stale or is still generating refuses
-the render before any process, naming it and what to do, unless the render
-param ``fill_failed_with_motion`` gives it Tier-1 motion. The manifest's
+a shot kept still keeps its Tier-1 motion. Plan 33 stage 4: every other
+shot is a video clip -- one never planned (no clip record), or whose clip
+failed, went stale or is still generating, refuses the render before any
+process, naming it and its regenerate target; nothing fills it with motion
+(``fill_failed_with_motion`` is refused). The manifest's
 ``shot_modes`` says which shot got what -- written only when some shot is
 not plain motion, so a tier-1 render is the parent commit's, byte for byte
 (RC-M3).
@@ -104,14 +105,20 @@ def test_guard_a_tier_1_render_plan_inputs_and_manifest_are_the_parent_commits(s
 
 # ============================================================ the episode
 
-def _animated(store, tmp_path, *, video=None, name_of=None):
+def _animated(store, tmp_path, *, video=None, name_of=None, still_unplanned=False):
     """A tier-2 episode whose planned clips stage 8's video phase made
     (``tests/test_story_video_phase.py``'s fakes), its assets approved:
     ``(story_id, planned shot ids)``. *video(planned)* builds the fake video
-    adapter from the planned shot ids (default: every clip answers)."""
+    adapter from the planned shot ids (default: every clip answers).
+    *still_unplanned*: the shots the plan leaves out pinned ``keep_still``
+    first (``tvp.keep_unplanned_still``; plan 33 stage 4: else the render
+    refuses them, every shot being a video clip)."""
     settings = tce._settings(**tvp.PAID)
     story_id = tvp._keyframes(store, tmp_path, settings=settings)
-    planned = [row["shot_id"] for row in tvp._plan(store, story_id, settings, tvp._adapters(tvp.FakeVideo()))["plan"]]
+    planned = tvp.planned_ids(store, story_id, settings)
+    if still_unplanned:
+        tvp.keep_unplanned_still(store, story_id, planned)
+        assert tvp.planned_ids(store, story_id, settings) == planned
     adapter = video(planned) if video is not None else tvp.FakeVideo()
     tas._run(store, story_id, adapters=tvp._adapters(adapter), settings=settings)
     trs.approve_assets(store, story_id)
@@ -132,13 +139,23 @@ def test_a_current_clip_is_cut_from_its_video_unless_an_override_keeps_its_shot_
     """Every planned shot's clip is current. The render cuts each from its
     clip (``tier2_clip_argv``: the clip staged, no looped still), except the
     one ``assets.json`` now keeps still -- its override wins over the
-    storyboard's own flag (false) -- which keeps its Tier-1 motion; a shot
-    the plan left without a clip (no record) keeps its motion too, and
-    nothing is refused. The manifest says which shot got what."""
+    storyboard's own flag (false) -- which keeps its Tier-1 motion. Plan 33
+    stage 4, re-pinned on purpose: a shot the plan left without a clip no
+    longer keeps plain motion -- it refuses the render, naming its
+    regenerate target -- so the episode is rendered with those shots kept
+    still too (DEC-236's one exemption). The manifest says which shot got
+    what: ``video`` or ``motion_keep_still``, never plain ``motion``."""
     from clipping.aistory.steps import clips
 
     story_id, planned = _animated(store, tmp_path)
     assert len(planned) > 1
+    unplanned = [shot["shot_id"] for shot in tas._shots(store, story_id) if shot["shot_id"] not in planned]
+    assert unplanned
+    message, fake = trs.refused(store, story_id, tmp_path=tmp_path)
+    assert fake.calls == [] and "Every shot is a video clip, never a still with camera motion" in message
+    assert all(f"shot:1:{shot_id}:video" in message for shot_id in unplanned)
+    assert "fill_failed_with_motion" not in message
+    tvp.keep_unplanned_still(store, story_id, planned)
     kept, animated = planned[-1], planned[:-1]
     board_flag = next(shot for shot in tas._shots(store, story_id) if shot["shot_id"] == kept)["keep_still"]
     assert board_flag is False
@@ -169,25 +186,26 @@ def test_a_current_clip_is_cut_from_its_video_unless_an_override_keeps_its_shot_
         else:
             assert staged[shot_id]["source"] == shot["assets"]["image"] and "-loop" in argv
             expected[shot_id] = "motion_keep_still" if clips.shot_flags(shot, doc)["keep_still"] else "motion"
-    assert expected[kept] == "motion_keep_still" and "motion" in expected.values()
+    assert expected[kept] == "motion_keep_still" and "motion" not in expected.values()
     assert manifest["shot_modes"] == expected
     assert manifest["params"] == {"subtitles": "word_pop", "encoder": "libx264"}
 
 
-def test_a_failed_clip_refuses_the_render_naming_its_target_unless_it_is_filled_with_motion(store, tmp_path):
+def test_a_failed_clip_refuses_the_render_naming_its_target_and_nothing_fills_it_with_motion(store, tmp_path):
     """One planned clip failed (the provider settled it without a clip),
-    another is still generating (its poll ran out). The render refuses before
-    any process: it names the failed shot with its regenerate target, the
-    one still generating with Continue only, and the param that fills them.
-    With ``fill_failed_with_motion`` both render with Tier-1 motion, labelled
-    ``motion_fill``, and the param is recorded."""
+    another is still generating (its poll ran out); the shots the plan left
+    out are kept still. The render refuses before any process: it names the
+    failed shot with its regenerate target, the one still generating with
+    Continue only. Plan 33 stage 4, re-pinned on purpose: no param fills them
+    with motion any more -- ``fill_failed_with_motion`` sent true is refused
+    with its own sentence, and nothing is rendered."""
     shot_ids = {}
 
     def video(planned):
         shot_ids["failed"], shot_ids["slow"] = planned[0], planned[1]
         return tvp.FakeVideo(fail_for={_clip_name(planned[0])}, slow_for={_clip_name(planned[1])})
 
-    story_id, planned = _animated(store, tmp_path, video=video)
+    story_id, planned = _animated(store, tmp_path, video=video, still_unplanned=True)
     failed, slow = shot_ids["failed"], shot_ids["slow"]
 
     message, fake = trs.refused(store, story_id, tmp_path=tmp_path)
@@ -196,15 +214,13 @@ def test_a_failed_clip_refuses_the_render_naming_its_target_unless_it_is_filled_
     assert f"shot {failed}'s clip failed" in message and f"shot:1:{failed}:video" in message
     assert f"shot {slow}'s clip is still generating" in message and f"shot:1:{slow}:video" not in message
     assert "press Continue (the assets step resumes it; nothing is bought again)" in message
-    assert "fill_failed_with_motion" in message
+    assert "Every shot is a video clip, never a still with camera motion" in message
+    assert "fill_failed_with_motion" not in message and "no clip" not in message
 
-    summary, _log, _fake = trs.render(store, story_id, tmp_path=tmp_path, params={"fill_failed_with_motion": True})
+    message, fake = trs.refused(store, story_id, tmp_path=tmp_path, params={"fill_failed_with_motion": True})
 
-    assert summary["state"] == "completed"
-    manifest = store.read_episode_doc(story_id, 1, "render_manifest.json")
-    assert manifest["params"] == summary["params"] == {"subtitles": "word_pop", "encoder": "libx264",
-                                                       "fill_failed_with_motion": True}
-    for shot_id in (failed, slow):
-        assert manifest["shot_modes"][shot_id] == "motion_fill" and "-loop" in _stage(manifest, shot_id)["argv"]
-    assert [mode for shot_id, mode in manifest["shot_modes"].items() if shot_id in planned[2:]] == [
-        "video"] * len(planned[2:])
+    assert fake.calls == []
+    assert message.startswith("fill_failed_with_motion is no longer a render option: every shot of an episode is a "
+                              "video clip")
+    assert "shot:<ep>:<shot_id>:video" in message
+    assert store.read_episode_doc(story_id, 1, "render_manifest.json") is None

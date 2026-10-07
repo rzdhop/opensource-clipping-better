@@ -10,7 +10,7 @@ current: the plan is held, the keyframes made, and the run stops before the
 video phase. A legacy episode is never judged or held.
 
 The episode is stage 8's tier-2 fixture (``tests/test_story_video_phase.py``:
-its keyframes and voices made with animate off) put on the v2 pipeline; the
+its keyframes and voices made with no clip) put on the v2 pipeline; the
 vision adapter is a fake answering J2; the video adapter stage 8's fake.
 Offline and hermetic (stage 8's ``hermetic`` fixture). The modules are
 imported inside the tests, so on the parent commit each test fails on its
@@ -92,7 +92,7 @@ def built(tmp_path_factory):
 
 def _v2_keyframes(store, tmp_path, built, *, v2=True):
     """A copy of the session's tier-2 episode whose keyframes and voices are
-    made (stage 8's, animate off), on the v2 pipeline unless *v2* is False;
+    made with no clip (stage 8's), on the v2 pipeline unless *v2* is False;
     its story id."""
     if "made" not in built["kinds"]:
         story_id = tvp._keyframes(store, tmp_path, settings=SETTINGS)
@@ -193,7 +193,7 @@ def test_a_changed_keyframe_makes_the_approval_stale_and_holds_the_clips_again(s
     from clipping.aistory.steps import assets
 
     story_id = _v2_keyframes(store, tmp_path, built)
-    _run(store, story_id, params={"animate": False})
+    _run(store, story_id)
     _approve_keyframes(store, story_id)
     ec = tas._ec(store, story_id)
     board = tas._board(store, story_id)
@@ -228,7 +228,7 @@ def test_a_failed_or_missing_verdict_is_approved_with_its_warning(store, tmp_pat
     # No vision link: J2 cannot run, said in the feed; nothing is judged.
     table = _adapters()
     del table[("vision", "gemini")]
-    summary, log = tas._run(store, story_id, adapters=table, settings=SETTINGS, params={"animate": False})
+    summary, log = tas._run(store, story_id, adapters=table, settings=SETTINGS)
     assert summary["keyframes"]["unavailable"].startswith("no vision link could judge the keyframes")
     assert any(line.startswith("👁 Keyframe check (J2) stopped: no vision link") for line in log)
     # Said in the feed as a warning, never as a refusal.
@@ -240,7 +240,7 @@ def test_a_failed_or_missing_verdict_is_approved_with_its_warning(store, tmp_pat
         shot_id: ["no keyframe check yet"] for shot_id in shots}
 
     # J2 finds sh03 short of its prop: approved with what it found, anyway or not.
-    _run(store, story_id, vision=FakeVision(_failing("sh03")), params={"animate": False})
+    _run(store, story_id, vision=FakeVision(_failing("sh03")))
     verdict = _doc(store, story_id)["keyframe_verdicts"]["sh03"]
     for anyway in (False, True):
         approved = _approve_keyframes(store, story_id, approve_anyway=anyway)["keyframes_approved"]
@@ -282,7 +282,7 @@ def test_a_clip_regenerate_is_refused_while_the_keyframes_are_not_approved(store
 
     wf = _wf()
     story_id = _v2_keyframes(store, tmp_path, built)
-    _run(store, story_id, params={"animate": False})
+    _run(store, story_id)
     target = "shot:1:sh01:video"
     parsed = regenerate.parse_target(target)
     with pytest.raises(wf.WorkflowError) as caught:
@@ -320,7 +320,7 @@ def test_j2_sends_the_keyframe_the_previous_one_and_what_the_shot_must_show(stor
 
     story_id = _v2_keyframes(store, tmp_path, built)
     vision = FakeVision()
-    _run(store, story_id, vision=vision, params={"animate": False})
+    _run(store, story_id, vision=vision)
     ec = tas._ec(store, story_id)
     board = tas._board(store, story_id)
     first, second = vision.requests[:2]
@@ -365,14 +365,13 @@ def test_a_stop_mid_check_keeps_every_verdict_judged_so_far(store, tmp_path, bui
         return PASS
 
     with pytest.raises(steps.StepFailed) as caught:
-        tas._run(store, story_id, adapters=_adapters(vision=FakeVision(slow)), settings=SETTINGS, clock=clock,
-                 params={"animate": False})
+        tas._run(store, story_id, adapters=_adapters(vision=FakeVision(slow)), settings=SETTINGS, clock=clock)
     assert "the keyframe check of shots" in str(caught.value)  # DEC-305: no check id
     judged = _doc(store, story_id)["keyframe_verdicts"]
     assert sorted(judged) == sorted(shots[:3])
 
     vision = FakeVision()
-    _run(store, story_id, vision=vision, params={"animate": False})
+    _run(store, story_id, vision=vision)
     assert vision.shots() == shots[3:]
 
 
@@ -507,8 +506,7 @@ def test_the_approve_route_takes_keyframes_without_auth_and_anyway_goes_over_not
     flagged keyframe is approved with its warning, with or without
     ``approve_anyway`` -- still taken on ``keyframes:<ep>``, and ignored."""
     story_id = _v2_keyframes(api.store, tmp_path, built)
-    tas._run(api.store, story_id, adapters=_adapters(vision=FakeVision(_failing("sh02"))), settings=SETTINGS,
-             params={"animate": False})
+    tas._run(api.store, story_id, adapters=_adapters(vision=FakeVision(_failing("sh02"))), settings=SETTINGS)
     path = f"/api/stories/{story_id}/approve/keyframes:1"
 
     for body in (None, {"approve_anyway": True}):
@@ -534,7 +532,7 @@ def test_the_approve_route_takes_keyframes_without_auth_and_anyway_goes_over_not
 
 def test_the_cli_approves_keyframes_and_refuses_any_other_document(cli, tmp_path, built):
     story_id = _v2_keyframes(cli.store, tmp_path, built)
-    _run(cli.store, story_id, vision=FakeVision(_failing("sh02")), params={"animate": False})
+    _run(cli.store, story_id, vision=FakeVision(_failing("sh02")))
 
     # DEC-311, re-pinned on purpose (plan 28 F1 refused it): a flagged keyframe is approved with its warning,
     # named on the line printed; --anyway is accepted and ignored.
