@@ -100,7 +100,7 @@ def test_the_template_listing_names_every_repo_template_with_its_kind():
     assert rows["edit_flux2_klein_multiref"]["ref_slots"] == 4
     assert rows["i2v_wan22_14b_lightning"]["kind"] == "video"
     assert rows["i2v_wan22_14b_lightning"]["frame_rule"]["lengths"] == [2, 3, 4, 5]
-    assert rows["i2v_wan22_14b_lightning"]["verified_live"] is False  # plan 34: the motion fix awaits its first clip
+    assert rows["i2v_wan22_14b_lightning"]["verified_live"] is True  # plan 34's recipe ran live on 2026-10-07
     assert rows["tts_chatterbox"]["task"] == "tts" and rows["tts_chatterbox"]["kind"] == "audio"
     assert "audio_path" in rows["tts_chatterbox"]["placeholders"]
 
