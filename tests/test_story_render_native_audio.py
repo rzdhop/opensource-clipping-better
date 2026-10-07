@@ -274,7 +274,9 @@ def _native_episode(store, tmp_path, *, tier):
     video adapter with two voiced planned shots keeping their native audio
     (``assets.json`` overrides): ``loud``'s clip then replaced by a real one
     with a sound track, ``mute``'s left as the fake answered it (no sound
-    track). Its assets approved: ``(story_id, loud, mute)``."""
+    track). The shots the plan leaves out are kept still (plan 33 stage 4:
+    else the render refuses them). Its assets approved: ``(story_id, loud,
+    mute)``."""
     settings = tce._settings(**tvp.PAID)
     story_id = tvp._keyframes(store, tmp_path, settings=settings)
     tce._tier(store, story_id, tier=tier)
@@ -285,6 +287,7 @@ def _native_episode(store, tmp_path, *, tier):
     loud, mute = voiced[:2]
     tce._patch(store, story_id, {"shot_id": loud, "keep_native_audio": True},
                {"shot_id": mute, "keep_native_audio": True})
+    tvp.keep_unplanned_still(store, story_id, planned)
     tas._run(store, story_id, adapters=tvp._adapters(tvp.FakeVideo()), settings=settings)
     shots = {shot["shot_id"]: shot for shot in tas._shots(store, story_id)}
     assert shots[loud]["assets"]["clip"]["state"] == shots[mute]["assets"]["clip"]["state"] == "current"

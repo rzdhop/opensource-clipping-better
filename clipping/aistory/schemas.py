@@ -4728,8 +4728,10 @@ RENDER_INPUT_ROLES = ("shot", "line", "sfx", "bgm", "overlay", "clip_audio")
 # or no clip was planned for it), because its effective flags keep it still
 # (``motion_keep_still``), or in place of a clip that failed, went stale or is
 # still generating, by the render param ``fill_failed_with_motion``
-# (``motion_fill``). The render step's own param name is
-# ``RENDER_FILL_PARAM``. Phase 6 stage 10 (DEC-201): at tier 3, its own clip
+# (``motion_fill``). The render step's own param name was
+# ``RENDER_FILL_PARAM``: retired by plan 33 stage 4 (every shot is a video
+# clip), kept here so the manifests that recorded it still read. Phase 6
+# stage 10 (DEC-201): at tier 3, its own clip
 # with the clip's sound heard in place of the shot's lines
 # (``video_native_audio``). Phase 7 follow-up, stage E: on an ambience story
 # (``media_policy.ambience``), its own clip with the clip's sound heard UNDER

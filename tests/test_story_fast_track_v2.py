@@ -74,8 +74,11 @@ def test_on_v2_a_script_outside_its_window_is_never_approve_it_yourself():
 def test_the_fast_track_stops_at_the_keyframe_approval_and_buys_no_clip_until_it(store, tmp_path, built):
     """Phase 7 follow-up stage C, re-pinned on purpose: the stop at the
     keyframes is now the ``stop_at_keyframes`` param's (the default goes up
-    to the render, ``tests/test_story_fast_track_one_click.py``)."""
+    to the render, ``tests/test_story_fast_track_one_click.py``). Plan 33
+    stage 4: the shots the key-shots plan leaves out are kept still, so the
+    render (every shot a video clip) is reached."""
     story_id = kg._v2_keyframes(store, tmp_path, built)
+    tvp.keep_unplanned_still(store, story_id, tvp.planned_ids(store, story_id, kg.SETTINGS))
     video = tvp.FakeVideo()
     fakes = tft.Fakes(tmp_path, runner=tft.no_llm())
     fakes.adapters = kg._adapters(video=video, vision=kg.FakeVision())
@@ -104,7 +107,8 @@ def test_the_fast_track_stops_at_the_keyframe_approval_and_buys_no_clip_until_it
 def test_a_fully_animated_storys_paid_stop_never_offers_still_shots_as_a_way_out(store, tmp_path):
     """DEC-236: every shot of a fully animated story is a clip, so the paid
     check's way out of the clips' cost is allow_paid or a cap -- never
-    "keep their shots still" or "animate off" (the legacy sentence keeps it)."""
+    "keep their shots still" or "animate off". Plan 33 stage 4, re-pinned on
+    purpose: the legacy sentence no longer offers them either."""
     import test_story_assets_step as tas
     import test_story_clip_estimate as tce
     from clipping.aistory.steps import fast_track
@@ -114,7 +118,7 @@ def test_a_fully_animated_storys_paid_stop_never_offers_still_shots_as_a_way_out
     units = tce._units(store, story_id, tce._settings())
 
     legacy = fast_track.paid_verdict(units, ep=1)
-    assert "keep their shots still" in legacy["stop"] and "animate off" in legacy["stop"]
+    assert "keep their shots still" not in legacy["stop"] and "animate off" not in legacy["stop"]
 
     fully = fast_track.paid_verdict(units, ep=1, fully_animated=True)
     assert fully["verdict"] == legacy["verdict"] == fast_track.STOPS_BEFORE_PAID

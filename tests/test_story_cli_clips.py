@@ -1,13 +1,13 @@
 """``main.py --ai-story step <id> assets --ep N [--tier T] [--route R]
-[--no-animate] [--estimate]`` and ``render [--fill-failed-with-motion]``
-(AI Story phase 6, stage 11; spec 9.3; DEC-114: one set of rules, two front
-ends; DEC-209).
+[--estimate]`` and ``render`` (AI Story phase 6, stage 11; spec 9.3;
+DEC-114: one set of rules, two front ends; DEC-209).
 
 ``--tier``/``--route`` patch the story's ``generation_profile`` through the
 workflow function the API's ``PATCH /stories/{id}`` calls, and print it,
 before anything runs (there is no run-level override); ``--estimate`` prints
-the assets estimate -- its video part included -- and runs nothing;
-``--no-animate`` and ``--fill-failed-with-motion`` reach the step's params.
+the assets estimate -- its video part included -- and runs nothing.
+Plan 33 stage 4: every shot is a video clip -- ``--no-animate`` and
+``--fill-failed-with-motion`` are gone (a usage error, nothing runs).
 Keys and chains come from the process environment only (DEC-114).
 
 Driven through ``clipping.aistory.cli.main(argv)`` against a story store
@@ -81,15 +81,20 @@ def test_tier_and_route_patch_the_profile_print_it_and_the_estimate_runs_nothing
     assert estimate["video"]["count"] >= 1 and estimate["video"]["est_usd"] > 0
 
 
-def test_no_animate_and_fill_failed_with_motion_reach_the_steps_params(cli, store, tmp_path):
+def test_no_animate_and_fill_failed_with_motion_are_gone_and_nothing_runs(cli, store, tmp_path):
+    """Plan 33 stage 4, re-pinned on purpose (phase 6 stage 11 sent them as
+    the step's params): every shot is a video clip, so both flags are a
+    usage error (exit 2) and no step runs; without them the steps get no
+    animate and no fill."""
     run, ran = cli
     story_id = tas._episode(store, tmp_path)
 
-    assert run("step", story_id, "assets", "--ep", "1", "--no-animate") == 1
-    assert run("step", story_id, "render", "--ep", "1", "--fill-failed-with-motion") == 1
-    assert run("render", story_id, "--ep", "1", "--fill-failed-with-motion") == 1
-    assert run("step", story_id, "render", "--ep", "1") == 1
+    assert run("step", story_id, "assets", "--ep", "1", "--no-animate") == 2
+    assert run("step", story_id, "render", "--ep", "1", "--fill-failed-with-motion") == 2
+    assert run("render", story_id, "--ep", "1", "--fill-failed-with-motion") == 2
+    assert ran == []
 
-    assert ran == [("assets", 1, {"animate": False}), ("render", 1, {"fill_failed_with_motion": True}),
-                   ("render", 1, {"fill_failed_with_motion": True}), ("render", 1, {})]
-    assert run("step", story_id, "render", "--ep", "1", "--no-animate") == 2  # assets only
+    assert run("step", story_id, "assets", "--ep", "1") == 1
+    assert run("step", story_id, "render", "--ep", "1") == 1
+    assert run("render", story_id, "--ep", "1") == 1
+    assert ran == [("assets", 1, {}), ("render", 1, {}), ("render", 1, {})]

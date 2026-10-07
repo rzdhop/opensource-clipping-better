@@ -248,7 +248,9 @@ def _ambient_episode(store, tmp_path, monkeypatch, *, tier):
     (``media_policy.ambience`` forced on, before any clip is asked, so the
     clips are made with the brief), its planned clips made by stage 8's fake
     video adapter; ``loud``'s clip then replaced by a real one with a sound
-    track, ``mute``'s left without. Its assets approved."""
+    track, ``mute``'s left without. The shots the plan leaves out are kept
+    still (plan 33 stage 4: else the render refuses them). Its assets
+    approved."""
     from clipping.aistory import media_policy
 
     monkeypatch.setattr(media_policy, "ambience", lambda story: True)
@@ -260,6 +262,7 @@ def _ambient_episode(store, tmp_path, monkeypatch, *, tier):
     loud, mute = planned[:2]
     # An opt-in pin is not read in ambience mode: the lines stay TTS.
     tce._patch(store, story_id, {"shot_id": loud, "keep_native_audio": True})
+    tvp.keep_unplanned_still(store, story_id, planned)
     tas._run(store, story_id, adapters=tvp._adapters(tvp.FakeVideo()), settings=settings)
     shots = {shot["shot_id"]: shot for shot in tas._shots(store, story_id)}
     assert shots[loud]["assets"]["clip"]["state"] == shots[mute]["assets"]["clip"]["state"] == "current"

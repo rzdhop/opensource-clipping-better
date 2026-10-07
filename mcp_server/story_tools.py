@@ -11,6 +11,14 @@ Plan 32 stage 1: a story can be created from a preset (``presets``), the
 style is a step like the others, ``story_make_episode`` runs one episode's
 fast track in one run, and ``story_estimate`` says what a step would spend
 before it starts (the workflow's own estimates, calling nothing).
+
+Plan 33 stage 4 (the "no still" rule): every shot of an episode is a video
+clip, never a still with camera motion. A story made here is fully animated:
+without a preset or a generation profile it gets :func:`animated_profile`
+(own_gpu, tier 3); a tier under 2, or a budget profile that does not animate
+every shot, is refused at ``story_create`` and ``story_patch``
+(:func:`still_refusal`); ``story_options`` lists only the budget profiles
+that animate every shot.
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ from typing import Optional
 from fastmcp.exceptions import ToolError
 
 from clipping.aistory import defaults, presets, store as story_store, templates, workflow
+from clipping.providers import budget as budget_mod
 from clipping.aistory.steps.entities import CHARACTERS, PLACES, PROPS
 
 from .director import CHAT_SETTINGS, STEP_MODULES, Director, DirectorError
@@ -117,31 +126,88 @@ def _story_overview(backend: StoryBackend, story_id: str) -> dict:
     return out
 
 
+# The budget profiles' animate mode that makes every shot a clip.
+ALL_SHOTS = "all_shots"
+
+
+def animated_profile() -> dict:
+    """The ``generation_profile`` a story made here gets without a preset or a
+    profile of its own (plan 33 stage 4): fully animated on the human's own
+    GPU -- the quality profile (v2, tier 3, references) on ``own_gpu``, the
+    fruit_drama preset's own choice without its cast or its agent mode."""
+    return dict(defaults.quality_generation_profile(), budget_profile=defaults.OWN_GPU_PROFILE)
+
+
+def _animated_profile_ids() -> list:
+    """The ids of the budget profiles that animate every shot (``animate:
+    all_shots``), in ``defaults.BUDGET_PROFILES`` order."""
+    try:
+        profiles = budget_mod.load_profiles()["profiles"]
+    except (OSError, ValueError):
+        return [defaults.OWN_GPU_PROFILE]
+    return [pid for pid in defaults.BUDGET_PROFILES if (profiles.get(pid) or {}).get("animate") == ALL_SHOTS]
+
+
+def still_refusal(profile: dict, keys=None) -> Optional[str]:
+    """Why *profile* (a ``generation_profile``, or the part of one a patch
+    sends: *keys* limits the check to the keys it sets) would put a still
+    with motion in an episode, in one sentence naming the fully animated
+    budget profiles, or None. Plan 33 stage 4: a tier under 2 makes no clip
+    at all; a budget profile whose animate mode is not ``all_shots`` leaves
+    shots without one."""
+    profile = profile or {}
+    keys = set(profile) if keys is None else set(keys)
+    animated = ", ".join(_animated_profile_ids())
+    why = None
+    if "tier" in keys:
+        try:
+            tier = int(profile.get("tier") or 1)
+        except (TypeError, ValueError):
+            tier = None
+        if tier is not None and tier < 2:
+            why = f"generation_profile.tier {profile.get('tier')!r} makes no clip (tier 2 or 3 does)"
+    if why is None and "budget_profile" in keys:
+        chosen = profile.get("budget_profile")
+        if chosen not in _animated_profile_ids():
+            why = f"budget_profile {chosen!r} does not animate every shot"
+    if why is None:
+        return None
+    return (f"Every shot of an episode is a video clip, never a still with camera motion: {why}. Use tier 2 or 3 "
+            f"with a budget profile that animates every shot: {animated}.")
+
+
 def _create_kwargs(*, preset, style, episode_format, generation_profile) -> dict:
     """``StoryStore.create``'s choices: the preset's (``presets.merge``) with
-    the caller's on top, or the caller's alone. An unknown preset is a tool
-    error naming the known ones."""
+    the caller's on top, or -- without a preset -- :func:`animated_profile`
+    with the caller's profile keys on top (plan 33 stage 4: never the
+    store's tier-1 default). An unknown preset, or a profile that would put
+    a still in an episode (:func:`still_refusal`), is a tool error saying
+    why."""
     if preset is None:
-        return {"style_template_id": style, "generation_profile": generation_profile,
-                "episode_template_id": episode_format}
-    try:
-        return presets.merge(preset, style_template_id=style, generation_profile=generation_profile,
-                             episode_template_id=episode_format)
-    except presets.UnknownPreset as exc:
-        raise ToolError(str(exc)) from None
+        kwargs = {"style_template_id": style, "episode_template_id": episode_format,
+                  "generation_profile": dict(animated_profile(), **(generation_profile or {}))}
+    else:
+        try:
+            kwargs = presets.merge(preset, style_template_id=style, generation_profile=generation_profile,
+                                   episode_template_id=episode_format)
+        except presets.UnknownPreset as exc:
+            raise ToolError(str(exc)) from None
+    refusal = still_refusal(kwargs.get("generation_profile") or {})
+    if refusal:
+        raise ToolError(refusal)
+    return kwargs
 
 
 def _budget_profiles() -> list:
-    """``[{id, label, cap_usd}]`` from ``templates/budget_profiles.json``."""
-    from clipping.providers import budget as budget_mod
-
+    """``[{id, label, cap_usd}]`` from ``templates/budget_profiles.json``: the
+    ones that animate every shot only (plan 33 stage 4)."""
     try:
         profiles = budget_mod.load_profiles()["profiles"]
     except (OSError, ValueError) as exc:
         return [{"error": str(exc)}]
     return [{"id": pid, "label": doc.get("label") or pid.replace("_", " ").capitalize(),
              "cap_usd": float(doc.get("cap_usd") or 0.0)}
-            for pid, doc in profiles.items() if pid in defaults.BUDGET_PROFILES]
+            for pid, doc in profiles.items() if pid in defaults.BUDGET_PROFILES and doc.get("animate") == ALL_SHOTS]
 
 
 def _episode_formats() -> list:
@@ -298,15 +364,17 @@ def register(mcp, backend: StoryBackend) -> None:
     def story_create(language: str, seed_text: Optional[str] = None, style: Optional[str] = None,
                      episode_format: Optional[str] = None, generation_profile: Optional[dict] = None,
                      preset: Optional[str] = None) -> dict:
-        """Free. Create a draft story. language: 'fr' or 'en'. seed_text: the idea in a few lines (optional).
-        preset: one of story_options().presets ids -- e.g. 'fruit_drama': the fruit-drama look, pictures and
-        clips made on your own GPU, a cast of fruits, ready for story_make_episode and the one-run story.
-        Without a preset the story makes no clips (the server's plain defaults). style: one of
-        story_options().styles ids (optional, pickable later at the style step). episode_format: an id of
-        story_options().episode_formats (optional). generation_profile: {budget_profile, route, ...}
-        (optional). What you name wins over the preset: a style or format replaces the preset's, and a
-        generation_profile's keys replace the preset's one by one. Returns the story document; its story_id
-        is what every other tool takes."""
+        """Free. Create a draft story. Every shot of every episode is a video clip. language: 'fr' or 'en'.
+        seed_text: the idea in a few lines (optional). preset: one of story_options().presets ids -- e.g.
+        'fruit_drama': the fruit-drama look, pictures and clips made on your own GPU, a cast of fruits, ready
+        for story_make_episode and the one-run story. Without a preset the story is made on your own GPU
+        (budget profile own_gpu, tier 3). style: one of story_options().styles ids (optional, pickable later
+        at the style step). episode_format: an id of story_options().episode_formats (optional).
+        generation_profile: {budget_profile (one of story_options().budget_profiles), route, ...}
+        (optional); a tier under 2 or a budget profile not in that list is refused. What you name wins over
+        the preset: a style or format replaces the preset's, and a generation_profile's keys replace the
+        preset's (or the default's) one by one. Returns the story document; its story_id is what every
+        other tool takes."""
         kwargs = _create_kwargs(preset=preset, style=style, episode_format=episode_format,
                                 generation_profile=generation_profile)
         return _answering(stories.create, language=language, seed_text=seed_text, now=now(), **kwargs)
@@ -315,8 +383,8 @@ def register(mcp, backend: StoryBackend) -> None:
     def story_options() -> dict:
         """Free. The choices a story can be made with: presets (id, label, summary, what each sets), styles
         (id, name), episode formats (id, length window in seconds, number of scenes), budget profiles (id,
-        label, spending cap in dollars), the step names the director runs, the documents and entity kinds
-        the read tools take."""
+        label, spending cap in dollars; each animates every shot), the step names the director runs, the
+        documents and entity kinds the read tools take."""
         styles = []
         for tid in templates.list_style_ids():
             try:
@@ -418,12 +486,13 @@ def register(mcp, backend: StoryBackend) -> None:
           Then story_approve('knowledge').
         - script (ep): {measure_voices, check_only}. Then story_approve('script:<ep>').
         - storyboard (ep): {fast: true for the plan without writing}. Then story_approve('storyboard:<ep>').
-        - assets (ep): {align_words, animate (default true)}. On an animated story this is TWO passes: the
-          first run makes and checks the keyframes, then stops; you look at them and call
+        - assets (ep): {align_words}. Every shot becomes a video clip. This is TWO passes: the first run
+          makes and checks the keyframes, then stops; you look at them and call
           story_approve('keyframes:<ep>'); a second assets run buys the clips. Then story_approve('assets:<ep>').
           story_approve('assets:<ep>') and render refuse while a shot has no clip.
-        - render (ep): {subtitles: style|word_pop|two_line|none, encoder: libx264|auto,
-          fill_failed_with_motion: true to cover a failed clip with a moving still}. Free, on this server.
+        - render (ep): {subtitles: style|word_pop|two_line|none, encoder: libx264|auto}. Free, on this
+          server. A missing or failed clip stops the render and names the shot's target
+          shot:<ep>:<shot_id>:video: regenerate that clip, approve the assets again, then render.
         - metadata (ep), memory (ep), feedback (ep), propose-next (ep): none. rerender (ep): none.
         - regenerate: {target, note (what to change), voice ({provider, voice_id} for a voice target)}.
           Targets: concepts, bible:<field>, character:<id>:text, character:<id>:image:portrait|turnaround|
@@ -559,7 +628,13 @@ def register(mcp, backend: StoryBackend) -> None:
     def story_patch(story_id: str, fields: dict) -> dict:
         """Edit story fields (bible fields such as logline, premise, tone, world, themes, audience; title,
         seed_text, narrator, generation_profile, episode_template_id). A changed bible field clears the
-        bible's approval. Returns the story."""
+        bible's approval. generation_profile: a tier under 2, or a budget profile not in
+        story_options().budget_profiles, is refused (every shot is a video clip). Returns the story."""
+        sent = (fields or {}).get("generation_profile")
+        if isinstance(sent, dict):
+            refusal = still_refusal(sent, keys=sent.keys())
+            if refusal:
+                raise ToolError(refusal)
         return _answering(workflow.patch_story, stories, story_id, fields, now=now())
 
     @mcp.tool

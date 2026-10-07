@@ -5,8 +5,11 @@ On a story ``media_policy.fully_animated`` holds for (v2, tier >= 2, a budget
 profile that animates every shot) the assets approval and the render refuse
 while a shot the user did not pin ``keep_still`` has no current clip -- one
 never made as well as one failed or stale -- and the render's
-``fill_failed_with_motion`` cannot turn one into a still with a zoom. Any
-other story keeps phase 6's behaviour (``tests/test_story_render_clips.py``).
+``fill_failed_with_motion`` cannot turn one into a still with a zoom. Plan 33
+stage 4: the render's side of that rule now holds for every story at tier
+>= 2 (``fill_failed_with_motion`` itself is refused); a story that is not
+fully animated refuses with the render's own sentence
+(``tests/test_story_render_clips.py``).
 
 The episode is the render-clip tests' own: a tier-2 episode whose planner
 animated only some shots (the ``one_dollar`` profile), with
@@ -70,8 +73,9 @@ def test_the_render_refuses_a_shot_never_animated_and_no_fill_makes_it_a_still(s
         assert shot_id in message
     assert "fill_failed_with_motion" not in message  # Tier-1 motion is never offered
 
+    # Plan 33 stage 4, re-pinned on purpose: the param itself is refused now, before any clip is read.
     message, fake = trs.refused(store, story_id, tmp_path=tmp_path, params={"fill_failed_with_motion": True})
-    assert fake.calls == [] and "no clip yet" in message
+    assert fake.calls == [] and message.startswith("fill_failed_with_motion is no longer a render option")
 
 
 def test_a_failed_clip_cannot_be_filled_with_motion_on_a_fully_animated_story(store, tmp_path, monkeypatch):
@@ -84,11 +88,14 @@ def test_a_failed_clip_cannot_be_filled_with_motion_on_a_fully_animated_story(st
     story_id, planned = trc._animated(store, tmp_path, video=video)
     _fully_animated(monkeypatch)
 
-    message, fake = trs.refused(store, story_id, tmp_path=tmp_path, params={"fill_failed_with_motion": True})
+    message, fake = trs.refused(store, story_id, tmp_path=tmp_path)
 
     assert fake.calls == []
     assert f"shot {shot_ids['failed']}'s clip failed" in message
     assert f"shot:1:{shot_ids['failed']}:video" in message
+    # Plan 33 stage 4, re-pinned on purpose: the fill is refused as a param of its own, before any clip is read.
+    message, fake = trs.refused(store, story_id, tmp_path=tmp_path, params={"fill_failed_with_motion": True})
+    assert fake.calls == [] and message.startswith("fill_failed_with_motion is no longer a render option")
 
 
 def test_a_shot_the_user_keeps_still_is_the_one_exemption(store, tmp_path, monkeypatch):
@@ -125,13 +132,38 @@ def test_the_assets_approval_refuses_until_every_shot_has_its_clip(store, tmp_pa
         assert shot_id in info.value.detail
 
 
-def test_a_story_that_is_not_fully_animated_keeps_phase_6s_motion_for_unplanned_shots(store, tmp_path):
-    """RC-M3's side: the same episode, the rule off (its real profile is not
-    v2), renders its unplanned shots with Tier-1 motion as before."""
-    story_id, planned = trc._animated(store, tmp_path)
+def test_a_story_that_is_not_fully_animated_refuses_its_unplanned_shots_too(store, tmp_path):
+    """Plan 33 stage 4, re-pinned on purpose (phase 6 rendered them with
+    Tier-1 motion): the same episode, ``fully_animated`` off (its real profile
+    is not v2, its budget profile animates key shots only), refuses the
+    render before any process, naming each unplanned shot's regenerate
+    target -- every shot of every tier-2+ story is a video clip -- and
+    offers no fill. Kept still, those shots are the one exemption, as on a
+    fully animated story."""
+    import test_story_clip_estimate as tce
+    from clipping.aistory import media_policy
 
+    story_id, planned = trc._animated(store, tmp_path)
+    assert media_policy.fully_animated(store.get(story_id)) is False
+    unplanned = [shot["shot_id"] for shot in tas._shots(store, story_id) if shot["shot_id"] not in planned]
+    assert unplanned
+
+    message, fake = trs.refused(store, story_id, tmp_path=tmp_path)
+
+    assert fake.calls == [] and store.read_episode_doc(story_id, 1, "render_manifest.json") is None
+    assert message.startswith("Episode 1 cannot be rendered: ")
+    assert "Every shot is a video clip, never a still with camera motion" in message
+    for shot_id in unplanned:
+        assert f"shot:1:{shot_id}:video" in message
+    assert "fill_failed_with_motion" not in message
+
+    for shot_id in unplanned:
+        tce._patch(store, story_id, {"shot_id": shot_id, "keep_still": True})
+    trs.approve_assets(store, story_id)
     summary, _log, _fake = trs.render(store, story_id, tmp_path=tmp_path)
 
     assert summary["state"] == "completed"
     manifest = store.read_episode_doc(story_id, 1, "render_manifest.json")
-    assert "motion" in manifest["shot_modes"].values()
+    assert "motion" not in manifest["shot_modes"].values()
+    assert {shot_id for shot_id, mode in manifest["shot_modes"].items() if mode == "motion_keep_still"} == set(
+        unplanned)

@@ -22,9 +22,9 @@ lock's own mode), ``word_pop``, ``two_line`` or ``none`` (a per-episode
 render parameter, DEC-164); ``encoder`` -- ``libx264`` (default) or
 ``auto``, opt-in: ``clipping.studio.ffmpeg_utils.detect_video_encoder``
 (imported lazily, only then) picks a hardware encoder for the final pass
-(``profiles.HARDWARE_ENCODERS``); anything else it answers keeps libx264;
-``fill_failed_with_motion`` -- off by default (phase 6 stage 9, "Clips"
-below), recorded in the manifest's params only when on.
+(``profiles.HARDWARE_ENCODERS``); anything else it answers keeps libx264.
+``fill_failed_with_motion`` is retired (plan 33 stage 4, "Clips" below): sent
+true it is refused; an old manifest's ``true`` is dropped on a re-render.
 
 **Clips** (phase 6 stage 9; :func:`shot_clips`). At tier 1 the render reads
 no clip: its inputs, plan and manifest are the ones it always made. At tier
@@ -32,13 +32,14 @@ no clip: its inputs, plan and manifest are the ones it always made. At tier
 current (``clips.clip_state`` on the episode's video link: made from the
 shot's image and video prompt as they are, its file on disk) and the shot's
 **effective** flags (``clips.shot_flags``: an ``assets.json`` override over
-the storyboard's own) do not keep it still; else its image with Tier-1
-motion -- a shot kept still, or one the plan never animated (no clip
-record). A shot not kept still whose clip record is not current -- failed,
-stale, a re-animate pending, a file gone, or still generating -- refuses the
-render before any process, naming each with what to do (its regenerate
-target; only Continue for one still generating); with
-``fill_failed_with_motion`` such shots get Tier-1 motion instead. The
+the storyboard's own) do not keep it still; else, only for a shot kept still
+(DEC-236's one exemption), its image with Tier-1 motion. Plan 33 stage 4,
+every story at tier >= 2: every shot is a video clip, never a still with
+motion -- a shot not kept still with no clip record, or whose clip record is
+not current (failed, stale, a re-animate pending, a file gone, or still
+generating), refuses the render before any process, naming each with what to
+do (its regenerate target ``shot:<ep>:<shot_id>:video``; only Continue for
+one still generating). Nothing fills such a shot with motion any more. The
 manifest's ``shot_modes`` (``schemas.RENDER_SHOT_MODES``) records which shot
 got what, whenever one is not plain motion.
 
@@ -124,8 +125,11 @@ SUBTITLES_FILE = plan_mod.SUBTITLES_REL
 
 SUBTITLES_PARAM = "subtitles"
 ENCODER_PARAM = "encoder"
+# Plan 33 stage 4: retired -- every shot is a video clip. No longer a param
+# (sent true it is refused, :func:`read_params`); an old manifest may still
+# record it (``schemas.RENDER_FILL_PARAM``), dropped by :func:`rerender_params`.
 FILL_PARAM = schemas.RENDER_FILL_PARAM
-PARAMS = (SUBTITLES_PARAM, ENCODER_PARAM, FILL_PARAM)
+PARAMS = (SUBTITLES_PARAM, ENCODER_PARAM)
 # "style" is the style lock's own mode; the rest are the closed list.
 STYLE_SUBTITLES = "style"
 SUBTITLE_CHOICES = (STYLE_SUBTITLES,) + schemas.SUBTITLE_MODES
@@ -155,13 +159,20 @@ def _plural(items, one, many) -> str:
 
 # ------------------------------------------------------------------- params
 
+def fill_refusal() -> str:
+    """The refusal of ``fill_failed_with_motion`` sent true (plan 33 stage 4)."""
+    return (f"{FILL_PARAM} is no longer a render option: every shot of an episode is a video clip, never a still "
+            "with camera motion. A missing or failed clip stops the render and names its regenerate target "
+            "(shot:<ep>:<shot_id>:video): make that clip again, approve the assets again, then render.")
+
+
 def read_params(params) -> dict:
     """``{"subtitles", "encoder"}`` from the step's params, defaults filled in
-    (``style``, ``libx264``), plus ``fill_failed_with_motion: true`` only
-    when it is on (off, the default, is not written: the params are the ones
-    a render always had); ``StepFailed`` naming the choices for a value that
-    is not one of them. Other keys are not the render's and are left
-    alone."""
+    (``style``, ``libx264``); ``StepFailed`` naming the choices for a value
+    that is not one of them, and for ``fill_failed_with_motion`` sent true
+    (:func:`fill_refusal`, plan 33 stage 4: retired; false, the old
+    default, changes nothing). Other keys are not the render's and are
+    left alone."""
     params = params or {}
     subtitles = params.get(SUBTITLES_PARAM)
     subtitles = STYLE_SUBTITLES if subtitles is None else subtitles
@@ -171,13 +182,9 @@ def read_params(params) -> dict:
     encoder = DEFAULT_ENCODER if encoder is None else encoder
     if encoder not in ENCODER_CHOICES:
         raise StepFailed(f"The encoder must be one of {', '.join(ENCODER_CHOICES)}, not {encoder!r}.")
-    fill = params.get(FILL_PARAM)
-    if fill is not None and not isinstance(fill, bool):
-        raise StepFailed(f"{FILL_PARAM} must be true or false, not {fill!r}.")
-    wanted = {"subtitles": subtitles, "encoder": encoder}
-    if fill:
-        wanted[FILL_PARAM] = True
-    return wanted
+    if params.get(FILL_PARAM):
+        raise StepFailed(fill_refusal())
+    return {"subtitles": subtitles, "encoder": encoder}
 
 
 # ------------------------------------------------------------ preconditions
@@ -266,15 +273,19 @@ def _clip_problem(ec, shot, state, *, script=None, doc=None, link=None):
     return "file is missing", False
 
 
-def clip_refusal(ec, blocked, *, script=None, doc=None, link=None) -> str:
+def clip_refusal(ec, blocked, unmade=(), *, script=None, doc=None, link=None) -> str:
     """The render's refusal of *blocked* (``[(shot, state)]``: shots not kept
-    still whose clip record is not current): each shot named with what went
-    wrong, its regenerate target -- or, still generating, only Continue
+    still whose clip record is not current) and *unmade* (``[shot id]``:
+    shots not kept still with no clip record, plan 33 stage 4): each shot
+    named with what went wrong and its regenerate target
+    (``shot:<ep>:<shot_id>:video``) -- or, still generating, only Continue
     (``assets.CONTINUE_ONLY``, DEC-152: a new seed would buy a second clip;
-    a pending re-animate the provider holds included, :func:`_clip_problem`)
-    -- and the param that renders them with Tier-1 motion instead."""
+    a pending re-animate the provider holds included, :func:`_clip_problem`).
+    Never offers motion in place of a clip: every shot is a video clip."""
     ep = ec.ep
     said, targets, held = [], [], []
+    if unmade:
+        said.append(f"{_plural(unmade, 'shot', 'shots')} {_and(unmade)} {_plural(unmade, 'has', 'have')} no clip")
     for shot, state in blocked:
         shot_id = shot["shot_id"]
         what, still = _clip_problem(ec, shot, state, script=script, doc=doc, link=link)
@@ -283,16 +294,21 @@ def clip_refusal(ec, blocked, *, script=None, doc=None, link=None) -> str:
             held.append(shot_id)
         else:
             targets.append(assets_step.clip_target(ep, shot_id))
-    fixes = []
+    makes = []
+    if unmade:
+        # A shot its plan never animated: only its own regenerate buys it (an assets run follows the plan).
+        new = [assets_step.clip_target(ep, shot_id) for shot_id in unmade]
+        makes.append(f"make {_plural(new, 'its clip', 'their clips')} (regenerate {_and(new)})")
     if targets:
-        fixes.append(f"make {_plural(targets, 'it', 'them')} again (regenerate {_and(targets)}, or run the assets "
-                     "step again), approve the assets again, then render")
+        makes.append(f"make {_plural(targets, 'it', 'them')} again (regenerate {_and(targets)}, or run the assets "
+                     "step again)")
+    fixes = [f"{' and '.join(makes)}, approve the assets again, then render"] if makes else []
     if held:
         fixes.append(f"for {_and(held)}, still generating: {assets_step.CONTINUE_ONLY}")
-    them = _plural(blocked, "it", "them")
-    return (f"Episode {ep} cannot be rendered: {_and(said)}. To cut {_plural(blocked, 'that shot', 'those shots')} "
-            f"from {_plural(blocked, 'its clip', 'their clips')}, {'; '.join(fixes)}. Or render with {FILL_PARAM} "
-            f"on to give {them} plain camera motion instead.")
+    shots = list(unmade) + [shot["shot_id"] for shot, _state in blocked]
+    return (f"Episode {ep} cannot be rendered: {_and(said)}. Every shot is a video clip, never a still with "
+            f"camera motion: to cut {_plural(shots, 'that shot', 'those shots')} from "
+            f"{_plural(shots, 'its clip', 'their clips')}, {'; '.join(fixes)}.")
 
 
 def fully_animated_refusal(ec, blocked, unmade, *, action="rendered", script=None, doc=None, link=None) -> str:
@@ -307,7 +323,8 @@ def fully_animated_refusal(ec, blocked, unmade, *, action="rendered", script=Non
     if unmade:
         said.append(f"{_plural(unmade, 'shot', 'shots')} {_and(unmade)} {_plural(unmade, 'has', 'have')} no clip yet")
         fixes.append("run the assets step (it buys every shot's clip, or collects one already bought, after the "
-                     "keyframes are approved)")
+                     "keyframes are approved), or regenerate "
+                     f"{_and([assets_step.clip_target(ep, shot_id) for shot_id in unmade])}")
     for shot, state in blocked:
         shot_id = shot["shot_id"]
         what, still = _clip_problem(ec, shot, state, script=script, doc=doc, link=link)
@@ -368,7 +385,7 @@ def silent_ambience_note(shot) -> str:
             "heard as always.")
 
 
-def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
+def shot_clips(ec, script, board, assets_doc):
     """What each shot is cut from (module docstring, "Clips"), or None at
     tier 1 -- the render reads no clip there, but a stock cutaway's
     (:func:`stock_shot_clips`, plan 23 stage B8)::
@@ -383,9 +400,10 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     nothing, with a note (:func:`silent_ambience_note`). Such a story never
     reads ``keep_native_audio``: ``native_audio`` stays empty.
 
-    ``filled``: the shots not kept still whose clip record is not current,
-    rendered with Tier-1 motion -- only with *fill_failed*; without it they
-    refuse the render (``StepFailed``, :func:`clip_refusal`).
+    ``filled``: always empty (plan 33 stage 4: every shot is a video clip):
+    a shot not kept still with no clip record, or whose clip record is not
+    current, refuses the render (``StepFailed``, :func:`clip_refusal`; a
+    fully animated story's own sentence, :func:`fully_animated_refusal`).
     ``native_audio`` (tier 3 only, DEC-201): the shots cut from their clip
     whose effective flags keep its native audio and whose clip has a sound
     track (``clips.clip_has_audio``) -- heard in place of their lines; a
@@ -400,18 +418,22 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
     link = (sticky_link.recorded(assets_doc, sticky_link.VIDEO) or {}).get("link")
     if media_policy.fully_animated(ec.story):
         # Every shot a clip: a shot never animated, or one whose clip is not
-        # current, refuses the render -- fill_failed_with_motion included.
+        # current, refuses the render (its own sentence; any other tier-2+ story's below).
         blocked, unmade = unanimated_shots(ec, script, board, assets_doc)
         if blocked or unmade:
             raise StepFailed(fully_animated_refusal(ec, blocked, unmade, script=script, doc=assets_doc, link=link))
     ambient = tier == 3 and media_policy.ambience(ec.story)
     speech = tier == 3 and media_policy.native_speech(ec.story)
-    videos, keep_still, blocked, native, ambience, notes = {}, {}, [], [], [], []
+    videos, keep_still, blocked, unmade, native, ambience, notes = {}, {}, [], [], [], [], []
     for shot in board["shots"]:
         shot_id = shot["shot_id"]
         flags = clips.shot_flags(shot, assets_doc)
         keep_still[shot_id] = bool(flags["keep_still"])
-        if keep_still[shot_id] or not shot["assets"].get("clip"):
+        if keep_still[shot_id]:
+            continue
+        if not shot["assets"].get("clip"):
+            # Plan 33 stage 4: a shot the plan never animated is no still with motion either.
+            unmade.append(shot_id)
             continue
         image = assets_step.shot_image_path(ec, shot)
         state = clips.clip_state(ec, shot, script, link=clips.class_link(ec.story, shot, assets_doc, link), tier=tier,
@@ -444,10 +466,10 @@ def shot_clips(ec, script, board, assets_doc, *, fill_failed=False):
                     notes.append(silent_clip_note(shot))
         else:
             blocked.append((shot, state))
-    if blocked and not fill_failed:
-        raise StepFailed(clip_refusal(ec, blocked, script=script, doc=assets_doc, link=link))
-    return {"videos": videos, "keep_still": keep_still, "filled": [shot["shot_id"] for shot, _state in blocked],
-            "native_audio": native, "ambience": ambience, "notes": notes}
+    if blocked or unmade:
+        raise StepFailed(clip_refusal(ec, blocked, unmade, script=script, doc=assets_doc, link=link))
+    return {"videos": videos, "keep_still": keep_still, "filled": [], "native_audio": native, "ambience": ambience,
+            "notes": notes}
 
 
 def stock_shot_clips(ec, script, board, assets_doc):
@@ -477,16 +499,16 @@ def stock_shot_clips(ec, script, board, assets_doc):
 
 
 def require_clips(ec, params=None) -> tuple:
-    """:func:`require_renderable`, then the render's clip refusal
-    (:func:`shot_clips`) with *params*' ``fill_failed_with_motion``
-    (:func:`read_params`) -- what the run meets, in its order, checked
+    """*params* read (:func:`read_params`), :func:`require_renderable`, then
+    the render's clip refusal (:func:`shot_clips`) -- what the run meets, in
+    its order, checked
     before a job exists (phase 6 stage 11: the API's 409, the render
     estimate): ``StepFailed`` with the run's own sentence, else
     ``(script, storyboard, assets_doc)``. Nothing more at tier 1. Reads
     files only."""
-    wanted = read_params(params)
+    read_params(params)
     script, board, doc = require_renderable(ec)
-    shot_clips(ec, script, board, doc, fill_failed=bool(wanted.get(FILL_PARAM)))
+    shot_clips(ec, script, board, doc)
     return script, board, doc
 
 
@@ -505,8 +527,7 @@ def _shipped_file(rel, prefix, base):
     return None if found is None else os.fspath(found)
 
 
-def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, fill_failed_with_motion=False,
-                  shot_clips_now=_RESOLVE) -> dict:
+def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, shot_clips_now=_RESOLVE) -> dict:
     """The plan's ``inputs`` (``plan.build_render_plan``): every file the
     render reads, resolved through the store and hashed now
     (``runner.file_record``); ``source`` is the path the manifest shows --
@@ -557,8 +578,7 @@ def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, fill_
     font = fonts.resolve_font(family, custom_fonts_dir=custom_fonts_dir)
     inputs = {"shots": shots, "lines": lines, "sfx": sfx, "bgm": bgm, "overlay": runner_mod.paper_texture_record(),
               "font": font, "word_timings": word_timings}
-    resolved = (shot_clips(ec, script, board, assets_doc, fill_failed=fill_failed_with_motion)
-                if shot_clips_now is _RESOLVE else shot_clips_now)
+    resolved = shot_clips(ec, script, board, assets_doc) if shot_clips_now is _RESOLVE else shot_clips_now
     if resolved is not None:
         inputs.update(videos=resolved["videos"], keep_still=resolved["keep_still"], filled=resolved["filled"])
         if resolved.get("native_audio"):
@@ -568,12 +588,12 @@ def render_inputs(ec, script, board, assets_doc, *, custom_fonts_dir=None, fill_
     return inputs
 
 
-def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, video_encoder=None,
-              fill_failed_with_motion=False) -> dict:
+def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, video_encoder=None) -> dict:
     """The keyword arguments of ``plan.build_render_plan`` (but ``ffmpeg``
     and ``profile``) for this episode: its documents, the story's id, title
     and language (the end card's title), the resolved *inputs* and the
-    step's params (``fill_failed_with_motion`` passed only when on) and, for
+    step's params (never ``fill_failed_with_motion``: retired, plan 33
+    stage 4) and, for
     a story with a ``subtitle_style``, its resolved look (``look``; absent
     otherwise, so the plan is what it always was), and for a 16:9 or 1:1
     story its frame (``aspect``, plan 23 stage B7; absent at 9:16)."""
@@ -586,8 +606,6 @@ def plan_args(ec, script, board, assets_doc, inputs, *, subtitles, encoder, vide
     if ec.story.get("recipe"):
         # Plan 32 stage 4: the end card's line and the hook's text follow the story's recipe.
         args["story"]["recipe"] = ec.story["recipe"]
-    if fill_failed_with_motion:
-        args["fill_failed_with_motion"] = True
     look = subtitle_style.look_for(ec.style_lock, ec.story)
     if look is not None:
         args["look"] = look
@@ -731,12 +749,9 @@ def _plan_now(ec, wanted, script, board, assets_doc, ffmpeg, *, profile, custom_
     """The plan :func:`run` would build now, keyed with *ffmpeg* (no
     pre-flight): the files as they are, hashed. ``PlanError``/``StepFailed``
     as the render meets them."""
-    fill = bool(wanted.get(FILL_PARAM))
-    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir,
-                           fill_failed_with_motion=fill)
+    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir)
     return plan_mod.build_render_plan(**plan_args(ec, script, board, assets_doc, inputs,
-                                                  subtitles=wanted["subtitles"], encoder=wanted["encoder"],
-                                                  fill_failed_with_motion=fill),
+                                                  subtitles=wanted["subtitles"], encoder=wanted["encoder"]),
                                       ffmpeg=ffmpeg, profile=profile)
 
 
@@ -884,8 +899,10 @@ def _stage_changes(baseline, plan, selection) -> list:
 
 
 def rerender_params(baseline) -> dict:
-    """The params a re-render renders with: the last good render's own."""
-    return read_params(baseline["params"])
+    """The params a re-render renders with: the last good render's own, less
+    a retired ``fill_failed_with_motion`` an old manifest records (plan 33
+    stage 4: the re-render then meets the clip refusal like any render)."""
+    return read_params({key: value for key, value in baseline["params"].items() if key != FILL_PARAM})
 
 
 def render_changes(ec, params=None, *, profile="final", custom_fonts_dir=None, ffmpeg=None) -> dict:
@@ -914,7 +931,7 @@ def render_changes(ec, params=None, *, profile="final", custom_fonts_dir=None, f
     render's own sentence when the episode cannot be rendered."""
     known = last_render(ec)
     baseline = known["baseline"]
-    wanted = read_params(baseline["params"] if params is None and baseline is not None else params)
+    wanted = rerender_params(baseline) if params is None and baseline is not None else read_params(params)
     script, board, assets_doc = require_renderable(ec)
     keyed = ffmpeg or (baseline or known["current"] or {}).get("ffmpeg") or {"version": "unknown",
                                                                              "machine": "unknown"}
@@ -992,9 +1009,8 @@ def render_episode(ctx, ec, params, *, step=STEP, profile="final", run_process=s
     ep = ec.ep
     script, board, assets_doc = require_renderable(ec)
     fingerprint = assets_doc["approved"]["fingerprint"]
-    fill = bool(params.get(FILL_PARAM))
-    # Tier >= 2: a clip that is not current refuses before any process.
-    resolved = shot_clips(ec, script, board, assets_doc, fill_failed=fill)
+    # Tier >= 2: a shot without a current clip refuses before any process.
+    resolved = shot_clips(ec, script, board, assets_doc)
     for note in (resolved or {}).get("notes") or ():
         ctx.on_log(note)
     ctx.cancel.check()
@@ -1006,12 +1022,11 @@ def render_episode(ctx, ec, params, *, step=STEP, profile="final", run_process=s
                          "(it needs zoompan, xfade, sidechaincompress, loudnorm and ass), then render again.") from None
     video_encoder = (detect_encoder(ctx, detect=detect, aspect=media_policy.aspect(ec.story))
                      if params["encoder"] == AUTO_ENCODER else None)
-    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir,
-                           fill_failed_with_motion=fill, shot_clips_now=resolved)
+    inputs = render_inputs(ec, script, board, assets_doc, custom_fonts_dir=custom_fonts_dir, shot_clips_now=resolved)
     try:
         plan = plan_mod.build_render_plan(**plan_args(ec, script, board, assets_doc, inputs,
                                                       subtitles=params["subtitles"], encoder=params["encoder"],
-                                                      video_encoder=video_encoder, fill_failed_with_motion=fill),
+                                                      video_encoder=video_encoder),
                                           ffmpeg=info, profile=profile)
     except plan_mod.PlanError as exc:
         raise StepFailed(f"Episode {ep} cannot be rendered: {exc}") from None

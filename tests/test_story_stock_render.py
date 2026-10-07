@@ -113,13 +113,17 @@ def test_a_stock_shot_never_carries_ambience_or_native_audio_at_tier_3(store, tm
         raise AssertionError("a stock clip's sound track is never read")
 
     monkeypatch.setattr(clips, "clip_has_audio", never_read)
+    # Plan 33 stage 4: every shot is a video clip at tier >= 2 -- the shots with no clip are kept still here.
+    shots = {shot["shot_id"]: {"keep_still": True} for shot in board["shots"] if shot["shot_id"] != SHOT}
     # an ambience story, and a human who asked this shot to keep its native audio
     monkeypatch.setattr(media_policy, "ambience", lambda _story: True)
-    resolved = render_step.shot_clips(ec, script, board, dict(doc, shots={SHOT: {"keep_native_audio": True}}))
+    resolved = render_step.shot_clips(ec, script, board, dict(doc, shots=dict(shots, **{SHOT: {
+        "keep_native_audio": True}})))
     assert list(resolved["videos"]) == [SHOT]
     assert resolved["native_audio"] == [] and resolved["ambience"] == [] and resolved["notes"] == []
     monkeypatch.setattr(media_policy, "ambience", lambda _story: False)
-    resolved = render_step.shot_clips(ec, script, board, dict(doc, shots={SHOT: {"keep_native_audio": True}}))
+    resolved = render_step.shot_clips(ec, script, board, dict(doc, shots=dict(shots, **{SHOT: {
+        "keep_native_audio": True}})))
     assert list(resolved["videos"]) == [SHOT] and resolved["native_audio"] == [] and resolved["ambience"] == []
 
 

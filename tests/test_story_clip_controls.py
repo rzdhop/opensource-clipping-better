@@ -12,9 +12,10 @@ stage 11; A-087, DEC-152..154, DEC-204, DEC-209).
   its regenerate target; a re-animate whose request the provider holds is
   offered Continue only -- even when the process stopped before its answer
   was recorded (stage 9's noted flaw: it was offered its target, which would
-  buy a second clip) -- and ``fill_failed_with_motion`` lets both through.
+  buy a second clip). Plan 33 stage 4: nothing lets them through any more
+  (``fill_failed_with_motion`` is refused).
 - The fast track's estimate counts the clips at tier 2, and its paid-check
-  stop says how to do without them.
+  stop never offers doing without them (plan 33 stage 4).
 
 The story, the fakes and the fixtures are the assets step's, the video
 phase's and the render's own (``tests/test_story_assets_step.py``,
@@ -125,8 +126,9 @@ def test_the_render_check_before_a_job_names_a_failed_clips_target_and_a_held_re
     ``pending`` re-animate. The check a render meets before a job exists --
     and its estimate -- refuse naming the failed shot's target and, for the
     re-animate the provider holds, Continue only (never its target: a new
-    request would buy a second clip). ``fill_failed_with_motion`` lets both
-    through."""
+    request would buy a second clip). Plan 33 stage 4, re-pinned on purpose:
+    ``fill_failed_with_motion`` no longer lets them through -- refused, with
+    its own sentence -- and the shots the plan left out are kept still."""
     from clipping.aistory import workflow
     from clipping.aistory.steps import regenerate
 
@@ -136,7 +138,7 @@ def test_the_render_check_before_a_job_names_a_failed_clips_target_and_a_held_re
         shot_ids["failed"], shot_ids["again"] = planned[0], planned[1]
         return tvp.FakeVideo(fail_for={f"shot_{planned[0][2:]}"})
 
-    story_id, _planned = trc._animated(store, tmp_path, video=video)
+    story_id, _planned = trc._animated(store, tmp_path, video=video, still_unplanned=True)
     failed, again = shot_ids["failed"], shot_ids["again"]
     roomy = tce._settings(**dict(tvp.PAID, PER_EPISODE_CAP_USD="1.00"))
     ctx, _log = eps._ctx(store, story_id, step="regenerate", settings=roomy,
@@ -161,19 +163,27 @@ def test_the_render_check_before_a_job_names_a_failed_clips_target_and_a_held_re
         assert "press Continue (the assets step resumes it; nothing is bought again)" in message
 
     filled = {"fill_failed_with_motion": True}
-    assert workflow.require_step_inputs(ec, "render", params=filled) is None
-    assert workflow.render_estimate(ec, filled)["ready"] is True
+    with pytest.raises(workflow.WorkflowError) as caught:
+        workflow.require_step_inputs(ec, "render", params=filled)
+    assert caught.value.code == workflow.CONFLICT
+    assert str(caught.value.detail).startswith("fill_failed_with_motion is no longer a render option")
+    with pytest.raises(workflow.WorkflowError) as caught:
+        workflow.render_estimate(ec, filled)  # the closed list first: an unknown parameter now
+    assert caught.value.code == workflow.INVALID
+    assert str(caught.value.detail) == "Unknown render parameter(s) fill_failed_with_motion (known: subtitles, encoder)."
     assert len(crash.requests) == 1  # nothing was asked again
 
 
 # ============================================================ the fast track
 
-def test_the_fast_track_estimate_counts_the_clips_at_tier_2_and_its_stop_says_how_to_do_without_them(
+def test_the_fast_track_estimate_counts_the_clips_at_tier_2_and_its_stop_never_offers_doing_without_them(
         store, tmp_path):
     """Tier 2, seedance keyed and allow_paid off: the fast track's estimate
     shows the planner's clips (``video``, the assets estimate's own part) in
     its paid part and total, and its stop -- before any generation call --
-    names them and the ways out: keep their shots still, or animate off."""
+    names them. Plan 33 stage 4, re-pinned on purpose: every shot is a video
+    clip, so the stop no longer offers keeping their shots still or animate
+    off; the ways out are allow_paid or free links."""
     from clipping.aistory.steps import fast_track
 
     story_id = tas._episode(store, tmp_path)
@@ -192,4 +202,5 @@ def test_the_fast_track_estimate_counts_the_clips_at_tier_2_and_its_stop_says_ho
                for part in paid["parts"])
     stop = est["stops_at"]["reason"]
     assert est["stops_at"]["step"] == "paid_check" and "Nothing was generated or spent" in stop
-    assert "keep their shots still" in stop and "animate off" in stop
+    assert "keep their shots still" not in stop and "animate off" not in stop
+    assert "turn allow_paid on in Settings" in stop

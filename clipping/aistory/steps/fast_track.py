@@ -433,9 +433,10 @@ def paid_verdict(units, *, ep, predicted=False, fully_animated=False) -> dict:
     estimate has no ``video``: its verdict is unchanged; nor does one made
     with ``animate`` off count its clips (stage 8).
 
-    *fully_animated* (``media_policy.fully_animated`` of the story, DEC-236):
-    every shot must be a clip, so the stop never offers keeping shots still
-    or animate off as a way out of the clips' cost.
+    *fully_animated* (``media_policy.fully_animated`` of the story, DEC-236)
+    no longer changes the sentence: since plan 33 stage 4 every shot of every
+    story is a clip, so no stop offers keeping shots still or animate off as a
+    way out of the clips' cost (kept for its callers).
 
     Phase 8 stage B: the keyframe auto-fix's ceiling (``units["keyframe_fix"]``
     on a paid image link: "up to $1.12 to redraw flagged keyframes" on 14
@@ -505,9 +506,6 @@ def paid_verdict(units, *, ep, predicted=False, fully_animated=False) -> dict:
     if fix_usd:
         parts.append(f"up to ${fix_usd:.2f} to redraw flagged keyframes")
     total = round(images_usd + float(voices_usd) + video_usd + fix_usd, 4)
-    # Phase 6 stage 11: paid clips have their own way out.
-    clips_way = ("; for the clips, keep their shots still (the assets edit's keep_still) or run the assets step "
-                 "with animate off" if video_usd and not fully_animated else "")
     over = units.get("over_cap")
     caps_line = _caps_line(caps)
 
@@ -521,12 +519,12 @@ def paid_verdict(units, *, ep, predicted=False, fully_animated=False) -> dict:
         verdict = STOPS_BEFORE_PAID
         stop = (f"{head} need paid generation -- {_and(parts)}, est {upto}${total:.3f} in all -- and allow_paid is "
                 f"off. {caps_line} Nothing was generated or spent: turn allow_paid on in Settings (the episode, day "
-                f"and story caps must all fit), or choose free links for the images and the voices{clips_way}.")
+                f"and story caps must all fit), or choose free links for the images and the voices.")
     elif parts and (over or refused):
         verdict = STOPS_BEFORE_PAID
         why = over or "; ".join(refused)
         stop = (f"{head} would go over a cap -- {_and(parts)}, est {upto}${total:.3f} in all: {why}. {caps_line} "
-                f"Nothing was generated or spent: raise that cap in Settings, or choose free links{clips_way}.")
+                f"Nothing was generated or spent: raise that cap in Settings, or choose free links.")
     elif blockers or not units.get("ready", True):
         verdict = BLOCKED
         stop = (f"{head} cannot be made as the chains stand: {'; '.join(blockers) or 'they are not ready'}. "
