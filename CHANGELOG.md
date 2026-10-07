@@ -10,6 +10,39 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### The chat speaks: MCP voice tools, a file upload, an honest ledger, no still ever (plan 33, DEC-316 / DEC-317)
+
+#### Added
+
+- **`tts_line`, `tts_batch`, `voice_ref_make` on the MCP server** (`mcp_server/voice_tools.py`).
+  One line through `gemini` (the app's adapter, prebuilt voices, the tail-noise
+  guard, retries on quota), `edge` (edge-tts fr-FR voices with rate/pitch, free)
+  or `chatterbox` (the `tts_chatterbox` job on the RunPod worker with a reference
+  WAV), always as mono 24 kHz 16-bit at `outputs/<dest>/<name>.wav`, with the
+  duration and the cost; a silent line is refused, a line over three times its
+  speech estimate (+ 1 s) is kept as `<name>.runaway.wav` and refused (A-217).
+  `tts_batch` speaks a whole episode (lines or a JSON file on the server),
+  skips what is on disk unless `redo` names it, and writes `durations.json`.
+  `voice_ref_make` builds a 6–30 s Chatterbox reference from ONE synthetic take
+  (edge or Gemini), trimmed and levelled (A-211). Every line is booked in
+  `outputs/mcp/voice_ledger.json`, summed by `cost_ledger` as `voice_lines`.
+  The Gemini key is read from `.env`, else from the app's stored settings.
+- **`file_upload(dest_path, content_base64, kind?, overwrite?)`**
+  (`mcp_server/file_upload.py`): a file from the chat saved under the outputs
+  dir only (realpath containment, dotfiles and links refused), extensions
+  wav/mp3/flac/png/jpg/jpeg/mp4/json/txt, 25 MiB cap checked before decoding,
+  atomic write, no silent overwrite; answers size, sha256 and a sound file's
+  duration.
+
+#### Changed
+
+- **The MCP ledger is honest** (DEC-316): `gpu_seconds` / `billed_usd` are
+  RunPod's `executionTime` alone; `delay_seconds` (queue + cold start) and
+  `wall_seconds` are shown beside them, `cost_ledger` adds
+  `wall_usd_if_delay_were_billed`; rows settled before are split on read from
+  their stored milliseconds, the journal untouched.
+
+
 ### The fruit drama as a product: a preset, a genre recipe, one look, a format, frozen voices, and the whole flow from the chat (DEC-315)
 
 #### Added

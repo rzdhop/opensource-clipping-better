@@ -1,3 +1,24 @@
+## CURRENT STATE — plan 33 (MCP voice tools, file_upload, honest ledger, the "no still" guard, ep01 voices) IN PROGRESS (2026-10-07, local session, the human away)
+
+- **In-progress header:** phase = IMPLEMENT. Checkpoint commit = ba145e7 (clean tree; untracked `reports/`,
+  `research_notes/`, `FETCH_HEAD` left as is). Plan file `.claude/plans/ai-story/33-mcp-voice-tools-honest-ledger-plan.md`
+  (the pasted brief is the approved plan, A-215). Stages: 1 ledger → 2 file_upload → 3 voice tools (inline, this
+  session) ∥ 4 the "no still" guard (an Opus agent in a worktree) → 5 MCP restart + the 13 Gemini lines of
+  "Faille d'amour" ep01 → 6 docs. Current stage = 1. Next action = `_billed` bills executionTime only.
+- **Tier-1 baseline (ba145e7, venv):** see the stage-1 log line (test_mcp_server, test_mcp_runpod_jobs,
+  test_runpod_comfyui, test_voice_tools, test_tts_adapters, test_tts_chatterbox_template).
+- **Regression contract (plan 33):** (1) image/video/audio jobs submit, settle once, save files —
+  test_mcp_runpod_jobs, test_mcp_server; (2) comfy_download containment — test_comfy_download_hands_back…;
+  (3) the tool list never shrinks — test_the_tools_are_listed; (4) the Gemini adapter's request/WAV shape and
+  the tail guard — test_tts_adapters, test_tts_tail; (5) the seven workflow templates byte-identical —
+  test_tts_chatterbox_template, test_comfyui_video; (6) tier-1 and tier-2 render goldens unchanged —
+  test_aistory_render_golden*; (7) the fully-animated refusals of DEC-236 — test_story_fully_animated_render;
+  (8) the app's spend ledger untouched (runpod_comfyui.gpu_seconds not edited) — test_runpod_comfyui.
+- **Open questions (for the human, not blocking):** tier 1 and the `free`/`one_dollar` profiles are stills by
+  construction and stay in the app (unreachable from the MCP after stage 4) — remove them from the product?
+  `keep_still` (DEC-236's one exemption) kept in the app, not offered by the MCP. Does RunPod bill the cold
+  start inside delayTime? The wall figure stays visible beside the billed one.
+
 ## CURRENT STATE — plan 32 COMPLETE (stages 0–9 incl. stage 8 talking clips) on main and DEPLOYED (2026-10-07, local session)
 
 - **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
