@@ -1,20 +1,22 @@
-## CURRENT STATE — plan 32 MERGED INTO MAIN AND DEPLOYED (2026-10-07, local session); stage 8 (S2V in the clips step) WAITS for the human's RunPod steps + one paid S2V line
+## CURRENT STATE — plan 32 LIVE-TESTED, stage 8 (talking clips) IN PROGRESS on main (2026-10-07, local session)
 
-- **In-progress header:** phase = DOCUMENT / close-out done; nothing in progress. Checkpoint commit = main (this
-  commit). **main = 8f935e5 → 99c0acc (plan 31 + plan 32, fast-forward) → 075cb21 (compose forwards
-  RUNPOD_IMAGE_*) → this commit**; the two feature branches deleted locally and on origin (main only, DEC-313). No
-  PR was opened (no gh, no token; CI green on 99c0acc compile + test; the full local run green — the merge gate
-  held). **Deployed on the A1 2026-10-07 ~07:30 UTC:** backend rebuilt (dashboard dist with the new format), health
-  200, bundle index-DJyUGCTy.js, the container sees the preset, the recipe, the format and now the image endpoint
-  id; the MCP unit restarted, `story_options` live lists the preset / the format / the steps; the plugin skill copy
-  replaced (backup `.bak-2026-10-07`). The worker image workflow ran on the push to main (run 37587638371 — the
-  first build ever of plan 31's image, with plan 32's symlink): its result and the GHCR package visibility are to
-  check. **What stays manual (RunPod console / GitHub web / the dev pod):** (1) GitHub → Packages →
-  worker-comfyui-tts → Public (or a registry credential on RunPod); (2) the image endpoint aq6qg1pykxa2st on
-  `ghcr.io/rzdhop/worker-comfyui-tts:latest` (the .env's RunPod key is serverless-only: 403 on the account APIs,
-  nothing here can read or re-point an endpoint); (3) on the dev pod `fetch_weights.sh` (Chatterbox, 3.2 GB) and
-  `fetch_weights_s2v.sh` (S2V, ≈ 18 GB); (4) optional `RUNPOD_AUDIO_ENDPOINT_ID` in the A1 .env; (5) then ONE paid
-  S2V line on a fruit keyframe (A-202, ≈ $0.03–0.07 warm + ≈ $0.10 cold, a guess) — "ça marche" starts stage 8.
+- **In-progress header:** phase = IMPLEMENT, stage 8 (Opus agent, main tree: talking_clips runpod_s2v on own_gpu,
+  GenRequest.audio, the s2v link in the app adapter on the audio-serving endpoint, the video/pricing tables, the
+  assets video phase, the ambience exclusion) + a follow-up (Sonnet agent, worktree: the cast's voice pick must
+  match the character's gender — the human's ask). Next action = verify both, cherry-pick the follow-up, run the
+  selections, commit, push, deploy (container restart + MCP unit), log, A-212…, CHANGELOG (DEC-315 §6 amended),
+  memory; then the first fruit-drama story from the chat with the skill. Checkpoint commit = main 64ac352.
+- **Live tests 2026-10-07 (the human's go):** weights on the volume (the human, through the fixed fetch scripts:
+  Chatterbox 3.2 GB, S2V 16.4 + 0.63 + 1.2 GB under models/unet, audio_encoders, loras), the image endpoint
+  aq6qg1pykxa2st on ghcr.io/rzdhop/worker-comfyui-tts:latest (the human), the package public. S2V job 99289971
+  on the mango close-up with a French Gemini line: COMPLETED, 220 GPU-s cold = $0.097, 4.875 s, the mouth moves,
+  identity kept — the human: "c'est très bien pour le lipsync". Voice lines: a concatenated reference ran away to
+  40 s (two seeds); a single-take edge-tts reference gave 6.5 s of clean speech at 4.4 GPU-s = $0.0019 → RULE:
+  one continuous take per reference (A-211). Two bugs found live, fixed on main and deployed to the MCP unit:
+  the key follows the serving endpoint (722b46f); a template names the endpoint kind that runs it
+  (`served_by: audio` on s2v_wan22, fc68470). Total spent ≈ $0.15.
+- **Deployed:** main 64ac352 code on the A1 container (rebuilt 07:30 UTC, recreated with the RUNPOD_IMAGE_* names)
+  and the MCP unit (restarted on fc68470). The compose fix 075cb21, the fetch-script fix 95e353f.
 - **Commits of the plan (on main since 2026-10-07):** branch `feat/fruit-drama-product` from `feat/comfy-tts-chatterbox`
   at 0de84d1 (plan 31). Commits: 396a289 stage 0 · aa7252b stage 1 (MCP unblock) · 997fcc3 stage 3 (the look) + a15b6d3 (four
   tier-1 guard goldens) · 6f5b1de stage 7 (s2v_wan22 + symlink) · d7a2f0d stage 5 (episode_sheet/export) · 647ec44
