@@ -43,8 +43,20 @@ All notable changes to the **rzdhop AI** project will be documented in this file
   animated stories only (`own_gpu`, tier 3 by default; still-based profiles and
   tiers refused; `story_options` lists animated profiles only).
 
+- **One talking clip per line, from a close-up of its speaker** (plan 35, DEC-318):
+  on own_gpu a speaking shot that cannot talk as one clip is cut per line; each
+  part's picture is a multi-reference close-up of the line's speaker, each
+  part's clip an S2V clip driven by that line alone; the render cuts the parts
+  back to back to the shot's frames; estimates count parts and close-ups;
+  `regenerate shot:<ep>:<shot_id>:closeup:<line_id>` redraws one close-up.
+  `tools/episode_cut.py` renders an episode from a JSON cut sheet (trimmed
+  segments, lines at offsets, hook and end card as ASS events).
+
 #### Changed
 
+- **A clip is never slowed** (DEC-318 amends DEC-250): `clips.MAX_STRETCH` is 1.0;
+  a shot longer than its clip is refused with its `shot:<ep>:<shot_id>:plan`
+  target; old records with `cover: stretch` render as before.
 - **The Wan 2.2 Lightning clips no longer play like slow motion** (plan 34):
   the `i2v_wan22_14b_lightning` template runs 8 steps, the high-noise stage at
   cfg 3.0 with its Lightning LoRA at 0.7, the low-noise stage at cfg 1 with its
