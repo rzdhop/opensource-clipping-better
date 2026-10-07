@@ -5,6 +5,7 @@
   "kind": "video",
   "min_profile": "high",
   "verified_live": false,
+  "served_by": "audio",
   "core_nodes_only": true,
   "description": "Sound to video with Wan 2.2 S2V 14B fp8 (Apache-2.0): a keyframe (image_path) and a spoken line (audio_path, a WAV) make a talking clip of up to 5 s at 16 fps, the mouth following the voice. Authored from ComfyUI's own graph https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/video_wan2_2_14B_s2v.json (read 2026-10-06), its 4-step lightx2v LoRA branch (T2V v1.1 high-noise LoRA, 4 steps, cfg 1, uni_pc/simple, shift 8) with one 77-frame chunk and without its Video S2V Extend subgraphs. The first latent frame is doubled before decoding and the first 3 decoded frames dropped (ComfyUI's own 'first frame overbaked by the VAE' hack): one chunk decodes to 81 frames, 78 remain, so a 5 s request is 78 frames (4.9 s) and shorter audio idles the mouth. The sampler length stays 77 (the model needs at least 73); the frames placeholder only trims the decoded batch (ImageFromBatch clamps). The ref image is center-cropped to width x height. Only ComfyUI core nodes (WanSoundImageToVideo, AudioEncoderLoader and AudioEncoderEncode need ComfyUI 0.3.53 or later). Not run live: unverified on cartoon faces and on French; the models need the audio_encoders folder of the worker image (docker/worker-comfyui-tts links it to the network volume).",
   "source": {

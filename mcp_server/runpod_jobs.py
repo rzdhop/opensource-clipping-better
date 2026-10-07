@@ -245,6 +245,10 @@ class JobClient:
             known = ", ".join(t["name"] for t in list_templates())
             raise JobError(f"no template {template_name!r}; known: {known}") from exc
         kind = template_kind(template)
+        # Plan 32: a template may name the endpoint kind that must run it (``served_by``): s2v_wan22 makes a
+        # video but needs the worker image of the voice lines (its audio_encoders mapping), so it runs where
+        # the audio kind is served (the audio endpoint, else the image one, else the video one).
+        served_by = template.get("served_by") or kind
         placeholders = set(template.get("placeholders", []))
         seed = int(seed) if seed is not None else self.rng.randrange(1, 2**31 - 1)
         values = {"prompt": prompt, "negative": negative or "", "seed": seed}
@@ -293,7 +297,8 @@ class JobClient:
             graph = render_template(template, values)
         except ValueError as exc:
             raise JobError(str(exc)) from exc
-        return {"template": template, "name": template_name, "kind": kind, "values": values, "images": images,
+        return {"template": template, "name": template_name, "kind": kind, "served_by": served_by, "values": values,
+                "images": images,
                 "graph": graph, "frames": frames, "seconds": int(seconds) if seconds is not None else None}
 
     def submit(self, template_name: str, *, prompt: str, negative: str = "", seed=None, width=None, height=None,
@@ -303,15 +308,16 @@ class JobClient:
         plan = self.plan(template_name, prompt=prompt, negative=negative, seed=seed, width=width, height=height,
                          seconds=seconds, image_path=image_path, ref_paths=ref_paths, audio_path=audio_path,
                          exaggeration=exaggeration, cfg_weight=cfg_weight)
-        endpoint = self.settings.endpoint(plan["kind"])
+        endpoint = self.settings.endpoint(plan["served_by"])
         body = {"input": {"workflow": plan["graph"], "images": plan["images"]}}
-        answer = self._request("POST", endpoint_url(endpoint, "run"), json_body=body, kind=plan["kind"])
+        answer = self._request("POST", endpoint_url(endpoint, "run"), json_body=body, kind=plan["served_by"])
         job_id = answer.get("id")
         if not job_id:
             raise JobError(f"/run answered without a job id: {str(answer)[:200]}")
         values = plan["values"]
         record = {
-            "job_id": job_id, "endpoint": endpoint, "kind": plan["kind"], "template": template_name,
+            "job_id": job_id, "endpoint": endpoint, "kind": plan["kind"], "served_by": plan["served_by"],
+            "template": template_name,
             "name": name or f"{template_name}_{values['seed']}", "dest_dir": self.dest_dir(dest),
             "note": note or "", "submitted_at": utc_now(), "state": answer.get("status") or "IN_QUEUE",
             "prompt": (prompt or "")[:300], "seed": values["seed"], "width": values.get("width"),
@@ -326,7 +332,7 @@ class JobClient:
 
     def _billed(self, record: dict, status: dict) -> dict:
         seconds = gpu_seconds(status)
-        rate = self.settings.rate(record.get("kind", "video"))
+        rate = self.settings.rate(record.get("served_by") or record.get("kind", "video"))
         usd = round(seconds * rate / 3600.0, 4) if rate else None
         return {"gpu_seconds": round(seconds, 1), "billed_usd": usd, "worker_id": status.get("workerId"),
                 "execution_ms": status.get("executionTime"), "delay_ms": status.get("delayTime")}
@@ -368,7 +374,7 @@ class JobClient:
             return record
         try:
             status = self._request("GET", endpoint_url(record["endpoint"], f"status/{job_id}"),
-                                   kind=record.get("kind", "video"))
+                                   kind=record.get("served_by") or record.get("kind", "video"))
         except JobError as exc:
             if "404" in str(exc):
                 return self.journal.update(job_id, state="GONE", error="RunPod no longer knows this job",
@@ -406,7 +412,8 @@ class JobClient:
             raise JobError(f"job {job_id} is not in the journal")
         if record["state"] in TERMINAL:
             return record
-        self._request("POST", endpoint_url(record["endpoint"], f"cancel/{job_id}"), kind=record.get("kind", "video"))
+        self._request("POST", endpoint_url(record["endpoint"], f"cancel/{job_id}"),
+                      kind=record.get("served_by") or record.get("kind", "video"))
         return self.journal.update(job_id, state="CANCELLED", finished_at=utc_now(), error="cancelled by request")
 
     def recent(self, limit: int = 20, *, refresh: bool = False) -> list:

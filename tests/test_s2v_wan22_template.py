@@ -104,6 +104,9 @@ def test_the_mcp_plans_an_s2v_job_with_the_keyframe_and_the_wav_both_uploaded(tm
     assert row["task"] == "s2v" and row["kind"] == "video" and row["verified_live"] is False
     assert {"image_path", "audio_path"} <= set(row["placeholders"])
     plan = client.plan("s2v_wan22", prompt="a pear says hello", seed=3, image_path="key.png", audio_path="line.wav")
+    # The clip is a video but runs where the voice lines run (the worker image with the audio_encoders mapping):
+    # found on the first live job, which the video endpoint's base image could not load.
+    assert (plan["kind"], plan["served_by"]) == ("video", "audio")
     assert plan["kind"] == "video" and plan["seconds"] == 5 and plan["frames"] == 81
     names = [item["name"] for item in plan["images"]]
     assert len(names) == 2 and names[0].endswith(".wav") and names[1].endswith(".png")
