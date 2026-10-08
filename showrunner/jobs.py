@@ -77,7 +77,7 @@ def submit(story: Story, endpoint, kind: str, template: str, values: dict, files
     """Send one job. *files*: ``{placeholder: story path}``; *dest*: where the outputs go in the story (a path
     without extension), or *episode* + *shot* for a clip that becomes the shot's next take. *extra*: more
     fields for the journal row (where the prompt came from)."""
-    if not dest and not (episode and shot):
+    if not dest and not (episode is not None and shot):
         raise JobError("say where the result goes: dest (a story path without extension) or episode + shot")
     local = {}
     try:
@@ -113,7 +113,7 @@ def _place(story: Story, row: dict, saved: list) -> list:
         return []
     main = next((p for p in saved if p.endswith(MEDIA_FIRST[:4])), saved[0])
     ext = os.path.splitext(main)[1].lower()
-    if ext == ".mp4" and row.get("episode") and row.get("shot"):
+    if ext == ".mp4" and row.get("episode") is not None and row.get("shot"):
         main_rel = story.clip(row["episode"], row["shot"], story.next_take(row["episode"], row["shot"]))
     else:
         base = row.get("dest") or f"{story.episode(row['episode'])}/jobs/{row['shot']}"
@@ -145,7 +145,7 @@ def settle(story: Story, row: dict, status: dict, *, rate_per_s: float) -> dict:
                 done["outputs"] = _place(story, row, saved)
             except StoreError as exc:
                 raise JobError(f"the outputs could not be saved: {exc}") from exc
-        if row.get("episode") and row.get("shot") and done["outputs"] and done["outputs"][0].endswith(".mp4"):
+        if row.get("episode") is not None and row.get("shot") and done["outputs"] and done["outputs"][0].endswith(".mp4"):
             done["take"] = story.add_take(row["episode"], row["shot"], done["outputs"][0],
                                           seed=row["values"].get("seed"), job=row["job"], note=row["template"])
     else:

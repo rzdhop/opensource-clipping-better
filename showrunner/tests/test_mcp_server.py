@@ -478,3 +478,22 @@ def test_voice_ref_from_take_locks_the_voice_of_an_approved_take(tmp_path):
     assert again.is_error and "locked" in again.content[0].text
     nobody = call(server, "voice_ref_from_take", story=slug, episode=0, shot="s01", take="v1", speaker="ghost", note="x")
     assert nobody.is_error and "no character sheet" in nobody.content[0].text
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_a_casting_clip_in_episode_zero_becomes_a_take(tmp_path):
+    """ep00 (the casting reel of the cast step): episode 0 is a real episode, not 'no episode'."""
+    backend, server, slug = _cast_story(tmp_path)
+    call(server, "store_write", story=slug, path="ep00/shots.json", text=json.dumps({"shots": [
+        {"id": "s01", "seconds": 5, "place": "cafe", "characters": ["ana"],
+         "lines": [{"speaker": "ana", "text": "Je ne mens jamais, sauf le mardi."}]}]}))
+    sto = S.st.Story.open(str(tmp_path / "stories" / slug))
+    sto.write_bytes("ep00/keyframes/s01.png", b"png")
+    sub = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"seed": 11},
+                       files={"image": "ep00/keyframes/s01.png"}, prompt_from="clip:0:s01"))
+    assert (sub["episode"], sub["shot"]) == (0, "s01")
+    FakeEndpoint.script = {sub["job"]: [{"status": "COMPLETED", "executionTime": 40000, "output": {"images": [
+        {"filename": "showrunner/x_00001_.mp4", "type": "base64", "data": _clip_b64(tmp_path)}]}}]}
+    info = json.loads(call(server, "comfy_fetch", story=slug, job=sub["job"]).content[1].text)
+    assert info["take"] == "v1" and info["outputs"] == ["ep00/clips/s01_v1.mp4"]
+    assert payload(call(server, "cost_ledger", story=slug, episode=0))["total_usd"] > 0
