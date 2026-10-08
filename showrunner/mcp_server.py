@@ -34,6 +34,7 @@ from fastmcp.utilities.types import Image  # noqa: E402
 from mcp.types import BlobResourceContents, EmbeddedResource  # noqa: E402
 
 from showrunner import comfy_templates  # noqa: E402
+from showrunner import jobs  # noqa: E402
 from showrunner import mcp_auth  # noqa: E402
 from showrunner import runpod_client as rp  # noqa: E402
 from showrunner import store as st  # noqa: E402
@@ -78,6 +79,7 @@ class Settings:
     state_dir: str = os.path.join(REPO_ROOT, "outputs")
     endpoints: dict = field(default_factory=dict)   # kind -> endpoint id ("video", "images")
     keys: dict = field(default_factory=dict)        # kind -> RunPod key
+    forbidden: set = field(default_factory=set)     # endpoint ids never used: the live app's video endpoint
 
 
 def load_settings(env: dict | None = None) -> Settings:
@@ -92,6 +94,7 @@ def load_settings(env: dict | None = None) -> Settings:
                                      ("images", get("RUNPOD_IMAGE_ENDPOINT_ID"))) if v},
         keys={k: v for k, v in (("video", get("RUNPOD_SHOWRUNNER_VIDEO_KEY") or get("RUNPOD_API_KEY")),
                                 ("images", get("RUNPOD_IMAGE_API_KEY") or get("RUNPOD_API_KEY"))) if v},
+        forbidden={v for v in (get("RUNPOD_COMFY_ENDPOINT_ID"),) if v},   # read only to refuse it
     )
 
 
@@ -101,17 +104,26 @@ def template_kind(template_name: str) -> str:
 
 
 class Backend:
-    """What the tools share. Tests pass ``endpoint_factory`` to fake RunPod."""
+    """What the tools share. Tests pass ``endpoint_factory`` to fake RunPod and ``sleep``/``clock`` to wait."""
 
-    def __init__(self, settings: Settings | None = None, *, endpoint_factory=None):
+    def __init__(self, settings: Settings | None = None, *, endpoint_factory=None, sleep=None, clock=None):
+        import time as _time
+
         self.settings = settings or load_settings()
+        self.sleep = sleep or _time.sleep
+        self.clock = clock or _time.monotonic
         self._endpoint_factory = endpoint_factory or (lambda kind, eid, key: rp.Endpoint(eid, key=key))
 
     def endpoint(self, kind: str) -> rp.Endpoint:
         eid = self.settings.endpoints.get(kind)
         if not eid:
             raise ToolError(f"no {kind} endpoint configured (RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID / RUNPOD_IMAGE_ENDPOINT_ID)")
+        if eid in self.settings.forbidden:
+            raise ToolError(f"endpoint {eid} is the live app's video endpoint (RUNPOD_COMFY_ENDPOINT_ID): never used here")
         return self._endpoint_factory(kind, eid, self.settings.keys.get(kind))
+
+    def rate(self, kind: str) -> float:
+        return RATES.get(kind, RATES["video"])
 
 
 # ------------------------------------------------------------------ story helpers
@@ -203,7 +215,7 @@ def build_server(backend: Backend | None = None) -> FastMCP:
     # ------------------------------------------------------------ stories (stage 2.1)
 
     @mcp.tool
-    def story_list() -> list:
+    def story_list() -> dict:
         """Free. The stories: slug, title, language, cast, episodes, and what each one has spent."""
         rows = []
         root = s.stories_dir
@@ -213,7 +225,7 @@ def build_server(backend: Backend | None = None) -> FastMCP:
             story = st.Story(os.path.join(root, slug))
             eps = sorted(d for d in os.listdir(story.root) if d.startswith("ep") and os.path.isdir(story.path(d)))
             rows.append({**story.meta, "cast": story.cast(), "episodes": eps, "spent_usd": story.total_usd()})
-        return rows
+        return {"count": len(rows), "stories": rows}
 
     @mcp.tool
     def story_create(title: str, language: str, universe_name: str = "", slug: str = "") -> dict:
@@ -327,6 +339,78 @@ def build_server(backend: Backend | None = None) -> FastMCP:
             blob = base64.b64encode(fh.read()).decode("ascii")
         return EmbeddedResource(type="resource", resource=BlobResourceContents(uri=f"file://{full}", mimeType=mime,
                                                                                blob=blob))
+
+    # ------------------------------------------------------------ GPU jobs (stage 2.2)
+
+    def _job_error(exc: Exception):
+        raise ToolError(str(exc)) from exc
+
+    @mcp.tool
+    def comfy_submit(story: str, template: str, values: dict, files: dict | None = None, dest: str = "",
+                     episode: int | None = None, shot: str | None = None) -> dict:
+        """COSTS MONEY (one GPU job; the answer gives its warm and cold estimate). Only after Rida's go in the chat
+        for this batch, with the count and the cost said first. Sends *template* (templates_list) with *values*
+        (prompt, seed, width, height, seconds ...) and *files* ({placeholder: story path}, e.g. {"image":
+        "ep01/keyframes/s03.png"}). Where the result goes: *episode* + *shot* for a clip (it becomes the shot's
+        next take, epNN/clips/sNN_vK.mp4) or *dest*, a story path without extension (e.g.
+        "02-cast/ana/candidates/c1"). Returns at once with the job id: then comfy_fetch."""
+        sto = open_story(s, story)
+        try:
+            kind = template_kind(template)
+        except (OSError, ValueError) as exc:
+            raise ToolError(f"no template {template!r} (templates_list)") from exc
+        ep = backend.endpoint(kind)
+        try:
+            row = jobs.submit(sto, ep, kind, template, values or {}, files or {}, dest=dest, episode=episode, shot=shot,
+                              rate_per_s=backend.rate(kind))
+        except jobs.JobError as exc:
+            _job_error(exc)
+        return {k: row[k] for k in ("job", "template", "kind", "dest", "episode", "shot", "estimate")}
+
+    @mcp.tool
+    def comfy_fetch(story: str, job: str, wait_s: int = 0):
+        """Free (the job was paid at submit). The job's state; once done its outputs are saved into the story (a
+        clip as its shot's next take), its cost written in the ledger, and you see the result (a picture, or a
+        clip's contact sheet with its numbers). Waits up to *wait_s* (≤ 240) for it. A queue of 20–35 min is
+        normal when GPUs are short; fetch again later. Fetching a finished job again bills nothing."""
+        sto = open_story(s, story)
+        try:
+            row = jobs.find(sto, job)
+            ep = backend.endpoint(row["kind"])
+            got = jobs.fetch(sto, ep, job, wait_s=max(0, min(int(wait_s), 240)), rate_per_s=backend.rate(row["kind"]),
+                             sleep=backend.sleep, clock=backend.clock)
+        except jobs.JobError as exc:
+            _job_error(exc)
+        summary = {k: got.get(k) for k in ("job", "state", "template", "episode", "shot", "take", "outputs",
+                                            "billed_s", "delay_s", "usd", "error", "waiting", "delay_s_so_far") if
+                   got.get(k) is not None}
+        outs = got.get("outputs") or []
+        if got.get("state") == "COMPLETED" and outs and outs[0].endswith(IMAGE_EXTS + VIDEO_EXTS):
+            return [*look(story_file(sto, outs[0]))[:1], summary]
+        return summary
+
+    @mcp.tool
+    def comfy_jobs(story: str, open_only: bool = False) -> dict:
+        """Free. The story's GPU jobs (newest last): state, template, shot or destination, cost. *open_only*: the
+        ones still waiting or running (fetch them)."""
+        rows = jobs.journal(open_story(s, story))
+        keep = ("job", "state", "template", "kind", "episode", "shot", "dest", "take", "usd", "submitted_at",
+                "settled_at", "estimate")
+        rows = [{k: r[k] for k in keep if k in r} for r in rows]
+        rows = [r for r in rows if not open_only or r["state"] == "SUBMITTED"]
+        return {"count": len(rows), "jobs": rows}
+
+    @mcp.tool
+    def cost_ledger(story: str, episode: int | None = None) -> dict:
+        """Free. What the story (or one episode) has spent on GPUs: execution time billed (the queue is free),
+        per kind of job, with the rows."""
+        sto = open_story(s, story)
+        rows = sto.costs(episode)
+        by_kind: dict = {}
+        for r in rows:
+            by_kind[r["kind"]] = round(by_kind.get(r["kind"], 0.0) + r["usd"], 4)
+        return {"story": sto.slug, "episode": episode, "total_usd": sto.total_usd(episode), "by_kind": by_kind,
+                "gpu_seconds": round(sum(r["billed_s"] for r in rows), 1), "rows": rows}
 
     return mcp
 

@@ -37,9 +37,19 @@ class FakeEndpoint:
     def __init__(self, kind, eid, key, log):
         self.kind, self.id, self.key, self.log = kind, eid, key, log
 
+    script: dict = {}   # job id -> list of status answers (the last repeats); shared by the fakes of one test
+
     def health(self):
         self.log.append(("health", self.kind, self.id, self.key))
         return {"workers": {"idle": 1, "running": 0, "throttled": 2}, "jobs": {"inQueue": 0}}
+
+    def run(self, payload, *, execution_timeout_s=None):
+        self.log.append(("run", self.kind, self.id, self.key, payload["workflow"]))
+        return f"{self.kind}-job{sum(1 for e in self.log if e[0] == 'run')}"
+
+    def status(self, job):
+        seq = FakeEndpoint.script[job]
+        return seq.pop(0) if len(seq) > 1 else seq[0]
 
 
 def make_backend(tmp_path, **over):
@@ -69,7 +79,8 @@ def test_settings_read_their_own_names_never_the_live_servers_or_the_live_endpoi
            "RUNPOD_COMFY_ENDPOINT_ID": "LIVE", "RUNPOD_API_KEY": "main"}
     s = S.load_settings(env)
     assert (s.host, s.port, s.public_url, s.token) == ("127.0.0.1", 8788, "", "t")
-    assert s.endpoints == {} and "LIVE" not in json.dumps(s.__dict__)
+    assert s.endpoints == {} and "LIVE" not in json.dumps(s.endpoints) + json.dumps(s.keys)
+    assert s.forbidden == {"LIVE"}                       # read only to be refused (test below)
     s = S.load_settings({"SHOWRUNNER_MCP_PORT": "9000", "SHOWRUNNER_MCP_PUBLIC_URL": "https://x.ts.net:8443/",
                          "RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID": "v", "RUNPOD_SHOWRUNNER_VIDEO_KEY": "kv",
                          "RUNPOD_IMAGE_ENDPOINT_ID": "i", "RUNPOD_API_KEY": "main"})
@@ -184,7 +195,7 @@ def make_story(tmp_path):
 def test_story_create_list_read_write_and_refusals(tmp_path):
     backend, server, slug = make_story(tmp_path)
     assert slug == "ete-a-paris"
-    listed = payload(call(server, "story_list"))
+    listed = payload(call(server, "story_list"))["stories"]
     assert [r["slug"] for r in listed] == ["ete-a-paris"] and listed[0]["language"] == "fr"
     tree = payload(call(server, "store_read", story=slug))
     assert {"path": "01-universe.md", "locked": False} in tree["files"]
@@ -244,3 +255,65 @@ def test_view_file_shows_images_and_clips_and_file_download_returns_the_bytes(tm
     big.write_bytes(b"0" * (2 * 1024 * 1024))
     refused = call(server, "file_download", story=slug, path="ep01/big.mp4", max_mib=1)
     assert refused.is_error and "over the 1 MiB limit" in refused.content[0].text
+
+
+
+# ------------------------------------------------------------------ GPU jobs (2.2)
+
+def _clip_b64(tmp_path):
+    clip = tmp_path / "gen.mp4"
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc=s=704x1280:r=24:d=2", "-f", "lavfi",
+                    "-i", "sine=frequency=300:duration=2", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+                    "-shortest", str(clip)], check=True, capture_output=True)
+    return base64.b64encode(clip.read_bytes()).decode()
+
+
+def test_the_live_video_endpoint_is_refused_even_if_configured(tmp_path):
+    backend = make_backend(tmp_path)
+    backend.settings.endpoints["video"] = "LIVE"
+    backend.settings.forbidden = {"LIVE"}
+    server = S.build_server(backend)
+    slug = payload(call(server, "story_create", title="T", language="en"))["slug"]
+    got = call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"prompt": "p", "seed": 1},
+               episode=1, shot="s01")
+    assert got.is_error and "live app" in got.content[0].text
+    assert not [e for e in backend.log if e[0] == "run"]
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_submit_then_fetch_a_clip_through_the_tools(tmp_path):
+    backend, server, slug = make_story(tmp_path)
+    kf = tmp_path / "stories" / slug / "ep01" / "keyframes"
+    kf.mkdir(parents=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=orange:s=704x1280", "-frames:v", "1",
+                    str(kf / "s01.png")], check=True, capture_output=True)
+    sub = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech",
+                       values={"prompt": "Ana says: \"Salut\"", "seed": 33, "seconds": 5},
+                       files={"image": "ep01/keyframes/s01.png"}, episode=1, shot="s01"))
+    assert sub["kind"] == "video" and sub["job"] == "video-job1" and sub["estimate"]["cold_usd"] > sub["estimate"]["warm_usd"]
+    run = [e for e in backend.log if e[0] == "run"][0]
+    assert run[1:4] == ("video", "vid-ep", "kv")
+    FakeEndpoint.script = {"video-job1": [{"status": "IN_QUEUE", "delayTime": 5000},
+                                          {"status": "COMPLETED", "executionTime": 40000, "delayTime": 600000,
+                                           "output": {"images": [{"filename": "showrunner/x_00001_.mp4", "type": "base64",
+                                                                  "data": _clip_b64(tmp_path)}]}}]}
+    waiting = payload(call(server, "comfy_fetch", story=slug, job="video-job1"))
+    assert waiting["state"] == "IN_QUEUE" and waiting["waiting"] is True
+    assert [r["job"] for r in payload(call(server, "comfy_jobs", story=slug, open_only=True))["jobs"]] == ["video-job1"]
+    done = call(server, "comfy_fetch", story=slug, job="video-job1")
+    assert type(done.content[0]).__name__ == "ImageContent"
+    info = json.loads(done.content[1].text)
+    assert info["take"] == "v1" and info["outputs"] == ["ep01/clips/s01_v1.mp4"] and info["usd"] == pytest.approx(0.0212)
+    ledger = payload(call(server, "cost_ledger", story=slug, episode=1))
+    assert ledger["total_usd"] == pytest.approx(0.0212) and ledger["by_kind"] == {"video": pytest.approx(0.0212)}
+    assert payload(call(server, "comfy_jobs", story=slug, open_only=True)) == {"count": 0, "jobs": []}
+
+
+def test_an_image_template_goes_to_the_images_endpoint_with_its_key(tmp_path):
+    backend, server, slug = make_story(tmp_path)
+    sub = payload(call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"prompt": "p", "seed": 2},
+                       dest="02-cast/ana/candidates/c1"))
+    assert sub["kind"] == "images" and [e[1:4] for e in backend.log if e[0] == "run"] == [("images", "img-ep", "ki")]
+    refused = call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"prompt": "p", "seed": 2})
+    assert refused.is_error and "dest" in refused.content[0].text
+    assert call(server, "comfy_submit", story=slug, template="nope", values={}, dest="x").is_error
