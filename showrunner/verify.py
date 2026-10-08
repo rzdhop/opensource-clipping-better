@@ -6,16 +6,23 @@
 - :func:`extract_audio` -> the clip's sound as a mono 24 kHz wav (a voice reference, or the
   input of an STT check later).
 
-The STT alignment of the spoken line (plan 36 §2.2) comes in stage 1; this module is what
-stage 0 needs to review takes by eye and ear.
+- :func:`verify_take` -> the clip check (plan 36 §2.2, stage 1.4): the clip's own audio transcribed on
+  this host's CPU (faster-whisper, decoded by ffmpeg) and aligned to its scripted lines: share of each
+  line's words heard, where the lines start and end, whether they come in order, whether the last word
+  ends before the clip does.
+
+Only :func:`transcribe` needs a model (``faster_whisper``, imported lazily); everything else is ffmpeg
+or pure Python, so stage 0 and the tests run without it.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
 import subprocess
+import unicodedata
 
 
 def _run(cmd: list, *, capture: bool = True) -> subprocess.CompletedProcess:
@@ -128,3 +135,110 @@ def report(path: str) -> dict:
     info = probe(path)
     info.update(loudness(path) if info["has_audio"] else {"mean_db": None, "max_db": None, "silent": True})
     return info
+
+
+# ------------------------------------------------------------------ the clip check (STT)
+
+STT_MODEL = os.environ.get("SHOWRUNNER_STT_MODEL", "large-v3")
+STT_RATE = 16000
+MIN_MATCHED = 0.75   # share of a line's words that must be heard (the app's native_speech rule)
+END_MARGIN_S = 0.1   # the last word must end this long before the clip does
+_MODELS: dict = {}
+
+
+def tokens(text: str) -> list:
+    """Words for matching: lowercase, accents and apostrophes dropped (``C'est`` -> ``c``, ``est``, the
+    way whisper splits elisions), punctuation gone."""
+    plain = unicodedata.normalize("NFKD", text.lower())
+    plain = "".join(ch for ch in plain if not unicodedata.combining(ch))
+    return re.findall(r"[a-z0-9]+", re.sub(r"['’`]", " ", plain))
+
+
+def decode_audio(path: str, *, sample_rate: int = STT_RATE):
+    """The audio of *path* as a mono float32 numpy array at *sample_rate* (ffmpeg, not PyAV: the
+    venv's ``av`` breaks faster-whisper's own decoder)."""
+    import numpy as np
+
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-i", path, "-vn", "-f", "f32le", "-ac", "1",
+                          "-ar", str(sample_rate), "-"], capture_output=True, check=False)
+    if out.returncode:
+        raise RuntimeError(f"audio decode failed on {path}: {out.stderr.decode(errors='replace')[-300:]}")
+    return np.frombuffer(out.stdout, dtype=np.float32)
+
+
+def _model(size: str):
+    if size not in _MODELS:
+        from faster_whisper import WhisperModel  # lazy: the rest of the module needs no model
+
+        _MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8")
+    return _MODELS[size]
+
+
+def transcribe(path: str, language: str, *, model: str | None = None) -> list:
+    """``[{"word", "start", "end", "prob"}]`` heard in *path* (faster-whisper on the CPU, word timings,
+    no text hint: the check must hear what the clip says, not what the script says)."""
+    segments, _ = _model(model or STT_MODEL).transcribe(decode_audio(path), language=language, beam_size=5,
+                                                        word_timestamps=True, vad_filter=False)
+    return [{"word": w.word.strip(), "start": round(w.start, 3), "end": round(w.end, 3),
+             "prob": round(w.probability, 3)} for seg in segments for w in seg.words]
+
+
+def _heard_tokens(words: list) -> list:
+    """Each heard token with the timing of the word it came from."""
+    return [(tok, w["start"], w["end"]) for w in words for tok in tokens(w["word"])]
+
+
+def align(lines: list, words: list) -> list:
+    """Align the scripted *lines* (texts, in order) to the heard *words* in one pass (a later line's
+    repeated word cannot be taken by an earlier one). Per line: ``{"matched", "words", "heard",
+    "start_s", "end_s"}``; start/end are None when nothing of the line was heard."""
+    heard = _heard_tokens(words)
+    script, owner = [], []
+    for k, text in enumerate(lines):
+        toks = tokens(text)
+        script += toks
+        owner += [k] * len(toks)
+    blocks = difflib.SequenceMatcher(None, script, [t for t, _, _ in heard], autojunk=False).get_matching_blocks()
+    pairs = [(b.a + d, b.b + d) for b in blocks for d in range(b.size)]
+    out = []
+    for k, text in enumerate(lines):
+        mine = [j for i, j in pairs if owner[i] == k]
+        n = len(tokens(text))
+        out.append({"text": text, "words": n, "heard": len(mine), "matched": round(len(mine) / n, 3) if n else 0.0,
+                    "start_s": heard[min(mine)][1] if mine else None, "end_s": heard[max(mine)][2] if mine else None})
+    return out
+
+
+def verify_take(clip: str, lines: list, language: str, *, words: list | None = None,
+                duration_s: float | None = None) -> dict:
+    """The clip check of one take. *lines*: ``[(speaker, text), ...]`` in the scripted order.
+
+    ``state``: ``ok`` (every line ≥ 75 % heard, in order, the last word ending ≥ 0.1 s before the clip
+    ends) · ``mismatch`` (a line not heard well enough, or out of order) · ``late`` (the speech runs into
+    the clip's last 0.1 s: the line may be cut) · ``no_speech``. ``start_s``/``end_s`` frame the scripted
+    speech (the assembly trims after ``end_s``); ``extra_after_s`` is speech heard after the last line.
+    """
+    if duration_s is None:
+        duration_s = probe(clip)["duration_s"]
+    if words is None:
+        words = transcribe(clip, language)
+    per_line = align([text for _, text in lines], words)
+    for (speaker, _), row in zip(lines, per_line):
+        row["speaker"] = speaker
+    verdict = {"state": "ok", "matched": min((r["matched"] for r in per_line), default=0.0), "lines": per_line,
+               "duration_s": duration_s, "heard_text": " ".join(w["word"] for w in words), "in_order": True,
+               "start_s": None, "end_s": None, "extra_after_s": 0.0}
+    if not words:
+        verdict["state"] = "no_speech"
+        return verdict
+    spans = [(r["start_s"], r["end_s"]) for r in per_line if r["start_s"] is not None]
+    verdict["in_order"] = all(spans[k][0] >= spans[k - 1][1] - 0.05 for k in range(1, len(spans)))
+    if spans:
+        verdict["start_s"], verdict["end_s"] = spans[0][0], max(e for _, e in spans)
+        after = [w for w in words if w["start"] >= verdict["end_s"]]
+        verdict["extra_after_s"] = round(after[-1]["end"] - after[0]["start"], 3) if after else 0.0
+    if verdict["matched"] < MIN_MATCHED or not verdict["in_order"]:
+        verdict["state"] = "mismatch"
+    elif verdict["end_s"] > duration_s - END_MARGIN_S + 1e-9:
+        verdict["state"] = "late"
+    return verdict

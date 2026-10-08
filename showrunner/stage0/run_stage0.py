@@ -24,6 +24,8 @@ Order of operations (each command is one GPU batch, submitted in parallel, waite
     python -m showrunner.stage0.run_stage0 vc        --video-endpoint <id> [--take 33] [--dry-run]
         stage 1.0 (A-221): one path (a) take per character re-voiced with its locked voice (FL_ChatterboxVC),
         timing kept, remuxed on the original picture -> stories/_stage0/vc/<char>_s<take>.mp4
+    python -m showrunner.stage0.run_stage0 verify    --clip stories/_stage0/a/paloma_fr_s33.mp4 --line "paloma: Tu souris ..."
+        free: the clip check (speech-to-text on this CPU, aligned to the lines); run it with .venv/bin/python
     python -m showrunner.stage0.run_stage0 review
         probes every clip (duration, audio, loudness), writes contact sheets and stories/_stage0/review.md
 
@@ -413,6 +415,26 @@ def cmd_vc(args) -> None:
         print(f"listen: {dest}  (original: {clips[stem]})")
 
 
+def cmd_verify(args) -> None:
+    """The clip check on one clip (free, this host's CPU): ``--line "who: text"`` once per scripted line."""
+    lines = []
+    for raw in args.line or []:
+        who, _, text = raw.partition(":")
+        if not text.strip():
+            sys.exit(f"--line needs 'who: text', got {raw!r}")
+        lines.append((who.strip(), text.strip()))
+    if not lines:
+        sys.exit("verify needs at least one --line")
+    started = time.time()
+    v = verify.verify_take(args.clip, lines, args.lang)
+    print(f"{os.path.basename(args.clip)}: {v['state']}  matched {v['matched']:.0%}  in order {v['in_order']}  "
+          f"speech {v['start_s']}-{v['end_s']} s of {v['duration_s']} s  extra after {v['extra_after_s']} s  "
+          f"({time.time() - started:.0f} s)")
+    for row in v["lines"]:
+        print(f"  {row['speaker']}: {row['heard']}/{row['words']} words, {row['start_s']}-{row['end_s']} s  {row['text']}")
+    print(f"  heard: {v['heard_text']}")
+
+
 def cmd_review(args) -> None:
     rows = []
     for sub in ("smoke", "a", "b", "c"):
@@ -441,7 +463,7 @@ def cmd_review(args) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["preflight", "smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review", "vc"])
+    ap.add_argument("command", choices=["preflight", "smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review", "vc", "verify"])
     ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker; default "
                                              "RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID (never the live app's "
                                              "RUNPOD_COMFY_ENDPOINT_ID)")
@@ -460,6 +482,8 @@ def main() -> None:
     ap.add_argument("--max-s", type=float, default=10.0, help="voice: keep at most this many seconds")
     ap.add_argument("--take", type=int, default=33, help="vc: the seed of the path (a) take to convert")
     ap.add_argument("--dry-run", action="store_true", help="vc: list the jobs, submit nothing")
+    ap.add_argument("--clip", help="verify: the clip to check")
+    ap.add_argument("--line", action="append", help="verify: 'who: text', once per scripted line, in order")
     args = ap.parse_args()
     if not args.video_endpoint:
         try:
@@ -482,10 +506,12 @@ def main() -> None:
         sys.exit("keyframe needs --character")
     if args.command == "keyframe" and args.pick is None and not args.images_endpoint:
         sys.exit("--images-endpoint is required (or --pick <seed> to lock a candidate)")
+    if args.command == "verify" and not args.clip:
+        sys.exit("verify needs --clip")
     if args.command == "voice" and not (args.character and args.source):
         sys.exit("voice needs --character and --from")
     {"smoke": cmd_smoke, "a": cmd_a, "voice": cmd_voice, "b": cmd_b, "c": cmd_c,
-     "keyframe3": cmd_keyframe3, "keyframe": cmd_keyframe, "review": cmd_review, "vc": cmd_vc}[args.command](args)
+     "keyframe3": cmd_keyframe3, "keyframe": cmd_keyframe, "review": cmd_review, "vc": cmd_vc, "verify": cmd_verify}[args.command](args)
 
 
 if __name__ == "__main__":
