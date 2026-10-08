@@ -1,10 +1,11 @@
 ## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
 
-- **In-progress header (2026-10-08 late):** Rida approved the locked voice (singles + exchanges, DEC-323); the demo
-  was rebuilt with locked voices (`319e0d5`, sent) and the .gitignore now tracks a story's .ass/.jpg (`70e48bb`).
-  **Stage 2 (MCP v2):** Rida answered — a NEW connector (own server/unit, the live rzdhop-story untouched) and clips
-  returned inline (base64) for now; VC is a tool (`vc_clip`). Phase = EXPLORE (mapping mcp_server/auth.py, server,
-  unit, proxy to copy), then the final stage-2 plan for Rida's approval. Tests 76 + 2. Not pushed.
+- **In-progress header (2026-10-08 night):** plan 36 **stage 2 code done** (2.0 `e0874e6`, 2.1 `5c2f892`, 2.2 `ab8d139`,
+  2.3 `ba14426`, 2.4 docs+unit `e49b139`): the `showrunner` MCP server, 20 tools, DEC-324. Free live check in
+  process on the demo story passed (story_list, cost_ledger, runpod_health, view_file, verify_take 52 s ok). `.env`
+  gained SHOWRUNNER_MCP_PORT/PUBLIC_URL. **Waiting on Rida:** run the 2 sudo commands (unit install, Funnel 8443),
+  add the connector, then the smoke's go (≈ $0.50: 1 keyframe, 1 clip, check, VC, assembly from the chat).
+  Tests: system 82 + 3 skipped; venv 98 + 1 skipped. Not pushed.
 - **Previous header:** phase = DOCUMENT done; nothing running. Waiting on Rida: (1) watch the demo
   `stories/faille-d-amour/ep01/final.mp4` (host only; sent in chat), (2) listen to `stories/_stage0/vc/vc_compare.mp4`
   (the VC verdict decides whether a locked voice stays in the cast pack and whether stage 2 gets a `vc_line` tool),
