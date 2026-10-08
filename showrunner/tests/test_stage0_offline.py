@@ -179,8 +179,9 @@ def test_matrix_prompts_quote_the_line_and_name_the_language():
     assert c.startswith("[VISUAL]:") and "[SPEECH]: Vaulta" in c and "[SOUNDS]:" in c
     ex = M.prompt_exchange_a("two", "fr")
     assert "Marie-Jeanne says in French" in ex and "Rida says in French" in ex
-    for char in M.CHARACTERS.values():
-        assert "whole head is a single" in char["head"]
+    for char in M.CHARACTERS.values():  # the head rule binds the fruit universe (D8: not every character)
+        if char["universe"] == "fruit":
+            assert "whole head is a single" in char["head"]
 
 
 def test_api_key_reads_the_named_key_and_names_it_when_missing():
@@ -188,3 +189,35 @@ def test_api_key_reads_the_named_key_and_names_it_when_missing():
     assert rp.api_key({"RUNPOD_API_KEY": "main", "RUNPOD_IMAGE_API_KEY": "img"}) == "main"
     with pytest.raises(rp.RunPodError, match="SHOWRUNNER_TEST_ABSENT_KEY"):
         rp.api_key({}, name="SHOWRUNNER_TEST_ABSENT_KEY")
+
+
+def test_each_character_speaks_in_its_own_universe():
+    human = M.prompt_path_a("camille", "fr") + M.prompt_path_b("camille", "fr") + M.prompt_path_c("camille", "fr")
+    assert "fruit" not in human.lower()
+    assert human.count(M.UNIVERSES["cartoon_human"]["medium"]) == 3
+    assert M.UNIVERSES["fruit"]["medium"] in M.prompt_path_a("paloma", "fr")
+    # the fruit negative bans human faces; the human character must not inherit it
+    assert "human face" in M.negative("rida") and "human face" not in M.negative("camille")
+    assert "Tu as signé sans moi" in M.prompt_path_a("camille", "fr")
+
+
+def test_keyframe_prompt_and_exchanges_keep_one_universe():
+    kf = M.prompt_keyframe("camille")
+    assert kf.startswith(M.UNIVERSES["cartoon_human"]["medium"]) and "Camille" in kf and "fruit" not in kf.lower()
+    assert M.exchange_medium("three") == M.UNIVERSES["fruit"]["medium"]
+    mixed = dict(M.EXCHANGES["two"], speakers=["rida", "camille"])
+    original = M.EXCHANGES["two"]
+    M.EXCHANGES["two"] = mixed
+    try:
+        with pytest.raises(ValueError, match="mixes universes"):
+            M.exchange_medium("two")
+    finally:
+        M.EXCHANGES["two"] = original
+
+
+def test_a_character_without_keyframe_is_skipped_not_sent(monkeypatch, capsys):
+    from showrunner.stage0 import run_stage0 as R
+    monkeypatch.setitem(M.CHARACTERS, "camille", dict(M.CHARACTERS["camille"], keyframe="/nonexistent/kf.png"))
+    ready = R._ready_characters()
+    assert "camille" not in ready and {"paloma", "marie_jeanne", "rida"} <= set(ready)
+    assert "keyframe --character camille" in capsys.readouterr().out

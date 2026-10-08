@@ -49,6 +49,8 @@ Marie-Jeanne the strawberry, Rida the kiwi) and their keyframes.
 ```
 python -m showrunner.stage0.run_stage0 smoke     --video-endpoint <id>          # 1 clip, prints billed seconds
 python -m showrunner.stage0.run_stage0 keyframe3 --images-endpoint <id>         # the 3-character keyframe (Flux 2 Klein)
+python -m showrunner.stage0.run_stage0 keyframe  --character camille --images-endpoint <id>  # the non-fruit test character: candidates
+python -m showrunner.stage0.run_stage0 keyframe  --character camille --pick <seed>       # lock the one Rida picks (free)
 python -m showrunner.stage0.run_stage0 a         --video-endpoint <id>          # path (a): 9 single clips + exchanges
 python -m showrunner.stage0.run_stage0 review                                   # contact sheets + review.md
 python -m showrunner.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4

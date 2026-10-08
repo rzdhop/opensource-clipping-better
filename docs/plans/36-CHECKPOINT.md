@@ -47,7 +47,7 @@ to the image endpoint, which has its own key (403) → `api_key(name=...)` + `RU
 in ENDPOINT.md; ENDPOINT.md now says a **fourth** endpoint (the live video endpoint runs the app's S2V clips).
 Added `.github/workflows/showrunner-worker-image.yml` (builds `ghcr.io/rzdhop/showrunner-worker:0.1.0`).
 
-Renamed the same day: `fruitstory/` → **`showrunner/`**, image `ghcr.io/rzdhop/showrunner-worker:0.1.0`, CI `.github/workflows/showrunner-worker-image.yml` (D8: any universe, not fruit only). The `fruitstory-worker` GHCR package built by `6cd7eb0` is abandoned (the human may delete it). Stage 0 gains one non-fruit character; its style is agreed in chat first.
+Renamed the same day: `fruitstory/` → **`showrunner/`**, image `ghcr.io/rzdhop/showrunner-worker:0.1.0`, CI `.github/workflows/showrunner-worker-image.yml` (D8: any universe, not fruit only). The `fruitstory-worker` GHCR package built by `6cd7eb0` is abandoned (the human may delete it). Stage 0 gains one non-fruit character: **Camille** (`cartoon_human` universe: 3D cartoon human, French woman, early 30s, chosen by Rida 2026-10-08); each character now carries its own universe (medium + negative), the 26 fruit prompts byte-identical; `a`/`b`/`c` skip a character until its keyframe is picked. Tests 19 green.
 
 Still missing (the human's side):
 1. The `HF_TOKEN` in `.env` has **not** accepted `Lightricks/LTX-2.5` (gated file → "Access … is restricted");
@@ -65,6 +65,8 @@ Still missing (the human's side):
 python -m pytest showrunner/tests -q
 python -m showrunner.stage0.run_stage0 smoke     --video-endpoint <id>
 python -m showrunner.stage0.run_stage0 keyframe3 --images-endpoint <id>
+python -m showrunner.stage0.run_stage0 keyframe  --character camille --images-endpoint <id>   # 2 candidates (D8)
+python -m showrunner.stage0.run_stage0 keyframe  --character camille --pick <seed>        # free, after Rida picks
 python -m showrunner.stage0.run_stage0 a         --video-endpoint <id>      # 9 single clips + 2/3-speaker exchanges
 python -m showrunner.stage0.run_stage0 review
 python -m showrunner.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4   # x3

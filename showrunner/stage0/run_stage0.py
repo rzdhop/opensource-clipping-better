@@ -16,6 +16,9 @@ Order of operations (each command is one GPU batch, submitted in parallel, waite
         path (c) LTX-2.3 ID-LoRA (keyframe + locked voice -> one pass), same matrix
     python -m showrunner.stage0.run_stage0 keyframe3 --images-endpoint <id>
         the three-character keyframe for the 3-speaker exchange (existing edit_flux2_klein_multiref template)
+    python -m showrunner.stage0.run_stage0 keyframe  --character camille --images-endpoint <id> [--seeds 1 2]
+        start-image candidates for a character with no keyframe (t2i_flux2_klein); then, free:
+    python -m showrunner.stage0.run_stage0 keyframe  --character camille --pick 2
     python -m showrunner.stage0.run_stage0 review
         probes every clip (duration, audio, loudness), writes contact sheets and stories/_stage0/review.md
 
@@ -27,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 
@@ -87,13 +91,33 @@ def _need_voices(chars: list) -> None:
                  f"on a path (a) take first (stories/_stage0/a/)")
 
 
+def _ready_characters() -> list:
+    """The characters whose start image exists; the others are skipped with the command that makes it."""
+    ready = []
+    for c, info in M.CHARACTERS.items():
+        if os.path.exists(info["keyframe"]):
+            ready.append(c)
+        else:
+            print(f"skip {c}: no keyframe yet (run `keyframe --character {c}`, then `--pick`)")
+    return ready
+
+
+def _images_endpoint(args) -> rp.Endpoint:
+    # The images endpoint has its own key in the app (RUNPOD_IMAGE_API_KEY); fall back to the main one.
+    try:
+        key = rp.api_key(name="RUNPOD_IMAGE_API_KEY")
+    except rp.RunPodError:
+        key = None
+    return rp.Endpoint(args.images_endpoint, key=key)
+
+
 # ------------------------------------------------------------------ commands
 
 def cmd_smoke(args) -> None:
     ep = rp.Endpoint(args.video_endpoint)
     c = "paloma"
     jobs = [(f"smoke_{c}", "ltx25_i2v_speech",
-             {"prompt": M.prompt_path_a(c, args.lang), "negative": M.NEGATIVE, "seed": 11, "width": M.WIDTH,
+             {"prompt": M.prompt_path_a(c, args.lang), "negative": M.negative(c), "seed": 11, "width": M.WIDTH,
               "height": M.HEIGHT, "seconds": M.SINGLE_SECONDS, "fps": M.FPS},
              {"image": M.CHARACTERS[c]["keyframe"]})]
     run_batch(ep, jobs, os.path.join(OUT, "smoke"))
@@ -108,7 +132,7 @@ def _exchange_jobs_a(lang: str, seeds: list) -> list:
             continue
         for seed in seeds[:2]:
             jobs.append((f"ex_{key}_{lang}_s{seed}", "ltx25_i2v_speech",
-                         {"prompt": M.prompt_exchange_a(key, lang), "negative": M.NEGATIVE, "seed": seed,
+                         {"prompt": M.prompt_exchange_a(key, lang), "negative": M.exchange_negative(key), "seed": seed,
                           "width": M.WIDTH, "height": M.HEIGHT, "seconds": M.EXCHANGE_SECONDS, "fps": M.FPS},
                          {"image": kf}))
     return jobs
@@ -117,10 +141,10 @@ def _exchange_jobs_a(lang: str, seeds: list) -> list:
 def cmd_a(args) -> None:
     ep = rp.Endpoint(args.video_endpoint)
     jobs = []
-    for c in M.CHARACTERS:
+    for c in _ready_characters():
         for seed in args.seeds:
             jobs.append((f"{c}_{args.lang}_s{seed}", "ltx25_i2v_speech",
-                         {"prompt": M.prompt_path_a(c, args.lang), "negative": M.NEGATIVE, "seed": seed,
+                         {"prompt": M.prompt_path_a(c, args.lang), "negative": M.negative(c), "seed": seed,
                           "width": M.WIDTH, "height": M.HEIGHT, "seconds": M.SINGLE_SECONDS, "fps": M.FPS},
                          {"image": M.CHARACTERS[c]["keyframe"]}))
     jobs += _exchange_jobs_a(args.lang, args.seeds)
@@ -160,23 +184,24 @@ def _seconds_for(wav: str) -> float:
 
 def cmd_b(args) -> None:
     ep = rp.Endpoint(args.video_endpoint)
-    _need_voices(list(M.CHARACTERS))
+    chars = _ready_characters()
+    _need_voices(chars)
     out_dir = os.path.join(OUT, "b")
     # 1. the lines, one TTS job each
-    lines = [(f"tts_{c}_{args.lang}", c, M.LINES[c][args.lang]) for c in M.CHARACTERS]
+    lines = [(f"tts_{c}_{args.lang}", c, M.LINES[c][args.lang]) for c in chars]
     for key, ex in M.EXCHANGES.items():
         for k, (who, text) in enumerate(ex["lines"][args.lang]):
             lines.append((f"tts_ex_{key}_{args.lang}_{k}_{who}", who, text))
     wavs = _tts_jobs(ep, lines, args.lang, os.path.join(out_dir, "tts"))
     # 2. the clips
     jobs = []
-    for c in M.CHARACTERS:
+    for c in chars:
         wav = wavs.get(f"tts_{c}_{args.lang}")
         if not wav:
             continue
         for seed in args.seeds:
             jobs.append((f"{c}_{args.lang}_s{seed}", "ltx25_a2v_speech",
-                         {"prompt": M.prompt_path_b(c, args.lang), "negative": M.NEGATIVE, "seed": seed,
+                         {"prompt": M.prompt_path_b(c, args.lang), "negative": M.negative(c), "seed": seed,
                           "width": M.WIDTH, "height": M.HEIGHT, "seconds": _seconds_for(wav), "fps": M.FPS,
                           "sampler": args.sampler},
                          {"image": M.CHARACTERS[c]["keyframe"], "audio": wav}))
@@ -189,7 +214,7 @@ def cmd_b(args) -> None:
         joined = verify.concat_audio(parts, os.path.join(out_dir, "tts", f"ex_{key}_{args.lang}.wav"))
         for seed in args.seeds[:2]:
             jobs.append((f"ex_{key}_{args.lang}_s{seed}", "ltx25_a2v_speech",
-                         {"prompt": M.prompt_exchange_b(key, args.lang), "negative": M.NEGATIVE, "seed": seed,
+                         {"prompt": M.prompt_exchange_b(key, args.lang), "negative": M.exchange_negative(key), "seed": seed,
                           "width": M.WIDTH, "height": M.HEIGHT, "seconds": _seconds_for(joined), "fps": M.FPS,
                           "sampler": args.sampler},
                          {"image": kf, "audio": joined}))
@@ -198,12 +223,13 @@ def cmd_b(args) -> None:
 
 def cmd_c(args) -> None:
     ep = rp.Endpoint(args.video_endpoint)
-    _need_voices(list(M.CHARACTERS))
+    chars = _ready_characters()
+    _need_voices(chars)
     jobs = []
-    for c in M.CHARACTERS:
+    for c in chars:
         for seed in args.seeds:
             jobs.append((f"{c}_{args.lang}_s{seed}", "ltx23_idlora_speech",
-                         {"prompt": M.prompt_path_c(c, args.lang), "negative": M.NEGATIVE, "seed": seed,
+                         {"prompt": M.prompt_path_c(c, args.lang), "negative": M.negative(c), "seed": seed,
                           "width": M.WIDTH, "height": M.HEIGHT, "seconds": M.SINGLE_SECONDS, "fps": M.FPS,
                           "identity_guidance": args.identity_guidance},
                          {"image": M.CHARACTERS[c]["keyframe"], "voice_ref": _voice_path(c)}))
@@ -218,7 +244,7 @@ def cmd_c(args) -> None:
         prompt = M.prompt_path_c(first, args.lang, line=speech).replace(
             M.CHARACTERS[first]["setting"], ex["setting"])
         jobs.append((f"ex_{key}_{args.lang}_s{args.seeds[0]}", "ltx23_idlora_speech",
-                     {"prompt": prompt, "negative": M.NEGATIVE, "seed": args.seeds[0], "width": M.WIDTH,
+                     {"prompt": prompt, "negative": M.exchange_negative(key), "seed": args.seeds[0], "width": M.WIDTH,
                       "height": M.HEIGHT, "seconds": M.EXCHANGE_SECONDS, "fps": M.FPS,
                       "identity_guidance": args.identity_guidance},
                      {"image": kf, "voice_ref": _voice_path(first)}))
@@ -229,21 +255,16 @@ def cmd_keyframe3(args) -> None:
     """The three-character keyframe with the repo's existing Flux 2 Klein multi-reference template."""
     from clipping.providers.local_comfyui import load_template, render_template  # the images endpoint's templates
 
-    # The images endpoint has its own key in the app (RUNPOD_IMAGE_API_KEY); fall back to the main one.
-    try:
-        key = rp.api_key(name="RUNPOD_IMAGE_API_KEY")
-    except rp.RunPodError:
-        key = None
-    ep = rp.Endpoint(args.images_endpoint, key=key)
+    ep = _images_endpoint(args)
     ex = M.EXCHANGES["three"]
     refs = [M.CHARACTERS[s]["ref"] for s in ex["speakers"]]
     names = [f"kf3_ref{k}.png" for k in range(len(refs))]
     heads = " ".join(M.CHARACTERS[s]["head"] + "." for s in ex["speakers"])
-    prompt = (f"{M.MEDIUM} {heads} The three of them stand close together by a desk in {ex['setting']}, "
+    prompt = (f"{M.exchange_medium('three')} {heads} The three of them stand close together by a desk in {ex['setting']}, "
               f"facing each other mid-conversation, medium three-shot, only these three characters, nobody else. "
               f"Same fruit heads, same outfits as the reference images.")
     graph = render_template(load_template("edit_flux2_klein_multiref"), {
-        "prompt": prompt, "negative": M.NEGATIVE + ", people, crowd, fourth character", "seed": 5,
+        "prompt": prompt, "negative": M.exchange_negative("three") + ", people, crowd, fourth character", "seed": 5,
         "width": M.WIDTH, "height": M.HEIGHT, "ref_paths": names})
     payload = {"workflow": graph, "images": [rp._file_entry(n, p) for n, p in zip(names, refs)]}
     job = ep.run(payload, execution_timeout_s=600)
@@ -254,6 +275,42 @@ def cmd_keyframe3(args) -> None:
     if png and png != KF_THREE:
         os.replace(png, KF_THREE)
     print("keyframe:", KF_THREE, "billed", rp.billed_seconds(status), "s")
+
+
+def cmd_keyframe(args) -> None:
+    """Start-image candidates for a character with none (t2i_flux2_klein), or ``--pick`` one (free)."""
+    char = M.CHARACTERS[args.character]
+    dest = char["keyframe"]
+    cand = lambda seed: os.path.join(OUT, f"kf_{args.character}_s{seed}.png")  # noqa: E731
+    if args.pick is not None:
+        src = cand(args.pick)
+        if not os.path.exists(src):
+            sys.exit(f"no candidate {src}: run `keyframe --character {args.character}` first")
+        shutil.copyfile(src, dest)
+        print(f"locked {dest} (from seed {args.pick})")
+        return
+    from clipping.providers.local_comfyui import load_template, render_template  # the images endpoint's templates
+
+    ep = _images_endpoint(args)
+    template = load_template("t2i_flux2_klein")
+    submitted = []
+    for seed in args.seeds:
+        graph = render_template(template, {"prompt": M.prompt_keyframe(args.character),
+                                           "negative": M.negative(args.character), "seed": seed,
+                                           "width": M.WIDTH, "height": M.HEIGHT})
+        job = ep.run({"workflow": graph}, execution_timeout_s=600)
+        print(f"submitted kf_{args.character}_s{seed} -> {job}")
+        submitted.append((seed, job))
+    total = 0.0
+    for seed, job in submitted:
+        status = ep.wait(job)
+        paths = rp.save_outputs(status, OUT, stem=f"kf_{args.character}_s{seed}")
+        png = next((p for p in paths if p.endswith(".png")), None)
+        if png and png != cand(seed):
+            os.replace(png, cand(seed))
+        total += rp.billed_seconds(status)
+        print(f"candidate {cand(seed)}")
+    print(f"billed {total:.0f} GPU-seconds. Look at them, then: keyframe --character {args.character} --pick <seed>")
 
 
 def cmd_review(args) -> None:
@@ -284,14 +341,15 @@ def cmd_review(args) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["smoke", "a", "voice", "b", "c", "keyframe3", "review"])
+    ap.add_argument("command", choices=["smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review"])
     ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker")
     ap.add_argument("--images-endpoint", help="RunPod endpoint id of the images worker (Flux 2 Klein)")
     ap.add_argument("--lang", choices=["fr", "en"], default="fr")
     ap.add_argument("--seeds", type=int, nargs="+", default=M.SEEDS)
     ap.add_argument("--sampler", default="euler", help="path b sampler (euler recommended for A2V lip-sync)")
     ap.add_argument("--identity-guidance", type=float, default=3.0, help="path c LTXVReferenceAudio scale")
-    ap.add_argument("--character", help="voice: character id")
+    ap.add_argument("--character", choices=sorted(M.CHARACTERS), help="voice / keyframe: character id")
+    ap.add_argument("--pick", type=int, help="keyframe: lock the candidate of this seed as the start image (free)")
     ap.add_argument("--from", dest="source", help="voice: the mp4 (or wav) whose audio becomes the reference")
     ap.add_argument("--start", type=float, default=0.0, help="voice: skip this many seconds")
     ap.add_argument("--max-s", type=float, default=10.0, help="voice: keep at most this many seconds")
@@ -300,10 +358,14 @@ def main() -> None:
         sys.exit("--video-endpoint is required")
     if args.command == "keyframe3" and not args.images_endpoint:
         sys.exit("--images-endpoint is required")
+    if args.command == "keyframe" and not args.character:
+        sys.exit("keyframe needs --character")
+    if args.command == "keyframe" and args.pick is None and not args.images_endpoint:
+        sys.exit("--images-endpoint is required (or --pick <seed> to lock a candidate)")
     if args.command == "voice" and not (args.character and args.source):
         sys.exit("voice needs --character and --from")
     {"smoke": cmd_smoke, "a": cmd_a, "voice": cmd_voice, "b": cmd_b, "c": cmd_c,
-     "keyframe3": cmd_keyframe3, "review": cmd_review}[args.command](args)
+     "keyframe3": cmd_keyframe3, "keyframe": cmd_keyframe, "review": cmd_review}[args.command](args)
 
 
 if __name__ == "__main__":
