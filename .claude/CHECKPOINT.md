@@ -1,4 +1,4 @@
-## CURRENT STATE — plan 36 (AI Story rebuilt from scratch, `showrunner/`): stage 0 blocked on the human's RunPod/HF setup (2026-10-08, local session)
+## CURRENT STATE — plan 36 (`showrunner/`): stage 0 DONE, D7 = path (a) LTX-2.5 joint picture+voice, multi-speaker preferred; next = stage 1 after Rida's answers (2026-10-08 evening)
 
 - **In-progress header:** phase = stage 0 setup; nothing running, $0 spent. Checkpoint before the change = `a8d8557`
   (origin/main fast-forwarded here; local main had been 2 commits behind). Plan files: `docs/plans/36-CHECKPOINT.md`

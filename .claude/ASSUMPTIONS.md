@@ -928,3 +928,7 @@ and untested — Stage 11 is where it would be.
 - A-219 UNCONFIRMED (plan 35): the pipeline's per-line talking parts (close-up edit + S2V per line, the parts concatenated) behave on a real own_gpu episode as the hand-made production did on 2026-10-07 (13/13 S2V clips clean, ≈ 150 GPU-s = $0.066 a line warm, a close-up $0.01); nothing of the pipeline path ran live yet.
 - A-220 UNCONFIRMED: the human accepts the re-cast Gemini voices (Rida Puck, Marie-Jeanne Kore, Leonardo Alnilam, Paloma Aoede, Don Maximiliano Algenib) picked from the free samples sent 2026-10-07; a different pick costs that character's talking clips again.
 
+## Plan 36 (2026-10-08)
+- A-221 UNCONFIRMED (the VC test): Chatterbox voice conversion (`FL_ChatterboxVC`) of a line cut from an LTX-2.5 clip keeps its timing, so the lips stay in sync, while the timbre becomes the character's locked voice; its weights (`ResembleAI/chatterbox` s3gen.pt, conds.pt) may be missing from the volume, which holds the multilingual model.
+- A-222 UNCONFIRMED (stage 2 keyframes): a keyframe drawn in three-quarter view, in the shot's framing, gives the dialogue framing the I2V prompt alone could not (batch a: the characters kept facing the camera).
+- A-223 UNCONFIRMED: the volume's datacenter GPU shortage of 2026-10-08 (all three endpoints throttled, 20–35 min queues) is a time-of-day effect, not the norm.
