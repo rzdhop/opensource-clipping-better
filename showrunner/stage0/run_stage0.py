@@ -186,18 +186,36 @@ def cmd_voice(args) -> None:
         print("WARNING: that audio is silent; pick another take")
 
 
-def _tts_jobs(ep: rp.Endpoint, lines: list, lang: str, out_dir: str) -> dict:
-    """*lines*: ``[(stem, char_id, text)]`` -> ``{stem: wav path}`` (Chatterbox, the locked voices)."""
+def _guard_line(raw: str, text: str, dest: str) -> str:
+    """Cut a Chatterbox line where the line ends (verify.line_cut_s); the raw file is kept."""
+    duration = verify.probe(raw)["duration_s"]
+    cut = verify.line_cut_s(text, verify.silences(raw), duration)
+    verify.extract_audio(raw, dest, max_s=cut)
+    print(f"line guard {os.path.basename(dest)}: {duration:.1f} s -> {cut:.2f} s")
+    return dest
+
+
+def _tts_jobs(ep: rp.Endpoint, lines: list, lang: str, out_dir: str, *, reuse: bool = False) -> dict:
+    """*lines*: ``[(stem, char_id, text)]`` -> ``{stem: wav path}`` (Chatterbox, the locked voices),
+    each cut by the line guard. *reuse*: guard the lines already in *out_dir* and send only the
+    missing ones (same voices, no new TTS spend)."""
+    os.makedirs(out_dir, exist_ok=True)
+    text_of = {stem: text for stem, _, text in lines}
+    raws = {}
+    for stem, _, _ in lines:
+        raw, old = os.path.join(out_dir, f"{stem}_raw.wav"), os.path.join(out_dir, f"{stem}.wav")
+        if reuse and not os.path.exists(raw) and os.path.exists(old):
+            os.replace(old, raw)  # a line made before the guard existed
+        if reuse and os.path.exists(raw):
+            raws[stem] = raw
     jobs = [(stem, "tts_chatterbox_line",
              {"text": text, "language": M.CHATTERBOX_LANGUAGE[lang], "exaggeration": 0.5, "seed": 7},
-             {"voice_ref": _voice_path(char_id)}) for stem, char_id, text in lines]
-    results = run_batch(ep, jobs, out_dir)
-    wavs = {}
-    for stem, paths, _, _ in results:
+             {"voice_ref": _voice_path(char_id)}) for stem, char_id, text in lines if stem not in raws]
+    for stem, paths, _, _ in (run_batch(ep, jobs, out_dir) if jobs else []):
         src = next((p for p in paths if p.endswith((".flac", ".wav", ".mp3", ".mp4"))), None)
         if src:  # flac from SaveAudio (patched handler); an mp4 wrapper would demux the same way
-            wavs[stem] = verify.extract_audio(src, os.path.join(out_dir, f"{stem}.wav"))
-    return wavs
+            raws[stem] = verify.extract_audio(src, os.path.join(out_dir, f"{stem}_raw.wav"))
+    return {stem: _guard_line(raw, text_of[stem], os.path.join(out_dir, f"{stem}.wav")) for stem, raw in raws.items()}
 
 
 def _seconds_for(wav: str) -> float:
@@ -215,7 +233,7 @@ def cmd_b(args) -> None:
     for key, ex in M.EXCHANGES.items():
         for k, (who, text) in enumerate(ex["lines"][args.lang]):
             lines.append((f"tts_ex_{key}_{args.lang}_{k}_{who}", who, text))
-    wavs = _tts_jobs(ep, lines, args.lang, os.path.join(out_dir, "tts"))
+    wavs = _tts_jobs(ep, lines, args.lang, os.path.join(out_dir, "tts"), reuse=args.reuse_tts)
     # 2. the clips
     jobs = []
     for c in chars:
@@ -375,6 +393,8 @@ def main() -> None:
                                               "default RUNPOD_IMAGE_ENDPOINT_ID from the environment or .env")
     ap.add_argument("--lang", choices=["fr", "en"], default="fr")
     ap.add_argument("--seeds", type=int, nargs="+", default=M.SEEDS)
+    ap.add_argument("--reuse-tts", action="store_true",
+                    help="path b: guard the TTS lines already made instead of making them again")
     ap.add_argument("--sampler", default="euler", help="path b sampler (euler recommended for A2V lip-sync)")
     ap.add_argument("--identity-guidance", type=float, default=3.0, help="path c LTXVReferenceAudio scale")
     ap.add_argument("--character", choices=sorted(M.CHARACTERS), help="voice / keyframe: character id")

@@ -354,3 +354,27 @@ def test_a_stuck_job_does_not_sink_the_batch_and_ids_are_kept(tmp_path, monkeypa
     assert [(stem, st) for stem, _, _, st in results] == [("a1", "LOST"), ("a2", "COMPLETED")]
     kept = [json.loads(l)["job"] for l in open(tmp_path / "submitted.jsonl")]
     assert kept == ["job1", "job2"] and "FAILED a1" in capsys.readouterr().out
+
+
+def test_line_guard_cuts_at_the_first_pause_after_most_of_the_line():
+    # the real numbers of 2026-10-08: Paloma's 9-word line came back 40 s long, the line in 0-2.9 s
+    paloma = [(2.877, 4.343), (8.637, 9.245), (13.43, 14.436)]
+    assert verify.line_cut_s("Tu souris à ton téléphone. C'est qui, le kiwi ?", paloma, 40.0) == 3.027
+    # a pause inside the line (after "R…") is too early to be its end
+    mj = [(0.582, 0.988), (3.008, 4.901)]
+    assert verify.line_cut_s("R… comme Rida ? Non. Non, non, non.", mj, 26.2) == 3.158
+    # no pause late enough: capped at 1.6 x the expected length
+    assert verify.line_cut_s("un deux trois quatre cinq six", [(0.5, 0.9)], 30.0) == round(1.6 * 6 / 2.4 + 0.15, 3)
+    # a short clean line is never lengthened
+    assert verify.line_cut_s("Personne ? Sympa.", [], 1.4) == 1.4
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_silences_finds_a_pause_and_one_running_to_the_end(tmp_path):
+    path = str(tmp_path / "t.wav")
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i",
+                    "sine=frequency=220:duration=1,apad=pad_dur=1,volume=1", "-f", "lavfi", "-i",
+                    "sine=frequency=330:duration=1", "-filter_complex", "[0][1]concat=n=2:v=0:a=1,apad=pad_dur=0.6",
+                    "-ar", "24000", "-ac", "1", path], check=True, capture_output=True)
+    pauses = verify.silences(path)
+    assert len(pauses) == 2 and abs(pauses[0][0] - 1.0) < 0.05 and abs(pauses[1][1] - verify.probe(path)["duration_s"]) < 0.05

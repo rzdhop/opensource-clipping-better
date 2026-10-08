@@ -82,6 +82,32 @@ def extract_audio(path: str, dest: str, *, start_s: float = 0.0, max_s: float | 
     return dest
 
 
+def silences(path: str, *, noise_db: float = -35.0, min_s: float = 0.3) -> list:
+    """``[(start_s, end_s)]`` of the pauses in *path* (ffmpeg silencedetect); a pause running to
+    the end of the file ends at its duration."""
+    out = _run(["ffmpeg", "-hide_banner", "-nostats", "-i", path, "-af",
+                f"silencedetect=noise={noise_db}dB:d={min_s}", "-f", "null", "-"]).stderr
+    starts = [float(x) for x in re.findall(r"silence_start: (-?[0-9.]+)", out)]
+    ends = [float(x) for x in re.findall(r"silence_end: ([0-9.]+)", out)]
+    if len(ends) < len(starts):
+        ends.append(probe(path)["duration_s"])
+    return list(zip(starts, ends))
+
+
+def line_cut_s(text: str, pauses: list, duration_s: float, *, words_per_s: float = 2.4,
+               floor: float = 0.7, cap: float = 1.6, pad_s: float = 0.15) -> float:
+    """Where a TTS line ends: the first pause that starts after *floor* of the line's expected
+    length (words / *words_per_s*), plus *pad_s*; with no such pause, *cap* times the expected
+    length. Chatterbox has no length limit but its 1000-token cap (≈ 40 s) and keeps talking
+    after the line (2026-10-08: a 9-word line came back 40 s long, the line in its first 2.9 s)."""
+    words = re.findall(r"[^\W_][\w'’-]*", text)  # a French " ?" or " !" is not a word
+    expected = max(1.0, len(words) / words_per_s)
+    for start, _ in pauses:
+        if start >= floor * expected:
+            return round(min(start + pad_s, duration_s), 3)
+    return round(min(duration_s, cap * expected + pad_s), 3)
+
+
 def concat_audio(parts: list, dest: str, *, gap_s: float = 0.35, sample_rate: int = 24000) -> str:
     """Join wav *parts* with *gap_s* of silence between them (a two-speaker exchange for A2V)."""
     inputs = []
