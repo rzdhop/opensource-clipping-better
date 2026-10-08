@@ -1,5 +1,11 @@
 ## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
 
+- **In-progress header (2026-10-08 night, replacement):** Rida: "Delete and replace the old connector ... your version
+  now erase the old one". Checkpoint = `83aaf21` (clean). Plan: showrunner server takes port 8787 and the Funnel root
+  (no 8443); old `mcp_server/`, its unit, its 8 tests, 4 ep01 GPU scripts and the repo skill fruit-drama-episode
+  deleted (git history keeps them); `rzdhop-story-mcp` stopped/disabled/removed, `showrunner-mcp` installed; Rida
+  re-adds the connector (same URL) in claude.ai. Rollback: `git revert` + re-install deploy/rzdhop-story-mcp.service
+  from `83aaf21`.
 - **In-progress header (2026-10-08 night):** plan 36 **stage 2 code done** (2.0 `e0874e6`, 2.1 `5c2f892`, 2.2 `ab8d139`,
   2.3 `ba14426`, 2.4 docs+unit `e49b139`): the `showrunner` MCP server, 20 tools, DEC-324. Free live check in
   process on the demo story passed (story_list, cost_ledger, runpod_health, view_file, verify_take 52 s ok). `.env`
