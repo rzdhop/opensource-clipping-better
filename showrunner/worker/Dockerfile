@@ -1,4 +1,4 @@
-# fruitstory video worker — RunPod Serverless image for the LTX speech clips (plan 36, stage 0).
+# showrunner video worker — RunPod Serverless image for the LTX speech clips (plan 36, stage 0).
 #
 # Base: the repo's own worker image, ghcr.io/rzdhop/worker-comfyui-tts (built by
 # .github/workflows/worker-tts-image.yml from docker/worker-comfyui-tts/, plan 31): that is
@@ -13,8 +13,8 @@
 # make every pull slow and invalidate FlashBoot snapshots on each rebuild.
 #
 # Build and push (from the repo root; or add a job to the worker-tts-image workflow):
-#   docker build -t ghcr.io/rzdhop/fruitstory-worker:0.1.0 -f fruitstory/worker/Dockerfile fruitstory/worker
-#   docker push ghcr.io/rzdhop/fruitstory-worker:0.1.0
+#   docker build -t ghcr.io/rzdhop/showrunner-worker:0.1.0 -f showrunner/worker/Dockerfile showrunner/worker
+#   docker push ghcr.io/rzdhop/showrunner-worker:0.1.0
 
 ARG BASE_TAG=latest
 FROM ghcr.io/rzdhop/worker-comfyui-tts:${BASE_TAG}

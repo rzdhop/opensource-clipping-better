@@ -492,7 +492,7 @@
           "video",
           0
         ],
-        "filename_prefix": "fruitstory/{{name}}",
+        "filename_prefix": "showrunner/{{name}}",
         "format": "mp4",
         "format.codec": "h264"
       }
@@ -515,7 +515,7 @@
           "last",
           0
         ],
-        "filename_prefix": "fruitstory/{{name}}_last"
+        "filename_prefix": "showrunner/{{name}}_last"
       }
     }
   }

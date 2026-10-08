@@ -1,4 +1,4 @@
-"""Validate the fruitstory workflow templates against a ComfyUI source tree.
+"""Validate the showrunner workflow templates against a ComfyUI source tree.
 
 Checks, for every node of every template: the class exists in that ComfyUI version (v1
 ``NODE_CLASS_MAPPINGS`` or v3 ``node_id=``), every input name the template sets exists on the
@@ -7,7 +7,7 @@ every link points at an existing node, and the placeholders render. Custom-node 
 (``custom_nodes`` of the template) are checked against an optional second tree.
 
 Usage:
-    python fruitstory/tools/validate_workflows.py --comfyui /path/to/ComfyUI [--custom /path/to/node_pack ...]
+    python showrunner/tools/validate_workflows.py --comfyui /path/to/ComfyUI [--custom /path/to/node_pack ...]
 
 Exit code 1 on any problem. Pure read-only: no ComfyUI import, no GPU.
 """
@@ -23,7 +23,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
-from fruitstory import comfy_templates  # noqa: E402
+from showrunner import comfy_templates  # noqa: E402
 
 # Placeholders of a render for the check (any plausible values).
 SAMPLE = {"image": "kf.png", "audio": "line.wav", "voice_ref": "voice.wav", "prompt": "p", "negative": "n",

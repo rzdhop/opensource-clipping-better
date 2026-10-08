@@ -1,4 +1,4 @@
-"""Load and render the fruitstory ComfyUI workflow templates (``fruitstory/workflows/*.json``).
+"""Load and render the showrunner ComfyUI workflow templates (``showrunner/workflows/*.json``).
 
 A template is an API-format ComfyUI graph whose literal inputs are ``{{placeholders}}``.
 :func:`render` fills them with typed values and computes the derived ones (frame count under

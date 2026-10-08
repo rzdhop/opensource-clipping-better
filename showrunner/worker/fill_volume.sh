@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fruitstory — fill the RunPod network volume with the weights of the stage-0 workflows.
+# showrunner — fill the RunPod network volume with the weights of the stage-0 workflows.
 #
 # Run this ONCE from a cheap pod (any GPU or CPU pod) that has the network volume mounted at
 # /runpod-volume, in the same datacenter as the serverless endpoint:

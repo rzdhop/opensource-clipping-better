@@ -59,7 +59,7 @@
           "tts",
           0
         ],
-        "filename_prefix": "fruitstory/{{name}}"
+        "filename_prefix": "showrunner/{{name}}"
       }
     }
   }

@@ -14,8 +14,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from fruitstory import comfy_templates, runpod_client as rp, verify  # noqa: E402
-from fruitstory.stage0 import matrix as M  # noqa: E402
+from showrunner import comfy_templates, runpod_client as rp, verify  # noqa: E402
+from showrunner.stage0 import matrix as M  # noqa: E402
 
 FFMPEG = shutil.which("ffmpeg") is not None
 
@@ -80,7 +80,7 @@ def test_i2v_prompt_lands_in_the_positive_encoder_and_the_negative_elsewhere():
                                          "height": 1280, "seconds": 5, "fps": 24, "name": "x"})
     assert graph["pos"]["inputs"]["text"] == "SAY HI"
     assert graph["neg"]["inputs"]["text"] == "NEG"
-    assert graph["save"]["inputs"]["filename_prefix"] == "fruitstory/x"
+    assert graph["save"]["inputs"]["filename_prefix"] == "showrunner/x"
     assert graph["save"]["inputs"]["format"] == "mp4" and graph["save"]["inputs"]["format.codec"] == "h264"
 
 
@@ -132,11 +132,11 @@ class FakeEndpoint(rp.Endpoint):
         if path == "run":
             return {"id": "job1"}
         return {"id": "job1", "status": "COMPLETED", "executionTime": 42000, "delayTime": 3000,
-                "output": {"images": [{"filename": "fruitstory/x_00001_.mp4", "type": "base64",
+                "output": {"images": [{"filename": "showrunner/x_00001_.mp4", "type": "base64",
                                        "data": base64.b64encode(b"MP4DATA").decode()},
-                                      {"filename": "fruitstory/x_last_00001_.png", "type": "base64",
+                                      {"filename": "showrunner/x_last_00001_.png", "type": "base64",
                                        "data": base64.b64encode(b"PNGDATA").decode()}],
-                           "audio": [{"filename": "fruitstory/x_00001_.flac", "type": "base64",
+                           "audio": [{"filename": "showrunner/x_00001_.flac", "type": "base64",
                                       "data": base64.b64encode(b"FLACDATA").decode()}], "errors": []}}
 
 
@@ -186,5 +186,5 @@ def test_matrix_prompts_quote_the_line_and_name_the_language():
 def test_api_key_reads_the_named_key_and_names_it_when_missing():
     assert rp.api_key({"RUNPOD_IMAGE_API_KEY": " img-key "}, name="RUNPOD_IMAGE_API_KEY") == "img-key"
     assert rp.api_key({"RUNPOD_API_KEY": "main", "RUNPOD_IMAGE_API_KEY": "img"}) == "main"
-    with pytest.raises(rp.RunPodError, match="FRUITSTORY_TEST_ABSENT_KEY"):
-        rp.api_key({}, name="FRUITSTORY_TEST_ABSENT_KEY")
+    with pytest.raises(rp.RunPodError, match="SHOWRUNNER_TEST_ABSENT_KEY"):
+        rp.api_key({}, name="SHOWRUNNER_TEST_ABSENT_KEY")

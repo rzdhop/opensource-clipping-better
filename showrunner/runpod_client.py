@@ -1,7 +1,7 @@
 """A thin client for a RunPod Serverless worker-comfyui endpoint (stdlib only).
 
 - :class:`Endpoint` wraps ``POST /run``, ``GET /status``, ``POST /cancel``.
-- :func:`submit_template` renders a fruitstory template, attaches the input files as
+- :func:`submit_template` renders a showrunner template, attaches the input files as
   ``input.images[]`` (the worker uploads any file type to ComfyUI's ``input/`` folder: png,
   wav, mp3 all work) and submits it.
 - :func:`save_outputs` writes what came back (``output.images[]`` and, with the repo's patched

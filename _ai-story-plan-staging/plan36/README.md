@@ -1,11 +1,11 @@
-# fruitstory — the AI Story rebuilt from scratch (plan 36)
+# showrunner — the AI Story rebuilt from scratch (plan 36)
 
 `docs/plans/36-rebuild-from-scratch-plan.md` is the plan; this package is its code. Nothing in
 here imports `clipping/aistory` (which stage 5 deletes). Stdlib + ffmpeg only, so the stage-0
 runner and the future MCP v2 server share the same pieces.
 
 ```
-fruitstory/
+showrunner/
   comfy_templates.py      load/render the ComfyUI templates ({{placeholders}}, derived frame counts)
   runpod_client.py        RunPod Serverless /run /status client, payload builder, output saver
   verify.py               ffprobe/ffmpeg checks: duration, audio, loudness, contact sheet, audio extract/concat
@@ -32,12 +32,12 @@ Marie-Jeanne the strawberry, Rida the kiwi) and their keyframes.
 
 ### 1. The video endpoint (yours)
 
-1. Build and push the image: `docker build -t ghcr.io/rzdhop/fruitstory-worker:0.1.0 -f fruitstory/worker/Dockerfile fruitstory/worker && docker push ...`
+1. Build and push the image: `docker build -t ghcr.io/rzdhop/showrunner-worker:0.1.0 -f showrunner/worker/Dockerfile showrunner/worker && docker push ...`
    It extends the repo's `ghcr.io/rzdhop/worker-comfyui-tts` (plan 31: Chatterbox + the handler patch that
    returns SaveAudio outputs) with the LTX model folders mapped on the volume.
 2. The existing network volume (the one the video/image/voice endpoints share, `docs/MCP.md`), or a new one
    ≥ 150 GB in the same datacenter; from a pod with it mounted at `/runpod-volume`:
-   `HF_TOKEN=hf_... bash fruitstory/worker/fill_volume.sh` (accept the gated licenses of
+   `HF_TOKEN=hf_... bash showrunner/worker/fill_volume.sh` (accept the gated licenses of
    `Lightricks/LTX-2.5` and `Lightricks/LTX-2.3-fp8` first). ≈ 100 GB, 20–40 min. Chatterbox weights:
    `docker/worker-comfyui-tts/fetch_weights.sh` if the volume does not have them yet.
 3. Point the **video** endpoint (`RUNPOD_COMFY_ENDPOINT_ID`) at this image with the settings of
@@ -47,16 +47,16 @@ Marie-Jeanne the strawberry, Rida the kiwi) and their keyframes.
 ### 2. The commands (from the repo root)
 
 ```
-python -m fruitstory.stage0.run_stage0 smoke     --video-endpoint <id>          # 1 clip, prints billed seconds
-python -m fruitstory.stage0.run_stage0 keyframe3 --images-endpoint <id>         # the 3-character keyframe (Flux 2 Klein)
-python -m fruitstory.stage0.run_stage0 a         --video-endpoint <id>          # path (a): 9 single clips + exchanges
-python -m fruitstory.stage0.run_stage0 review                                   # contact sheets + review.md
-python -m fruitstory.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4
-python -m fruitstory.stage0.run_stage0 voice --character marie_jeanne --from ...  # one locked voice per character
-python -m fruitstory.stage0.run_stage0 voice --character rida --from ...
-python -m fruitstory.stage0.run_stage0 b         --video-endpoint <id>          # path (b): TTS -> A2V
-python -m fruitstory.stage0.run_stage0 c         --video-endpoint <id>          # path (c): ID-LoRA
-python -m fruitstory.stage0.run_stage0 review
+python -m showrunner.stage0.run_stage0 smoke     --video-endpoint <id>          # 1 clip, prints billed seconds
+python -m showrunner.stage0.run_stage0 keyframe3 --images-endpoint <id>         # the 3-character keyframe (Flux 2 Klein)
+python -m showrunner.stage0.run_stage0 a         --video-endpoint <id>          # path (a): 9 single clips + exchanges
+python -m showrunner.stage0.run_stage0 review                                   # contact sheets + review.md
+python -m showrunner.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4
+python -m showrunner.stage0.run_stage0 voice --character marie_jeanne --from ...  # one locked voice per character
+python -m showrunner.stage0.run_stage0 voice --character rida --from ...
+python -m showrunner.stage0.run_stage0 b         --video-endpoint <id>          # path (b): TTS -> A2V
+python -m showrunner.stage0.run_stage0 c         --video-endpoint <id>          # path (c): ID-LoRA
+python -m showrunner.stage0.run_stage0 review
 ```
 
 `--lang en` runs the English lines (D4). Everything lands in `stories/_stage0/<path>/`, with
@@ -80,9 +80,9 @@ real voice works the same way (`voice --from recording.wav`).
 ## Offline checks
 
 ```
-python -m pytest fruitstory/tests -q
-python fruitstory/tools/validate_workflows.py --comfyui <ComfyUI checkout at v0.34.0> --custom <ComfyUI_Fill-ChatterBox checkout>
-python -m fruitstory.workflows._build        # regenerate the JSON after editing _build.py
+python -m pytest showrunner/tests -q
+python showrunner/tools/validate_workflows.py --comfyui <ComfyUI checkout at v0.34.0> --custom <ComfyUI_Fill-ChatterBox checkout>
+python -m showrunner.workflows._build        # regenerate the JSON after editing _build.py
 ```
 
 The templates were validated on 2026-10-08 against ComfyUI v0.34.0 (the version pinned by

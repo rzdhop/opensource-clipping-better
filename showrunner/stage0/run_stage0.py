@@ -1,22 +1,22 @@
 """Stage 0 of plan 36: the voice-path spike on the RunPod `video` endpoint.
 
-Runs the matrix of :mod:`fruitstory.stage0.matrix` and writes every clip, its contact sheet and a
+Runs the matrix of :mod:`showrunner.stage0.matrix` and writes every clip, its contact sheet and a
 review table under ``stories/_stage0/`` so Rida can watch, listen and pick the primary path.
 
 Order of operations (each command is one GPU batch, submitted in parallel, waited, saved):
 
-    python -m fruitstory.stage0.run_stage0 smoke     --video-endpoint <id>
-    python -m fruitstory.stage0.run_stage0 a         --video-endpoint <id> [--lang fr|en] [--seeds 11 22 33]
+    python -m showrunner.stage0.run_stage0 smoke     --video-endpoint <id>
+    python -m showrunner.stage0.run_stage0 a         --video-endpoint <id> [--lang fr|en] [--seeds 11 22 33]
         path (a) prompt-only dialogue: 3 characters x seeds + the two-speaker exchange (+ three if kf_three.png exists)
-    python -m fruitstory.stage0.run_stage0 voice     --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4
+    python -m showrunner.stage0.run_stage0 voice     --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4
         locks a voice reference (the audio of the take you liked) -> stories/_stage0/voices/paloma.wav
-    python -m fruitstory.stage0.run_stage0 b         --video-endpoint <id>
+    python -m showrunner.stage0.run_stage0 b         --video-endpoint <id>
         path (b) TTS (Chatterbox, the locked voice) -> LTX-2.5 A2V, same matrix; exchanges from concatenated lines
-    python -m fruitstory.stage0.run_stage0 c         --video-endpoint <id>
+    python -m showrunner.stage0.run_stage0 c         --video-endpoint <id>
         path (c) LTX-2.3 ID-LoRA (keyframe + locked voice -> one pass), same matrix
-    python -m fruitstory.stage0.run_stage0 keyframe3 --images-endpoint <id>
+    python -m showrunner.stage0.run_stage0 keyframe3 --images-endpoint <id>
         the three-character keyframe for the 3-speaker exchange (existing edit_flux2_klein_multiref template)
-    python -m fruitstory.stage0.run_stage0 review
+    python -m showrunner.stage0.run_stage0 review
         probes every clip (duration, audio, loudness), writes contact sheets and stories/_stage0/review.md
 
 ``RUNPOD_API_KEY`` from the environment or ``.env``. Nothing here calls an LLM.
@@ -32,9 +32,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from fruitstory import runpod_client as rp  # noqa: E402
-from fruitstory import verify  # noqa: E402
-from fruitstory.stage0 import matrix as M  # noqa: E402
+from showrunner import runpod_client as rp  # noqa: E402
+from showrunner import verify  # noqa: E402
+from showrunner.stage0 import matrix as M  # noqa: E402
 
 OUT = os.path.join(M.REPO_ROOT, "stories", "_stage0")
 VOICES = os.path.join(OUT, "voices")
@@ -126,7 +126,7 @@ def cmd_a(args) -> None:
     jobs += _exchange_jobs_a(args.lang, args.seeds)
     run_batch(ep, jobs, os.path.join(OUT, "a"))
     print("\nNext: listen, pick one take per character, lock its voice:\n"
-          "  python -m fruitstory.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4")
+          "  python -m showrunner.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4")
 
 
 def cmd_voice(args) -> None:
@@ -285,7 +285,7 @@ def cmd_review(args) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["smoke", "a", "voice", "b", "c", "keyframe3", "review"])
-    ap.add_argument("--video-endpoint", help="RunPod endpoint id of the fruitstory video worker")
+    ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker")
     ap.add_argument("--images-endpoint", help="RunPod endpoint id of the images worker (Flux 2 Klein)")
     ap.add_argument("--lang", choices=["fr", "en"], default="fr")
     ap.add_argument("--seeds", type=int, nargs="+", default=M.SEEDS)

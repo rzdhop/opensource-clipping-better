@@ -1,6 +1,6 @@
-name: fruitstory-worker image
+name: showrunner-worker image
 
-# Builds fruitstory/worker (the LTX speech worker of plan 36, FROM worker-comfyui-tts) and
+# Builds showrunner/worker (the LTX speech worker of plan 36, FROM worker-comfyui-tts) and
 # pushes it to GHCR. Separate from worker-tts-image.yml: it only runs when its own files change,
 # or by hand.
 on:
@@ -13,8 +13,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "fruitstory/worker/**"
-      - ".github/workflows/fruitstory-worker-image.yml"
+      - "showrunner/worker/**"
+      - ".github/workflows/showrunner-worker-image.yml"
 
 permissions:
   contents: read
@@ -43,12 +43,12 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: fruitstory/worker
-          file: fruitstory/worker/Dockerfile
+          context: showrunner/worker
+          file: showrunner/worker/Dockerfile
           push: true
           tags: |
-            ghcr.io/rzdhop/fruitstory-worker:0.1.0
-            ghcr.io/rzdhop/fruitstory-worker:${{ github.sha }}
+            ghcr.io/rzdhop/showrunner-worker:0.1.0
+            ghcr.io/rzdhop/showrunner-worker:${{ github.sha }}
           build-args: |
             BASE_TAG=${{ inputs.base_tag || 'latest' }}
           labels: |

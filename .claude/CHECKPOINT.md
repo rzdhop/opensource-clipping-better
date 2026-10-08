@@ -1,12 +1,12 @@
-## CURRENT STATE — plan 36 (AI Story rebuilt from scratch, `fruitstory/`): stage 0 blocked on the human's RunPod/HF setup (2026-10-08, local session)
+## CURRENT STATE — plan 36 (AI Story rebuilt from scratch, `showrunner/`): stage 0 blocked on the human's RunPod/HF setup (2026-10-08, local session)
 
 - **In-progress header:** phase = stage 0 setup; nothing running, $0 spent. Checkpoint before the change = `a8d8557`
   (origin/main fast-forwarded here; local main had been 2 commits behind). Plan files: `docs/plans/36-CHECKPOINT.md`
   (its "Session 2026-10-08" section lists what is ready and what the human must do), `docs/plans/36-rebuild-from-scratch-plan.md`.
-- **Tier 1 baseline:** `python -m pytest fruitstory/tests -q` 15 passed at `a8d8557`; 16 after this session's fix.
+- **Tier 1 baseline:** `python -m pytest showrunner/tests -q` 15 passed at `a8d8557`; 16 after this session's fix.
 - **Next action:** the human accepts the LTX-2.5 license, makes the GHCR package public, fills the volume, creates the
   spike endpoint (never switch the live video endpoint `RUNPOD_COMFY_ENDPOINT_ID`), then `smoke` on their go.
-- **Regression contract (plan 36):** the live app's three endpoints untouched; nothing in `fruitstory/` imports
+- **Regression contract (plan 36):** the live app's three endpoints untouched; nothing in `showrunner/` imports
   `clipping/aistory` (test_stage0_offline); the four workflows render without leftover placeholders (same file).
 
 ## CURRENT STATE — plans 33, 34 and 35 COMPLETE: the talking "Faille d'amour" ep01 (v3) delivered; the fix is in the pipeline (2026-10-07, local session)

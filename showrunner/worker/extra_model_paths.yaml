@@ -1,4 +1,4 @@
-# fruitstory — ComfyUI model folders on the RunPod network volume.
+# showrunner — ComfyUI model folders on the RunPod network volume.
 #
 # The stock worker-comfyui file maps only checkpoints / clip / clip_vision / configs /
 # controlnet / embeddings / loras / upscale_models / vae / unet. ComfyUI's legacy map makes

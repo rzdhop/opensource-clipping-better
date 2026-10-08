@@ -1,6 +1,6 @@
 # Plan 36 — AI Story rebuilt from scratch, Claude-native (draft for discussion)
 
-Date: 2026-10-08. Status: ACCEPTED with the decisions of §7 — stage 0 code built (fruitstory/), not yet run. Numbered 36: plans 30–35 were done on the other system on 2026-10-06/07 (see 36-CHECKPOINT.md). Supersedes plans 00–35 for the AI Story mode once accepted.
+Date: 2026-10-08. Status: ACCEPTED with the decisions of §7 — stage 0 code built (showrunner/), not yet run. Numbered 36: plans 30–35 were done on the other system on 2026-10-06/07 (see 36-CHECKPOINT.md). Supersedes plans 00–35 for the AI Story mode once accepted.
 
 ## 0. The problem and the root causes
 
@@ -34,7 +34,7 @@ Date: 2026-10-08. Status: ACCEPTED with the decisions of §7 — stage 0 code bu
 ### 2.1 What exists after the rebuild
 
 ```
-fruitstory/                      # new package, replaces clipping/aistory (name to decide)
+showrunner/                      # new package, replaces clipping/aistory (named 2026-10-08: any universe, D8)
   store.py          story folder layout, lock states, ids, cost ledger (small)
   prompts/          *.md prompt templates with {{placeholders}} (character sheet, turnaround,
                     emotion grid, keyframe, clip-dialogue, clip-reaction) — one file per template
@@ -129,7 +129,7 @@ No tool calls an LLM. No tool decides anything creative. One run per story at a 
 | Stage | Technical description | Output / gate | GPU cost |
 |---|---|---|---|
 | **0 — Spike: pick the voice path (2–3 days)** | Build the `video` endpoint with LTX-2.5 int8 distilled; make 3 clips of one existing fruit character (keyframe from the current store) in three ways: (a) prompt-only dialogue in LTX-2.5 I2V, (b) TTS line (Chatterbox / Qwen3-TTS from a voice ref) → LTX-2.5 A2V, (c) LTX-2.3 ID-LoRA (keyframe + voice ref, one pass). Same line, 3 seeds each. Also one 10 s two-speaker test on (b). | Rida listens and watches; we choose the primary + fallback. Decision written in this plan. | ≈ $2–3 |
-| **1 — Store and skeleton (2 days)** | `fruitstory/` package: folder layout, ids, lock states, cost ledger, prompt templates as `.md`, workflows JSON + patch tables (t2i, multiref edit, turnaround LoRA, emotion grid, LTX-2.5 clip, TTS ref), `assemble.py`, `verify.py`. Tests on fakes. | `pytest` green; one story folder created by hand | $0 |
+| **1 — Store and skeleton (2 days)** | `showrunner/` package: folder layout, ids, lock states, cost ledger, prompt templates as `.md`, workflows JSON + patch tables (t2i, multiref edit, turnaround LoRA, emotion grid, LTX-2.5 clip, TTS ref), `assemble.py`, `verify.py`. Tests on fakes. | `pytest` green; one story folder created by hand | $0 |
 | **2 — MCP v2 (2 days)** | The tools of §4 on the existing server base; `story_step_*` removed; the image endpoint re-pointed; S3/R2 outputs. | Smoke: one image, one clip, one verify, one assemble from the chat | ≈ $0.50 |
 | **3 — Skills (2 days)** | One SKILL.md per step: `story-concepts`, `story-universe`, `story-cast`, `story-script`, `story-shots`, `story-clips`, `story-assemble`, `story-next-episode`; each with its prompt template, its checklist, its gate question and its "what to show Rida". The old `story-director` / `fruit-drama-episode` skills retired. | Dry run of steps 1–4 on a new pitch with no GPU | $0 |
 | **4 — Validation run, episode 1 (3–4 days, the test Rida asked for)** | A real story from a pitch: 3 concepts → universe → cast of 3–4 (every image and voice ref gated) → script → shots → every clip gated one by one → assembly → mp4 in the chat. Every defect logged in `stories/<slug>/ep01/defects.md`; prompts and templates fixed as we go; no drift allowed: a failed gate stops the run. | Episode 1 posted or declared not good enough, with the list of why | ≈ $3–5 (cast + 12 clips × ~2 seeds) |
@@ -158,6 +158,7 @@ Stages 1–3 can run in parallel with stage 0's GPU waits. Each stage ends with 
 | D5 | **No story dashboard** in this rebuild — chat only. | Stage 5 removes the story pages; the web UI keeps Clips. |
 | D6 | **1, 2 or 3 speakers per clip, no hard limit.** Honest caveat from the research: every open joint model is unreliable past one speaker (faces merge, speaker assignment is random); the audio-driven path with one voice track per speaker is the only one with a documented multi-speaker mode (InfiniteTalk-multi, LongCat-Avatar-1.5, SkyReels-V3-A2V; LTX-2.5 A2V does not bind a voice to a face). | Stage 0 adds a **2-speaker and a 3-speaker 10 s test** on each path. The writer may plan multi-speaker clips; the shot planner marks them `multi_speaker: true` and routes them to whichever path passed the test; a multi-speaker take that fails `verify_take` for one of its lines is split into shot / reverse-shot before a re-roll, not re-rolled blind. |
 | D7 | *(voice path — after stage 0)* | |
+| D8 | **The engine is universe-agnostic; package `showrunner/`** (Rida, 2026-10-08: "fruit dramas but also any type of universe; it has to be discussed first to define the art"). Fruit is one universe among others. | Step 2 (Universe) is the gate: the medium, head types, proportions, palette, lighting and negative are agreed in chat before any picture, and `01-universe.md` opens every prompt. Nothing in the code may hard-wire fruit outside a story's own files. Stage 0 adds **one non-fruit character** (style agreed first) so D7 is not chosen on fruit faces only. Image `ghcr.io/rzdhop/showrunner-worker`. |
 
 ## Sources (research of 2026-10-08)
 - LTX-2.5: https://huggingface.co/Lightricks/LTX-2.5 · https://docs.comfy.org/tutorials/video/ltx/ltx-2-5 · https://docs.ltx.io/open-source-model/usage-guides/audio-to-video · https://ltx.io/blog/what-is-id-lora · https://github.com/Lightricks/ComfyUI-LTXVideo · https://huggingface.co/Lightricks/LTX-2.5/discussions/44 (A2V lip-sync recipe)

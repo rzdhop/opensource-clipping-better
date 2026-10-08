@@ -1,13 +1,12 @@
 {
   "$schema": "comfy_workflow_v1",
-  "name": "ltx23_idlora_speech",
-  "task": "idlora_speech",
+  "name": "ltx25_i2v_speech",
+  "task": "i2v_speech",
   "core_nodes_only": true,
   "verified_live": false,
-  "description": "LTX-2.3 22B dev fp8 + distilled LoRA 0.5 + ID-LoRA (TalkVid) 1.0, two-stage, 24 fps. The reference voice (~5 s wav) conditions the model through the native LTXVReferenceAudio node; the prompt uses the [VISUAL]/[SPEECH]/[SOUNDS] sections. Authored from ComfyUI's video_ltx2_3_id_lora.json (2026-10-08), subgraph flattened. Only core nodes of ComfyUI 0.34.0.",
+  "description": "LTX-2.5 22B distilled int8, two-stage (8 steps at half size, x2 latent upscale, 3 steps), 24 fps, joint audio: the character speaks the quoted line of the prompt with a voice the prompt describes. The clip is saved WITH its sound (mp4/h264+aac) and its last frame as PNG. Authored from ComfyUI's video_ltx2_5_i2v.json (2026-10-08), subgraph flattened, prompt enhancer dropped. Only core nodes of ComfyUI 0.34.0.",
   "placeholders": [
     "image",
-    "voice_ref",
     "prompt",
     "negative",
     "seed",
@@ -15,12 +14,10 @@
     "height",
     "seconds",
     "fps",
-    "identity_guidance",
     "name"
   ],
   "files": {
-    "image": "the keyframe (png)",
-    "voice_ref": "the character's locked voice reference (wav, 5-10 s)"
+    "image": "the keyframe (png), uploaded as input.images[].name"
   },
   "derived": {
     "frames": "1 + floor(fps * seconds / 8) * 8",
@@ -33,8 +30,7 @@
     "height": 1280,
     "fps": 24,
     "seconds": 5,
-    "negative": "live action, real people, photograph, human skin, mask, costume, blurry, deformed mouth, extra limbs, text, subtitles, watermark, pc game, console game, video game, childish, ugly",
-    "identity_guidance": 3.0
+    "negative": "live action, real people, photograph, human skin, mask, costume, blurry, deformed mouth, extra limbs, text, subtitles, watermark, pc game, console game, video game, childish, ugly"
   },
   "frame_rule": {
     "fps": 24,
@@ -49,33 +45,33 @@
   },
   "requires": [
     {
-      "node": "ckpt",
-      "field": "ckpt_name",
-      "file": "ltx-2.3-22b-dev-fp8.safetensors",
-      "dir": "models/checkpoints"
+      "node": "unet",
+      "field": "unet_name",
+      "file": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "dir": "models/diffusion_models"
     },
     {
-      "node": "te",
-      "field": "text_encoder",
-      "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+      "node": "clip",
+      "field": "clip_name",
+      "file": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
       "dir": "models/text_encoders"
     },
     {
-      "node": "lora_d",
-      "field": "lora_name",
-      "file": "ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors",
-      "dir": "models/loras"
+      "node": "vae",
+      "field": "vae_name",
+      "file": "ltx-2.5-video-vae-bf16.safetensors",
+      "dir": "models/vae"
     },
     {
-      "node": "lora_id",
-      "field": "lora_name",
-      "file": "ltx-2.3-id-lora-talkvid-3k.safetensors",
-      "dir": "models/loras"
+      "node": "avae",
+      "field": "vae_name",
+      "file": "ltx-2.5-audio-vae-bf16.safetensors",
+      "dir": "models/vae"
     },
     {
       "node": "up_model",
       "field": "model_name",
-      "file": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      "file": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
       "dir": "models/latent_upscale_models"
     }
   ],
@@ -111,52 +107,37 @@
         "img_compression": 18
       }
     },
-    "ckpt": {
-      "class_type": "CheckpointLoaderSimple",
+    "unet": {
+      "class_type": "UNETLoader",
       "inputs": {
-        "ckpt_name": "ltx-2.3-22b-dev-fp8.safetensors"
+        "unet_name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+        "weight_dtype": "default"
       }
     },
-    "te": {
-      "class_type": "LTXAVTextEncoderLoader",
+    "vae": {
+      "class_type": "VAELoader",
       "inputs": {
-        "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
-        "ckpt_name": "ltx-2.3-22b-dev-fp8.safetensors",
-        "device": "default"
+        "vae_name": "ltx-2.5-video-vae-bf16.safetensors"
       }
     },
     "avae": {
-      "class_type": "LTXVAudioVAELoader",
+      "class_type": "VAELoader",
       "inputs": {
-        "ckpt_name": "ltx-2.3-22b-dev-fp8.safetensors"
+        "vae_name": "ltx-2.5-audio-vae-bf16.safetensors"
       }
     },
-    "lora_d": {
-      "class_type": "LoraLoaderModelOnly",
+    "clip": {
+      "class_type": "CLIPLoader",
       "inputs": {
-        "model": [
-          "ckpt",
-          0
-        ],
-        "lora_name": "ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors",
-        "strength_model": 0.5
-      }
-    },
-    "lora_id": {
-      "class_type": "LoraLoaderModelOnly",
-      "inputs": {
-        "model": [
-          "lora_d",
-          0
-        ],
-        "lora_name": "ltx-2.3-id-lora-talkvid-3k.safetensors",
-        "strength_model": 1.0
+        "clip_name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+        "type": "ltxv",
+        "device": "default"
       }
     },
     "up_model": {
       "class_type": "LatentUpscaleModelLoader",
       "inputs": {
-        "model_name": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
+        "model_name": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
       }
     },
     "pos": {
@@ -164,7 +145,7 @@
       "inputs": {
         "text": "{{prompt}}",
         "clip": [
-          "te",
+          "clip",
           0
         ]
       }
@@ -174,24 +155,14 @@
       "inputs": {
         "text": "{{negative}}",
         "clip": [
-          "te",
+          "clip",
           0
         ]
       }
     },
-    "refaudio": {
-      "class_type": "LoadAudio",
+    "cond": {
+      "class_type": "LTXVConditioning",
       "inputs": {
-        "audio": "{{voice_ref}}"
-      }
-    },
-    "ref": {
-      "class_type": "LTXVReferenceAudio",
-      "inputs": {
-        "model": [
-          "lora_id",
-          0
-        ],
         "positive": [
           "pos",
           0
@@ -199,30 +170,6 @@
         "negative": [
           "neg",
           0
-        ],
-        "reference_audio": [
-          "refaudio",
-          0
-        ],
-        "audio_vae": [
-          "avae",
-          0
-        ],
-        "identity_guidance_scale": "{{identity_guidance}}",
-        "start_percent": 0.0,
-        "end_percent": 1.0
-      }
-    },
-    "cond": {
-      "class_type": "LTXVConditioning",
-      "inputs": {
-        "positive": [
-          "ref",
-          1
-        ],
-        "negative": [
-          "ref",
-          2
         ],
         "frame_rate": "{{fps}}"
       }
@@ -239,23 +186,6 @@
         "batch_size": 1
       }
     },
-    "crop": {
-      "class_type": "LTXVCropGuides",
-      "inputs": {
-        "positive": [
-          "cond",
-          0
-        ],
-        "negative": [
-          "cond",
-          1
-        ],
-        "latent": [
-          "sep1",
-          0
-        ]
-      }
-    },
     "lat1": {
       "class_type": "EmptyLTXVLatentVideo",
       "inputs": {
@@ -269,8 +199,8 @@
       "class_type": "LTXVImgToVideoInplace",
       "inputs": {
         "vae": [
-          "ckpt",
-          2
+          "vae",
+          0
         ],
         "image": [
           "prep",
@@ -298,10 +228,10 @@
       }
     },
     "guider1": {
-      "class_type": "CFGGuider",
+      "class_type": "LTXVDualCFGGuider",
       "inputs": {
         "model": [
-          "ref",
+          "unet",
           0
         ],
         "positive": [
@@ -312,7 +242,8 @@
           "cond",
           1
         ],
-        "cfg": 1.0
+        "video_cfg": 1.0,
+        "audio_cfg": 1.0
       }
     },
     "noise1": {
@@ -324,7 +255,7 @@
     "sampler": {
       "class_type": "KSamplerSelect",
       "inputs": {
-        "sampler_name": "euler"
+        "sampler_name": "euler_ancestral"
       }
     },
     "sig1": {
@@ -379,8 +310,8 @@
           0
         ],
         "vae": [
-          "ckpt",
-          2
+          "vae",
+          0
         ]
       }
     },
@@ -388,8 +319,8 @@
       "class_type": "LTXVImgToVideoInplace",
       "inputs": {
         "vae": [
-          "ckpt",
-          2
+          "vae",
+          0
         ],
         "image": [
           "prep",
@@ -417,21 +348,22 @@
       }
     },
     "guider2": {
-      "class_type": "CFGGuider",
+      "class_type": "LTXVDualCFGGuider",
       "inputs": {
         "model": [
-          "lora_d",
+          "unet",
           0
         ],
         "positive": [
-          "crop",
+          "cond",
           0
         ],
         "negative": [
-          "crop",
+          "cond",
           1
         ],
-        "cfg": 1.0
+        "video_cfg": 1.0,
+        "audio_cfg": 1.0
       }
     },
     "noise2": {
@@ -501,13 +433,13 @@
           0
         ],
         "vae": [
-          "ckpt",
-          2
+          "vae",
+          0
         ],
-        "tile_size": 768,
+        "tile_size": 512,
         "overlap": 64,
-        "temporal_size": 4096,
-        "temporal_overlap": 4
+        "temporal_size": 64,
+        "temporal_overlap": 16
       }
     },
     "video": {
@@ -531,7 +463,7 @@
           "video",
           0
         ],
-        "filename_prefix": "fruitstory/{{name}}",
+        "filename_prefix": "showrunner/{{name}}",
         "format": "mp4",
         "format.codec": "h264"
       }
@@ -554,7 +486,7 @@
           "last",
           0
         ],
-        "filename_prefix": "fruitstory/{{name}}_last"
+        "filename_prefix": "showrunner/{{name}}_last"
       }
     }
   }

@@ -21,11 +21,11 @@ against it.
 ## Where we are
 
 - **Plan 36 accepted** (`docs/plans/36-rebuild-from-scratch-plan.md`, D1–D6 in §7; D7 = the voice path, pending stage 0).
-- **Stage 0 code COMPLETE, not yet run on a GPU** — `fruitstory/` (stdlib + ffmpeg, no import of `clipping/aistory`):
+- **Stage 0 code COMPLETE, not yet run on a GPU** — `showrunner/` (stdlib + ffmpeg, no import of `clipping/aistory`):
   worker image extending the tts image, four API-format workflows validated against ComfyUI **v0.34.0** source
   (LTX-2.5 I2V joint audio · LTX-2.5 A2V · LTX-2.3 ID-LoRA · Chatterbox line via SaveAudio), the runner and matrix on
   the `productions/faille_damour` cast (committed: chars + keyframes + script; `ep01/out` and `clips` ignored),
-  15 offline tests green (`python -m pytest fruitstory/tests -q` — they are outside the CI `testpaths`).
+  15 offline tests green (`python -m pytest showrunner/tests -q` — they are outside the CI `testpaths`).
 - `.claude/` was NOT touched by this session (the PC's `.claude/*` showed line-ending-only diffs; not committed).
   The upstream `.claude/CHECKPOINT.md` is plan 35's; add a plan-36 header there from the next system.
 
@@ -33,24 +33,26 @@ against it.
 
 1. `RUNPOD_API_KEY` in `.env` (the app's key) + the endpoint ids (`RUNPOD_COMFY_ENDPOINT_ID` video,
    `RUNPOD_IMAGE_ENDPOINT_ID` image, `RUNPOD_AUDIO_ENDPOINT_ID` voice — see `docs/MCP.md`).
-2. The LTX weights on the shared volume: `HF_TOKEN=... bash fruitstory/worker/fill_volume.sh` from a pod (≈ 100 GB;
+2. The LTX weights on the shared volume: `HF_TOKEN=... bash showrunner/worker/fill_volume.sh` from a pod (≈ 100 GB;
    gated `Lightricks/LTX-2.5` and `LTX-2.3-fp8` accepted). Chatterbox weights are already there if the voice endpoint works.
-3. The video endpoint on `ghcr.io/rzdhop/fruitstory-worker` (build from `fruitstory/worker/Dockerfile`; or add a job
-   to `worker-tts-image.yml`) — or a fourth endpoint for the spike. Settings: `fruitstory/worker/ENDPOINT.md`.
+3. The video endpoint on `ghcr.io/rzdhop/showrunner-worker` (build from `showrunner/worker/Dockerfile`; or add a job
+   to `worker-tts-image.yml`) — or a fourth endpoint for the spike. Settings: `showrunner/worker/ENDPOINT.md`.
 4. The `rzdhop-story` MCP answered **502** from the cloud session all day (`CLIENT_HTTP_NOT_IMPLEMENTED`); the runner
    talks to RunPod directly, so stage 0 does not need it; stage 2 does. The server unit is `deploy/rzdhop-story-mcp.service`.
 
 ## Session 2026-10-08 (A1 host, local) — what is ready, what the human must do
 
-Checked for free (no GPU job): `fruitstory/tests` 15 → 16 green. Found and fixed: `keyframe3` sent `RUNPOD_API_KEY`
+Checked for free (no GPU job): `showrunner/tests` 15 → 16 green. Found and fixed: `keyframe3` sent `RUNPOD_API_KEY`
 to the image endpoint, which has its own key (403) → `api_key(name=...)` + `RUNPOD_IMAGE_API_KEY`; the smoke command
 in ENDPOINT.md; ENDPOINT.md now says a **fourth** endpoint (the live video endpoint runs the app's S2V clips).
-Added `.github/workflows/fruitstory-worker-image.yml` (builds `ghcr.io/rzdhop/fruitstory-worker:0.1.0`).
+Added `.github/workflows/showrunner-worker-image.yml` (builds `ghcr.io/rzdhop/showrunner-worker:0.1.0`).
+
+Renamed the same day: `fruitstory/` → **`showrunner/`**, image `ghcr.io/rzdhop/showrunner-worker:0.1.0`, CI `.github/workflows/showrunner-worker-image.yml` (D8: any universe, not fruit only). The `fruitstory-worker` GHCR package built by `6cd7eb0` is abandoned (the human may delete it). Stage 0 gains one non-fruit character; its style is agreed in chat first.
 
 Still missing (the human's side):
 1. The `HF_TOKEN` in `.env` has **not** accepted `Lightricks/LTX-2.5` (gated file → "Access … is restricted");
    `LTX-2.3-fp8` is accepted. All 10 files of `fill_volume.sh` exist on HF (≈ 83 GB).
-2. The GHCR package `fruitstory-worker` is new → private by default; make it public like `worker-comfyui-tts`.
+2. The GHCR package `showrunner-worker` is new → private by default; make it public like `worker-comfyui-tts`.
 3. The volume: size and datacenter unknown from here (the `RUNPOD_API_KEY` is restricted: no account REST); needs
    ≈ 85 GB free for the LTX weights.
 4. The spike endpoint (ENDPOINT.md settings, same volume) and its id; the restricted key must cover it.
@@ -60,15 +62,15 @@ Still missing (the human's side):
 ## Stage 0 run order (from the repo root)
 
 ```
-python -m pytest fruitstory/tests -q
-python -m fruitstory.stage0.run_stage0 smoke     --video-endpoint <id>
-python -m fruitstory.stage0.run_stage0 keyframe3 --images-endpoint <id>
-python -m fruitstory.stage0.run_stage0 a         --video-endpoint <id>      # 9 single clips + 2/3-speaker exchanges
-python -m fruitstory.stage0.run_stage0 review
-python -m fruitstory.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4   # x3
-python -m fruitstory.stage0.run_stage0 b         --video-endpoint <id>      # TTS -> A2V
-python -m fruitstory.stage0.run_stage0 c         --video-endpoint <id>      # ID-LoRA
-python -m fruitstory.stage0.run_stage0 review                                # fill the verdict column
+python -m pytest showrunner/tests -q
+python -m showrunner.stage0.run_stage0 smoke     --video-endpoint <id>
+python -m showrunner.stage0.run_stage0 keyframe3 --images-endpoint <id>
+python -m showrunner.stage0.run_stage0 a         --video-endpoint <id>      # 9 single clips + 2/3-speaker exchanges
+python -m showrunner.stage0.run_stage0 review
+python -m showrunner.stage0.run_stage0 voice --character paloma --from stories/_stage0/a/paloma_fr_s22.mp4   # x3
+python -m showrunner.stage0.run_stage0 b         --video-endpoint <id>      # TTS -> A2V
+python -m showrunner.stage0.run_stage0 c         --video-endpoint <id>      # ID-LoRA
+python -m showrunner.stage0.run_stage0 review                                # fill the verdict column
 ```
 Option: the 13 Gemini voice WAVs of `outputs/faille_damour/ep01/voices/` (if present on that system) can be the
 locked voice references instead of the path-(a) takes (`voice --from <wav>`). Add the live S2V path as (d) with
@@ -86,5 +88,5 @@ locked voice references instead of the path-(a) takes (`voice --from <wav>`). Ad
 ## Rules in force
 
 Money only on Rida's go (each command is one batch; say the count and ≈ cost first). Every clip reviewed by Rida
-before it is used. Code and comments in English; chat in French or English as Rida writes. Nothing in `fruitstory/`
+before it is used. Code and comments in English; chat in French or English as Rida writes. Nothing in `showrunner/`
 imports `clipping/aistory`. No stills, no Ken Burns, no edge-tts, no LLM API call from the app.

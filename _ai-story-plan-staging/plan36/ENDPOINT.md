@@ -1,8 +1,8 @@
-# fruitstory `video` endpoint — settings (plan 36, D2)
+# showrunner `video` endpoint — settings (plan 36, D2)
 
 | Setting | Value | Why |
 |---|---|---|
-| Image | `ghcr.io/rzdhop/fruitstory-worker:0.1.0` (this folder's Dockerfile, `FROM ghcr.io/rzdhop/worker-comfyui-tts`) | the repo's plan-31 image (worker-comfyui 5.10.0 = ComfyUI 0.34.0, Chatterbox, the audio handler patch) + the LTX model folders mapped; all LTX nodes are core |
+| Image | `ghcr.io/rzdhop/showrunner-worker:0.1.0` (this folder's Dockerfile, `FROM ghcr.io/rzdhop/worker-comfyui-tts`) | the repo's plan-31 image (worker-comfyui 5.10.0 = ComfyUI 0.34.0, Chatterbox, the audio handler patch) + the LTX model folders mapped; all LTX nodes are core |
 | GPU | **L40S 48 GB** (1 GPU / worker) | LTX-2.5 int8 + Gemma 4 int8 fit; cheapest working tier (D2). ID-LoRA 2.3 fp8 (27 GB) + Gemma 3 (8.8 GB) also fit. |
 | Network volume | ≥ 150 GB, same datacenter, mounted at `/runpod-volume`, filled by `fill_volume.sh` | weights are not in the image |
 | Container disk | 30 GB | image + ComfyUI temp only |
@@ -19,7 +19,7 @@ The app already has three endpoints (`docs/MCP.md`): **video** (`RUNPOD_COMFY_EN
 Smoke test after deploy (from the repo root, `RUNPOD_API_KEY` in the environment or `.env`):
 
 ```
-python -m fruitstory.stage0.run_stage0 smoke --video-endpoint <id>
+python -m showrunner.stage0.run_stage0 smoke --video-endpoint <id>
 ```
 
 It submits one 5 s `ltx25_i2v_speech` clip and prints the billed seconds.
