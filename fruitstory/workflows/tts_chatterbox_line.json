@@ -1,0 +1,91 @@
+{
+  "$schema": "comfy_workflow_v1",
+  "name": "tts_chatterbox_line",
+  "task": "tts_line",
+  "core_nodes_only": false,
+  "custom_nodes": [
+    "comfyui_fill-chatterbox"
+  ],
+  "verified_live": false,
+  "description": "Chatterbox Multilingual TTS (23 languages incl. French) cloning the character's reference voice for one line; wrapped into a 1-frame mp4 so the stock worker returns it (demux with ffmpeg: -vn -acodec pcm_s16le -ar 24000). Language values are the node's labels, e.g. 'French (fr)', 'English (en)'.",
+  "placeholders": [
+    "voice_ref",
+    "text",
+    "language",
+    "exaggeration",
+    "seed",
+    "name"
+  ],
+  "files": {
+    "voice_ref": "the character's locked voice reference (wav, 5-10 s)"
+  },
+  "defaults": {
+    "language": "French (fr)",
+    "exaggeration": 0.5
+  },
+  "requires": [],
+  "output_node": "save",
+  "graph": {
+    "ref": {
+      "class_type": "LoadAudio",
+      "inputs": {
+        "audio": "{{voice_ref}}"
+      }
+    },
+    "tts": {
+      "class_type": "FL_ChatterboxMultilingualTTS",
+      "inputs": {
+        "text": "{{text}}",
+        "language": "{{language}}",
+        "exaggeration": "{{exaggeration}}",
+        "cfg_weight": 0.5,
+        "temperature": 0.8,
+        "repetition_penalty": 2.0,
+        "min_p": 0.05,
+        "top_p": 1.0,
+        "seed": "{{seed}}",
+        "audio_prompt": [
+          "ref",
+          0
+        ],
+        "use_cpu": false,
+        "keep_model_loaded": true
+      }
+    },
+    "frame": {
+      "class_type": "EmptyImage",
+      "inputs": {
+        "width": 64,
+        "height": 64,
+        "batch_size": 1,
+        "color": 0
+      }
+    },
+    "video": {
+      "class_type": "CreateVideo",
+      "inputs": {
+        "images": [
+          "frame",
+          0
+        ],
+        "fps": 1.0,
+        "audio": [
+          "tts",
+          0
+        ]
+      }
+    },
+    "save": {
+      "class_type": "SaveVideo",
+      "inputs": {
+        "video": [
+          "video",
+          0
+        ],
+        "filename_prefix": "fruitstory/{{name}}",
+        "format": "mp4",
+        "format.codec": "h264"
+      }
+    }
+  }
+}

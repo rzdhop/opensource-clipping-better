@@ -1,0 +1,24 @@
+# fruitstory — ComfyUI model folders on the RunPod network volume.
+#
+# The stock worker-comfyui file maps only checkpoints / clip / clip_vision / configs /
+# controlnet / embeddings / loras / upscale_models / vae / unet. ComfyUI's legacy map makes
+# `unet` -> diffusion_models and `clip` -> text_encoders, but files placed in the modern
+# folder names on the volume were invisible. This file maps both spellings, so fill_volume.sh
+# can use the folders the official templates name.
+runpod_worker_comfy:
+  base_path: /runpod-volume
+  checkpoints: models/checkpoints/
+  clip: models/clip/
+  clip_vision: models/clip_vision/
+  configs: models/configs/
+  controlnet: models/controlnet/
+  embeddings: models/embeddings/
+  loras: models/loras/
+  upscale_models: models/upscale_models/
+  vae: models/vae/
+  unet: models/unet/
+  diffusion_models: models/diffusion_models/
+  text_encoders: models/text_encoders/
+  latent_upscale_models: models/latent_upscale_models/
+  audio_encoders: models/audio_encoders/
+  model_patches: models/model_patches/
