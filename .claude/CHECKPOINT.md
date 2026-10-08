@@ -1,6 +1,14 @@
-## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
+## CURRENT STATE — plan 36 STAGE 3 DONE (toolbox gaps closed, 8 story skills, dry run passed) — 2026-10-09 night, cloud session
 
-- **Current header (2026-10-08 23:10, SESSION CLOSED):** resume with `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`
+- **Current header (2026-10-09):** stage 3 done and pushed (see `docs/plans/36-CHECKPOINT.md` top): prompt tools +
+  strict `comfy_submit` (DEC-326), `voice_ref_from_take` (DEC-327), `full_body.md`, the A-222 wording, ep00 accepted,
+  24 tools; `.claude/skills/story-*` (8) + `showrunner/skills/RULES.md` + `tools/build_skills.py`; dry run
+  `stories/les-heritiers-du-fournil` ($0). Tests: system 130+3s / with server deps 150+1s. **Waiting on Rida:** host
+  `git pull` + `sudo systemctl restart showrunner-mcp`; upload the 8 skill zips in claude.ai, turn off the 2 old
+  skills; go for the A-222 image (≈ $0.03). Next: stage 4 (the validation run). Resume:
+  `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`.
+
+- **Earlier header (2026-10-08 23:10, SESSION CLOSED):** resume with `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`
   (stage 3, the skills). Nothing running. Plan 36 stages 0–2 DONE and PUSHED (origin/main = local main). The showrunner
   connector is live and Rida re-added it in claude.ai. Smoke through the public URL ran end to end ($0.16, story
   `stories/smoke-2026-10-08`). Findings for stage 3: a `voice_ref` tool is missing (a chat cannot bring a voice

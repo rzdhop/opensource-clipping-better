@@ -1,5 +1,26 @@
 # Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
 
+## STAGE 3 DONE — the toolbox gaps closed, the eight skills, the dry run (2026-10-09 night, cloud session)
+
+- **Rida, 2026-10-09:** "Do as the previous works have done for the voices […]; for the rest of questions decide for
+  me". Worked on a GitHub clone (the host folder was connected but this session had no shell there); pushed to main.
+- **Toolbox (findings 1–4):** `full_body.md` + `prompts.full_body` (cast step 1); A-222 `three_quarter` wording now
+  names no other person (`framing_intruders` test; GPU check pending Rida's go, 1 image ≈ $0.03);
+  `story_prompts.py` + tools `prompt_keyframe` / `prompt_clip` / `prompt_cast`, and `comfy_submit(prompt_from=…)`
+  sends only the built prompt (hand prompts need `hand_prompt_reason`), DEC-326; the demo's 5 batch-a prompts
+  rebuild word for word from its files (now `clip_prompt_as_sent`, a record); `voice_ref_from_take` locks a voice
+  from an approved take the stage-0 way, DEC-327; episode 0 (the casting reel) accepted by the job code. **24 tools.**
+- **Skills:** `.claude/skills/story-{concepts,universe,cast,script,shots,clips,assemble,next-episode}/SKILL.md`,
+  the shared rules in `showrunner/skills/RULES.md`, `showrunner/tools/build_skills.py` (rules copy, `--check`,
+  `--zip` for claude.ai), `test_skills.py`.
+- **Gate passed:** dry run of steps 1–4 on a new pitch (claymation animal people of Paris, French,
+  `stories/les-heritiers-du-fournil/`), 43 tool calls through the server in process, 2 expected refusals, $0.
+  Report: `docs/plans/36-stage3-dry-run.md` (built prompts + three watch items, A-227–A-229).
+- **Tests:** system 130 + 3 skipped; with the server's deps 150 + 1 skipped. Plan 36 total still ≈ $2.51.
+- **Rida's side:** on the host `git pull` + `sudo systemctl restart showrunner-mcp` (the live unit gets the 4 new
+  tools); upload the 8 skill zips in claude.ai (Settings → Capabilities → Skills) and turn off story-director /
+  fruit-drama-episode; the go for the A-222 check. **Next:** stage 4, the validation run (episode 1 for real).
+
 ## SESSION CLOSED 2026-10-08 23:10 — next session: stage 3 (the skills)
 
 - **Resume prompt:** `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`. Everything is pushed (origin/main = main).
