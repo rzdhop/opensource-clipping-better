@@ -1,4 +1,41 @@
-# Plan 36 — CHECKPOINT (2026-10-08 12:30, cloud session linked to the Windows PC; merged onto origin/main)
+# Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
+
+## SESSION CLOSED 2026-10-08 23:10 — next session: stage 3 (the skills)
+
+- **Resume prompt:** `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`. Everything is pushed (origin/main = main).
+- **State:** stages 0–2 done; the `showrunner` connector is live and re-added by Rida in claude.ai; the smoke through
+  the public URL passed ($0.16). Plan 36 total ≈ $2.51.
+- **Stage 3 must add** a `voice_ref` tool (no chat route brings a voice reference into a story yet) and keep keyframes
+  `faces_camera` (the three-quarter wording drew an extra human, A-222). The old story-director / fruit-drama-episode
+  skills call deleted tools.
+
+## STAGE 2 DONE — the showrunner connector, and it replaced rzdhop-story (2026-10-08 night)
+
+- **Locked voices approved** by Rida (singles and exchanges, DEC-323); the demo re-assembled with them.
+- **The server:** `showrunner/mcp_server.py`, 20 tools (story files, look/download, GPU jobs journaled in the story,
+  clip check, locked voices, approval, assembly), DEC-324. **Replacement (DEC-325):** `mcp_server/` deleted, the new
+  server runs as `showrunner-mcp` on 8787 behind `https://main-network-interface.tail01346d.ts.net/mcp`; verified live.
+- **Next:** Rida re-adds the claude.ai connector (same URL, login with MCP_TOKEN), the smoke on his go (≈ $0.50), then
+  stage 3 — the skills (the old story-director / fruit-drama-episode skills call tools that no longer exist).
+
+## STAGE 1 DONE — the story store and the toolbox (2026-10-08 night)
+
+- **Rida's answers:** clip check = Whisper on this CPU · VC test now · text + images in git, media out · demo from stage 0.
+- **Built (`showrunner/`):** `store.py` (stories/<slug>/, lock states with an explicit unlock reason, takes and
+  approvals that lock the clip, `costs.jsonl`) · `prompts/*.md` + `prompts.py` (clip_dialogue / clip_exchange = the
+  batch-a golden word for word except `CLEAN_FRAME`, reaction, keyframe with the three-quarter option (A-222),
+  turnaround, emotions, sheet and universe skeletons) · Flux 2 Klein t2i + multiref workflows (no import of
+  `clipping` any more) · `verify.verify_take` (faster-whisper large-v3 int8 on the CPU, ≈ 35 s a clip) ·
+  `assemble.py` (approved clips only, trimmed after the last word, never slowed, ASS subtitles from the check,
+  ducked bed, end card) · `vc_chatterbox` + `run_stage0 vc|verify`.
+- **Demo:** `stories/faille-d-amour/` (3 locked sheets, 5 places, ep01 = the 5 batch-a takes Rida preferred, 6/6
+  pass the clip check) → `ep01/final.mp4` 30.6 s, sent. Rida's s33 and Marie-Jeanne's s33 keep LTX's own burned-in
+  captions (the batch-a defect `CLEAN_FRAME` fixes for new clips).
+- **VC test (1.0):** 4 jobs, $0.01; timing kept, words intact; `stories/_stage0/vc/vc_compare.mp4` awaits Rida's ears.
+- **Tests:** 73 + 2 (venv). **Next:** Rida's watch + listen, then `docs/plans/36-stage2-plan.md` (MCP v2, PROPOSED,
+  3 questions).
+
+## Earlier header: 2026-10-08 12:30, cloud session linked to the Windows PC; merged onto origin/main
 
 ## STAGE 0 DONE — D7 written (2026-10-08 evening, local session)
 

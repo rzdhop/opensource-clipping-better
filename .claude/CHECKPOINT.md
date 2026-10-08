@@ -1,6 +1,7 @@
 ## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
 
-- **Current header (2026-10-08 23:00):** plan 36 stages 0–2 DONE and PUSHED (origin/main = local main). The showrunner
+- **Current header (2026-10-08 23:10, SESSION CLOSED):** resume with `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`
+  (stage 3, the skills). Nothing running. Plan 36 stages 0–2 DONE and PUSHED (origin/main = local main). The showrunner
   connector is live and Rida re-added it in claude.ai. Smoke through the public URL ran end to end ($0.16, story
   `stories/smoke-2026-10-08`). Findings for stage 3: a `voice_ref` tool is missing (a chat cannot bring a voice
   reference into a story); the three-quarter keyframe wording draws an extra human (A-222). Next: stage 3 (skills:

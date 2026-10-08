@@ -1,5 +1,14 @@
 # Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
 
+## SESSION CLOSED 2026-10-08 23:10 — next session: stage 3 (the skills)
+
+- **Resume prompt:** `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`. Everything is pushed (origin/main = main).
+- **State:** stages 0–2 done; the `showrunner` connector is live and re-added by Rida in claude.ai; the smoke through
+  the public URL passed ($0.16). Plan 36 total ≈ $2.51.
+- **Stage 3 must add** a `voice_ref` tool (no chat route brings a voice reference into a story yet) and keep keyframes
+  `faces_camera` (the three-quarter wording drew an extra human, A-222). The old story-director / fruit-drama-episode
+  skills call deleted tools.
+
 ## STAGE 2 DONE — the showrunner connector, and it replaced rzdhop-story (2026-10-08 night)
 
 - **Locked voices approved** by Rida (singles and exchanges, DEC-323); the demo re-assembled with them.
