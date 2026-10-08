@@ -4,8 +4,9 @@
 - :func:`submit_template` renders a fruitstory template, attaches the input files as
   ``input.images[]`` (the worker uploads any file type to ComfyUI's ``input/`` folder: png,
   wav, mp3 all work) and submits it.
-- :func:`save_outputs` writes what came back (``output.images[]``: base64 blobs, or S3 URLs when
-  the endpoint has the bucket env vars) and returns the local paths.
+- :func:`save_outputs` writes what came back (``output.images[]`` and, with the repo's patched
+  worker handler, ``output.audio[]``: base64 blobs, or S3 URLs when the endpoint has the bucket
+  env vars) and returns the local paths.
 
 The API key is read from ``RUNPOD_API_KEY`` or from a ``.env`` line in the repo root; it is never
 printed. Payloads must stay under RunPod's 10 MB ``/run`` limit: this client refuses bigger ones.
@@ -140,18 +141,21 @@ def submit_template(endpoint: Endpoint, template_name: str, values: dict, files:
 
 
 def save_outputs(status: dict, out_dir: str, *, stem: str) -> list:
-    """Write every returned file of a COMPLETED job into *out_dir* as ``<stem>_<k><ext>``.
-    Videos keep ``.mp4``; images ``.png``. Returns the local paths (videos first)."""
+    """Write every returned file of a COMPLETED job into *out_dir*: the video as ``<stem>.mp4``,
+    audio as ``<stem>.<ext>``, images as ``<stem>_<name>.png``. Returns the local paths (videos
+    and audio first). Reads ``images`` (stock handler) and ``audio`` (the repo's patched handler)."""
     if status.get("status") != "COMPLETED":
         raise RunPodError(f"job {status.get('id')} ended {status.get('status')}: "
                           f"{json.dumps(status.get('error') or status.get('output'))[:800]}")
     output = status.get("output") or {}
     os.makedirs(out_dir, exist_ok=True)
     paths = []
-    for k, item in enumerate(output.get("images") or []):
+    items = [(it, "images") for it in output.get("images") or []] + [(it, "audio") for it in output.get("audio") or []]
+    for k, (item, kind) in enumerate(items):
         filename = item.get("filename") or f"out_{k}"
         ext = os.path.splitext(filename)[1] or ".bin"
-        dest = os.path.join(out_dir, f"{stem}{'' if ext == '.mp4' else '_' + os.path.splitext(os.path.basename(filename))[0]}{ext}")
+        whole = ext == ".mp4" or kind == "audio"
+        dest = os.path.join(out_dir, f"{stem}{'' if whole else '_' + os.path.splitext(os.path.basename(filename))[0]}{ext}")
         if item.get("type") == "s3_url":
             with urllib.request.urlopen(item["data"], timeout=300) as resp, open(dest, "wb") as fh:
                 fh.write(resp.read())
@@ -161,7 +165,7 @@ def save_outputs(status: dict, out_dir: str, *, stem: str) -> list:
         paths.append(dest)
     for err in output.get("errors") or []:
         print("  worker error:", err)
-    paths.sort(key=lambda p: (not p.endswith(".mp4"), p))
+    paths.sort(key=lambda p: (not p.endswith((".mp4", ".flac", ".wav", ".mp3")), p))
     return paths
 
 

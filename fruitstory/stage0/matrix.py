@@ -1,4 +1,4 @@
-"""The stage-0 test matrix (plan 30, D1/D6): three voice paths x seeds, plus 2- and 3-speaker
+"""The stage-0 test matrix (plan 36, D1/D6): three voice paths x seeds, plus 2- and 3-speaker
 clips, on the existing Fruit Drama cast of ``productions/faille_damour``.
 
 Everything creative lives here as data so a run is reproducible and a prompt change is a diff:

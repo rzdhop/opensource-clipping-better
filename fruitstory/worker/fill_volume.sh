@@ -9,7 +9,7 @@
 #                                 # and https://huggingface.co/Lightricks/LTX-2.3-fp8 first.
 #   bash fill_volume.sh           # idempotent: skips files already present with the right size
 #
-# Sizes (approx.): LTX-2.5 int8 stack 57 GB, LTX-2.3 ID-LoRA stack 40 GB, Chatterbox 3 GB.
+# Sizes (approx.): LTX-2.5 int8 stack 57 GB, LTX-2.3 ID-LoRA stack 40 GB (Chatterbox 3 GB: fetch_weights.sh).
 # Volume: 150 GB minimum (leave room for the Flux 2 Klein / Qwen-Image-Edit stack of the
 # images endpoint if it shares the volume).
 
@@ -20,7 +20,6 @@ MODELS="$ROOT/models"
 : "${HF_TOKEN:?HF_TOKEN is required (gated Lightricks repos)}"
 
 mkdir -p "$MODELS"/{diffusion_models,text_encoders,vae,latent_upscale_models,checkpoints,loras}
-mkdir -p "$ROOT/huggingface-cache/hub"
 
 # fetch <url> <target path>: resumable, skips a complete file.
 fetch() {
@@ -60,22 +59,16 @@ fetch "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-up
       "$MODELS/latent_upscale_models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
 
 # ---------------------------------------------------------------- Chatterbox (TTS lines, path b)
-# The node pack downloads ResembleAI/chatterbox into HF_HOME at first use; pre-warm it here so
-# the first serverless job does not pay the download.
-if command -v python3 >/dev/null 2>&1; then
-  HF_HOME="$ROOT/huggingface-cache" python3 - <<'EOF' || echo "warn   chatterbox pre-warm skipped (huggingface_hub missing?)"
-import os
-from huggingface_hub import snapshot_download
-for repo in ("ResembleAI/chatterbox", "ResembleAI/chatterbox-turbo"):
-    try:
-        snapshot_download(repo, token=os.environ["HF_TOKEN"])
-        print("warm  ", repo)
-    except Exception as exc:  # the multilingual repo name may differ; the node will fetch it
-        print("warn  ", repo, exc)
-EOF
+# The node reads <ComfyUI>/models/chatterbox/chatterbox_multilingual/, symlinked to the volume by
+# the base image (docker/worker-comfyui-tts). Its weights are fetched by the repo's own script:
+#   sh docker/worker-comfyui-tts/fetch_weights.sh      (destination: $ROOT/models/chatterbox)
+if [ -d "$MODELS/chatterbox/chatterbox_multilingual" ]; then
+  echo "skip   chatterbox (present)"
+else
+  echo "todo   chatterbox: run docker/worker-comfyui-tts/fetch_weights.sh on this volume"
 fi
 
 echo
 echo "Volume contents:"
-du -sh "$MODELS"/* "$ROOT/huggingface-cache" 2>/dev/null || true
+du -sh "$MODELS"/* 2>/dev/null || true
 echo "done"

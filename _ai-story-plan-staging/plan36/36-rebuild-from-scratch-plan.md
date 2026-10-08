@@ -1,6 +1,6 @@
-# Plan 30 — AI Story rebuilt from scratch, Claude-native (draft for discussion)
+# Plan 36 — AI Story rebuilt from scratch, Claude-native (draft for discussion)
 
-Date: 2026-10-08. Status: PROPOSAL — nothing built yet. Supersedes plans 00–29 for the AI Story mode once accepted.
+Date: 2026-10-08. Status: ACCEPTED with the decisions of §7 — stage 0 code built (fruitstory/), not yet run. Numbered 36: plans 30–35 were done on the other system on 2026-10-06/07 (see 36-CHECKPOINT.md). Supersedes plans 00–35 for the AI Story mode once accepted.
 
 ## 0. The problem and the root causes
 
@@ -147,9 +147,17 @@ Stages 1–3 can run in parallel with stage 0's GPU waits. Each stage ends with 
 5. **Language of the episodes** — French, English, or per story? (LTX-2.5 dialogue is multilingual; the voice references must be made in the episode's language.)
 6. **Two speakers in one clip** — only through the audio path and only in 10 s clips (my proposal), or never?
 
-## 7. Decisions
+## 7. Decisions (Rida, 2026-10-08)
 
-(empty — filled after the discussion)
+| # | Decision | Consequence in the plan |
+|---|---|---|
+| D1 | **Stage 0 tests all three voice paths** (prompt-only LTX-2.5 I2V, TTS→LTX-2.5 A2V, LTX-2.3 ID-LoRA) and the primary is chosen after listening. | Stage 0 matrix stays 3 paths × 3 seeds on the same line and keyframe; the decision is written here as D7 after the spike. |
+| D2 | **Video endpoint = L40S 48 GB, LTX-2.5 int8 distilled.** | Dockerfile and volume sized for the int8 stack (≈ 57 GB); no bf16 / spatial upscaler in v1. |
+| D3 | **Persistence = `stories/` in the git repo**; images and wav as files (LFS if the repo grows). | No project-doc mirror; sessions read the repo through the linked computer. |
+| D4 | **Episodes in French or English, chosen per story.** | `00-brief.md` carries `language`; the voice references are generated in the story's language; prompts to the image/video models stay in English. |
+| D5 | **No story dashboard** in this rebuild — chat only. | Stage 5 removes the story pages; the web UI keeps Clips. |
+| D6 | **1, 2 or 3 speakers per clip, no hard limit.** Honest caveat from the research: every open joint model is unreliable past one speaker (faces merge, speaker assignment is random); the audio-driven path with one voice track per speaker is the only one with a documented multi-speaker mode (InfiniteTalk-multi, LongCat-Avatar-1.5, SkyReels-V3-A2V; LTX-2.5 A2V does not bind a voice to a face). | Stage 0 adds a **2-speaker and a 3-speaker 10 s test** on each path. The writer may plan multi-speaker clips; the shot planner marks them `multi_speaker: true` and routes them to whichever path passed the test; a multi-speaker take that fails `verify_take` for one of its lines is split into shot / reverse-shot before a re-roll, not re-rolled blind. |
+| D7 | *(voice path — after stage 0)* | |
 
 ## Sources (research of 2026-10-08)
 - LTX-2.5: https://huggingface.co/Lightricks/LTX-2.5 · https://docs.comfy.org/tutorials/video/ltx/ltx-2-5 · https://docs.ltx.io/open-source-model/usage-guides/audio-to-video · https://ltx.io/blog/what-is-id-lora · https://github.com/Lightricks/ComfyUI-LTXVideo · https://huggingface.co/Lightricks/LTX-2.5/discussions/44 (A2V lip-sync recipe)

@@ -6,7 +6,7 @@
 - :func:`extract_audio` -> the clip's sound as a mono 24 kHz wav (a voice reference, or the
   input of an STT check later).
 
-The STT alignment of the spoken line (plan 30 §2.2) comes in stage 1; this module is what
+The STT alignment of the spoken line (plan 36 §2.2) comes in stage 1; this module is what
 stage 0 needs to review takes by eye and ear.
 """
 

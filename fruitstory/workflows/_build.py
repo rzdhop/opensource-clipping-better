@@ -14,7 +14,9 @@ Sources (read 2026-10-08):
 - ``ltx25_a2v_speech``: Lightricks/ComfyUI-LTXVideo ``2.5/LTX-2.5_A2V_Two_Stage_Distilled.json``
   (its custom-node prompt switches dropped: core nodes only).
 - ``ltx23_idlora_speech``: Comfy-Org/workflow_templates ``video_ltx2_3_id_lora.json``.
-- ``tts_chatterbox_line``: Comfy-Org ``audio-chatterbox_tts_multilingual.json`` + ComfyUI_Fill-ChatterBox.
+- ``tts_chatterbox_line``: Comfy-Org ``audio-chatterbox_tts_multilingual.json`` + ComfyUI_Fill-ChatterBox
+  (the pack pinned in docker/worker-comfyui-tts; the repo's ``tts_chatterbox.json`` template is the
+  app's equivalent).
 
 Every node class used here exists in ComfyUI 0.34.0 (the version pinned by worker-comfyui
 5.10.0); ``fruitstory/tools/validate_workflows.py`` checks that against the ComfyUI source.
@@ -282,8 +284,8 @@ def ltx23_idlora_speech() -> dict:
 def tts_chatterbox_line() -> dict:
     """One spoken line in a character's locked voice (Chatterbox Multilingual, 5-10 s reference).
 
-    The stock worker handler only returns files reported under the ``images`` history key, so the
-    audio is wrapped into a 1-frame mp4 by CreateVideo/SaveVideo; the runner demuxes the wav.
+    Core ``SaveAudio`` writes a flac; the repo's worker image (docker/worker-comfyui-tts) patches
+    the handler to return it under the ``audio`` key, which :mod:`fruitstory.runpod_client` reads.
     """
     g: dict = {}
     g["ref"] = node("LoadAudio", audio="{{voice_ref}}")
@@ -291,11 +293,7 @@ def tts_chatterbox_line() -> dict:
                     exaggeration="{{exaggeration}}", cfg_weight=0.5, temperature=0.8, repetition_penalty=2.0,
                     min_p=0.05, top_p=1.0, seed="{{seed}}", audio_prompt=link("ref"), use_cpu=False,
                     keep_model_loaded=True)
-    g["frame"] = node("EmptyImage", width=64, height=64, batch_size=1, color=0)
-    g["video"] = node("CreateVideo", images=link("frame"), fps=1.0, audio=link("tts", 0))
-    g["save"] = {"class_type": "SaveVideo",
-                 "inputs": {"video": link("video"), "filename_prefix": "fruitstory/{{name}}",
-                            "format": "mp4", "format.codec": "h264"}}
+    g["save"] = node("SaveAudio", audio=link("tts", 0), filename_prefix="fruitstory/{{name}}")
     return {
         "$schema": "comfy_workflow_v1",
         "name": "tts_chatterbox_line",
@@ -304,9 +302,9 @@ def tts_chatterbox_line() -> dict:
         "custom_nodes": ["comfyui_fill-chatterbox"],
         "verified_live": False,
         "description": "Chatterbox Multilingual TTS (23 languages incl. French) cloning the character's "
-                       "reference voice for one line; wrapped into a 1-frame mp4 so the stock worker returns "
-                       "it (demux with ffmpeg: -vn -acodec pcm_s16le -ar 24000). Language values are the "
-                       "node's labels, e.g. 'French (fr)', 'English (en)'.",
+                       "reference voice for one line, saved as flac by core SaveAudio and returned under the "
+                       "`audio` key by the repo's patched worker handler (docker/worker-comfyui-tts). Language "
+                       "values are the node's labels, e.g. 'French (fr)', 'English (en)'.",
         "placeholders": ["voice_ref", "text", "language", "exaggeration", "seed", "name"],
         "files": {"voice_ref": "the character's locked voice reference (wav, 5-10 s)"},
         "defaults": {"language": "French (fr)", "exaggeration": 0.5},

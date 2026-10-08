@@ -1,4 +1,4 @@
-"""Stage 0 of plan 30: the voice-path spike on the RunPod `video` endpoint.
+"""Stage 0 of plan 36: the voice-path spike on the RunPod `video` endpoint.
 
 Runs the matrix of :mod:`fruitstory.stage0.matrix` and writes every clip, its contact sheet and a
 review table under ``stories/_stage0/`` so Rida can watch, listen and pick the primary path.
@@ -147,9 +147,9 @@ def _tts_jobs(ep: rp.Endpoint, lines: list, lang: str, out_dir: str) -> dict:
     results = run_batch(ep, jobs, out_dir)
     wavs = {}
     for stem, paths, _, _ in results:
-        mp4 = next((p for p in paths if p.endswith(".mp4")), None)
-        if mp4:
-            wavs[stem] = verify.extract_audio(mp4, os.path.join(out_dir, f"{stem}.wav"))
+        src = next((p for p in paths if p.endswith((".flac", ".wav", ".mp3", ".mp4"))), None)
+        if src:  # flac from SaveAudio (patched handler); an mp4 wrapper would demux the same way
+            wavs[stem] = verify.extract_audio(src, os.path.join(out_dir, f"{stem}.wav"))
     return wavs
 
 

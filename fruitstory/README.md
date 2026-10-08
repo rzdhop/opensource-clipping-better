@@ -1,6 +1,6 @@
-# fruitstory — the AI Story rebuilt from scratch (plan 30)
+# fruitstory — the AI Story rebuilt from scratch (plan 36)
 
-`docs/plans/30-rebuild-from-scratch-plan.md` is the plan; this package is its code. Nothing in
+`docs/plans/36-rebuild-from-scratch-plan.md` is the plan; this package is its code. Nothing in
 here imports `clipping/aistory` (which stage 5 deletes). Stdlib + ffmpeg only, so the stage-0
 runner and the future MCP v2 server share the same pieces.
 
@@ -23,18 +23,26 @@ fruitstory/
 ## Stage 0 — the voice-path spike (D1, D6)
 
 Goal: hear and see the same line from the same keyframe through the three paths, 3 seeds each,
-plus one 2-speaker and one 3-speaker 10 s exchange per path, then choose the primary. Test
+plus one 2-speaker and one 3-speaker 10 s exchange per path, then choose the primary. A fourth,
+already-live path exists in the app — `s2v_wan22` (Wan 2.2 S2V, audio-driven, 16 fps; plan 32
+stage 8, the "talking" ep01 v3 of 2026-10-07) — add it to the comparison with the same lines
+through the MCP's `tts_line` + `comfy_submit(s2v_wan22)` when the MCP is reachable. Test
 material: the five fruit characters of `productions/faille_damour` (Paloma the mango,
 Marie-Jeanne the strawberry, Rida the kiwi) and their keyframes.
 
 ### 1. The video endpoint (yours)
 
-1. Build and push the image: `docker build -t ghcr.io/<you>/fruitstory-worker:0.1.0 -f fruitstory/worker/Dockerfile fruitstory/worker && docker push ...`
-2. Network volume ≥ 150 GB in the endpoint's datacenter; from a pod with it mounted at `/runpod-volume`:
+1. Build and push the image: `docker build -t ghcr.io/rzdhop/fruitstory-worker:0.1.0 -f fruitstory/worker/Dockerfile fruitstory/worker && docker push ...`
+   It extends the repo's `ghcr.io/rzdhop/worker-comfyui-tts` (plan 31: Chatterbox + the handler patch that
+   returns SaveAudio outputs) with the LTX model folders mapped on the volume.
+2. The existing network volume (the one the video/image/voice endpoints share, `docs/MCP.md`), or a new one
+   ≥ 150 GB in the same datacenter; from a pod with it mounted at `/runpod-volume`:
    `HF_TOKEN=hf_... bash fruitstory/worker/fill_volume.sh` (accept the gated licenses of
-   `Lightricks/LTX-2.5` and `Lightricks/LTX-2.3-fp8` first). ≈ 100 GB, 20–40 min.
-3. Create the endpoint with the settings of `worker/ENDPOINT.md` (L40S, the volume, the S3/R2 env vars).
-4. `RUNPOD_API_KEY=...` in the environment or in `.env` at the repo root.
+   `Lightricks/LTX-2.5` and `Lightricks/LTX-2.3-fp8` first). ≈ 100 GB, 20–40 min. Chatterbox weights:
+   `docker/worker-comfyui-tts/fetch_weights.sh` if the volume does not have them yet.
+3. Point the **video** endpoint (`RUNPOD_COMFY_ENDPOINT_ID`) at this image with the settings of
+   `worker/ENDPOINT.md` (L40S 48 GB, timeout 1200 s, the S3/R2 env vars), or make a fourth endpoint for the spike.
+4. `RUNPOD_API_KEY=...` in the environment or in `.env` at the repo root (the app's key).
 
 ### 2. The commands (from the repo root)
 
@@ -59,7 +67,7 @@ The voice "casting" is deliberate: the locked reference of a character is the au
 path-(a) take you liked — the model that will speak it later heard it first. A recording of a
 real voice works the same way (`voice --from recording.wav`).
 
-### 3. What stage 0 decides (→ plan 30 §7 D7)
+### 3. What stage 0 decides (→ plan 36 §7 D7)
 
 | Question | Read it on |
 |---|---|
@@ -84,8 +92,8 @@ worker-comfyui 5.10.0): every class exists, every input name matches, every link
 ## Known limits of stage 0 (by design)
 
 - The stock worker handler returns only files reported under ComfyUI's `images` key: the clips
-  use core `SaveVideo` (fine), and the TTS line is wrapped in a 1-frame mp4 and demuxed with
-  ffmpeg. A ~20-line handler fork (return `audio`/`gifs` keys too) is on the MCP v2 list.
+  use core `SaveVideo` (fine); the TTS line uses core `SaveAudio`, returned under `audio` by the
+  repo's patched handler (`docker/worker-comfyui-tts/patch_handler.py`) — the base of our image.
 - Path (c) ID-LoRA is single-speaker by construction; its exchange runs are limit tests, not candidates.
 - No STT check of the spoken line yet (stage 1, `verify_take`); stage 0 is judged by ear and eye.
 - ComfyUI-LTXVideo's text-to-audio ("cast a voice from a description") needs that custom pack and

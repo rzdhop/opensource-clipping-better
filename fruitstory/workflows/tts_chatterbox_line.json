@@ -7,7 +7,7 @@
     "comfyui_fill-chatterbox"
   ],
   "verified_live": false,
-  "description": "Chatterbox Multilingual TTS (23 languages incl. French) cloning the character's reference voice for one line; wrapped into a 1-frame mp4 so the stock worker returns it (demux with ffmpeg: -vn -acodec pcm_s16le -ar 24000). Language values are the node's labels, e.g. 'French (fr)', 'English (en)'.",
+  "description": "Chatterbox Multilingual TTS (23 languages incl. French) cloning the character's reference voice for one line, saved as flac by core SaveAudio and returned under the `audio` key by the repo's patched worker handler (docker/worker-comfyui-tts). Language values are the node's labels, e.g. 'French (fr)', 'English (en)'.",
   "placeholders": [
     "voice_ref",
     "text",
@@ -52,39 +52,14 @@
         "keep_model_loaded": true
       }
     },
-    "frame": {
-      "class_type": "EmptyImage",
+    "save": {
+      "class_type": "SaveAudio",
       "inputs": {
-        "width": 64,
-        "height": 64,
-        "batch_size": 1,
-        "color": 0
-      }
-    },
-    "video": {
-      "class_type": "CreateVideo",
-      "inputs": {
-        "images": [
-          "frame",
-          0
-        ],
-        "fps": 1.0,
         "audio": [
           "tts",
           0
-        ]
-      }
-    },
-    "save": {
-      "class_type": "SaveVideo",
-      "inputs": {
-        "video": [
-          "video",
-          0
         ],
-        "filename_prefix": "fruitstory/{{name}}",
-        "format": "mp4",
-        "format.codec": "h264"
+        "filename_prefix": "fruitstory/{{name}}"
       }
     }
   }

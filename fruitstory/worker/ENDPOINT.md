@@ -1,8 +1,8 @@
-# fruitstory `video` endpoint — settings (plan 30, D2)
+# fruitstory `video` endpoint — settings (plan 36, D2)
 
 | Setting | Value | Why |
 |---|---|---|
-| Image | `ghcr.io/<you>/fruitstory-worker:0.1.0` (this folder's Dockerfile) | worker-comfyui 5.10.0 = ComfyUI 0.34.0, all LTX nodes core |
+| Image | `ghcr.io/rzdhop/fruitstory-worker:0.1.0` (this folder's Dockerfile, `FROM ghcr.io/rzdhop/worker-comfyui-tts`) | the repo's plan-31 image (worker-comfyui 5.10.0 = ComfyUI 0.34.0, Chatterbox, the audio handler patch) + the LTX model folders mapped; all LTX nodes are core |
 | GPU | **L40S 48 GB** (1 GPU / worker) | LTX-2.5 int8 + Gemma 4 int8 fit; cheapest working tier (D2). ID-LoRA 2.3 fp8 (27 GB) + Gemma 3 (8.8 GB) also fit. |
 | Network volume | ≥ 150 GB, same datacenter, mounted at `/runpod-volume`, filled by `fill_volume.sh` | weights are not in the image |
 | Container disk | 30 GB | image + ComfyUI temp only |
@@ -14,7 +14,7 @@
 | Env `BUCKET_ENDPOINT_URL` / `BUCKET_ACCESS_KEY_ID` / `BUCKET_SECRET_ACCESS_KEY` | your R2/S3 bucket | clips come back as URLs, never near the 20 MB response cap |
 | Env `COMFY_LOG_LEVEL` | `INFO` | RunPod throttles DEBUG-level log floods |
 
-Two endpoints, not one: keep the existing **images** endpoint (Flux 2 Klein, Qwen-Image-Edit) separate from this **video** endpoint. Mixing image and video models on one worker thrashes ComfyUI's model cache (every job reloads 30+ GB).
+The app already has three endpoints (`docs/MCP.md`): **video** (`RUNPOD_COMFY_ENDPOINT_ID`, Wan 2.2 / LTX-2), **image** (`RUNPOD_IMAGE_ENDPOINT_ID`, FLUX.2 klein, same volume) and **voice** (`RUNPOD_AUDIO_ENDPOINT_ID`, the tts image). Stage 0 uses the **video** endpoint switched to this image (or a fourth endpoint on the same volume while testing) and the **image** endpoint for `keyframe3`; TTS lines can run on the video endpoint (Chatterbox is in the base image) or on the voice endpoint. Never mix image and video models on one endpoint: every job would reload 30+ GB.
 
 Smoke test after deploy (from the repo root, `RUNPOD_API_KEY` in the environment or `.env`):
 

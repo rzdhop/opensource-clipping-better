@@ -64,7 +64,8 @@ def test_every_template_renders_without_leftover_placeholders(name):
     graph = comfy_templates.render(tpl, values)
     dumped = json.dumps(graph)
     assert "{{" not in dumped
-    assert tpl["output_node"] in graph and graph[tpl["output_node"]]["class_type"] == "SaveVideo"
+    expected = "SaveAudio" if name == "tts_chatterbox_line" else "SaveVideo"
+    assert tpl["output_node"] in graph and graph[tpl["output_node"]]["class_type"] == expected
     # typed values land as numbers
     if name != "tts_chatterbox_line":
         assert graph["lat1"]["inputs"] == {"width": 352, "height": 640, "length": 121, "batch_size": 1}
@@ -134,16 +135,18 @@ class FakeEndpoint(rp.Endpoint):
                 "output": {"images": [{"filename": "fruitstory/x_00001_.mp4", "type": "base64",
                                        "data": base64.b64encode(b"MP4DATA").decode()},
                                       {"filename": "fruitstory/x_last_00001_.png", "type": "base64",
-                                       "data": base64.b64encode(b"PNGDATA").decode()}], "errors": []}}
+                                       "data": base64.b64encode(b"PNGDATA").decode()}],
+                           "audio": [{"filename": "fruitstory/x_00001_.flac", "type": "base64",
+                                      "data": base64.b64encode(b"FLACDATA").decode()}], "errors": []}}
 
 
-def test_fake_round_trip_saves_video_first_and_bills_delay_plus_execution(tmp_path):
+def test_fake_round_trip_saves_media_first_and_bills_delay_plus_execution(tmp_path):
     ep = FakeEndpoint()
     job = ep.run({"workflow": {}, "images": []})
     status = ep.wait(job, poll_s=0, on_log=lambda s: None)
     paths = rp.save_outputs(status, str(tmp_path), stem="x")
-    assert [os.path.basename(p) for p in paths] == ["x.mp4", "x_x_last_00001_.png"]
-    assert open(paths[0], "rb").read() == b"MP4DATA"
+    assert [os.path.basename(p) for p in paths] == ["x.flac", "x.mp4", "x_x_last_00001_.png"]
+    assert open(paths[1], "rb").read() == b"MP4DATA" and open(paths[0], "rb").read() == b"FLACDATA"
     assert rp.billed_seconds(status) == 45.0
 
 
