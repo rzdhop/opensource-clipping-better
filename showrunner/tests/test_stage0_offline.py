@@ -459,7 +459,7 @@ def test_keyframe3_job_uses_showrunners_own_template():
     assert (values["width"], values["height"]) == (M.WIDTH, M.HEIGHT)
 
 
-def test_nothing_in_showrunner_imports_clipping():
+def test_nothing_in_showrunner_imports_clipping_or_the_live_mcp_server():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     offenders = []
     for dirpath, _, filenames in os.walk(root):
@@ -467,7 +467,8 @@ def test_nothing_in_showrunner_imports_clipping():
             if f.endswith(".py"):
                 path = os.path.join(dirpath, f)
                 for k, line in enumerate(open(path, encoding="utf-8"), 1):
-                    if line.lstrip().startswith(("import clipping", "from clipping")):
+                    if line.lstrip().startswith(("import clipping", "from clipping", "import mcp_server",
+                                                 "from mcp_server")):
                         offenders.append(f"{os.path.relpath(path, root)}:{k}")
     assert offenders == []
 
