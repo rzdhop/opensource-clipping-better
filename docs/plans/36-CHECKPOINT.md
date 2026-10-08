@@ -1,5 +1,14 @@
 # Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
 
+## STAGE 2 DONE — the showrunner connector, and it replaced rzdhop-story (2026-10-08 night)
+
+- **Locked voices approved** by Rida (singles and exchanges, DEC-323); the demo re-assembled with them.
+- **The server:** `showrunner/mcp_server.py`, 20 tools (story files, look/download, GPU jobs journaled in the story,
+  clip check, locked voices, approval, assembly), DEC-324. **Replacement (DEC-325):** `mcp_server/` deleted, the new
+  server runs as `showrunner-mcp` on 8787 behind `https://main-network-interface.tail01346d.ts.net/mcp`; verified live.
+- **Next:** Rida re-adds the claude.ai connector (same URL, login with MCP_TOKEN), the smoke on his go (≈ $0.50), then
+  stage 3 — the skills (the old story-director / fruit-drama-episode skills call tools that no longer exist).
+
 ## STAGE 1 DONE — the story store and the toolbox (2026-10-08 night)
 
 - **Rida's answers:** clip check = Whisper on this CPU · VC test now · text + images in git, media out · demo from stage 0.

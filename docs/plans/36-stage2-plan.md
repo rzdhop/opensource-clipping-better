@@ -1,6 +1,8 @@
 # Plan 36 — Stage 2: the MCP v2 (`showrunner` connector)
 
-Status: **FINAL PLAN, awaiting Rida's approval** (2026-10-08). Rida's answers: a new connector next to
+Status: **DONE 2026-10-08** — approved, built (2.0–2.3), deployed; then, on Rida's word, the showrunner server
+**replaced** rzdhop-story on port 8787 and the Funnel root (DEC-325): the 8443 / 8788 layout below was dropped.
+Left: Rida re-adds the connector; the smoke (≈ $0.50) on his go. Rida's answers: a new connector next to
 `rzdhop-story` · clips returned inline for now · voice conversion is a tool (DEC-323).
 Read first: `docs/plans/36-CHECKPOINT.md` (top), `docs/plans/36-rebuild-from-scratch-plan.md` §4, `showrunner/README.md`.
 
