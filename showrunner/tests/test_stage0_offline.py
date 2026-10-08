@@ -290,3 +290,67 @@ def test_positive_prompts_never_name_text_or_subtitles():
         low = p.lower()
         assert "subtitle" not in low and "caption" not in low and "on-screen" not in low, p[-200:]
     assert all(M.CLEAN_FRAME in p for p in prompts if not p.startswith("[VISUAL]"))
+
+
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+class _Scripted(rp.Endpoint):
+    """Answers the given states in order, the last one forever."""
+
+    def __init__(self, states):
+        super().__init__("fake", key="k")
+        self.states = list(states)
+
+    def status(self, job_id):
+        state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+        return {"id": job_id, "status": state}
+
+
+def test_wait_is_patient_in_the_queue_and_strict_once_running():
+    clock = _Clock()
+    # 40 min queued (a throttled datacenter, 2026-10-08), then it runs and completes: no error
+    ep = _Scripted(["IN_QUEUE"] * 480 + ["IN_PROGRESS", "COMPLETED"])
+    st = ep.wait("j", poll_s=5, on_log=lambda s: None, clock=clock, sleep=clock.sleep)
+    assert st["status"] == "COMPLETED" and clock.t >= 2400
+    clock = _Clock()
+    with pytest.raises(rp.RunPodError, match="IN_PROGRESS 1800 s after it started"):
+        _Scripted(["IN_QUEUE"] * 10 + ["IN_PROGRESS"]).wait("j", poll_s=60, on_log=lambda s: None,
+                                                             clock=clock, sleep=clock.sleep)
+    clock = _Clock()
+    with pytest.raises(rp.RunPodError, match="no GPU free"):
+        _Scripted(["IN_QUEUE"]).wait("j", poll_s=600, queue_timeout_s=3600, on_log=lambda s: None,
+                                     clock=clock, sleep=clock.sleep)
+
+
+def test_a_stuck_job_does_not_sink_the_batch_and_ids_are_kept(tmp_path, monkeypatch, capsys):
+    from showrunner.stage0 import run_stage0 as R
+
+    class Batch(rp.Endpoint):
+        def __init__(self):
+            super().__init__("fake", key="k")
+            self.n = 0
+
+        def run(self, payload, **kw):
+            self.n += 1
+            return f"job{self.n}"
+
+        def wait(self, job_id, **kw):
+            if job_id == "job1":
+                raise rp.RunPodError("job1: still IN_QUEUE after 10800 s (no GPU free)")
+            return {"id": job_id, "status": "COMPLETED", "executionTime": 40000, "delayTime": 1000, "output": {}}
+
+    monkeypatch.setattr(rp, "submit_template", lambda ep, *a, **k: ep.run({}))
+    monkeypatch.setattr(rp, "save_outputs", lambda status, out_dir, stem: [f"{stem}.mp4"])
+    results = R.run_batch(Batch(), [("a1", "t", {}, {}), ("a2", "t", {}, {})], str(tmp_path), poll_s=0)
+    assert [(stem, st) for stem, _, _, st in results] == [("a1", "LOST"), ("a2", "COMPLETED")]
+    kept = [json.loads(l)["job"] for l in open(tmp_path / "submitted.jsonl")]
+    assert kept == ["job1", "job2"] and "FAILED a1" in capsys.readouterr().out

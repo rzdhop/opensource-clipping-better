@@ -62,12 +62,20 @@ def run_batch(endpoint: rp.Endpoint, jobs: list, out_dir: str, *, poll_s: float 
         job_id = rp.submit_template(endpoint, template, values, files)
         print(f"submitted {stem} -> {job_id}")
         submitted.append((stem, job_id, template, values))
+        # Written at once: a crashed or killed run still leaves every job id to collect or cancel.
+        with open(os.path.join(out_dir, "submitted.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"stem": stem, "job": job_id, "endpoint": endpoint.id,
+                                 "at": time.strftime("%Y-%m-%d %H:%M:%S")}) + "\n")
     results = []
     total = 0.0
     for stem, job_id, template, values in submitted:
-        status = endpoint.wait(job_id, poll_s=poll_s)
         try:
-            paths = rp.save_outputs(status, out_dir, stem=stem)
+            status = endpoint.wait(job_id, poll_s=poll_s)
+        except rp.RunPodError as exc:  # one stuck job never sinks the batch
+            print(f"FAILED {stem}: {exc}")
+            status = {"status": "LOST", "error": str(exc)}
+        try:
+            paths = rp.save_outputs(status, out_dir, stem=stem) if status.get("status") != "LOST" else []
         except rp.RunPodError as exc:
             print(f"FAILED {stem}: {exc}")
             paths = []

@@ -88,9 +88,15 @@ class Endpoint:
     def health(self) -> dict:
         return self._call("GET", "health")
 
-    def wait(self, job_id: str, *, poll_s: float = 5.0, timeout_s: float = 1800, on_log=print) -> dict:
-        """Poll until the job ends; returns the final status dict (with ``output`` on success)."""
-        start = time.monotonic()
+    def wait(self, job_id: str, *, poll_s: float = 5.0, queue_timeout_s: float = 3 * 3600,
+             run_timeout_s: float = 1800, on_log=print, clock=time.monotonic, sleep=time.sleep) -> dict:
+        """Poll until the job ends; returns the final status dict (with ``output`` on success).
+
+        A queued job costs nothing, and a throttled datacenter kept jobs queued for 35 min on
+        2026-10-08: the queue gets hours of patience. Once the job runs, *run_timeout_s* applies
+        (RunPod's own executionTimeout policy ends it first in practice)."""
+        start = clock()
+        started_running = None
         last = None
         while True:
             st = self.status(job_id)
@@ -100,9 +106,14 @@ class Endpoint:
                 last = state
             if state in TERMINAL:
                 return st
-            if time.monotonic() - start > timeout_s:
-                raise RunPodError(f"{job_id}: still {state} after {timeout_s:.0f} s")
-            time.sleep(poll_s)
+            now = clock()
+            if state == "IN_QUEUE" and now - start > queue_timeout_s:
+                raise RunPodError(f"{job_id}: still IN_QUEUE after {queue_timeout_s:.0f} s (no GPU free)")
+            if state != "IN_QUEUE":
+                started_running = started_running if started_running is not None else now
+                if now - started_running > run_timeout_s:
+                    raise RunPodError(f"{job_id}: still {state} {run_timeout_s:.0f} s after it started")
+            sleep(poll_s)
 
 
 # ------------------------------------------------------------------ payloads
