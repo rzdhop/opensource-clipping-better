@@ -314,11 +314,46 @@ def tts_chatterbox_line() -> dict:
     }
 
 
+def vc_chatterbox() -> dict:
+    """Voice conversion (plan 36 stage 1.0, A-221): the audio of a clip re-voiced as the character's
+    locked voice, timing kept, so the clip's lips stay in sync. ``FL_ChatterboxVC`` of the pinned
+    Fill-ChatterBox pack (inputs ``input_audio``, ``target_voice``, ``seed``); its weights load from
+    ``models/chatterbox/chatterbox_vc/`` (``s3gen.pt``, ``conds.pt``), downloaded at first use if absent.
+    """
+    g: dict = {}
+    g["source"] = node("LoadAudio", audio="{{input}}")
+    g["target"] = node("LoadAudio", audio="{{target_voice}}")
+    g["vc"] = node("FL_ChatterboxVC", input_audio=link("source"), target_voice=link("target"), seed="{{seed}}",
+                   use_cpu=False, keep_model_loaded=True)
+    g["save"] = node("SaveAudio", audio=link("vc", 0), filename_prefix="showrunner/{{name}}")
+    return {
+        "$schema": "comfy_workflow_v1",
+        "name": "vc_chatterbox",
+        "task": "voice_conversion",
+        "core_nodes_only": False,
+        "custom_nodes": ["comfyui_fill-chatterbox"],
+        "verified_live": False,
+        "description": "Chatterbox voice conversion: the uploaded speech (`input`, the audio of a clip) re-voiced "
+                       "with the timbre of `target_voice` (the character's locked reference, 5-10 s), timing kept. "
+                       "Saved as flac by core SaveAudio and returned under the `audio` key by the repo's patched "
+                       "worker handler. The node downloads ResembleAI/chatterbox s3gen.pt + conds.pt into "
+                       "models/chatterbox/chatterbox_vc/ at first use if they are not on the volume.",
+        "placeholders": ["input", "target_voice", "seed", "name"],
+        "files": {"input": "the speech to convert (wav)",
+                  "target_voice": "the character's locked voice reference (wav, 5-10 s)"},
+        "defaults": {"seed": 0},
+        "requires": [],
+        "output_node": "save",
+        "graph": g,
+    }
+
+
 TEMPLATES = {
     "ltx25_i2v_speech": ltx25_i2v_speech,
     "ltx25_a2v_speech": ltx25_a2v_speech,
     "ltx23_idlora_speech": ltx23_idlora_speech,
     "tts_chatterbox_line": tts_chatterbox_line,
+    "vc_chatterbox": vc_chatterbox,
 }
 
 

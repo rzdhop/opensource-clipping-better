@@ -55,19 +55,22 @@ def test_derived_values_need_a_64px_grid():
         comfy_templates.derived_values({"width": 736, "height": 1280, "seconds": 5})
 
 
-@pytest.mark.parametrize("name", ["ltx25_i2v_speech", "ltx25_a2v_speech", "ltx23_idlora_speech", "tts_chatterbox_line"])
+@pytest.mark.parametrize("name", ["ltx25_i2v_speech", "ltx25_a2v_speech", "ltx23_idlora_speech", "tts_chatterbox_line",
+                                  "vc_chatterbox"])
 def test_every_template_renders_without_leftover_placeholders(name):
     tpl = comfy_templates.load_template(name)
     values = {"image": "kf.png", "audio": "l.wav", "voice_ref": "v.wav", "prompt": "p", "negative": "n", "seed": 3,
               "width": 704, "height": 1280, "seconds": 5, "fps": 24, "name": "t", "sampler": "euler",
-              "identity_guidance": 3.0, "text": "bonjour", "language": "French (fr)", "exaggeration": 0.5}
+              "identity_guidance": 3.0, "text": "bonjour", "language": "French (fr)", "exaggeration": 0.5,
+              "input": "clip.wav", "target_voice": "v.wav"}
     graph = comfy_templates.render(tpl, values)
     dumped = json.dumps(graph)
     assert "{{" not in dumped
-    expected = "SaveAudio" if name == "tts_chatterbox_line" else "SaveVideo"
+    audio_only = name in ("tts_chatterbox_line", "vc_chatterbox")
+    expected = "SaveAudio" if audio_only else "SaveVideo"
     assert tpl["output_node"] in graph and graph[tpl["output_node"]]["class_type"] == expected
     # typed values land as numbers
-    if name != "tts_chatterbox_line":
+    if not audio_only:
         assert graph["lat1"]["inputs"] == {"width": 352, "height": 640, "length": 121, "batch_size": 1}
         assert graph["noise1"]["inputs"]["noise_seed"] == 3
         assert graph["video"]["inputs"]["fps"] == 24.0
@@ -378,3 +381,46 @@ def test_silences_finds_a_pause_and_one_running_to_the_end(tmp_path):
                     "-ar", "24000", "-ac", "1", path], check=True, capture_output=True)
     pauses = verify.silences(path)
     assert len(pauses) == 2 and abs(pauses[0][0] - 1.0) < 0.05 and abs(pauses[1][1] - verify.probe(path)["duration_s"]) < 0.05
+
+
+def test_vc_converts_the_clip_audio_to_the_locked_voice_and_keeps_the_seed_typed(tmp_path, wav):
+    payload = rp.build_payload("vc_chatterbox", {"seed": 0, "name": "paloma_fr_s33_vc"},
+                               {"input": wav, "target_voice": wav})
+    g = payload["workflow"]
+    assert [e["name"] for e in payload["images"]] == ["paloma_fr_s33_vc_input.wav", "paloma_fr_s33_vc_target_voice.wav"]
+    assert g["vc"]["class_type"] == "FL_ChatterboxVC"
+    assert g["vc"]["inputs"]["input_audio"] == ["source", 0] and g["vc"]["inputs"]["target_voice"] == ["target", 0]
+    assert g["source"]["inputs"]["audio"] == "paloma_fr_s33_vc_input.wav"
+    assert g["vc"]["inputs"]["seed"] == 0 and g["save"]["class_type"] == "SaveAudio"
+
+
+def test_vc_jobs_never_convert_a_take_to_the_voice_cut_from_it(tmp_path, monkeypatch):
+    from showrunner.stage0 import run_stage0 as R
+    out = tmp_path / "_stage0"
+    (out / "a").mkdir(parents=True)
+    (out / "voices").mkdir()
+    for c in M.CHARACTERS:
+        (out / "voices" / f"{c}.wav").write_bytes(b"RIFF")
+        for seed in (22, 33):
+            (out / "a" / f"{c}_fr_s{seed}.mp4").write_bytes(b"mp4")
+    monkeypatch.setattr(R, "OUT", str(out))
+    monkeypatch.setattr(R, "VOICES", str(out / "voices"))
+    monkeypatch.setattr(R, "VC_DIR", str(out / "vc"))
+    jobs = {j[0]: j for j in R._vc_jobs(33, "fr")}
+    assert set(jobs) == {"paloma_fr_s33_vc", "marie_jeanne_fr_s33_vc", "rida_fr_s33_vc", "camille_fr_s22_vc"}
+    stem, template, values, files, clip = jobs["camille_fr_s22_vc"]
+    assert template == "vc_chatterbox" and clip.endswith("a/camille_fr_s22.mp4")
+    assert files["target_voice"].endswith("voices/camille.wav") and files["input"].endswith("vc/camille_fr_s22_in.wav")
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_remux_keeps_the_picture_and_swaps_the_sound(tmp_path, wav):
+    from showrunner.stage0 import run_stage0 as R
+    clip = tmp_path / "c.mp4"
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc=s=704x1280:r=24:d=3",
+                    "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "3", "-c:v", "libx264", "-c:a", "aac",
+                    "-shortest", str(clip)], check=True, capture_output=True)
+    dest = R.remux(str(clip), wav, str(tmp_path / "out.mp4"))
+    info, src = verify.probe(dest), verify.probe(str(clip))
+    assert info["has_audio"] and info["width"] == 704 and info["frames"] == src["frames"]
+    assert not verify.loudness(dest)["silent"]

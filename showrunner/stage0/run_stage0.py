@@ -21,6 +21,9 @@ Order of operations (each command is one GPU batch, submitted in parallel, waite
     python -m showrunner.stage0.run_stage0 keyframe  --character camille --pick 2
     python -m showrunner.stage0.run_stage0 preflight --video-endpoint <id>
         free, read-only: HF licenses, the image on GHCR, both endpoints and their keys, local files, batch sizes
+    python -m showrunner.stage0.run_stage0 vc        --video-endpoint <id> [--take 33] [--dry-run]
+        stage 1.0 (A-221): one path (a) take per character re-voiced with its locked voice (FL_ChatterboxVC),
+        timing kept, remuxed on the original picture -> stories/_stage0/vc/<char>_s<take>.mp4
     python -m showrunner.stage0.run_stage0 review
         probes every clip (duration, audio, loudness), writes contact sheets and stories/_stage0/review.md
 
@@ -357,6 +360,61 @@ def cmd_keyframe(args) -> None:
           f"keyframe --character {args.character} --pick <seed>")
 
 
+# A voice locked FROM a take cannot test the conversion of that same take: use another seed.
+VC_SOURCE_SEED = {"camille": 22}  # camille.wav was cut from camille_fr_s33 (2026-10-08)
+VC_DIR = os.path.join(OUT, "vc")
+
+
+def _vc_jobs(take: int, lang: str) -> list:
+    """``[(stem, template, values, files, clip)]`` for the voice-conversion test: per character with a
+    locked voice, the audio of its path (a) take as ``input``, the locked voice as ``target_voice``."""
+    jobs = []
+    for c in M.CHARACTERS:
+        seed = VC_SOURCE_SEED.get(c, take)
+        clip = os.path.join(OUT, "a", f"{c}_{lang}_s{seed}.mp4")
+        if not os.path.exists(clip) or not os.path.exists(_voice_path(c)):
+            print(f"skip {c}: needs {os.path.relpath(clip, OUT)} and voices/{c}.wav")
+            continue
+        stem = f"{c}_{lang}_s{seed}_vc"
+        jobs.append((stem, "vc_chatterbox", {"seed": 0},
+                     {"input": os.path.join(VC_DIR, f"{c}_{lang}_s{seed}_in.wav"), "target_voice": _voice_path(c)},
+                     clip))
+    return jobs
+
+
+def remux(clip: str, audio: str, dest: str) -> str:
+    """The picture of *clip* with *audio* as its only sound track (video stream copied, never re-timed)."""
+    out = verify._run(["ffmpeg", "-hide_banner", "-y", "-i", clip, "-i", audio, "-map", "0:v:0", "-map", "1:a:0",
+                       "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", dest])
+    if out.returncode:
+        raise RuntimeError(f"remux failed: {out.stderr.strip()[-300:]}")
+    return dest
+
+
+def cmd_vc(args) -> None:
+    jobs = _vc_jobs(args.take, args.lang)
+    if not jobs:
+        sys.exit("nothing to convert")
+    print(f"{len(jobs)} voice-conversion jobs on {args.video_endpoint}: ≈ $0.05-0.10 warm, up to ≈ $0.20 cold "
+          f"(model load); the queue is not billed")
+    if args.dry_run:
+        for stem, _, _, files, clip in jobs:
+            print(f"  {stem}: {os.path.relpath(clip, OUT)} -> voice of {os.path.relpath(files['target_voice'], OUT)}")
+        return
+    os.makedirs(VC_DIR, exist_ok=True)
+    for _, _, _, files, clip in jobs:
+        verify.extract_audio(clip, files["input"])
+    results = run_batch(_video_endpoint(args), [j[:4] for j in jobs], VC_DIR)
+    clips = {j[0]: j[4] for j in jobs}
+    for stem, paths, _, status in results:
+        src = next((p for p in paths if p.endswith((".flac", ".wav", ".mp3"))), None)
+        if not src:
+            print(f"no audio back for {stem} ({status})")
+            continue
+        dest = remux(clips[stem], src, os.path.join(VC_DIR, f"{stem[:-3]}.mp4"))
+        print(f"listen: {dest}  (original: {clips[stem]})")
+
+
 def cmd_review(args) -> None:
     rows = []
     for sub in ("smoke", "a", "b", "c"):
@@ -385,7 +443,7 @@ def cmd_review(args) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["preflight", "smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review"])
+    ap.add_argument("command", choices=["preflight", "smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review", "vc"])
     ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker; default "
                                              "RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID (never the live app's "
                                              "RUNPOD_COMFY_ENDPOINT_ID)")
@@ -402,6 +460,8 @@ def main() -> None:
     ap.add_argument("--from", dest="source", help="voice: the mp4 (or wav) whose audio becomes the reference")
     ap.add_argument("--start", type=float, default=0.0, help="voice: skip this many seconds")
     ap.add_argument("--max-s", type=float, default=10.0, help="voice: keep at most this many seconds")
+    ap.add_argument("--take", type=int, default=33, help="vc: the seed of the path (a) take to convert")
+    ap.add_argument("--dry-run", action="store_true", help="vc: list the jobs, submit nothing")
     args = ap.parse_args()
     if not args.video_endpoint:
         try:
@@ -416,7 +476,7 @@ def main() -> None:
     if args.command == "preflight":
         from showrunner.stage0 import preflight
         sys.exit(1 if preflight.run(args) else 0)
-    if args.command in ("smoke", "a", "b", "c") and not args.video_endpoint:
+    if args.command in ("smoke", "a", "b", "c", "vc") and not args.video_endpoint:
         sys.exit("--video-endpoint is required")
     if args.command == "keyframe3" and not args.images_endpoint:
         sys.exit("--images-endpoint is required")
@@ -427,7 +487,7 @@ def main() -> None:
     if args.command == "voice" and not (args.character and args.source):
         sys.exit("voice needs --character and --from")
     {"smoke": cmd_smoke, "a": cmd_a, "voice": cmd_voice, "b": cmd_b, "c": cmd_c,
-     "keyframe3": cmd_keyframe3, "keyframe": cmd_keyframe, "review": cmd_review}[args.command](args)
+     "keyframe3": cmd_keyframe3, "keyframe": cmd_keyframe, "review": cmd_review, "vc": cmd_vc}[args.command](args)
 
 
 if __name__ == "__main__":
