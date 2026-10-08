@@ -54,6 +54,31 @@
       "state": "locked",
       "at": "2026-10-08T20:40:36",
       "note": "approved s05/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    "ep01/clips/s01_v2.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T21:40:52",
+      "note": "approved s01/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    "ep01/clips/s02_v2.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T21:41:17",
+      "note": "approved s02/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    "ep01/clips/s03_v2.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T21:41:42",
+      "note": "approved s03/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    "ep01/clips/s04_v2.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T21:42:10",
+      "note": "approved s04/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    "ep01/clips/s05_v2.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T21:42:35",
+      "note": "approved s05/v2: Rida, 2026-10-08: 'I approve the locked voice'"
     }
   },
   "history": [
@@ -122,6 +147,36 @@
       "path": "ep01/clips/s05_v1.mp4",
       "at": "2026-10-08T20:40:36",
       "note": "approved s05/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s01_v2.mp4",
+      "at": "2026-10-08T21:40:52",
+      "note": "approved s01/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s02_v2.mp4",
+      "at": "2026-10-08T21:41:17",
+      "note": "approved s02/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s03_v2.mp4",
+      "at": "2026-10-08T21:41:42",
+      "note": "approved s03/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s04_v2.mp4",
+      "at": "2026-10-08T21:42:10",
+      "note": "approved s04/v2: Rida, 2026-10-08: 'I approve the locked voice'"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s05_v2.mp4",
+      "at": "2026-10-08T21:42:35",
+      "note": "approved s05/v2: Rida, 2026-10-08: 'I approve the locked voice'"
     }
   ]
 }

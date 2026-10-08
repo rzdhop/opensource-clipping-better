@@ -36,11 +36,52 @@
           "end_s": 7.46,
           "extra_after_s": 0.76
         },
-        "approved": true,
+        "approved": false,
         "note": "stage 0 batch a, ex_two_fr_s22",
         "at": "2026-10-08T20:40:36",
         "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
         "approved_at": "2026-10-08T20:40:36"
+      },
+      {
+        "take": "v2",
+        "path": "ep01/clips/s01_v2.mp4",
+        "seed": 22,
+        "job": null,
+        "verdict": {
+          "state": "ok",
+          "matched": 1.0,
+          "lines": [
+            {
+              "text": "Pardon ! Je signe le contrat de l'année dans une heure !",
+              "words": 11,
+              "heard": 11,
+              "matched": 1.0,
+              "start_s": 0.0,
+              "end_s": 4.56,
+              "speaker": "marie_jeanne"
+            },
+            {
+              "text": "Et vous êtes en retard même sur le café ?",
+              "words": 9,
+              "heard": 9,
+              "matched": 1.0,
+              "start_s": 5.14,
+              "end_s": 7.46,
+              "speaker": "rida"
+            }
+          ],
+          "duration_s": 10.042,
+          "heard_text": "Pardon! Je signe le contrat de l 'année dans une heure. Et vous êtes en retard même sur le café?",
+          "in_order": true,
+          "start_s": 0.0,
+          "end_s": 7.46,
+          "extra_after_s": 0.0
+        },
+        "approved": true,
+        "note": "v1 with every line in its speaker's locked voice (Chatterbox VC, ex_two_fr_s22)",
+        "at": "2026-10-08T21:40:52",
+        "approved_note": "Rida, 2026-10-08: 'I approve the locked voice'",
+        "approved_at": "2026-10-08T21:40:52"
       }
     ]
   },
@@ -72,11 +113,43 @@
           "end_s": 2.6,
           "extra_after_s": 0.0
         },
-        "approved": true,
+        "approved": false,
         "note": "stage 0 batch a, rida_fr_s33",
         "at": "2026-10-08T20:40:36",
         "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
         "approved_at": "2026-10-08T20:40:36"
+      },
+      {
+        "take": "v2",
+        "path": "ep01/clips/s02_v2.mp4",
+        "seed": 33,
+        "job": null,
+        "verdict": {
+          "state": "ok",
+          "matched": 0.875,
+          "lines": [
+            {
+              "text": "Vaulta… t'as laissé la porte grande ouverte.",
+              "words": 8,
+              "heard": 7,
+              "matched": 0.875,
+              "start_s": 0.64,
+              "end_s": 2.6,
+              "speaker": "rida"
+            }
+          ],
+          "duration_s": 5.04,
+          "heard_text": "« Volta, t 'as laissé la porte grande ouverte ? »",
+          "in_order": true,
+          "start_s": 0.64,
+          "end_s": 2.6,
+          "extra_after_s": 0.84
+        },
+        "approved": true,
+        "note": "v1 with every line in its speaker's locked voice (Chatterbox VC, rida_fr_s33)",
+        "at": "2026-10-08T21:41:17",
+        "approved_note": "Rida, 2026-10-08: 'I approve the locked voice'",
+        "approved_at": "2026-10-08T21:41:17"
       }
     ]
   },
@@ -108,11 +181,43 @@
           "end_s": 3.94,
           "extra_after_s": 0.0
         },
-        "approved": true,
+        "approved": false,
         "note": "stage 0 batch a, paloma_fr_s33",
         "at": "2026-10-08T20:40:36",
         "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
         "approved_at": "2026-10-08T20:40:36"
+      },
+      {
+        "take": "v2",
+        "path": "ep01/clips/s03_v2.mp4",
+        "seed": 33,
+        "job": null,
+        "verdict": {
+          "state": "ok",
+          "matched": 1.0,
+          "lines": [
+            {
+              "text": "Tu souris à ton téléphone. C'est qui, le kiwi ?",
+              "words": 10,
+              "heard": 10,
+              "matched": 1.0,
+              "start_s": 0.0,
+              "end_s": 3.96,
+              "speaker": "paloma"
+            }
+          ],
+          "duration_s": 5.04,
+          "heard_text": "Tu souris à ton téléphone. C 'est qui, le kiwi ?",
+          "in_order": true,
+          "start_s": 0.0,
+          "end_s": 3.96,
+          "extra_after_s": 0.18
+        },
+        "approved": true,
+        "note": "v1 with every line in its speaker's locked voice (Chatterbox VC, paloma_fr_s33)",
+        "at": "2026-10-08T21:41:42",
+        "approved_note": "Rida, 2026-10-08: 'I approve the locked voice'",
+        "approved_at": "2026-10-08T21:41:42"
       }
     ]
   },
@@ -162,11 +267,61 @@
           "end_s": 8.46,
           "extra_after_s": 0.12
         },
-        "approved": true,
+        "approved": false,
         "note": "stage 0 batch a, ex_three_fr_s22",
         "at": "2026-10-08T20:40:36",
         "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
         "approved_at": "2026-10-08T20:40:36"
+      },
+      {
+        "take": "v2",
+        "path": "ep01/clips/s04_v2.mp4",
+        "seed": 22,
+        "job": null,
+        "verdict": {
+          "state": "ok",
+          "matched": 1.0,
+          "lines": [
+            {
+              "text": "C'est qui, le kiwi ?",
+              "words": 5,
+              "heard": 5,
+              "matched": 1.0,
+              "start_s": 0.0,
+              "end_s": 2.28,
+              "speaker": "paloma"
+            },
+            {
+              "text": "Personne, Paloma !",
+              "words": 2,
+              "heard": 2,
+              "matched": 1.0,
+              "start_s": 3.94,
+              "end_s": 5.98,
+              "speaker": "marie_jeanne"
+            },
+            {
+              "text": "Personne ? Sympa.",
+              "words": 2,
+              "heard": 2,
+              "matched": 1.0,
+              "start_s": 6.46,
+              "end_s": 8.52,
+              "speaker": "rida"
+            }
+          ],
+          "duration_s": 10.042,
+          "heard_text": "C 'est qui le kiwi ? Personne. Paloma. Personne. Sympa.",
+          "in_order": true,
+          "start_s": 0.0,
+          "end_s": 8.52,
+          "extra_after_s": 0.0
+        },
+        "approved": true,
+        "note": "v1 with every line in its speaker's locked voice (Chatterbox VC, ex_three_fr_s22)",
+        "at": "2026-10-08T21:42:10",
+        "approved_note": "Rida, 2026-10-08: 'I approve the locked voice'",
+        "approved_at": "2026-10-08T21:42:10"
       }
     ]
   },
@@ -198,11 +353,43 @@
           "end_s": 4.2,
           "extra_after_s": 0.0
         },
-        "approved": true,
+        "approved": false,
         "note": "stage 0 batch a, marie_jeanne_fr_s33",
         "at": "2026-10-08T20:40:36",
         "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
         "approved_at": "2026-10-08T20:40:36"
+      },
+      {
+        "take": "v2",
+        "path": "ep01/clips/s05_v2.mp4",
+        "seed": 33,
+        "job": null,
+        "verdict": {
+          "state": "ok",
+          "matched": 0.857,
+          "lines": [
+            {
+              "text": "R… comme Rida ? Non. Non, non, non.",
+              "words": 7,
+              "heard": 6,
+              "matched": 0.857,
+              "start_s": 0.46,
+              "end_s": 4.24,
+              "speaker": "marie_jeanne"
+            }
+          ],
+          "duration_s": 5.04,
+          "heard_text": "« Re » comme « rida », non. Non, non, non.",
+          "in_order": true,
+          "start_s": 0.46,
+          "end_s": 4.24,
+          "extra_after_s": 0.0
+        },
+        "approved": true,
+        "note": "v1 with every line in its speaker's locked voice (Chatterbox VC, marie_jeanne_fr_s33)",
+        "at": "2026-10-08T21:42:35",
+        "approved_note": "Rida, 2026-10-08: 'I approve the locked voice'",
+        "approved_at": "2026-10-08T21:42:35"
       }
     ]
   }
