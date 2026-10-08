@@ -1,5 +1,7 @@
 ## CURRENT STATE — plan 36 (`showrunner/`): stage 0 DONE, D7 = path (a) LTX-2.5 joint picture+voice, multi-speaker preferred; next = stage 1 after Rida's answers (2026-10-08 evening)
 
+- **Resume:** `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md` → `docs/plans/36-stage1-plan.md` (PROPOSED, 4 blocking questions §5). Tier 1: `python -m pytest showrunner/tests -q` = 29 green at `d1959a0`.
+
 - **In-progress header:** phase = stage 0 setup; nothing running, $0 spent. Checkpoint before the change = `a8d8557`
   (origin/main fast-forwarded here; local main had been 2 commits behind). Plan files: `docs/plans/36-CHECKPOINT.md`
   (its "Session 2026-10-08" section lists what is ready and what the human must do), `docs/plans/36-rebuild-from-scratch-plan.md`.

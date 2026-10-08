@@ -5,7 +5,7 @@
 - **D7 = path (a)**, LTX-2.5 I2V joint picture+voice; multi-speaker clips preferred; (b) and (c) rejected; no fallback path; next cheap test = Chatterbox voice conversion of (a) lines to a locked voice. Plan §7 D7.
 - **Spend:** stage 0 ≈ $2.30 (smoke 0.13, images 0.04, a 0.67, b 0.55, c 0.91), the queue never billed.
 - **Learned:** cfg 1.0 everywhere (negative ignored → `CLEAN_FRAME`, positives never name the unwanted); I2V keeps the keyframe's pose; the volume's datacenter runs short of GPUs (waits 20–35 min, `wait()` patient); Chatterbox runs on past the line (line guard in `verify.py`).
-- **Next action:** Rida answers the stage-1 questions (in chat 2026-10-08); then stage 1 (store + skeleton), $0.
+- **Next action (next session):** follow `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md` — the stage-1 plan `docs/plans/36-stage1-plan.md` (corrected 2026-10-08 with Rida's remarks: ~70-word characters, the batch-a prompts frozen as a golden in `docs/plans/36-stage0-batch-a-prompts.json`, the three-quarter keyframe a hypothesis) is PROPOSED; its 4 questions (§5) block the start.
 - **Tier 1:** `python -m pytest showrunner/tests -q` 29 green. Stage-0 media in `stories/_stage0/` (gitignored).
 
 Resume prompt for the next session: `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md`.

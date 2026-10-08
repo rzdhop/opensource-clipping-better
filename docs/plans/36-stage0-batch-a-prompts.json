@@ -1,0 +1,136 @@
+{
+  "_about": "Plan 36 stage 0, batch a (LTX-2.5 I2V, path a), the prompts exactly as sent on 2026-10-08. Rida's verdict: the takes s33 (single speaker) and s22 (2- and 3-speaker exchanges) were the nicest; later batches (b, c) were worse. The stage-1 dialogue template must reproduce these word for word, with one deliberate difference: the closing sentence 'No subtitles, no on-screen text, no black frames.' becomes CLEAN_FRAME (cfg 1.0 ignores the negative; naming subtitles primed captions in 6/16 clips of this batch).",
+  "negative_ignored_at_cfg_1": true,
+  "prompts": {
+    "paloma_fr_s22": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Paloma, an anthropomorphic mango woman: her whole head is a single ripe mango, golden-yellow at the bottom blushing to red-orange on top, with a short green stem and two glossy leaves; large brown cartoon eyes with long lashes, pink blush cheeks, a wide open smile drawn on the mango skin, gold hoop earrings; slim human body in a mustard-yellow knit cardigan over a knee-length turquoise floral wrap dress, white sneakers, human hands. Setting: a bright modern open-plan office with plants and large windows, daylight. Paloma talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a bubbly, playful young woman, bright and quick, teasing, smiling as she speaks: \"Tu souris à ton téléphone. C'est qui, le kiwi ?\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 22,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "becb8c32-2b8a-44aa-b284-ec5a3d57665d-e2",
+      "at": "2026-10-08 16:03:11"
+    },
+    "paloma_fr_s33": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Paloma, an anthropomorphic mango woman: her whole head is a single ripe mango, golden-yellow at the bottom blushing to red-orange on top, with a short green stem and two glossy leaves; large brown cartoon eyes with long lashes, pink blush cheeks, a wide open smile drawn on the mango skin, gold hoop earrings; slim human body in a mustard-yellow knit cardigan over a knee-length turquoise floral wrap dress, white sneakers, human hands. Setting: a bright modern open-plan office with plants and large windows, daylight. Paloma talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a bubbly, playful young woman, bright and quick, teasing, smiling as she speaks: \"Tu souris à ton téléphone. C'est qui, le kiwi ?\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 33,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "f2cefcf4-c5a2-4963-a2b9-e50f097f7378-e1",
+      "at": "2026-10-08 16:03:52"
+    },
+    "marie_jeanne_fr_s22": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Marie-Jeanne, an anthropomorphic strawberry woman: her whole head is a single glossy red strawberry dotted with golden seeds, a crown of spiky green leaves on top; large almond brown cartoon eyes with long lashes and arched dark brows, a confident knowing smile drawn on the strawberry skin; slim human body in a cream tailored blazer over a burgundy silk blouse, slim black trousers, black pointed heels, a gold wristwatch, human hands. Setting: a dim conference room at night, warm practical lamps, a red glow from a screen. Marie-Jeanne talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a confident, fast-talking young woman, proud, telenovela energy, crisp diction: \"R… comme Rida ? Non. Non, non, non.\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 22,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "e41daf95-ec94-4d2b-9639-dd1eaad358fc-e1",
+      "at": "2026-10-08 16:05:13"
+    },
+    "marie_jeanne_fr_s33": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Marie-Jeanne, an anthropomorphic strawberry woman: her whole head is a single glossy red strawberry dotted with golden seeds, a crown of spiky green leaves on top; large almond brown cartoon eyes with long lashes and arched dark brows, a confident knowing smile drawn on the strawberry skin; slim human body in a cream tailored blazer over a burgundy silk blouse, slim black trousers, black pointed heels, a gold wristwatch, human hands. Setting: a dim conference room at night, warm practical lamps, a red glow from a screen. Marie-Jeanne talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a confident, fast-talking young woman, proud, telenovela energy, crisp diction: \"R… comme Rida ? Non. Non, non, non.\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 33,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "d3fd885a-ebf8-4495-8362-41d2238915f0-e1",
+      "at": "2026-10-08 16:05:53"
+    },
+    "rida_fr_s22": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Rida, an anthropomorphic kiwi man: his whole head is a single fuzzy olive-brown kiwi fruit with a short brown stem on top; large round brown cartoon eyes under thick dark brows, rosy cheeks, a small rounded nose and a wide mouth with a sly half-smile drawn on the kiwi skin; slim human body in a charcoal zip hoodie over a green t-shirt, black over-ear headphones around his neck, dark grey jeans, white sneakers, human hands. Setting: a dark attic loft at night, three monitors glowing red, a city skyline through the window. Rida talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a calm young man, dry and ironic, slightly amused, quick but composed: \"Vaulta… t'as laissé la porte grande ouverte.\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 22,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "a9861b35-8f93-4db3-b19c-4f3a160866bf-e2",
+      "at": "2026-10-08 16:07:46"
+    },
+    "rida_fr_s33": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Rida, an anthropomorphic kiwi man: his whole head is a single fuzzy olive-brown kiwi fruit with a short brown stem on top; large round brown cartoon eyes under thick dark brows, rosy cheeks, a small rounded nose and a wide mouth with a sly half-smile drawn on the kiwi skin; slim human body in a charcoal zip hoodie over a green t-shirt, black over-ear headphones around his neck, dark grey jeans, white sneakers, human hands. Setting: a dark attic loft at night, three monitors glowing red, a city skyline through the window. Rida talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a calm young man, dry and ironic, slightly amused, quick but composed: \"Vaulta… t'as laissé la porte grande ouverte.\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 33,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "d868bd41-8a82-4b40-95c9-ef1b9f3a6471-e2",
+      "at": "2026-10-08 16:08:26"
+    },
+    "camille_fr_s22": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are cartoon humans: gently stylised proportions (a slightly larger head and eyes than in life), smooth soft skin shading, expressive faces with a clearly modelled mouth, lips and teeth; real-looking clothes, human hands. Smooth CGI surfaces; no live-action footage, no real people, no photographs. Camille, a French woman in her early thirties: an oval face with soft rounded features, large expressive hazel eyes, thick dark arched brows, a small straight nose, full rose-tinted lips with white teeth that show when she speaks; dark brown wavy hair in a loose low bun, a few strands framing her face; slim body in a charcoal tailored blazer over a cream silk blouse, small gold stud earrings, a thin wristwatch, human hands. Setting: a glass-walled meeting room in a modern office at dusk, city lights behind her, a warm desk lamp. Camille talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a woman in her thirties, composed but hurt, a low controlled voice, restrained anger: \"Tu as signé sans moi ? Alors on n'est plus associés.\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 22,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "9186fabd-7bbe-4667-87cf-f97b40874135-e1",
+      "at": "2026-10-08 16:10:11"
+    },
+    "camille_fr_s33": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are cartoon humans: gently stylised proportions (a slightly larger head and eyes than in life), smooth soft skin shading, expressive faces with a clearly modelled mouth, lips and teeth; real-looking clothes, human hands. Smooth CGI surfaces; no live-action footage, no real people, no photographs. Camille, a French woman in her early thirties: an oval face with soft rounded features, large expressive hazel eyes, thick dark arched brows, a small straight nose, full rose-tinted lips with white teeth that show when she speaks; dark brown wavy hair in a loose low bun, a few strands framing her face; slim body in a charcoal tailored blazer over a cream silk blouse, small gold stud earrings, a thin wristwatch, human hands. Setting: a glass-walled meeting room in a modern office at dusk, city lights behind her, a warm desk lamp. Camille talks to someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of a woman in her thirties, composed but hurt, a low controlled voice, restrained anger: \"Tu as signé sans moi ? Alors on n'est plus associés.\" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 33,
+        "width": 704,
+        "height": 1280,
+        "seconds": 5,
+        "fps": 24
+      },
+      "job": "0af30bba-fa00-45e7-8c3e-d1a8fa3f3c05-e1",
+      "at": "2026-10-08 16:11:08"
+    },
+    "ex_two_fr_s22": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Marie-Jeanne, an anthropomorphic strawberry woman: her whole head is a single glossy red strawberry dotted with golden seeds, a crown of spiky green leaves on top; large almond brown cartoon eyes with long lashes and arched dark brows, a confident knowing smile drawn on the strawberry skin; slim human body in a cream tailored blazer over a burgundy silk blouse, slim black trousers, black pointed heels, a gold wristwatch, human hands. Rida, an anthropomorphic kiwi man: his whole head is a single fuzzy olive-brown kiwi fruit with a short brown stem on top; large round brown cartoon eyes under thick dark brows, rosy cheeks, a small rounded nose and a wide mouth with a sly half-smile drawn on the kiwi skin; slim human body in a charcoal zip hoodie over a green t-shirt, black over-ear headphones around his neck, dark grey jeans, white sneakers, human hands. Setting: a sunny café counter in the morning, plants, a spilled coffee cup. They speak in turn, each one's mouth moving only on their own line, the other listening and reacting: Marie-Jeanne says in French, with the voice of a confident, fast-talking young woman, proud, telenovela energy, crisp diction: \"Pardon ! Je signe le contrat de l'année dans une heure !\" Rida says in French, with the voice of a calm young man, dry and ironic, slightly amused, quick but composed: \"Et vous êtes en retard même sur le café ?\" Medium two-shot, the camera holds still. Audio: two distinct voices close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 22,
+        "width": 704,
+        "height": 1280,
+        "seconds": 10,
+        "fps": 24
+      },
+      "job": "b6f495d7-730e-4938-a763-cfe30ce078c5-e2",
+      "at": "2026-10-08 16:14:05"
+    },
+    "ex_three_fr_s22": {
+      "template": "ltx25_i2v_speech",
+      "prompt": "Use the provided start image as the first frame. A stylised 3D cartoon animation in the manner of a Pixar feature, fully computer-generated. The characters are fruit people: each one's whole head IS the fruit itself, stem, leaves and skin intact, with large expressive cartoon eyes and a wide mouth drawn on the fruit's skin; cartoon proportions (an oversized fruit head on a slim body) in real-looking human clothes, with human hands. Smooth CGI surfaces; never a human face, never real human skin, never a mask or costume on a person; no live-action footage, no real people, no photographs. Paloma, an anthropomorphic mango woman: her whole head is a single ripe mango, golden-yellow at the bottom blushing to red-orange on top, with a short green stem and two glossy leaves; large brown cartoon eyes with long lashes, pink blush cheeks, a wide open smile drawn on the mango skin, gold hoop earrings; slim human body in a mustard-yellow knit cardigan over a knee-length turquoise floral wrap dress, white sneakers, human hands. Marie-Jeanne, an anthropomorphic strawberry woman: her whole head is a single glossy red strawberry dotted with golden seeds, a crown of spiky green leaves on top; large almond brown cartoon eyes with long lashes and arched dark brows, a confident knowing smile drawn on the strawberry skin; slim human body in a cream tailored blazer over a burgundy silk blouse, slim black trousers, black pointed heels, a gold wristwatch, human hands. Rida, an anthropomorphic kiwi man: his whole head is a single fuzzy olive-brown kiwi fruit with a short brown stem on top; large round brown cartoon eyes under thick dark brows, rosy cheeks, a small rounded nose and a wide mouth with a sly half-smile drawn on the kiwi skin; slim human body in a charcoal zip hoodie over a green t-shirt, black over-ear headphones around his neck, dark grey jeans, white sneakers, human hands. Setting: a bright open-plan office, three characters standing close together by a desk. They speak in turn, each one's mouth moving only on their own line, the other listening and reacting: Paloma says in French, with the voice of a bubbly, playful young woman, bright and quick, teasing, smiling as she speaks: \"C'est qui, le kiwi ?\" Marie-Jeanne says in French, with the voice of a confident, fast-talking young woman, proud, telenovela energy, crisp diction: \"Personne, Paloma !\" Rida says in French, with the voice of a calm young man, dry and ironic, slightly amused, quick but composed: \"Personne ? Sympa.\" Medium two-shot, the camera holds still. Audio: two distinct voices close to the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.",
+      "values": {
+        "seed": 22,
+        "width": 704,
+        "height": 1280,
+        "seconds": 10,
+        "fps": 24
+      },
+      "job": "32bdc019-597a-41a4-8680-07cbe7665d28-e1",
+      "at": "2026-10-08 16:15:10"
+    }
+  }
+}

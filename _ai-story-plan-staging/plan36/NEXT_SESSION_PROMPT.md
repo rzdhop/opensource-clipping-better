@@ -1,23 +1,22 @@
-Continue plan 36 (the AI Story rebuilt from scratch, Claude-native) — stage 0, the voice-path spike. `git pull` first: everything is on origin/main (commit "plan 36").
+Continue plan 36 (the AI Story rebuilt from scratch in `showrunner/`, Claude-native) — stage 1, the story store and the toolbox. `git pull` first.
 
 CONTEXT
-- Repo: opensource-clipping-better (rzdhop AI). The old AI Story (`clipping/aistory`, 75k lines, plans 0–35) never produced an episode I'd post — the S2V "talking" ep01 v3 of plan 35 included. Plan 36 rebuilds it with Claude as writer/director in the session, `stories/` in git as the persistence, and the MCP server limited to GPU jobs (RunPod ComfyUI), assembly and verification. Read first, in this order:
-  1. `docs/plans/36-CHECKPOINT.md` (where we are, what the merge revealed, run order)
-  2. `docs/plans/36-rebuild-from-scratch-plan.md` (the plan; D1–D6 in §7, D7 pending)
-  3. `showrunner/README.md`, `showrunner/worker/ENDPOINT.md`, and `docs/MCP.md` for the existing endpoints/tools
-- Decisions already taken (do not reopen): stage 0 tests the voice paths and picks after listening (D1); video endpoint = L40S 48 GB, LTX-2.5 int8 (D2); persistence = `stories/` in git (D3); episodes in FR or EN per story (D4); no story dashboard, chat only (D5); 1–3 speakers per clip allowed, stage 0 measures it (D6).
-- Binding facts from the research: open Wan stops at 2.2 (silent) / S2V (audio in) — Wan 2.5/2.6/2.7/"3.0" are API-only; LTX-2.5 is the native-speech candidate, LTX-2.3 ID-LoRA the voice-reference path, MiniMax H3's license excludes the EU; a prompt-only voice does not repeat across clips, so each character gets a locked voice reference; speech ≈ 2.5 words/s (5 s = 1 line, 10 s = 2–3 lines); the endpoint runs worker-comfyui 5.10.0 = ComfyUI 0.34.0; our image extends the repo's `worker-comfyui-tts` (its patched handler returns SaveAudio outputs).
-- Stage 0 code is COMPLETE and validated offline (`showrunner/`: worker image, 4 API-format workflows checked against ComfyUI v0.34.0 source, runner + matrix on the `productions/faille_damour` cast, 15 tests). Nothing has run on a GPU yet. The `rzdhop-story` MCP answered 502 from the cloud session; stage 0 does not need it (the runner talks to RunPod directly).
-
-THIS SYSTEM HAS: `RUNPOD_API_KEY` and the endpoint ids in `.env` / the app settings (`docs/MCP.md` names them).
+- Repo: opensource-clipping-better (rzdhop AI). Plan 36 rebuilds the AI Story with Claude as writer/director in the session, `stories/` in git as the persistence, and the MCP limited to GPU jobs, assembly and verification. Any universe, not fruit only (D8). Read first, in this order:
+  1. `docs/plans/36-CHECKPOINT.md` (top section: stage 0 done, D7)
+  2. `docs/plans/36-stage1-plan.md` (THE plan for this session: stages 1.0–1.6, checks, 4 blocking questions)
+  3. `docs/plans/36-rebuild-from-scratch-plan.md` §2.1 (layout), §2.2 (the six steps), §7 (D1–D8)
+  4. `docs/plans/36-stage0-batch-a-prompts.json` (the prompts Rida liked — the golden for the dialogue template)
+- Decisions taken (do not reopen): D1–D6; D7 = path (a), LTX-2.5 I2V makes picture and voice from the prompt, multi-speaker clips (2–3 per 10 s clip) preferred, paths b and c rejected, no fallback path; D8 = package `showrunner/`, any universe, the art agreed in chat first.
+- Rida's remarks that bind stage 1: character descriptions of about 70 words; batch a's look was the best — the dialogue template reproduces its prompts word for word except `CLEAN_FRAME`; characters rarely speak to camera (the three-quarter keyframe is a hypothesis, A-222, not a rule); never name the unwanted in a positive prompt (cfg 1.0 ignores the negative); every clip approved by Rida; no stills.
+- Stage 0 spent ≈ $2.30. Stage 1 is $0 except the optional voice-conversion test (≈ $0.05–0.10).
 
 DO NOW
-1. `git pull`, then `python -m pytest showrunner/tests -q` — must be green here.
-2. Check with me: is the LTX-2.5 / 2.3 stack on the shared volume (`showrunner/worker/fill_volume.sh`, gated HF token)? Is a video endpoint running `ghcr.io/rzdhop/showrunner-worker` (build from `showrunner/worker/Dockerfile`, or a CI job next to `worker-tts-image.yml`)? Which endpoint ids for video and image? Are the S3/R2 env vars set? Walk me through what is missing before any spend.
-3. Run stage 0 in this order, one batch at a time, telling me the clip count and ≈ cost before each and waiting for my go: `smoke` → `keyframe3` → `a` → `review` → I pick one take per character (or we lock the Gemini WAVs of `outputs/faille_damour/ep01/voices/` as references) → `voice` ×3 → `b` → `c` → `review`. If the MCP is reachable, add path (d): the live `s2v_wan22` on the same lines, for the comparison. Show me the contact sheets and the review table after each `review`; I judge voice, lips, identity, motion per clip.
-4. After my verdicts, write D7 (primary + fallback voice path) in plan 36 §7, add a plan-36 header to `.claude/CHECKPOINT.md`, then propose stage 1 (store + skeleton) as a staged plan with questions.
+1. `git pull`, then `python -m pytest showrunner/tests -q` — must be green (29).
+2. Ask Rida the 4 questions of `36-stage1-plan.md` §5 (STT engine, VC test now or later, videos in git, demo story) and get the plan approved.
+3. Implement stage by stage (1.0 if approved → 1.6): tests green → commit → action-log line → next. Before any GPU job: the clip count, ≈ cost, and Rida's go.
+4. After 1.6, Rida watches the demo; then update the checkpoint and propose stage 2 (MCP v2).
 
 RULES
-- Money only on my explicit go; every clip is reviewed by me before it is used; no stills, no Ken Burns, no edge-tts, no LLM API calls from the app — you are the writer.
-- All code and comments in English. Nothing in `showrunner/` imports `clipping/aistory`.
-- Answer format: short problem + root cause; per solution: description, full code, why; a recap table (what, where, why, cost).
+- Money only on Rida's explicit go; every clip reviewed by Rida; no stills, no Ken Burns, no edge-tts, no LLM API call from the app — Claude is the writer.
+- All code and comments in English. Nothing in `showrunner/` imports `clipping/aistory`. The live app and its endpoints are not touched.
+- Plain words in chat (Rida found earlier reports too technical); answer format: short problem + root cause; per solution: description, full code, why; a recap table (what, where, why, cost).
