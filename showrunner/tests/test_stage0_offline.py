@@ -140,14 +140,15 @@ class FakeEndpoint(rp.Endpoint):
                                       "data": base64.b64encode(b"FLACDATA").decode()}], "errors": []}}
 
 
-def test_fake_round_trip_saves_media_first_and_bills_delay_plus_execution(tmp_path):
+def test_fake_round_trip_saves_media_first_and_bills_execution_only(tmp_path):
     ep = FakeEndpoint()
     job = ep.run({"workflow": {}, "images": []})
     status = ep.wait(job, poll_s=0, on_log=lambda s: None)
     paths = rp.save_outputs(status, str(tmp_path), stem="x")
     assert [os.path.basename(p) for p in paths] == ["x.flac", "x.mp4", "x_x_last_00001_.png"]
     assert open(paths[1], "rb").read() == b"MP4DATA" and open(paths[0], "rb").read() == b"FLACDATA"
-    assert rp.billed_seconds(status) == 45.0
+    # DEC-316: the execution is billed; the queue wait is shown apart, never priced
+    assert rp.billed_seconds(status) == 42.0 and rp.delay_seconds(status) == 3.0
 
 
 def test_oversized_payload_is_refused():

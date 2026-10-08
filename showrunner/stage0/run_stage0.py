@@ -43,6 +43,9 @@ from showrunner import verify  # noqa: E402
 from showrunner.stage0 import matrix as M  # noqa: E402
 
 OUT = os.path.join(M.REPO_ROOT, "stories", "_stage0")
+# RunPod Serverless list prices, flex workers, per second (check against the invoice).
+L40S_USD_PER_S = 0.00053
+IMAGES_USD_PER_S = 1.58 / 3600  # the images endpoint's rate in .env (RUNPOD_IMAGE_GPU_USD_PER_HOUR)
 VOICES = os.path.join(OUT, "voices")
 KF_THREE = os.path.join(OUT, "kf_three.png")
 
@@ -68,17 +71,18 @@ def run_batch(endpoint: rp.Endpoint, jobs: list, out_dir: str, *, poll_s: float 
         except rp.RunPodError as exc:
             print(f"FAILED {stem}: {exc}")
             paths = []
-        billed = rp.billed_seconds(status)
+        billed, waited = rp.billed_seconds(status), rp.delay_seconds(status)
         total += billed
         results.append((stem, paths, billed, status.get("status")))
         with open(os.path.join(out_dir, "jobs.jsonl"), "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"stem": stem, "job": job_id, "template": template, "status": status.get("status"),
-                                 "billed_s": billed, "paths": paths, "values": {k: v for k, v in values.items()
+                                 "billed_s": billed, "delay_s": waited, "paths": paths, "values": {k: v for k, v in values.items()
                                                                                  if k not in ("prompt",)},
                                  "prompt": values.get("prompt"), "at": time.strftime("%Y-%m-%d %H:%M:%S")},
                                 ensure_ascii=False) + "\n")
-        print(f"done {stem}: {status.get('status')} billed {billed:.0f} s -> {[os.path.basename(p) for p in paths]}")
-    print(f"batch billed {total:.0f} GPU-seconds (≈ ${total * 0.00049:.2f} on an L40S flex worker)")
+        print(f"done {stem}: {status.get('status')} ran {billed:.0f} s (waited {waited:.0f} s, not billed) "
+              f"-> {[os.path.basename(p) for p in paths]}")
+    print(f"batch ran {total:.0f} GPU-seconds (≈ ${total * L40S_USD_PER_S:.2f} at the L40S flex list price)")
     return results
 
 
@@ -285,7 +289,9 @@ def cmd_keyframe3(args) -> None:
     png = next((p for p in paths if p.endswith(".png")), None)
     if png and png != KF_THREE:
         os.replace(png, KF_THREE)
-    print("keyframe:", KF_THREE, "billed", rp.billed_seconds(status), "s")
+    ran = rp.billed_seconds(status)
+    print(f"keyframe: {KF_THREE} ran {ran:.0f} s (≈ ${ran * IMAGES_USD_PER_S:.3f}; waited {rp.delay_seconds(status):.0f} s, "
+          f"not billed)")
 
 
 def cmd_keyframe(args) -> None:
@@ -321,7 +327,8 @@ def cmd_keyframe(args) -> None:
             os.replace(png, cand(seed))
         total += rp.billed_seconds(status)
         print(f"candidate {cand(seed)}")
-    print(f"billed {total:.0f} GPU-seconds. Look at them, then: keyframe --character {args.character} --pick <seed>")
+    print(f"ran {total:.0f} GPU-seconds (≈ ${total * IMAGES_USD_PER_S:.3f}). Look at them, then: "
+          f"keyframe --character {args.character} --pick <seed>")
 
 
 def cmd_review(args) -> None:

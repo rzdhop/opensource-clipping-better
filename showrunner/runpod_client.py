@@ -171,5 +171,11 @@ def save_outputs(status: dict, out_dir: str, *, stem: str) -> list:
 
 
 def billed_seconds(status: dict) -> float:
-    """What RunPod bills for the job: execution + delay (queue/cold start), in seconds."""
-    return (float(status.get("executionTime") or 0) + float(status.get("delayTime") or 0)) / 1000.0
+    """The job's execution time in seconds, the figure we price (DEC-316). The model load of a cold
+    worker happens inside the execution; the queue wait (``delayTime``) is shown, never priced."""
+    return float(status.get("executionTime") or 0) / 1000.0
+
+
+def delay_seconds(status: dict) -> float:
+    """Queue + worker start before the job ran, in seconds (shown beside the bill, not priced)."""
+    return float(status.get("delayTime") or 0) / 1000.0
