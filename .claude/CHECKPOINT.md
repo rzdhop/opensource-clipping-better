@@ -1,9 +1,9 @@
 ## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
 
-- **In-progress header (2026-10-08 late):** Rida LOVED the locked-voice (VC) singles; asked to review VC on the
-  multi-character clips first. Current task: per-speaker VC of the batch-a exchanges (ex_two/ex_three s22): cut at
-  the clip check's line timings, each part converted to its speaker's locked voice, rejoined at the same times.
-  Checkpoint = `0a05632` (clean tree). Next: build + test (free), then Rida's go for 5 VC jobs (≈ $0.01-0.05).
+- **In-progress header (2026-10-08 late):** Rida LOVED the locked-voice singles (DEC-323). Per-speaker VC of the
+  exchanges done (`149992e` + this commit, $0.01): `stories/_stage0/vc/vc_compare_exchanges.mp4` sent; waiting on
+  Rida's listening. If yes: the demo re-assembled with every clip in its locked voice (free), then stage 2 (MCP v2,
+  `docs/plans/36-stage2-plan.md`, a `vc_clip` tool added). Tests 76 + 2 (venv). Not pushed.
 - **Previous header:** phase = DOCUMENT done; nothing running. Waiting on Rida: (1) watch the demo
   `stories/faille-d-amour/ep01/final.mp4` (host only; sent in chat), (2) listen to `stories/_stage0/vc/vc_compare.mp4`
   (the VC verdict decides whether a locked voice stays in the cast pack and whether stage 2 gets a `vc_line` tool),
