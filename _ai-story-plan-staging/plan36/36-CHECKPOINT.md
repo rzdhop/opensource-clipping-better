@@ -53,6 +53,8 @@ Renamed the same day: `fruitstory/` → **`showrunner/`**, image `ghcr.io/rzdhop
 
 **Update 2026-10-08 (ready for smoke):** `showrunner-video` = `8o50u2dipy57br` (L40S, its own key `RUNPOD_SHOWRUNNER_VIDEO_KEY`; both in `.env`, the runner defaults to them). Rida approved: Camille, the Gemini voices (locked: paloma Aoede 6.5 s, marie_jeanne Kore 6.4 s, rida Puck 4.7 s → `stories/_stage0/voices/`), and **~70-word character descriptions** (all four rewritten from the reference images: MJ's blazer is cream and she wears a watch). Preflight: all ok but Camille's keyframe, the three-speaker keyframe and Camille's voice (from a batch-a take). Both endpoints showed 3 throttled workers (GPU shortage in the datacenter).
 
+**Batch a verdicts (Rida, 2026-10-08):** single clips — take **s33** preferred across characters; exchanges — **s22** preferred ("s23" read as s22: exchanges ran s11/s22 only). Camille's voice locked from `camille_fr_s33` (first 4.0 s: 2.4 s of speech, trailing silence cut). Found: burned-in subtitles in 6/16 clips; every workflow samples at cfg 1.0, so the negative prompt is ignored — the positives now end on `CLEAN_FRAME` and never name text/subtitles/captions (test). Keyframes face the camera, so dialogue framing barely took: stage 2 makes keyframes in 3/4 view. Stage 0 spend ≈ $0.84. Next: `b` then `c` on Rida's go.
+
 Still missing (the human's side):
 1. **No HF token on this system** (`HF_TOKEN=` is empty in `.env`; an earlier note here wrongly read the anonymous
    check as "license not accepted"). Only `Lightricks/LTX-2.5` is gated; LTX-2.3, LTX-2.3-fp8 and the Comfy-Org

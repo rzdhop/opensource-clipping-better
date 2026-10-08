@@ -280,3 +280,13 @@ def test_single_speaker_prompts_use_dialogue_framing_not_the_lens():
             p = build(cid, "fr")
             assert "talks to someone just off-screen" in p and "never looking into it" in p
             assert "looks toward the camera" not in p
+
+
+def test_positive_prompts_never_name_text_or_subtitles():
+    # cfg 1.0 ignores the negative; naming captions in the positive primed burned-in subtitles (batch a)
+    prompts = [build(c, "fr") for c in M.CHARACTERS for build in (M.prompt_path_a, M.prompt_path_b, M.prompt_path_c)]
+    prompts += [build(k, "fr") for k in M.EXCHANGES for build in (M.prompt_exchange_a, M.prompt_exchange_b)]
+    for p in prompts:
+        low = p.lower()
+        assert "subtitle" not in low and "caption" not in low and "on-screen" not in low, p[-200:]
+    assert all(M.CLEAN_FRAME in p for p in prompts if not p.startswith("[VISUAL]"))

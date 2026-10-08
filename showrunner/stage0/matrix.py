@@ -188,6 +188,11 @@ def prompt_keyframe(char_id: str) -> str:
 
 # ------------------------------------------------------------------ prompt builders
 
+# LTX-2.5 distilled samples at cfg 1.0: the negative prompt is ignored, so a clean picture must be asked
+# for in the positive. Naming what is unwanted ("no subtitles") primed burned-in captions in 6/16 clips
+# of batch a (2026-10-08): the positive prompts never name text, subtitles or captions.
+CLEAN_FRAME = "One continuous, clean cinematic shot from the first frame to the last."
+
 # Rida, 2026-10-08: in an episode a character rarely speaks to the lens. The single-speaker tests use
 # the drama's real framing: talking to someone just off-screen, three-quarter view, eyeline past the lens.
 def dialogue_framing(name: str) -> str:
@@ -204,7 +209,7 @@ def prompt_path_a(char_id: str, lang: str, line: str | None = None) -> str:
             f"{c['voice']['en']}: \"{line}\" The mouth moves naturally with every word, a small head tilt, "
             f"a breath before and a beat of silence after the line. Medium close-up, the camera holds still on "
             f"the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet "
-            f"room tone, no music. No subtitles, no on-screen text, no black frames.")
+            f"room tone, no music. {CLEAN_FRAME}")
 
 
 def prompt_path_b(char_id: str, lang: str, setting: str | None = None) -> str:
@@ -215,7 +220,7 @@ def prompt_path_b(char_id: str, lang: str, setting: str | None = None) -> str:
             f"{LANGUAGE_NAME[lang]}, "
             f"lips in sync with every syllable, natural blinks and small head movements, expressive brows, "
             f"a beat of stillness after the last word. Medium close-up, the camera holds still on the speaker. "
-            f"No subtitles, no on-screen text, no black frames.")
+            f"{CLEAN_FRAME}")
 
 
 def prompt_path_c(char_id: str, lang: str, line: str | None = None) -> str:
@@ -238,7 +243,7 @@ def prompt_exchange_a(key: str, lang: str) -> str:
     return (f"Use the provided start image as the first frame. {exchange_medium(key)} {heads} Setting: {ex['setting']}. "
             f"They speak in turn, each one's mouth moving only on their own line, the other listening and "
             f"reacting: {turns} Medium two-shot, the camera holds still. Audio: two distinct voices close to "
-            f"the microphone, quiet room tone, no music. No subtitles, no on-screen text, no black frames.")
+            f"the microphone, quiet room tone, no music. {CLEAN_FRAME}")
 
 
 def prompt_exchange_b(key: str, lang: str) -> str:
@@ -248,5 +253,4 @@ def prompt_exchange_b(key: str, lang: str) -> str:
     return (f"Use the provided start image as the first frame. {exchange_medium(key)} {heads} Setting: {ex['setting']}. "
             f"The characters speak the lines that are heard, in {LANGUAGE_NAME[lang]}, in this order: {order}; "
             f"only the speaking character's mouth moves on each line, the others listen and react with "
-            f"their eyes and brows. Medium two-shot, the camera holds still. No subtitles, no on-screen text, "
-            f"no black frames.")
+            f"their eyes and brows. Medium two-shot, the camera holds still. {CLEAN_FRAME}")
