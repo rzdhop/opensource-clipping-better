@@ -134,3 +134,18 @@ def test_a_sheet_needs_a_title_a_head_and_a_voice():
 def test_master_heads_are_about_seventy_words():
     for cid, c in M.CHARACTERS.items():
         assert 65 <= P.words(c["head"]) <= 80, (cid, P.words(c["head"]))
+
+
+DEMO = os.path.join(ROOT, "stories", "faille-d-amour")
+
+
+@pytest.mark.skipif(not os.path.exists(DEMO), reason="the demo story")
+def test_the_demo_story_sheets_parse_and_hold_about_seventy_words():
+    s = store.Story.open(DEMO)
+    assert s.cast() == ["marie_jeanne", "paloma", "rida"]
+    for cid in s.cast():
+        c = P.character_from_sheet(s.sections(s.sheet(cid)))
+        assert 65 <= P.words(c["head"]) <= 80, cid
+        assert s.is_locked(s.sheet(cid))
+    shots = s.read_json(s.shots(1))["shots"]
+    assert all(s.approved_clip(1, sh["id"]) for sh in shots)

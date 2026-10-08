@@ -1,0 +1,209 @@
+{
+  "s01": {
+    "takes": [
+      {
+        "take": "v1",
+        "path": "ep01/clips/s01_v1.mp4",
+        "seed": 22,
+        "job": "b6f495d7-730e-4938-a763-cfe30ce078c5-e2",
+        "verdict": {
+          "state": "ok",
+          "matched": 1.0,
+          "lines": [
+            {
+              "text": "Pardon ! Je signe le contrat de l'année dans une heure !",
+              "words": 11,
+              "heard": 11,
+              "matched": 1.0,
+              "start_s": 0.0,
+              "end_s": 4.52,
+              "speaker": "marie_jeanne"
+            },
+            {
+              "text": "Et vous êtes en retard même sur le café ?",
+              "words": 9,
+              "heard": 9,
+              "matched": 1.0,
+              "start_s": 5.34,
+              "end_s": 7.46,
+              "speaker": "rida"
+            }
+          ],
+          "duration_s": 10.042,
+          "heard_text": "« Pardon ! Je signe le contrat de l 'année dans une heure ! » « Et vous êtes en retard même sur le café ? »",
+          "in_order": true,
+          "start_s": 0.0,
+          "end_s": 7.46,
+          "extra_after_s": 0.76
+        },
+        "approved": true,
+        "note": "stage 0 batch a, ex_two_fr_s22",
+        "at": "2026-10-08T20:40:36",
+        "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
+        "approved_at": "2026-10-08T20:40:36"
+      }
+    ]
+  },
+  "s02": {
+    "takes": [
+      {
+        "take": "v1",
+        "path": "ep01/clips/s02_v1.mp4",
+        "seed": 33,
+        "job": "d868bd41-8a82-4b40-95c9-ef1b9f3a6471-e2",
+        "verdict": {
+          "state": "ok",
+          "matched": 0.875,
+          "lines": [
+            {
+              "text": "Vaulta… t'as laissé la porte grande ouverte.",
+              "words": 8,
+              "heard": 7,
+              "matched": 0.875,
+              "start_s": 0.64,
+              "end_s": 2.6,
+              "speaker": "rida"
+            }
+          ],
+          "duration_s": 5.042,
+          "heard_text": "Volta, t 'as laissé la porte grande ouverte.",
+          "in_order": true,
+          "start_s": 0.64,
+          "end_s": 2.6,
+          "extra_after_s": 0.0
+        },
+        "approved": true,
+        "note": "stage 0 batch a, rida_fr_s33",
+        "at": "2026-10-08T20:40:36",
+        "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
+        "approved_at": "2026-10-08T20:40:36"
+      }
+    ]
+  },
+  "s03": {
+    "takes": [
+      {
+        "take": "v1",
+        "path": "ep01/clips/s03_v1.mp4",
+        "seed": 33,
+        "job": "f2cefcf4-c5a2-4963-a2b9-e50f097f7378-e1",
+        "verdict": {
+          "state": "ok",
+          "matched": 1.0,
+          "lines": [
+            {
+              "text": "Tu souris à ton téléphone. C'est qui, le kiwi ?",
+              "words": 10,
+              "heard": 10,
+              "matched": 1.0,
+              "start_s": 0.0,
+              "end_s": 3.94,
+              "speaker": "paloma"
+            }
+          ],
+          "duration_s": 5.042,
+          "heard_text": "Tu souris à ton téléphone. C 'est qui, le kiwi?",
+          "in_order": true,
+          "start_s": 0.0,
+          "end_s": 3.94,
+          "extra_after_s": 0.0
+        },
+        "approved": true,
+        "note": "stage 0 batch a, paloma_fr_s33",
+        "at": "2026-10-08T20:40:36",
+        "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
+        "approved_at": "2026-10-08T20:40:36"
+      }
+    ]
+  },
+  "s04": {
+    "takes": [
+      {
+        "take": "v1",
+        "path": "ep01/clips/s04_v1.mp4",
+        "seed": 22,
+        "job": "32bdc019-597a-41a4-8680-07cbe7665d28-e1",
+        "verdict": {
+          "state": "ok",
+          "matched": 1.0,
+          "lines": [
+            {
+              "text": "C'est qui, le kiwi ?",
+              "words": 5,
+              "heard": 5,
+              "matched": 1.0,
+              "start_s": 0.0,
+              "end_s": 2.3,
+              "speaker": "paloma"
+            },
+            {
+              "text": "Personne, Paloma !",
+              "words": 2,
+              "heard": 2,
+              "matched": 1.0,
+              "start_s": 3.92,
+              "end_s": 5.96,
+              "speaker": "marie_jeanne"
+            },
+            {
+              "text": "Personne ? Sympa.",
+              "words": 2,
+              "heard": 2,
+              "matched": 1.0,
+              "start_s": 6.88,
+              "end_s": 8.46,
+              "speaker": "rida"
+            }
+          ],
+          "duration_s": 10.042,
+          "heard_text": "C 'est qui le kiwi ? Personne, Paloma ! Personne, Sympa !",
+          "in_order": true,
+          "start_s": 0.0,
+          "end_s": 8.46,
+          "extra_after_s": 0.12
+        },
+        "approved": true,
+        "note": "stage 0 batch a, ex_three_fr_s22",
+        "at": "2026-10-08T20:40:36",
+        "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
+        "approved_at": "2026-10-08T20:40:36"
+      }
+    ]
+  },
+  "s05": {
+    "takes": [
+      {
+        "take": "v1",
+        "path": "ep01/clips/s05_v1.mp4",
+        "seed": 33,
+        "job": "d3fd885a-ebf8-4495-8362-41d2238915f0-e1",
+        "verdict": {
+          "state": "ok",
+          "matched": 1.0,
+          "lines": [
+            {
+              "text": "R… comme Rida ? Non. Non, non, non.",
+              "words": 7,
+              "heard": 7,
+              "matched": 1.0,
+              "start_s": 0.0,
+              "end_s": 4.2,
+              "speaker": "marie_jeanne"
+            }
+          ],
+          "duration_s": 5.042,
+          "heard_text": "R, comme Rida ? Non. Non, non, non.",
+          "in_order": true,
+          "start_s": 0.0,
+          "end_s": 4.2,
+          "extra_after_s": 0.0
+        },
+        "approved": true,
+        "note": "stage 0 batch a, marie_jeanne_fr_s33",
+        "at": "2026-10-08T20:40:36",
+        "approved_note": "Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)",
+        "approved_at": "2026-10-08T20:40:36"
+      }
+    ]
+  }
+}

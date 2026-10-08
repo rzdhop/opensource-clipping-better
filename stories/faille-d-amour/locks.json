@@ -1,0 +1,127 @@
+{
+  "locked": {
+    "02-cast/paloma/sheet.md": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "Rida, 2026-10-08: the ~70-word descriptions of stage 0"
+    },
+    "02-cast/paloma/full_body.png": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "the canonical image of productions/faille_damour"
+    },
+    "02-cast/marie_jeanne/sheet.md": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "Rida, 2026-10-08: the ~70-word descriptions of stage 0"
+    },
+    "02-cast/marie_jeanne/full_body.png": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "the canonical image of productions/faille_damour"
+    },
+    "02-cast/rida/sheet.md": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "Rida, 2026-10-08: the ~70-word descriptions of stage 0"
+    },
+    "02-cast/rida/full_body.png": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "the canonical image of productions/faille_damour"
+    },
+    "ep01/clips/s01_v1.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s01/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    "ep01/clips/s02_v1.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s02/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    "ep01/clips/s03_v1.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s03/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    "ep01/clips/s04_v1.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s04/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    "ep01/clips/s05_v1.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s05/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    }
+  },
+  "history": [
+    {
+      "action": "lock",
+      "path": "02-cast/paloma/sheet.md",
+      "at": "2026-10-08T20:40:36",
+      "note": "Rida, 2026-10-08: the ~70-word descriptions of stage 0"
+    },
+    {
+      "action": "lock",
+      "path": "02-cast/paloma/full_body.png",
+      "at": "2026-10-08T20:40:36",
+      "note": "the canonical image of productions/faille_damour"
+    },
+    {
+      "action": "lock",
+      "path": "02-cast/marie_jeanne/sheet.md",
+      "at": "2026-10-08T20:40:36",
+      "note": "Rida, 2026-10-08: the ~70-word descriptions of stage 0"
+    },
+    {
+      "action": "lock",
+      "path": "02-cast/marie_jeanne/full_body.png",
+      "at": "2026-10-08T20:40:36",
+      "note": "the canonical image of productions/faille_damour"
+    },
+    {
+      "action": "lock",
+      "path": "02-cast/rida/sheet.md",
+      "at": "2026-10-08T20:40:36",
+      "note": "Rida, 2026-10-08: the ~70-word descriptions of stage 0"
+    },
+    {
+      "action": "lock",
+      "path": "02-cast/rida/full_body.png",
+      "at": "2026-10-08T20:40:36",
+      "note": "the canonical image of productions/faille_damour"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s01_v1.mp4",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s01/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s02_v1.mp4",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s02/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s03_v1.mp4",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s03/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s04_v1.mp4",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s04/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    },
+    {
+      "action": "lock",
+      "path": "ep01/clips/s05_v1.mp4",
+      "at": "2026-10-08T20:40:36",
+      "note": "approved s05/v1: Rida, 2026-10-08: the preferred batch-a take (s33 singles, s22 exchanges)"
+    }
+  ]
+}

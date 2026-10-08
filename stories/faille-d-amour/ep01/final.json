@@ -1,0 +1,61 @@
+{
+  "final": "ep01/final.mp4",
+  "duration_s": 30.625,
+  "expected_s": 30.625,
+  "width": 1080,
+  "height": 1920,
+  "fps": 24.0,
+  "mean_db": -13.6,
+  "max_db": -0.8,
+  "subtitles": 9,
+  "sheet": "ep01/final_sheet.jpg",
+  "unsubtitled": [],
+  "segments": [
+    {
+      "shot": "s01",
+      "take": "v1",
+      "start": 0.0,
+      "seconds": 7.75,
+      "source_s": 10.042,
+      "has_audio": true,
+      "clip": "ep01/clips/s01_v1.mp4"
+    },
+    {
+      "shot": "s02",
+      "take": "v1",
+      "start": 7.75,
+      "seconds": 2.875,
+      "source_s": 5.042,
+      "has_audio": true,
+      "clip": "ep01/clips/s02_v1.mp4"
+    },
+    {
+      "shot": "s03",
+      "take": "v1",
+      "start": 10.625,
+      "seconds": 4.208333333333333,
+      "source_s": 5.042,
+      "has_audio": true,
+      "clip": "ep01/clips/s03_v1.mp4"
+    },
+    {
+      "shot": "s04",
+      "take": "v1",
+      "start": 14.833,
+      "seconds": 8.75,
+      "source_s": 10.042,
+      "has_audio": true,
+      "clip": "ep01/clips/s04_v1.mp4"
+    },
+    {
+      "shot": "s05",
+      "take": "v1",
+      "start": 23.583,
+      "seconds": 5.041666666666667,
+      "source_s": 5.042,
+      "has_audio": true,
+      "clip": "ep01/clips/s05_v1.mp4"
+    }
+  ],
+  "bgm": "assets/bgm/suspense/the_mountain-cinematic-mood-129193.mp3"
+}
