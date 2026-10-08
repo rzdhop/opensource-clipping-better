@@ -1,0 +1,24 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Dialog,Montserrat Black,74,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,6,2,2,80,80,330,1
+Style: Hook,Montserrat Black,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&H70000000,0,0,0,0,100,100,0,0,3,24,0,8,80,80,190,1
+Style: Card,Bebas Neue,120,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,2,0,1,6,3,5,60,60,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:04.81,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H4B4BFF&}MARIE-JEANNE\N{\fs74\c&HFFFFFF&}Pardon ! Je signe le contrat de l'année dans une heure !
+Dialogue: 0,0:00:05.14,0:00:07.71,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H4AC38B&}RIDA\N{\fs74\c&HFFFFFF&}Et vous êtes en retard même sur le café ?
+Dialogue: 0,0:00:08.39,0:00:10.60,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H4AC38B&}RIDA\N{\fs74\c&HFFFFFF&}Vaulta… t'as laissé la porte grande ouverte.
+Dialogue: 0,0:00:10.62,0:00:14.84,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H0098FF&}PALOMA\N{\fs74\c&HFFFFFF&}Tu souris à ton téléphone. C'est qui, le kiwi ?
+Dialogue: 0,0:00:14.88,0:00:17.40,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H0098FF&}PALOMA\N{\fs74\c&HFFFFFF&}C'est qui, le kiwi ?
+Dialogue: 0,0:00:18.82,0:00:21.10,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H4B4BFF&}MARIE-JEANNE\N{\fs74\c&HFFFFFF&}Personne, Paloma !
+Dialogue: 0,0:00:21.34,0:00:23.64,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H4AC38B&}RIDA\N{\fs74\c&HFFFFFF&}Personne ? Sympa.
+Dialogue: 0,0:00:24.13,0:00:28.16,Dialog,,0,0,0,,{\fad(80,80)}{\fs52\c&H4B4BFF&}MARIE-JEANNE\N{\fs74\c&HFFFFFF&}R… comme Rida ? Non. Non, non, non.
+Dialogue: 1,0:00:28.67,0:00:30.67,Card,,0,0,0,,Faille d'amour\NTeam Rida\Nou Team Marie-Jeanne ?\N{\c&H00D7FF&}Partie 2 demain

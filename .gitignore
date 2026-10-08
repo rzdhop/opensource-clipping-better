@@ -85,6 +85,9 @@ stories/**/*.mp4
 stories/**/*.wav
 stories/**/*.flac
 stories/**/*.mp3
+# ...but a story's subtitles and contact sheets are text and images: tracked (the repo ignores *.ass and *.jpg)
+!stories/**/*.ass
+!stories/**/*.jpg
 productions/*/ep*/out/
 productions/*/ep*/clips/
 productions/**/__pycache__/
