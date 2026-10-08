@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 
+from showrunner import prompts as P
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PRODUCTION = os.path.join(REPO_ROOT, "productions", "faille_damour")
 KF = os.path.join(PRODUCTION, "ep01", "kf")
@@ -178,38 +180,28 @@ def exchange_negative(key: str) -> str:
     return _exchange_universe(key)["negative"]
 
 
+def _char(char_id: str) -> dict:
+    c = CHARACTERS[char_id]
+    return P.character(c["name"], c["head"], c["voice"]["en"])
+
+
 def prompt_keyframe(char_id: str) -> str:
     """The start image of a character that has none yet (text to image on the images endpoint)."""
-    c = CHARACTERS[char_id]
-    return (f"{medium(char_id)} {c['head']}. Setting: {c['setting']}. Medium close shot from the waist up, "
-            f"{c['name']} faces the camera, mouth closed, a tense and composed expression, soft cinematic light, "
-            f"vertical 9:16 framing, only this one character, nobody else.")
+    return P.keyframe(medium(char_id), [_char(char_id)], CHARACTERS[char_id]["setting"])
 
 
 # ------------------------------------------------------------------ prompt builders
 
-# LTX-2.5 distilled samples at cfg 1.0: the negative prompt is ignored, so a clean picture must be asked
-# for in the positive. Naming what is unwanted ("no subtitles") primed burned-in captions in 6/16 clips
-# of batch a (2026-10-08): the positive prompts never name text, subtitles or captions.
-CLEAN_FRAME = "One continuous, clean cinematic shot from the first frame to the last."
-
-# Rida, 2026-10-08: in an episode a character rarely speaks to the lens. The single-speaker tests use
-# the drama's real framing: talking to someone just off-screen, three-quarter view, eyeline past the lens.
-def dialogue_framing(name: str) -> str:
-    return (f"{name} talks to someone just off-screen beside the camera, in three-quarter view, the eyeline "
-            f"passing just past the lens and never looking into it, as in a conversation scene of a drama")
+# The prompt text lives in showrunner/prompts/*.md (stage 1.2); these names stay for the stage-0 runner.
+CLEAN_FRAME = P.CLEAN_FRAME
+dialogue_framing = P.dialogue_framing
 
 
 def prompt_path_a(char_id: str, lang: str, line: str | None = None) -> str:
-    """Path (a): LTX-2.5 I2V, the voice described and the line quoted in the prompt."""
-    c = CHARACTERS[char_id]
+    """Path (a): LTX-2.5 I2V, the voice described and the line quoted in the prompt (prompts/clip_dialogue.md)."""
     line = line or LINES[char_id][lang]
-    return (f"Use the provided start image as the first frame. {medium(char_id)} {c['head']}. Setting: {c['setting']}. "
-            f"{dialogue_framing(c['name'])}, and says in {LANGUAGE_NAME[lang]}, with the voice of "
-            f"{c['voice']['en']}: \"{line}\" The mouth moves naturally with every word, a small head tilt, "
-            f"a breath before and a beat of silence after the line. Medium close-up, the camera holds still on "
-            f"the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet "
-            f"room tone, no music. {CLEAN_FRAME}")
+    return P.dialogue_clip(medium(char_id), {char_id: _char(char_id)}, CHARACTERS[char_id]["setting"],
+                           [(char_id, line)], language=lang)
 
 
 def prompt_path_b(char_id: str, lang: str, setting: str | None = None) -> str:
@@ -236,14 +228,10 @@ def prompt_path_c(char_id: str, lang: str, line: str | None = None) -> str:
 
 
 def prompt_exchange_a(key: str, lang: str) -> str:
+    """Path (a), 2-3 speakers in turn (prompts/clip_exchange.md)."""
     ex = EXCHANGES[key]
-    heads = " ".join(CHARACTERS[s]["head"] + "." for s in ex["speakers"])
-    turns = " ".join(f"{CHARACTERS[who]['name']} says in {LANGUAGE_NAME[lang]}, with the voice of "
-                     f"{CHARACTERS[who]['voice']['en']}: \"{line}\"" for who, line in ex["lines"][lang])
-    return (f"Use the provided start image as the first frame. {exchange_medium(key)} {heads} Setting: {ex['setting']}. "
-            f"They speak in turn, each one's mouth moving only on their own line, the other listening and "
-            f"reacting: {turns} Medium two-shot, the camera holds still. Audio: two distinct voices close to "
-            f"the microphone, quiet room tone, no music. {CLEAN_FRAME}")
+    return P.dialogue_clip(exchange_medium(key), {s: _char(s) for s in ex["speakers"]}, ex["setting"],
+                           ex["lines"][lang], language=lang, in_frame=ex["speakers"])
 
 
 def prompt_exchange_b(key: str, lang: str) -> str:
