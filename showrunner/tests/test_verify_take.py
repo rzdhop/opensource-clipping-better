@@ -104,3 +104,30 @@ CLIP = os.path.join(ROOT, "stories", "_stage0", "a", "paloma_fr_s33.mp4")
                     reason="real model: SHOWRUNNER_STT_TESTS=1, faster-whisper and the stage-0 clip (≈ 45 s)")
 def test_real_model_hears_the_batch_a_take():
     assert V.verify_take(CLIP, PALOMA_LINE, "fr")["state"] == "ok"
+
+
+def test_speaker_parts_tile_the_clip_and_cut_in_the_pauses():
+    verdict = {"lines": [{"speaker": "paloma", "start_s": 0.0, "end_s": 2.3},
+                         {"speaker": "marie_jeanne", "start_s": 3.92, "end_s": 5.96},
+                         {"speaker": "rida", "start_s": 6.88, "end_s": 8.46}]}
+    parts = V.speaker_parts(verdict, 10.042)
+    assert parts == [("paloma", 0.0, 3.11), ("marie_jeanne", 3.11, 6.42), ("rida", 6.42, 10.042)]
+    with pytest.raises(ValueError, match="not heard"):
+        V.speaker_parts({"lines": [{"speaker": "a", "start_s": 0.0, "end_s": 1.0},
+                                   {"speaker": "b", "start_s": None, "end_s": None}]}, 5.0)
+    with pytest.raises(ValueError, match="overlap"):
+        V.speaker_parts({"lines": [{"speaker": "a", "start_s": 0.0, "end_s": 2.0},
+                                   {"speaker": "b", "start_s": 1.5, "end_s": 3.0}]}, 5.0)
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_join_parts_puts_every_part_back_at_its_length(tmp_path):
+    paths = []
+    for k, (secs, freq) in enumerate(((1.23, 220), (2.0, 440))):     # the second comes back 40 ms too long
+        p = tmp_path / f"p{k}.flac"
+        subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i",
+                        f"sine=frequency={freq}:duration={secs + (0.04 if k else -0.1)}", "-ar", "24000", str(p)],
+                       check=True, capture_output=True)
+        paths.append((str(p), secs))
+    out = V.join_parts(paths, str(tmp_path / "joined.wav"))
+    assert V.probe(out)["duration_s"] == pytest.approx(3.23, abs=0.002)

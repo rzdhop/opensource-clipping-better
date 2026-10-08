@@ -24,6 +24,9 @@ Order of operations (each command is one GPU batch, submitted in parallel, waite
     python -m showrunner.stage0.run_stage0 vc        --video-endpoint <id> [--take 33] [--dry-run]
         stage 1.0 (A-221): one path (a) take per character re-voiced with its locked voice (FL_ChatterboxVC),
         timing kept, remuxed on the original picture -> stories/_stage0/vc/<char>_s<take>.mp4
+    python -m showrunner.stage0.run_stage0 vc        --exchanges [--exchange-take 22] [--dry-run]   (run with .venv/bin/python)
+        the 2- and 3-speaker clips: cut at the clip check's line timings, each line converted to its speaker's
+        locked voice, rejoined at the same times -> stories/_stage0/vc/ex_<two|three>_fr_s22.mp4
     python -m showrunner.stage0.run_stage0 verify    --clip stories/_stage0/a/paloma_fr_s33.mp4 --line "paloma: Tu souris ..."
         free: the clip check (speech-to-text on this CPU, aligned to the lines); run it with .venv/bin/python
     python -m showrunner.stage0.run_stage0 review
@@ -391,7 +394,38 @@ def remux(clip: str, audio: str, dest: str) -> str:
     return dest
 
 
+def _vc_exchange_jobs(take: int, lang: str, *, verdicts: dict | None = None) -> list:
+    """Per-speaker voice conversion of the exchanges: ``[(clip, stem, parts)]`` where *parts* is
+    ``[(stem, template, values, files, seconds)]``, one per line, cut by the clip check's timings
+    (:func:`verify.speaker_parts`). *verdicts* ``{clip stem: verify_take verdict}`` skips the check (tests)."""
+    out = []
+    for key, ex in M.EXCHANGES.items():
+        stem = f"ex_{key}_{lang}_s{take}"
+        clip = os.path.join(OUT, "a", f"{stem}.mp4")
+        speakers = [who for who, _ in ex["lines"][lang]]
+        missing = [c for c in dict.fromkeys(speakers) if not os.path.exists(_voice_path(c))]
+        if not os.path.exists(clip) or missing:
+            print(f"skip {stem}: needs a/{stem}.mp4 and the locked voices of {', '.join(missing) or '-'}")
+            continue
+        verdict = (verdicts or {}).get(stem) or verify.verify_take(clip, ex["lines"][lang], lang)
+        try:
+            cuts = verify.speaker_parts(verdict, verdict.get("duration_s") or verify.probe(clip)["duration_s"])
+        except ValueError as exc:
+            print(f"skip {stem}: {exc}")
+            continue
+        parts = []
+        for k, (who, start, end) in enumerate(cuts):
+            pstem = f"{stem}_l{k}_{who}_vc"
+            parts.append((pstem, "vc_chatterbox", {"seed": 0},
+                          {"input": os.path.join(VC_DIR, f"{stem}_l{k}_{who}_in.wav"), "target_voice": _voice_path(who)},
+                          (start, end)))
+        out.append((clip, stem, parts))
+    return out
+
+
 def cmd_vc(args) -> None:
+    if args.exchanges:
+        return _cmd_vc_exchanges(args)
     jobs = _vc_jobs(args.take, args.lang)
     if not jobs:
         sys.exit("nothing to convert")
@@ -414,6 +448,36 @@ def cmd_vc(args) -> None:
         dest = remux(clips[stem], src, os.path.join(VC_DIR, f"{stem[:-3]}.mp4"))
         print(f"listen: {dest}  (original: {clips[stem]})")
 
+
+def _cmd_vc_exchanges(args) -> None:
+    plans = _vc_exchange_jobs(args.exchange_take, args.lang)
+    count = sum(len(p) for _, _, p in plans)
+    if not count:
+        sys.exit("nothing to convert")
+    print(f"{count} voice-conversion jobs (one per line) for {len(plans)} exchanges on {args.video_endpoint}: "
+          f"≈ $0.01 warm, up to ≈ $0.05 cold; the queue is not billed")
+    for clip, stem, parts in plans:
+        print(f"  {stem}: " + " | ".join(f"{p[0].split('_l')[1][:-3]} {p[4][0]:.2f}-{p[4][1]:.2f} s" for p in parts))
+    if args.dry_run:
+        return
+    os.makedirs(VC_DIR, exist_ok=True)
+    for clip, _, parts in plans:
+        for _, _, _, files, (start, end) in parts:
+            verify.extract_audio(clip, files["input"], start_s=start, max_s=round(end - start, 3))
+    jobs = [p[:4] for _, _, parts in plans for p in parts]
+    results = {stem: paths for stem, paths, _, _ in run_batch(_video_endpoint(args), jobs, VC_DIR)}
+    for clip, stem, parts in plans:
+        back = []
+        for pstem, _, _, _, (start, end) in parts:
+            src = next((p for p in results.get(pstem, []) if p.endswith((".flac", ".wav", ".mp3"))), None)
+            if not src:
+                print(f"no audio back for {pstem}: {stem} not rebuilt")
+                break
+            back.append((src, end - start))
+        else:
+            joined = verify.join_parts(back, os.path.join(VC_DIR, f"{stem}_vc.wav"))
+            dest = remux(clip, joined, os.path.join(VC_DIR, f"{stem}.mp4"))
+            print(f"listen: {dest}  (original: {clip})")
 
 def cmd_verify(args) -> None:
     """The clip check on one clip (free, this host's CPU): ``--line "who: text"`` once per scripted line."""
@@ -482,6 +546,9 @@ def main() -> None:
     ap.add_argument("--max-s", type=float, default=10.0, help="voice: keep at most this many seconds")
     ap.add_argument("--take", type=int, default=33, help="vc: the seed of the path (a) take to convert")
     ap.add_argument("--dry-run", action="store_true", help="vc: list the jobs, submit nothing")
+    ap.add_argument("--exchanges", action="store_true",
+                    help="vc: the multi-speaker clips, each line converted to its own speaker's locked voice")
+    ap.add_argument("--exchange-take", type=int, default=22, help="vc --exchanges: the seed of the exchange take")
     ap.add_argument("--clip", help="verify: the clip to check")
     ap.add_argument("--line", action="append", help="verify: 'who: text', once per scripted line, in order")
     args = ap.parse_args()

@@ -242,3 +242,39 @@ def verify_take(clip: str, lines: list, language: str, *, words: list | None = N
     elif verdict["end_s"] > duration_s - END_MARGIN_S + 1e-9:
         verdict["state"] = "late"
     return verdict
+
+
+# ------------------------------------------------------------------ per-speaker parts (multi-speaker voice conversion)
+
+def speaker_parts(verdict: dict, duration_s: float) -> list:
+    """``[(speaker, start_s, end_s)]`` tiling the whole clip, one part per scripted line, cut in the middle
+    of the pause between two lines (so a part never clips a word and the parts rejoin to the same length).
+    ``ValueError`` when a line was not heard or the lines overlap: such a take cannot be split by speaker."""
+    lines = verdict.get("lines") or []
+    if not lines:
+        raise ValueError("no lines in the verdict")
+    missing = [r.get("speaker", "?") for r in lines if r.get("start_s") is None]
+    if missing:
+        raise ValueError(f"line(s) of {', '.join(missing)} not heard: cannot split this take by speaker")
+    for a, b in zip(lines, lines[1:]):
+        if b["start_s"] < a["end_s"]:
+            raise ValueError(f"{a['speaker']} and {b['speaker']} overlap ({a['end_s']} > {b['start_s']})")
+    cuts = [0.0] + [round((a["end_s"] + b["start_s"]) / 2, 3) for a, b in zip(lines, lines[1:])] + [float(duration_s)]
+    return [(r["speaker"], cuts[k], cuts[k + 1]) for k, r in enumerate(lines)]
+
+
+def join_parts(parts: list, dest: str, *, sample_rate: int = 24000) -> str:
+    """Join ``[(path, seconds)]`` back to back, each padded or trimmed to exactly *seconds* (a converted
+    part can come back a few ms longer), so every line lands where it was in the clip."""
+    inputs, filters = [], []
+    for k, (path, seconds) in enumerate(parts):
+        inputs += ["-i", path]
+        filters.append(f"[{k}:a]aresample={sample_rate},aformat=channel_layouts=mono,apad,"
+                       f"atrim=duration={seconds:.4f},asetpts=PTS-STARTPTS[p{k}]")
+    chain = "".join(f"[p{k}]" for k in range(len(parts)))
+    graph = ";".join(filters) + f";{chain}concat=n={len(parts)}:v=0:a=1[out]"
+    out = _run(["ffmpeg", "-hide_banner", "-y", *inputs, "-filter_complex", graph, "-map", "[out]",
+                "-ar", str(sample_rate), "-ac", "1", "-acodec", "pcm_s16le", dest])
+    if out.returncode:
+        raise RuntimeError(f"join failed: {out.stderr.strip()[-300:]}")
+    return dest

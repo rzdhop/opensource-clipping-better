@@ -470,3 +470,31 @@ def test_nothing_in_showrunner_imports_clipping():
                     if line.lstrip().startswith(("import clipping", "from clipping")):
                         offenders.append(f"{os.path.relpath(path, root)}:{k}")
     assert offenders == []
+
+
+def test_vc_exchanges_convert_each_line_to_its_own_speaker(tmp_path, monkeypatch):
+    from showrunner.stage0 import run_stage0 as R
+    out = tmp_path / "_stage0"
+    (out / "a").mkdir(parents=True)
+    (out / "voices").mkdir()
+    for c in M.CHARACTERS:
+        (out / "voices" / f"{c}.wav").write_bytes(b"RIFF")
+    for key in ("two", "three"):
+        (out / "a" / f"ex_{key}_fr_s22.mp4").write_bytes(b"mp4")
+    monkeypatch.setattr(R, "OUT", str(out))
+    monkeypatch.setattr(R, "VOICES", str(out / "voices"))
+    monkeypatch.setattr(R, "VC_DIR", str(out / "vc"))
+    verdicts = {
+        "ex_two_fr_s22": {"duration_s": 10.042, "lines": [{"speaker": "marie_jeanne", "start_s": 0.0, "end_s": 4.52},
+                                                          {"speaker": "rida", "start_s": 5.34, "end_s": 7.46}]},
+        "ex_three_fr_s22": {"duration_s": 10.042, "lines": [{"speaker": "paloma", "start_s": 0.0, "end_s": 2.3},
+                                                            {"speaker": "marie_jeanne", "start_s": None, "end_s": None},
+                                                            {"speaker": "rida", "start_s": 6.88, "end_s": 8.46}]},
+    }
+    plans = R._vc_exchange_jobs(22, "fr", verdicts=verdicts)
+    assert [stem for _, stem, _ in plans] == ["ex_two_fr_s22"]          # a line not heard: that take is skipped
+    parts = plans[0][2]
+    assert [(p[0], p[4]) for p in parts] == [("ex_two_fr_s22_l0_marie_jeanne_vc", (0.0, 4.93)),
+                                             ("ex_two_fr_s22_l1_rida_vc", (4.93, 10.042))]
+    assert parts[0][3]["target_voice"].endswith("voices/marie_jeanne.wav")
+    assert parts[1][3]["target_voice"].endswith("voices/rida.wav") and parts[1][1] == "vc_chatterbox"
