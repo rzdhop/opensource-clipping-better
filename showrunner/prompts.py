@@ -28,13 +28,25 @@ UNWANTED_WORDS = ("subtitle", "caption", "on-screen text")
 LANGUAGE_NAME = {"fr": "French", "en": "English"}
 MAX_SPEAKERS = 3  # D6/D7: 1-3 characters in a clip
 
-# The keyframe's framing. "faces_camera" is the stage-0 wording; "three_quarter" is A-222 (a hypothesis
-# to validate at the first real episode), offered, not the default.
+# The keyframe's framing. "faces_camera" is the stage-0 wording and the default. "three_quarter" is A-222,
+# a hypothesis: its first wording ("turned toward someone just off-screen beside the camera") drew that
+# someone, a stray human at the frame's edge (smoke, 2026-10-08). A framing names nobody but the characters
+# in frame (test); this one is checked once on the GPU before a shot relies on it.
 KEYFRAME_FRAMINGS = {
     "faces_camera": "{name} faces the camera",
-    "three_quarter": "{name} in three-quarter view, turned toward someone just off-screen beside the camera",
+    "three_quarter": "{name} with the head turned three-quarters to the right, eyes looking past the right edge of the frame",
     "together": "{names} stand close together, facing each other mid-conversation",
 }
+# Words a keyframe framing never contains (whole words): each one invites the image model to draw a
+# person who is not in the shot. ("each other" between the characters in frame is fine.)
+FRAMING_FORBIDDEN = ("someone", "somebody", "anyone", "person", "people", "off-screen", "offscreen", "another",
+                     "stranger", "crowd")
+
+
+def framing_intruders(text: str) -> list:
+    """The :data:`FRAMING_FORBIDDEN` words in *text* (whole words, any case)."""
+    low = text.lower()
+    return [w for w in FRAMING_FORBIDDEN if re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", low)]
 DEFAULT_EXPRESSION = "a tense and composed expression"
 WHO = {1: "only this one character, nobody else", 2: "only these two characters, nobody else",
        3: "only these three characters, nobody else"}
@@ -172,6 +184,11 @@ def keyframe(medium: str, chars: list, setting: str, *, framing: str = "faces_ca
     heads = " ".join(c["head"] + "." for c in chars)
     return render("keyframe", medium=medium, heads=heads, setting=setting, framing=framed, expression=expression,
                   who=WHO[len(chars)])
+
+
+def full_body(medium: str, char: dict) -> str:
+    """The canonical cast image (cast step 1), sent at :data:`CAST_IMAGE_SIZE`."""
+    return render("full_body", medium=medium, head=char["head"])
 
 
 def turnaround(medium: str, char: dict) -> str:

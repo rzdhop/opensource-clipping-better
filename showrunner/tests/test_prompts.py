@@ -98,6 +98,7 @@ def test_no_rendered_prompt_names_what_is_unwanted():
         P.keyframe(medium, [c], "an office"),
         P.keyframe(medium, [c], "an office", framing="three_quarter"),
         P.keyframe(medium, [c, c, c], "an office"),
+        P.full_body(medium, c),
         P.turnaround(medium, c),
         P.emotions(medium, c),
     ]
@@ -112,14 +113,37 @@ def test_no_rendered_prompt_names_what_is_unwanted():
 def test_keyframe_framings():
     a, b = P.character("Ana", "Ana, a pear woman", "v"), P.character("Bo", "Bo, a plum man", "v")
     assert "Ana faces the camera" in P.keyframe("M.", [a], "a café")
-    assert "Ana in three-quarter view, turned toward someone just off-screen" in \
-        P.keyframe("M.", [a], "a café", framing="three_quarter")
+    three = P.keyframe("M.", [a], "a café", framing="three_quarter")
+    assert "Ana with the head turned three-quarters to the right" in three
     two = P.keyframe("M.", [a, b], "a café")
     assert "Ana and Bo stand close together" in two and "only these two characters" in two
     with pytest.raises(P.PromptError):
         P.keyframe("M.", [a], "a café", framing="dutch_angle")
     with pytest.raises(P.PromptError):
         P.keyframe("M.", [], "a café")
+
+
+def test_no_keyframe_framing_invites_another_person():
+    """A-222: "turned toward someone just off-screen" drew that someone (a stray human, smoke 2026-10-08)."""
+    for key, wording in P.KEYFRAME_FRAMINGS.items():
+        assert P.framing_intruders(wording) == [], key
+    assert P.framing_intruders("turned toward someone just off-screen beside the camera") == ["someone", "off-screen"]
+    assert P.framing_intruders("facing each other mid-conversation") == []
+    a, b, c = (P.character(n, f"{n}, a test character", "v") for n in ("Ana", "Bo", "Cy"))
+    for chars in ([a], [a, b], [a, b, c]):
+        for framing in P.KEYFRAME_FRAMINGS:
+            assert P.framing_intruders(P.keyframe("M.", chars, "a café", framing=framing)) == []
+
+
+def test_full_body_is_the_whole_figure_on_grey_and_only_this_character():
+    c = P.character("Ana", "Ana, a pear woman: a pear head", "v")
+    got = P.full_body("A 3D cartoon.", c)
+    assert got.startswith("A 3D cartoon. Ana, a pear woman: a pear head. A full-body character reference")
+    for part in ("from head to feet", "light-grey background", "flat even studio light",
+                 "only this one character, nobody else"):
+        assert part in got
+    assert P.placeholders("full_body") == ["head", "medium"]
+    assert P.CAST_IMAGE_SIZE == (832, 1216)
 
 
 def test_a_sheet_needs_a_title_a_head_and_a_voice():
