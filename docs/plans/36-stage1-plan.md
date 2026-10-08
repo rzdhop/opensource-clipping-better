@@ -1,6 +1,6 @@
 # Plan 36 — Stage 1: the story store and the toolbox (proposed 2026-10-08, to approve next session)
 
-Status: **PROPOSED, not approved.** Four questions (§5) block the start; ask them first.
+Status: **DONE 2026-10-08** (approved with the 4 recommended answers; see `36-CHECKPOINT.md`).
 Context to read before this file: `docs/plans/36-CHECKPOINT.md` (top section), `docs/plans/36-rebuild-from-scratch-plan.md`
 §2.1 (layout), §2.2 (the six steps), §7 (D1–D8, D7 = the voice path).
 

@@ -1,21 +1,27 @@
-## CURRENT STATE — plan 36 STAGE 1 in progress (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
+## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
 
-- **In-progress header:** phase = IMPLEMENT; current stage = 1.0 (voice-conversion test); next action = build the
-  `vc_chatterbox` template + `run_stage0 vc`, then ask Rida's go for 4 jobs (≈ $0.05–0.20) on `showrunner-video`.
-  Plan file: `/home/ubuntu/.claude/plans/pasted-content-id-e9ca-continue-plan-zesty-bonbon.md` (approved by Rida);
-  source plan `docs/plans/36-stage1-plan.md`. Open questions: none blocking.
-- **Checkpoint commit:** `6c8ec7a` (= origin/main, clean tree; untracked left as is: `reports/`, `research_notes/`, `FETCH_HEAD`).
-- **Tier-1 baseline:** `python -m pytest showrunner/tests -q` = 29 passed at `6c8ec7a`.
-- **Rida's answers to the 4 stage-1 questions (2026-10-08):** Q1 the clip check = faster-whisper on this host's CPU ·
-  Q2 the VC test now (stage 1.0) · Q3 stories/: text + images in git, clips and voice wavs out · Q4 the demo story
-  reuses the stage-0 material.
-- **Measured (free):** faster-whisper 1.2.1 in `.venv`, `large-v3` cached; one 5 s clip = 22 s load + 22 s transcription
-  on this ARM CPU (int8); the venv's `av` 19.0.1 breaks faster-whisper's own decoder → decode with ffmpeg.
-- **Regression contract (stage 1):** the live app, its endpoints (`comfy-video`, `comfy-images`) and `clipping/aistory`
-  untouched — no test (by construction: no file outside `showrunner/`, `stories/`, docs, `.gitignore` is edited);
-  the stage-0 runner keeps working — `showrunner/tests/test_stage0_offline.py` (29); the batch-a prompts stay
-  byte-identical except `CLEAN_FRAME` — golden test (stage 1.2); nothing in `showrunner/` imports `clipping` — test
-  (stage 1.3); only `showrunner-video` is used for GPU work (1.0) — `test_video_jobs_use_the_showrunner_video_key`.
+- **In-progress header:** phase = DOCUMENT done; nothing running. Waiting on Rida: (1) watch the demo
+  `stories/faille-d-amour/ep01/final.mp4` (host only; sent in chat), (2) listen to `stories/_stage0/vc/vc_compare.mp4`
+  (the VC verdict decides whether a locked voice stays in the cast pack and whether stage 2 gets a `vc_line` tool),
+  (3) answer the 3 questions of `docs/plans/36-stage2-plan.md` §4 (PROPOSED). Next action: stage 2 on approval.
+- **Commits:** checkpoint `4bb7b05` (base `6c8ec7a`) · 1.0 `c5c67ed` · 1.1 `05b123c` · 1.2 `2a92c17` · 1.3 `5d136ec` ·
+  1.4 `b8d1abe` · 1.5 `b145493` · 1.6 `b05a16a` · this close-out. Not pushed.
+- **Tier 1:** `python3 -m pytest showrunner/tests -o addopts="" -q` = 73 passed, 2 skipped (numpy/whisper absent from
+  the system python); the 2 run green in the venv: `SHOWRUNNER_STT_TESTS=1 PYTHONPATH=<scratch pytest> .venv/bin/python
+  -m pytest showrunner/tests/test_verify_take.py` (the venv itself has no pytest and is not modified: the live MCP runs
+  from it). The CI suite (`tests/`) is untouched by stage 1 (no file under `tests/`, `clipping/`, `web/`,
+  `mcp_server/` edited). **Tier 2:** no web route changed; the stage's live check is Rida's watch of the demo.
+  **Tier 3:** test_store.py (7), test_prompts.py (18 incl. the 10-prompt golden), test_verify_take.py (9),
+  test_assemble.py (5), +7 in test_stage0_offline.py.
+- **Spend:** stage 1 = $0.01 (VC test, 27 GPU-s); plan 36 total ≈ $2.31.
+- **Regression contract (stage 1) — intact:** the live app, its endpoints and `clipping/aistory` untouched (no file
+  there edited); the stage-0 runner — test_stage0_offline (29 → 36), its 36 prompts byte-identical (snapshot diff);
+  the batch-a golden — test_prompts; no `clipping` import — test_nothing_in_showrunner_imports_clipping; only
+  `showrunner-video` used for GPU — test_video_jobs_use_the_showrunner_video_key.
+- **Found, not fixed (own tasks):** the venv's `av` 19.0.1 vs the lockfile's 17.1.0 breaks faster-whisper's decoder
+  (showrunner decodes with ffmpeg; the app's own Whisper path may be hit); the clips of `stories/` have no automated
+  backup yet (DEC-322).
+- **Untracked, left as is:** `reports/`, `research_notes/`, `FETCH_HEAD`.
 
 ## CURRENT STATE — plan 36 (`showrunner/`): stage 0 DONE, D7 = path (a) LTX-2.5 joint picture+voice, multi-speaker preferred; next = stage 1 after Rida's answers (2026-10-08 evening)
 
