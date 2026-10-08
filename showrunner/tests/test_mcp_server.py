@@ -164,3 +164,83 @@ async def test_the_connector_flow_logs_in_with_the_token_and_keeps_its_own_state
     state = tmp_path / "outputs" / "showrunner-mcp" / "oauth.json"
     assert cid in json.load(open(state, encoding="utf-8"))["clients"]
     assert oct(os.stat(state).st_mode)[-3:] == "600"
+
+
+# ------------------------------------------------------------------ story tools (2.1)
+
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+
+FFMPEG = shutil.which("ffmpeg") is not None
+
+
+def make_story(tmp_path):
+    backend = make_backend(tmp_path)
+    server = S.build_server(backend)
+    made = payload(call(server, "story_create", title="Été à Paris", language="fr", universe_name="Cartoon humans"))
+    return backend, server, made["slug"]
+
+
+def test_story_create_list_read_write_and_refusals(tmp_path):
+    backend, server, slug = make_story(tmp_path)
+    assert slug == "ete-a-paris"
+    listed = payload(call(server, "story_list"))
+    assert [r["slug"] for r in listed] == ["ete-a-paris"] and listed[0]["language"] == "fr"
+    tree = payload(call(server, "store_read", story=slug))
+    assert {"path": "01-universe.md", "locked": False} in tree["files"]
+    w = call(server, "store_write", story=slug, path="02-cast/ana/sheet.md", text="# Ana\n\n## Head\nAna, a pear woman\n")
+    assert not w.is_error
+    assert "Ana, a pear woman" in payload(call(server, "store_read", story=slug, path="02-cast/ana/sheet.md"))["text"]
+    for bad in ({"path": "../escape.md"}, {"path": "/etc/passwd.md"}, {"path": "02-cast/ana/x.png"}):
+        assert call(server, "store_write", story=slug, text="x", **bad).is_error
+    assert "not valid JSON" in call(server, "store_write", story=slug, path="ep01/shots.json", text="{oops").content[0].text
+    assert call(server, "store_read", story="../stories", path="00-brief.md").is_error
+    assert call(server, "store_read", story="_stage0").is_error
+
+
+def test_lock_refuses_writes_until_an_unlock_with_a_reason(tmp_path):
+    backend, server, slug = make_story(tmp_path)
+    call(server, "store_write", story=slug, path="02-cast/ana/sheet.md", text="v1")
+    assert not call(server, "store_lock", story=slug, path="02-cast/ana/sheet.md", note="Rida: ok").is_error
+    refused = call(server, "store_write", story=slug, path="02-cast/ana/sheet.md", text="v2")
+    assert refused.is_error and "locked" in refused.content[0].text
+    assert call(server, "store_unlock", story=slug, path="02-cast/ana/sheet.md", reason="").is_error
+    assert not call(server, "store_unlock", story=slug, path="02-cast/ana/sheet.md", reason="new outfit").is_error
+    assert not call(server, "store_write", story=slug, path="02-cast/ana/sheet.md", text="v2").is_error
+
+
+def test_a_link_out_of_the_story_is_refused(tmp_path):
+    backend, server, slug = make_story(tmp_path)
+    secret = tmp_path / "secret.md"
+    secret.write_text("nope")
+    os.symlink(secret, tmp_path / "stories" / slug / "link.md")
+    got = call(server, "store_read", story=slug, path="link.md")
+    assert got.is_error and "leaves the story" in got.content[0].text
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_view_file_shows_images_and_clips_and_file_download_returns_the_bytes(tmp_path):
+    backend, server, slug = make_story(tmp_path)
+    root = tmp_path / "stories" / slug
+    (root / "02-cast" / "ana").mkdir(parents=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=orange:s=832x1216", "-frames:v", "1",
+                    str(root / "02-cast" / "ana" / "full_body.png")], check=True, capture_output=True)
+    (root / "ep01" / "clips").mkdir(parents=True)
+    clip = root / "ep01" / "clips" / "s01_v1.mp4"
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "testsrc=s=704x1280:r=24:d=2", "-f", "lavfi",
+                    "-i", "sine=frequency=300:duration=2", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+                    "-shortest", str(clip)], check=True, capture_output=True)
+    img = call(server, "view_file", story=slug, path="02-cast/ana/full_body.png", max_px=256)
+    assert type(img.content[0]).__name__ == "ImageContent" and img.content[0].mime_type == "image/jpeg"
+    vid = call(server, "view_file", story=slug, path="ep01/clips/s01_v1.mp4")
+    assert type(vid.content[0]).__name__ == "ImageContent"
+    assert json.loads(vid.content[1].text)["has_audio"] is True
+    assert call(server, "view_file", story=slug, path="00-brief.md").is_error
+    dl = call(server, "file_download", story=slug, path="ep01/clips/s01_v1.mp4")
+    res = dl.content[0].resource
+    assert res.mime_type == "video/mp4" and base64.b64decode(res.blob) == clip.read_bytes()
+    assert not call(server, "file_download", story=slug, path="ep01/clips/s01_v1.mp4", max_mib=0).is_error  # clamped to 1 MiB
+    big = root / "ep01" / "big.mp4"
+    big.write_bytes(b"0" * (2 * 1024 * 1024))
+    refused = call(server, "file_download", story=slug, path="ep01/big.mp4", max_mib=1)
+    assert refused.is_error and "over the 1 MiB limit" in refused.content[0].text

@@ -17,21 +17,34 @@ the endpoints ``RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID`` + ``RUNPOD_SHOWRUNNER_VIDE
 from __future__ import annotations
 
 import argparse
+import base64
+import json
+import mimetypes
 import os
+import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastmcp import FastMCP  # noqa: E402
 from fastmcp.exceptions import ToolError  # noqa: E402
+from fastmcp.utilities.types import Image  # noqa: E402
+from mcp.types import BlobResourceContents, EmbeddedResource  # noqa: E402
 
 from showrunner import comfy_templates  # noqa: E402
 from showrunner import mcp_auth  # noqa: E402
 from showrunner import runpod_client as rp  # noqa: E402
+from showrunner import store as st  # noqa: E402
+from showrunner import verify  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PORT = 8788
+TEXT_EXTS = (".md", ".json", ".jsonl", ".txt", ".ass")
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+VIDEO_EXTS = (".mp4", ".mov", ".webm")
+DOWNLOAD_MAX_MIB, DOWNLOAD_CEILING_MIB = 25, 50   # base64 adds a third; one JSON message (the live server's rule)
 IMAGE_TASKS = {"t2i", "edit"}           # templates served by the images endpoint; every other one by showrunner-video
 # RunPod Serverless list prices per second (check against the invoice); billed = execution time (DEC-316).
 RATES = {"video": 0.00053, "images": 1.58 / 3600}
@@ -101,6 +114,56 @@ class Backend:
         return self._endpoint_factory(kind, eid, self.settings.keys.get(kind))
 
 
+# ------------------------------------------------------------------ story helpers
+
+def open_story(settings: Settings, slug: str) -> st.Story:
+    """The story *slug* under the stories folder; a slug is one folder name, never a path."""
+    if not slug or slug != os.path.basename(slug) or slug.startswith((".", "_")):
+        raise ToolError(f"{slug!r} is not a story slug (story_list shows them)")
+    try:
+        return st.Story.open(os.path.join(settings.stories_dir, slug))
+    except st.StoreError as exc:
+        raise ToolError(str(exc)) from exc
+
+
+def story_file(story: st.Story, relpath: str, *, must_exist: bool = True) -> str:
+    """The absolute path of *relpath* inside *story*, links followed; never outside the story."""
+    try:
+        full = story.path(relpath)
+    except st.StoreError as exc:
+        raise ToolError(str(exc)) from exc
+    real = os.path.realpath(full)
+    if not (real == os.path.realpath(story.root) or real.startswith(os.path.realpath(story.root) + os.sep)):
+        raise ToolError(f"{relpath!r} leaves the story folder")
+    if must_exist and not os.path.exists(real):
+        raise ToolError(f"no file {relpath} in {story.slug}")
+    return real
+
+
+def thumbnail(path: str, max_px: int = 1024) -> bytes:
+    """A JPEG of the image *path*, its long side at most *max_px* (ffmpeg; no Pillow needed)."""
+    vf = f"scale='if(gt(iw,ih),min({max_px},iw),-2)':'if(gt(iw,ih),-2,min({max_px},ih))'"
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-i", path, "-vf", vf, "-frames:v", "1",
+                          "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "-"], capture_output=True, check=False)
+    if out.returncode or not out.stdout:
+        raise ToolError(f"cannot read {os.path.basename(path)} as an image: {out.stderr.decode(errors='replace')[-200:]}")
+    return out.stdout
+
+
+def look(path: str, *, max_px: int = 1024) -> list:
+    """What the chat sees of a file: an image as a thumbnail; a clip as a contact sheet + its numbers."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in IMAGE_EXTS:
+        return [Image(data=thumbnail(path, max_px), format="jpeg"), {"path": path, "size_bytes": os.path.getsize(path)}]
+    if ext in VIDEO_EXTS:
+        info = verify.report(path)
+        with tempfile.TemporaryDirectory() as tmp:
+            sheet = verify.contact_sheet(path, os.path.join(tmp, "sheet.jpg"), frames=8, width=240)
+            data = open(sheet, "rb").read()
+        return [Image(data=data, format="jpeg"), {"path": path, **info}]
+    raise ToolError(f"view_file shows images and clips; read text with store_read ({os.path.basename(path)})")
+
+
 def build_server(backend: Backend | None = None) -> FastMCP:
     backend = backend or Backend()
     s = backend.settings
@@ -136,6 +199,134 @@ def build_server(backend: Backend | None = None) -> FastMCP:
                          "defaults": t.get("defaults", {}), "files": t.get("files", {}),
                          "description": t.get("description", "")})
         return rows
+
+    # ------------------------------------------------------------ stories (stage 2.1)
+
+    @mcp.tool
+    def story_list() -> list:
+        """Free. The stories: slug, title, language, cast, episodes, and what each one has spent."""
+        rows = []
+        root = s.stories_dir
+        for slug in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            if not os.path.exists(os.path.join(root, slug, st.STORY_FILE)):
+                continue
+            story = st.Story(os.path.join(root, slug))
+            eps = sorted(d for d in os.listdir(story.root) if d.startswith("ep") and os.path.isdir(story.path(d)))
+            rows.append({**story.meta, "cast": story.cast(), "episodes": eps, "spent_usd": story.total_usd()})
+        return rows
+
+    @mcp.tool
+    def story_create(title: str, language: str, universe_name: str = "", slug: str = "") -> dict:
+        """Free. A new story folder: story.json + the skeletons of 00-brief.md, 01-universe.md, 04-season.md,
+        memory.md. *language* "fr" or "en" (the episode's spoken language; prompts stay in English)."""
+        try:
+            story = st.Story.create(s.stories_dir, slug or st.slugify(title), title=title, language=language,
+                                    universe_name=universe_name)
+        except st.StoreError as exc:
+            raise ToolError(str(exc)) from exc
+        return {**story.meta, "files": sorted(os.listdir(story.root))}
+
+    @mcp.tool
+    def store_read(story: str, path: str = "") -> dict:
+        """Free. A text file of the story (markdown, json, jsonl, ass) — or, with no *path*, the story's file
+        tree with what is locked. Images and clips: view_file."""
+        sto = open_story(s, story)
+        if not path:
+            locked = sto.locked()
+            tree = []
+            for dirpath, _, files in os.walk(sto.root):
+                for f in sorted(files):
+                    rel = os.path.relpath(os.path.join(dirpath, f), sto.root)
+                    if not f.endswith(".tmp"):
+                        tree.append({"path": rel, "locked": rel in locked})
+            return {"story": sto.slug, "files": sorted(tree, key=lambda r: r["path"])}
+        full = story_file(sto, path)
+        if not full.endswith(TEXT_EXTS):
+            raise ToolError(f"{path} is not text; view_file shows images and clips")
+        text = open(full, encoding="utf-8").read()
+        return {"path": path, "locked": sto.is_locked(path), "text": text}
+
+    @mcp.tool
+    def store_write(story: str, path: str, text: str) -> dict:
+        """Free. Write a text file of the story (markdown, json, jsonl, ass), creating its folders. A locked file
+        is refused: unlock it first with store_unlock and a reason. JSON is checked before it is written."""
+        sto = open_story(s, story)
+        if not path.endswith(TEXT_EXTS):
+            raise ToolError(f"store_write writes text files only ({', '.join(TEXT_EXTS)})")
+        story_file(sto, path, must_exist=False)
+        if path.endswith(".json"):
+            try:
+                json.loads(text)
+            except ValueError as exc:
+                raise ToolError(f"{path} is not valid JSON: {exc}") from exc
+        try:
+            sto.write_text(path, text)
+        except st.StoreError as exc:
+            raise ToolError(str(exc)) from exc
+        return {"path": path, "bytes": len(text.encode("utf-8"))}
+
+    @mcp.tool
+    def store_copy(story: str, src: str, dest: str) -> dict:
+        """Free. Copy a file inside the story (a chosen candidate image to 02-cast/<char>/full_body.png ...).
+        A locked destination is refused."""
+        sto = open_story(s, story)
+        full = story_file(sto, src)
+        story_file(sto, dest, must_exist=False)
+        try:
+            sto.copy_in(full, dest)
+        except st.StoreError as exc:
+            raise ToolError(str(exc)) from exc
+        return {"src": src, "dest": dest}
+
+    @mcp.tool
+    def store_lock(story: str, path: str, note: str) -> dict:
+        """Free. Lock a file Rida approved (a sheet, the canonical image, a voice): it is never overwritten
+        afterwards. *note*: who approved it and when, in Rida's words."""
+        sto = open_story(s, story)
+        story_file(sto, path)
+        try:
+            sto.lock(path, note)
+        except st.StoreError as exc:
+            raise ToolError(str(exc)) from exc
+        return {"path": path, "locked": True}
+
+    @mcp.tool
+    def store_unlock(story: str, path: str, reason: str) -> dict:
+        """Free. Unlock a locked file so it can change; *reason* is required and kept in locks.json."""
+        sto = open_story(s, story)
+        try:
+            sto.unlock(path, reason)
+        except st.StoreError as exc:
+            raise ToolError(str(exc)) from exc
+        return {"path": path, "locked": False}
+
+    @mcp.tool
+    def view_file(story: str, path: str, max_px: int = 1024):
+        """Free. Look at a file of the story: an image as a picture; a clip as a contact sheet of 8 frames with
+        its duration, size, fps, audio and loudness. To hand Rida the file itself: file_download."""
+        sto = open_story(s, story)
+        try:
+            return look(story_file(sto, path), max_px=max(128, min(int(max_px), 2048)))
+        except (RuntimeError, OSError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool
+    def file_download(story: str, path: str, max_mib: int = DOWNLOAD_MAX_MIB) -> EmbeddedResource:
+        """Free. The file itself (a clip, an episode, an image, a voice), base64 in the answer, so the client can
+        save it and show it to Rida. Refused over *max_mib* (default 25, ceiling 50)."""
+        sto = open_story(s, story)
+        full = story_file(sto, path)
+        limit = max(1, min(int(max_mib), DOWNLOAD_CEILING_MIB))
+        size = os.path.getsize(full)
+        if size > limit * 1024 * 1024:
+            raise ToolError(f"{path} is {size / 1048576:.1f} MiB, over the {limit} MiB limit")
+        mime = mimetypes.guess_type(full)[0] or {".mp4": "video/mp4", ".wav": "audio/wav",
+                                                 ".flac": "audio/flac"}.get(os.path.splitext(full)[1].lower(),
+                                                                            "application/octet-stream")
+        with open(full, "rb") as fh:
+            blob = base64.b64encode(fh.read()).decode("ascii")
+        return EmbeddedResource(type="resource", resource=BlobResourceContents(uri=f"file://{full}", mimeType=mime,
+                                                                               blob=blob))
 
     return mcp
 
