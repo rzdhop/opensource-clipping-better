@@ -15,7 +15,7 @@ Order of operations (each command is one GPU batch, submitted in parallel, waite
     python -m showrunner.stage0.run_stage0 c         --video-endpoint <id>
         path (c) LTX-2.3 ID-LoRA (keyframe + locked voice -> one pass), same matrix
     python -m showrunner.stage0.run_stage0 keyframe3 --images-endpoint <id>
-        the three-character keyframe for the 3-speaker exchange (existing edit_flux2_klein_multiref template)
+        the three-character keyframe for the 3-speaker exchange (showrunner's edit_flux2_klein_multiref)
     python -m showrunner.stage0.run_stage0 keyframe  --character camille --images-endpoint <id> [--seeds 1 2]
         start-image candidates for a character with no keyframe (t2i_flux2_klein); then, free:
     python -m showrunner.stage0.run_stage0 keyframe  --character camille --pick 2
@@ -41,6 +41,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from showrunner import comfy_templates  # noqa: E402
 from showrunner import runpod_client as rp  # noqa: E402
 from showrunner import verify  # noqa: E402
 from showrunner.stage0 import matrix as M  # noqa: E402
@@ -295,23 +296,24 @@ def cmd_c(args) -> None:
     run_batch(ep, jobs, os.path.join(OUT, "c"))
 
 
-def cmd_keyframe3(args) -> None:
-    """The three-character keyframe with the repo's existing Flux 2 Klein multi-reference template."""
-    from clipping.providers.local_comfyui import load_template, render_template  # the images endpoint's templates
-
-    ep = _images_endpoint(args)
+def _keyframe3_job() -> tuple:
+    """``(stem, template, values, files)`` of the three-character keyframe (multi-reference edit)."""
     ex = M.EXCHANGES["three"]
-    refs = [M.CHARACTERS[s]["ref"] for s in ex["speakers"]]
-    names = [f"kf3_ref{k}.png" for k in range(len(refs))]
     heads = " ".join(M.CHARACTERS[s]["head"] + "." for s in ex["speakers"])
     prompt = (f"{M.exchange_medium('three')} {heads} The three of them stand close together by a desk in {ex['setting']}, "
               f"facing each other mid-conversation, medium three-shot, only these three characters, nobody else. "
               f"Same fruit heads, same outfits as the reference images.")
-    graph = render_template(load_template("edit_flux2_klein_multiref"), {
-        "prompt": prompt, "negative": M.exchange_negative("three") + ", people, crowd, fourth character", "seed": 5,
-        "width": M.WIDTH, "height": M.HEIGHT, "ref_paths": names})
-    payload = {"workflow": graph, "images": [rp._file_entry(n, p) for n, p in zip(names, refs)]}
-    job = ep.run(payload, execution_timeout_s=600)
+    values = {"prompt": prompt, "negative": M.exchange_negative("three") + ", people, crowd, fourth character",
+              "seed": 5, "width": M.WIDTH, "height": M.HEIGHT}
+    files = comfy_templates.multiref_files([M.CHARACTERS[s]["ref"] for s in ex["speakers"]])
+    return "kf_three", "edit_flux2_klein_multiref", values, files
+
+
+def cmd_keyframe3(args) -> None:
+    """The three-character keyframe (showrunner's Flux 2 Klein multi-reference template)."""
+    ep = _images_endpoint(args)
+    stem, template, values, files = _keyframe3_job()
+    job = rp.submit_template(ep, template, dict(values, name=stem), files, execution_timeout_s=600)
     print("submitted keyframe3 ->", job)
     status = ep.wait(job)
     paths = rp.save_outputs(status, OUT, stem="kf_three")
@@ -335,16 +337,12 @@ def cmd_keyframe(args) -> None:
         shutil.copyfile(src, dest)
         print(f"locked {dest} (from seed {args.pick})")
         return
-    from clipping.providers.local_comfyui import load_template, render_template  # the images endpoint's templates
-
     ep = _images_endpoint(args)
-    template = load_template("t2i_flux2_klein")
     submitted = []
     for seed in args.seeds:
-        graph = render_template(template, {"prompt": M.prompt_keyframe(args.character),
-                                           "negative": M.negative(args.character), "seed": seed,
-                                           "width": M.WIDTH, "height": M.HEIGHT})
-        job = ep.run({"workflow": graph}, execution_timeout_s=600)
+        values = {"prompt": M.prompt_keyframe(args.character), "negative": M.negative(args.character), "seed": seed,
+                  "width": M.WIDTH, "height": M.HEIGHT, "name": f"kf_{args.character}_s{seed}"}
+        job = rp.submit_template(ep, "t2i_flux2_klein", values, {}, execution_timeout_s=600)
         print(f"submitted kf_{args.character}_s{seed} -> {job}")
         submitted.append((seed, job))
     total = 0.0

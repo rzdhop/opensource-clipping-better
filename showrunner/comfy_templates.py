@@ -93,3 +93,16 @@ def render(template: dict, values: dict) -> dict:
 def file_placeholders(template: dict) -> list:
     """The placeholders that name an uploaded input file (image, audio, voice_ref ...)."""
     return list((template.get("files") or {}).keys())
+
+
+MULTIREF_SLOTS = 4
+
+
+def multiref_files(refs: list) -> dict:
+    """``{"ref1": .., "ref4": ..}`` for ``edit_flux2_klein_multiref``: the given references in order, the
+    last one repeated into the unused slots (the app's ``ref_paths`` rule). 1 to 4 references."""
+    refs = list(refs)
+    if not 1 <= len(refs) <= MULTIREF_SLOTS:
+        raise ValueError(f"1 to {MULTIREF_SLOTS} reference images, not {len(refs)}")
+    refs += [refs[-1]] * (MULTIREF_SLOTS - len(refs))
+    return {f"ref{k + 1}": path for k, path in enumerate(refs)}

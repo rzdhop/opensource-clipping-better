@@ -384,8 +384,10 @@ def test_silences_finds_a_pause_and_one_running_to_the_end(tmp_path):
 
 
 def test_vc_converts_the_clip_audio_to_the_locked_voice_and_keeps_the_seed_typed(tmp_path, wav):
+    target = tmp_path / "voice.wav"
+    shutil.copyfile(wav, target)  # two distinct files (one file given twice is sent once, see build_payload)
     payload = rp.build_payload("vc_chatterbox", {"seed": 0, "name": "paloma_fr_s33_vc"},
-                               {"input": wav, "target_voice": wav})
+                               {"input": wav, "target_voice": str(target)})
     g = payload["workflow"]
     assert [e["name"] for e in payload["images"]] == ["paloma_fr_s33_vc_input.wav", "paloma_fr_s33_vc_target_voice.wav"]
     assert g["vc"]["class_type"] == "FL_ChatterboxVC"
@@ -424,3 +426,47 @@ def test_remux_keeps_the_picture_and_swaps_the_sound(tmp_path, wav):
     info, src = verify.probe(dest), verify.probe(str(clip))
     assert info["has_audio"] and info["width"] == 704 and info["frames"] == src["frames"]
     assert not verify.loudness(dest)["silent"]
+
+
+def test_image_templates_render_and_the_multiref_slots_repeat_the_last_reference(tmp_path, png):
+    t2i = comfy_templates.render(comfy_templates.load_template("t2i_flux2_klein"),
+                                 {"prompt": "p", "seed": 4, "name": "kf_x_s4"})
+    assert t2i["5"]["inputs"] == {"width": 832, "height": 1216, "batch_size": 1}   # the cast image default
+    assert t2i["3"]["inputs"]["seed"] == 4 and t2i["3"]["inputs"]["cfg"] == 1.0
+    assert t2i["9"]["inputs"]["filename_prefix"] == "showrunner/kf_x_s4" and "{{" not in json.dumps(t2i)
+    assert comfy_templates.multiref_files(["a.png", "b.png"]) == {"ref1": "a.png", "ref2": "b.png", "ref3": "b.png",
+                                                                  "ref4": "b.png"}
+    for bad in ([], ["a"] * 5):
+        with pytest.raises(ValueError):
+            comfy_templates.multiref_files(bad)
+    other = tmp_path / "other.png"
+    shutil.copyfile(png, other)
+    payload = rp.build_payload("edit_flux2_klein_multiref", {"prompt": "p", "seed": 1, "width": 704, "height": 1280,
+                                                             "name": "kf_three"},
+                               comfy_templates.multiref_files([png, str(other)]))
+    g = payload["workflow"]
+    assert [e["name"] for e in payload["images"]] == ["kf_three_ref1.png", "kf_three_ref2.png"]   # sent once each
+    assert [g[n]["inputs"]["image"] for n in ("20", "21", "22", "23")] == \
+        ["kf_three_ref1.png", "kf_three_ref2.png", "kf_three_ref2.png", "kf_three_ref2.png"]
+    assert g["3"]["inputs"]["positive"] == ["43", 0] and g["43"]["inputs"]["conditioning"] == ["42", 0]
+
+
+def test_keyframe3_job_uses_showrunners_own_template():
+    from showrunner.stage0 import run_stage0 as R
+    stem, template, values, files = R._keyframe3_job()
+    assert (stem, template) == ("kf_three", "edit_flux2_klein_multiref")
+    assert files["ref1"] == M.CHARACTERS["paloma"]["ref"] and files["ref4"] == M.CHARACTERS["rida"]["ref"]
+    assert (values["width"], values["height"]) == (M.WIDTH, M.HEIGHT)
+
+
+def test_nothing_in_showrunner_imports_clipping():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    offenders = []
+    for dirpath, _, filenames in os.walk(root):
+        for f in filenames:
+            if f.endswith(".py"):
+                path = os.path.join(dirpath, f)
+                for k, line in enumerate(open(path, encoding="utf-8"), 1):
+                    if line.lstrip().startswith(("import clipping", "from clipping")):
+                        offenders.append(f"{os.path.relpath(path, root)}:{k}")
+    assert offenders == []

@@ -1,0 +1,281 @@
+{
+  "$schema": "comfy_workflow_v1",
+  "name": "edit_flux2_klein_multiref",
+  "task": "edit",
+  "core_nodes_only": true,
+  "verified_live": false,
+  "description": "Image edit on FLUX.2 [klein] 4B with four reference slots (ref1..ref4), each encoded and chained as a ReferenceLatent conditioning; fewer references repeat the last one (showrunner.comfy_templates.multiref_files). A copy of the app's verified-live edit_flux2_klein_multiref graph; only the output prefix and the slot placeholders differ.",
+  "placeholders": [
+    "prompt",
+    "negative",
+    "seed",
+    "width",
+    "height",
+    "name",
+    "ref1",
+    "ref2",
+    "ref3",
+    "ref4"
+  ],
+  "files": {
+    "ref1": "reference image 1 (png)",
+    "ref2": "reference image 2 (png)",
+    "ref3": "reference image 3 (png)",
+    "ref4": "reference image 4 (png)"
+  },
+  "defaults": {
+    "width": 832,
+    "height": 1216,
+    "negative": ""
+  },
+  "requires": [
+    {
+      "node": "10",
+      "field": "unet_name",
+      "file": "flux-2-klein-4b.safetensors",
+      "dir": "models/diffusion_models"
+    },
+    {
+      "node": "11",
+      "field": "clip_name",
+      "file": "qwen_3_4b.safetensors",
+      "dir": "models/text_encoders"
+    },
+    {
+      "node": "12",
+      "field": "vae_name",
+      "file": "flux2-vae.safetensors",
+      "dir": "models/vae"
+    }
+  ],
+  "output_node": "9",
+  "graph": {
+    "10": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "flux-2-klein-4b.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "11": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "qwen_3_4b.safetensors",
+        "type": "flux2",
+        "device": "default"
+      }
+    },
+    "12": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "flux2-vae.safetensors"
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "{{prompt}}",
+        "clip": [
+          "11",
+          0
+        ]
+      }
+    },
+    "7": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "{{negative}}",
+        "clip": [
+          "11",
+          0
+        ]
+      }
+    },
+    "20": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{ref1}}"
+      }
+    },
+    "30": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": [
+          "20",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ]
+      }
+    },
+    "40": {
+      "class_type": "ReferenceLatent",
+      "inputs": {
+        "conditioning": [
+          "6",
+          0
+        ],
+        "latent": [
+          "30",
+          0
+        ]
+      }
+    },
+    "21": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{ref2}}"
+      }
+    },
+    "31": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": [
+          "21",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ]
+      }
+    },
+    "41": {
+      "class_type": "ReferenceLatent",
+      "inputs": {
+        "conditioning": [
+          "40",
+          0
+        ],
+        "latent": [
+          "31",
+          0
+        ]
+      }
+    },
+    "22": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{ref3}}"
+      }
+    },
+    "32": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": [
+          "22",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ]
+      }
+    },
+    "42": {
+      "class_type": "ReferenceLatent",
+      "inputs": {
+        "conditioning": [
+          "41",
+          0
+        ],
+        "latent": [
+          "32",
+          0
+        ]
+      }
+    },
+    "23": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "{{ref4}}"
+      }
+    },
+    "33": {
+      "class_type": "VAEEncode",
+      "inputs": {
+        "pixels": [
+          "23",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ]
+      }
+    },
+    "43": {
+      "class_type": "ReferenceLatent",
+      "inputs": {
+        "conditioning": [
+          "42",
+          0
+        ],
+        "latent": [
+          "33",
+          0
+        ]
+      }
+    },
+    "5": {
+      "class_type": "EmptySD3LatentImage",
+      "inputs": {
+        "width": "{{width}}",
+        "height": "{{height}}",
+        "batch_size": 1
+      }
+    },
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": "{{seed}}",
+        "steps": 4,
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": [
+          "10",
+          0
+        ],
+        "positive": [
+          "43",
+          0
+        ],
+        "negative": [
+          "7",
+          0
+        ],
+        "latent_image": [
+          "5",
+          0
+        ]
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "3",
+          0
+        ],
+        "vae": [
+          "12",
+          0
+        ]
+      }
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "filename_prefix": "showrunner/{{name}}",
+        "images": [
+          "8",
+          0
+        ]
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 # showrunner — the AI Story rebuilt from scratch (plan 36)
 
 `docs/plans/36-rebuild-from-scratch-plan.md` is the plan; this package is its code. Nothing in
-here imports `clipping/aistory` (which stage 5 deletes). Stdlib + ffmpeg only, so the stage-0
+here imports `clipping` (tested; `clipping/aistory` goes in stage 5). Stdlib + ffmpeg only, so the stage-0
 runner and the future MCP v2 server share the same pieces.
 
 ```

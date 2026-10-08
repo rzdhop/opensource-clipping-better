@@ -130,19 +130,23 @@ def build_payload(template_name: str, values: dict, files: dict) -> dict:
 
     *files* maps a file placeholder (``image``, ``audio``, ``voice_ref``) to a local path; the
     file is sent under a unique name (``<tag>_<placeholder><ext>``) so parallel jobs never
-    overwrite each other in ComfyUI's input folder.
+    overwrite each other in ComfyUI's input folder. The same local file given for several
+    placeholders (a reference repeated into the unused multiref slots) is sent once.
     """
     template = comfy_templates.load_template(template_name)
     tag = values.get("name", "job").replace("/", "_")
     merged = dict(values)
     entries = []
+    sent: dict = {}
     for placeholder in comfy_templates.file_placeholders(template):
         if placeholder not in files:
             raise ValueError(f"{template_name} needs a file for {placeholder}")
         path = files[placeholder]
-        upload_name = f"{tag}_{placeholder}{os.path.splitext(path)[1].lower()}"
-        merged[placeholder] = upload_name
-        entries.append(_file_entry(upload_name, path))
+        key = os.path.abspath(path)
+        if key not in sent:
+            sent[key] = f"{tag}_{placeholder}{os.path.splitext(path)[1].lower()}"
+            entries.append(_file_entry(sent[key], path))
+        merged[placeholder] = sent[key]
     graph = comfy_templates.render(template, merged)
     return {"workflow": graph, "images": entries}
 

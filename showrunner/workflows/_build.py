@@ -14,6 +14,9 @@ Sources (read 2026-10-08):
 - ``ltx25_a2v_speech``: Lightricks/ComfyUI-LTXVideo ``2.5/LTX-2.5_A2V_Two_Stage_Distilled.json``
   (its custom-node prompt switches dropped: core nodes only).
 - ``ltx23_idlora_speech``: Comfy-Org/workflow_templates ``video_ltx2_3_id_lora.json``.
+- ``t2i_flux2_klein`` / ``edit_flux2_klein_multiref``: copied node for node from the app's verified-live
+  ``clipping/aistory/templates/workflows/*.json`` (FLUX.2 [klein] 4B, 4 steps, cfg 1.0); only the output
+  prefix changes and the four reference slots become file placeholders ``ref1``..``ref4``.
 - ``tts_chatterbox_line``: Comfy-Org ``audio-chatterbox_tts_multilingual.json`` + ComfyUI_Fill-ChatterBox
   (the pack pinned in docker/worker-comfyui-tts; the repo's ``tts_chatterbox.json`` template is the
   app's equivalent).
@@ -348,12 +351,89 @@ def vc_chatterbox() -> dict:
     }
 
 
+FLUX2_KLEIN = {"unet": "flux-2-klein-4b.safetensors", "clip": "qwen_3_4b.safetensors", "vae": "flux2-vae.safetensors"}
+REF_SLOTS = 4
+
+
+def _flux2_klein(g: dict, positive: list) -> None:
+    """Loaders + sampler + decode + save of the FLUX.2 [klein] graphs (node ids of the app's templates)."""
+    g["5"] = node("EmptySD3LatentImage", width="{{width}}", height="{{height}}", batch_size=1)
+    g["3"] = node("KSampler", seed="{{seed}}", steps=4, cfg=1.0, sampler_name="euler", scheduler="simple",
+                  denoise=1.0, model=link("10"), positive=positive, negative=link("7"), latent_image=link("5"))
+    g["8"] = node("VAEDecode", samples=link("3"), vae=link("12"))
+    g["9"] = node("SaveImage", filename_prefix="showrunner/{{name}}", images=link("8"))
+
+
+def _flux2_loaders(g: dict) -> None:
+    g["10"] = node("UNETLoader", unet_name=FLUX2_KLEIN["unet"], weight_dtype="default")
+    g["11"] = node("CLIPLoader", clip_name=FLUX2_KLEIN["clip"], type="flux2", device="default")
+    g["12"] = node("VAELoader", vae_name=FLUX2_KLEIN["vae"])
+    g["6"] = node("CLIPTextEncode", text="{{prompt}}", clip=link("11"))
+    g["7"] = node("CLIPTextEncode", text="{{negative}}", clip=link("11"))
+
+
+def _image_template(name: str, task: str, description: str, graph: dict, placeholders: list, files: dict) -> dict:
+    return {
+        "$schema": "comfy_workflow_v1",
+        "name": name,
+        "task": task,
+        "core_nodes_only": True,
+        "verified_live": False,
+        "description": description,
+        "placeholders": placeholders,
+        "files": files,
+        "defaults": {"width": 832, "height": 1216, "negative": ""},
+        "requires": [_req("10", "unet_name", FLUX2_KLEIN["unet"], "diffusion_models"),
+                     _req("11", "clip_name", FLUX2_KLEIN["clip"], "text_encoders"),
+                     _req("12", "vae_name", FLUX2_KLEIN["vae"], "vae")],
+        "output_node": "9",
+        "graph": graph,
+    }
+
+
+def t2i_flux2_klein() -> dict:
+    """Text to image (cast full-body candidates, keyframes without references)."""
+    g: dict = {}
+    _flux2_loaders(g)
+    _flux2_klein(g, positive=link("6"))
+    return _image_template(
+        "t2i_flux2_klein", "t2i",
+        "Text to image on FLUX.2 [klein] 4B (4 steps, cfg 1.0: the negative is ignored, say it in the positive). "
+        "A copy of the app's verified-live t2i_flux2_klein graph; only the output prefix differs.",
+        g, ["prompt", "negative", "seed", "width", "height", "name"], {})
+
+
+def edit_flux2_klein_multiref() -> dict:
+    """Image edit with up to four references chained as ReferenceLatent (cast turnaround, emotion grid,
+    keyframes from the cast's canonical images and a place plate)."""
+    g: dict = {}
+    _flux2_loaders(g)
+    prev = link("6")
+    for k in range(REF_SLOTS):
+        # The app's copy also sets upload="image", a UI widget hint LoadImage does not declare (ignored).
+        g[str(20 + k)] = node("LoadImage", image=f"{{{{ref{k + 1}}}}}")
+        g[str(30 + k)] = node("VAEEncode", pixels=link(str(20 + k)), vae=link("12"))
+        g[str(40 + k)] = node("ReferenceLatent", conditioning=prev, latent=link(str(30 + k)))
+        prev = link(str(40 + k))
+    _flux2_klein(g, positive=prev)
+    return _image_template(
+        "edit_flux2_klein_multiref", "edit",
+        "Image edit on FLUX.2 [klein] 4B with four reference slots (ref1..ref4), each encoded and chained as a "
+        "ReferenceLatent conditioning; fewer references repeat the last one "
+        "(showrunner.comfy_templates.multiref_files). A copy of the app's verified-live "
+        "edit_flux2_klein_multiref graph; only the output prefix and the slot placeholders differ.",
+        g, ["prompt", "negative", "seed", "width", "height", "name", "ref1", "ref2", "ref3", "ref4"],
+        {f"ref{k + 1}": f"reference image {k + 1} (png)" for k in range(REF_SLOTS)})
+
+
 TEMPLATES = {
     "ltx25_i2v_speech": ltx25_i2v_speech,
     "ltx25_a2v_speech": ltx25_a2v_speech,
     "ltx23_idlora_speech": ltx23_idlora_speech,
     "tts_chatterbox_line": tts_chatterbox_line,
     "vc_chatterbox": vc_chatterbox,
+    "t2i_flux2_klein": t2i_flux2_klein,
+    "edit_flux2_klein_multiref": edit_flux2_klein_multiref,
 }
 
 

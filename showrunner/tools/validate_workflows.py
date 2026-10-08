@@ -29,7 +29,8 @@ from showrunner import comfy_templates  # noqa: E402
 SAMPLE = {"image": "kf.png", "audio": "line.wav", "voice_ref": "voice.wav", "prompt": "p", "negative": "n",
           "seed": 1, "width": 704, "height": 1280, "seconds": 5, "fps": 24, "name": "t", "sampler": "euler",
           "identity_guidance": 3.0, "text": "t", "language": "French (fr)", "exaggeration": 0.5,
-          "input": "clip.wav", "target_voice": "voice.wav"}
+          "input": "clip.wav", "target_voice": "voice.wav", "ref1": "a.png", "ref2": "b.png", "ref3": "c.png",
+          "ref4": "d.png"}
 
 
 def _py_files(root: str) -> list:
