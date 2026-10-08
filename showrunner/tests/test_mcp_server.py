@@ -453,3 +453,28 @@ def test_comfy_submit_sends_the_built_prompt_and_refuses_a_hand_written_one(tmp_
     assert row["values"]["width"] == 832 and row["values"]["height"] == 1216 and "A full-body" in row["prompt"]
     assert call(server, "comfy_submit", story=slug, template="vc_chatterbox", values={},
                 prompt_from="cast:ana:full_body", dest="x").is_error            # no prompt in that template
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_voice_ref_from_take_locks_the_voice_of_an_approved_take(tmp_path):
+    backend, server, slug = _cast_story(tmp_path)
+    sto = S.st.Story.open(str(tmp_path / "stories" / slug))
+    clip = sto.writable("ep00/clips/s01_v1.mp4")
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=gray:s=320x568:r=24:d=5", "-f", "lavfi",
+                    "-i", "sine=frequency=300:duration=5", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+                    "-shortest", clip], check=True, capture_output=True)
+    sto.add_take(0, "s01", "ep00/clips/s01_v1.mp4", verdict={"duration_s": 5.0, "lines": [
+        {"speaker": "ana", "start_s": 0.4, "end_s": 3.6}]})
+    args = dict(story=slug, episode=0, shot="s01", take="v1", speaker="ana")
+    assert "needs a note" in call(server, "voice_ref_from_take", note=" ", **args).content[0].text
+    assert "not approved" in call(server, "voice_ref_from_take", note="Rida: this voice", **args).content[0].text
+    call(server, "approve_take", story=slug, episode=0, shot="s01", take="v1", note="Rida: s33 for Ana")
+    got = payload(call(server, "voice_ref_from_take", note="Rida: this voice", **args))
+    assert got["path"] == "02-cast/ana/voice_ref.wav" and got["locked"] and got["speech_s"] == pytest.approx(3.2)
+    assert sto.is_locked("02-cast/ana/voice_ref.wav")
+    record = json.loads(payload(call(server, "store_read", story=slug, path="02-cast/ana/voice_ref.json"))["text"])
+    assert record["from"]["take"] == "v1" and record["note"] == "Rida: this voice"
+    again = call(server, "voice_ref_from_take", note="Rida: again", **args)
+    assert again.is_error and "locked" in again.content[0].text
+    nobody = call(server, "voice_ref_from_take", story=slug, episode=0, shot="s01", take="v1", speaker="ghost", note="x")
+    assert nobody.is_error and "no character sheet" in nobody.content[0].text

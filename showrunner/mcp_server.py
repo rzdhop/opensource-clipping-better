@@ -634,6 +634,36 @@ def build_server(backend: Backend | None = None) -> FastMCP:
         return {"shot": shot, "take": take, "clip": path, "approved": True}
 
     @mcp.tool
+    def voice_ref_from_take(story: str, episode: int, shot: str, take: str, speaker: str, note: str) -> dict:
+        """Free (this server's CPU). Locks a character's voice for the whole series, the stage-0 way: the
+        *speaker*'s line(s) of a take Rida APPROVED (approve_take), cut by the clip check's timings, silence
+        trimmed (2-10 s), saved as 02-cast/<speaker>/voice_ref.wav and locked; vc_clip then re-voices every clip
+        with it. The casting take is usually an ep00 shot of that character alone. *note* quotes Rida choosing this
+        voice. An already locked voice is refused: store_unlock it with a reason first. Hand Rida the file to hear
+        (file_download) before going on."""
+        if not note.strip():
+            raise ToolError("voice_ref_from_take needs a note quoting Rida choosing this voice")
+        sto = open_story(s, story)
+        t = take_entry(sto, episode, shot, take)
+        if not t.get("approved"):
+            raise ToolError(f"{shot}/{take} is not approved: the voice comes from a take Rida picked (approve_take)")
+        if not (t.get("verdict") or {}).get("lines"):
+            raise ToolError(f"{shot}/{take} has no clip check with line timings: run verify_take first")
+        if not sto.exists(sto.sheet(speaker)):
+            raise ToolError(f"no character sheet {sto.sheet(speaker)}")
+        dest = f"{sto.cast_dir(speaker)}/voice_ref.wav"
+        if sto.is_locked(dest):
+            raise ToolError(f"{dest} is locked; store_unlock it with a reason to cast the voice again")
+        try:
+            got = voice.reference_from_take(story_file(sto, t["path"]), t["verdict"], speaker, sto.writable(dest))
+        except (voice.VoiceRefError, RuntimeError) as exc:
+            raise ToolError(str(exc)) from exc
+        source = {"episode": episode, "shot": shot, "take": take, "clip": t["path"]}
+        sto.write_json(f"{sto.cast_dir(speaker)}/voice_ref.json", {**got, "from": source, "note": note.strip()})
+        sto.lock(dest, f"voice of {speaker} from {st.episode_dir(episode)} {shot}/{take}: {note.strip()}")
+        return {"path": dest, "locked": True, **got, "from": source}
+
+    @mcp.tool
     def assemble_episode(story: str, episode: int, preset: str = "medium"):
         """Free (this server's CPU, ≈ 1 min for 30 s). The episode from its approved takes only: each clip cut after
         its last word, never slowed; subtitles from the clip check; the music bed of shots.json ducked under the
