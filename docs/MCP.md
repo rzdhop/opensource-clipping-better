@@ -327,6 +327,38 @@ the voices), plus a Gemini key for the voice references. The money gates are the
 app's own (`ALLOW_PAID`, the per-episode cap of the budget profile); a refusal
 names the figure.
 
+## The showrunner connector (plan 36 stage 2) — a second server, the rebuilt AI Story
+
+A separate MCP server, `showrunner/mcp_server.py`, drives the plan-36 toolbox (`showrunner/`): the story folder
+(`stories/<slug>/`, in git), GPU jobs on the `showrunner-video` and images endpoints, the clip check, the locked
+voices, the assembly. It runs next to this one and shares nothing with it but `MCP_TOKEN`.
+
+| | rzdhop-story (this server) | showrunner |
+|---|---|---|
+| Code | `mcp_server/` | `showrunner/mcp_server.py` (+ `mcp_auth.py`, copied from `mcp_server/auth.py`) |
+| Local port | 8787 (`MCP_PORT`) | 8788 (`SHOWRUNNER_MCP_PORT`) |
+| Public URL | `https://<node>.<tailnet>.ts.net/mcp` | `https://<node>.<tailnet>.ts.net:8443/mcp` (`SHOWRUNNER_MCP_PUBLIC_URL`, no `/mcp`) |
+| Unit | `rzdhop-story-mcp` | `showrunner-mcp` (`deploy/showrunner-mcp.service`) |
+| OAuth state | `outputs/mcp/oauth.json` | `outputs/showrunner-mcp/oauth.json` |
+
+Install (once, sudo):
+
+```bash
+sudo cp deploy/showrunner-mcp.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now showrunner-mcp
+sudo tailscale funnel --bg --https=8443 http://127.0.0.1:8788
+```
+
+Connect: claude.ai → Settings → Connectors → Add custom connector, URL `https://<node>.<tailnet>.ts.net:8443/mcp`,
+no client id; the login page asks `MCP_TOKEN`. Claude Code:
+`claude mcp add --transport http showrunner https://<node>.<tailnet>.ts.net:8443/mcp --header "Authorization: Bearer <MCP_TOKEN>"`.
+
+Tools (20): `runpod_health`, `templates_list` · `story_list`, `story_create`, `store_read`, `store_write`, `store_copy`,
+`store_lock`, `store_unlock`, `view_file`, `file_download` · `comfy_submit` (COSTS MONEY), `comfy_fetch`, `comfy_jobs`,
+`cost_ledger` · `verify_take`, `vc_clip` (COSTS MONEY), `vc_fetch`, `approve_take`, `assemble_episode`. GPU tools are
+submit-then-fetch (a chat tool call must answer within ≈ 280 s; GPU queues of 20–35 min are normal and free).
+The live app's `RUNPOD_COMFY_ENDPOINT_ID` is read only to be refused.
+
 ## Tests
 
 `tests/test_mcp_runpod_jobs.py` (the job client, fake transport, a voice line
