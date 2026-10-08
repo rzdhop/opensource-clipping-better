@@ -1,3 +1,22 @@
+## CURRENT STATE — plan 36 STAGE 1 in progress (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
+
+- **In-progress header:** phase = IMPLEMENT; current stage = 1.0 (voice-conversion test); next action = build the
+  `vc_chatterbox` template + `run_stage0 vc`, then ask Rida's go for 4 jobs (≈ $0.05–0.20) on `showrunner-video`.
+  Plan file: `/home/ubuntu/.claude/plans/pasted-content-id-e9ca-continue-plan-zesty-bonbon.md` (approved by Rida);
+  source plan `docs/plans/36-stage1-plan.md`. Open questions: none blocking.
+- **Checkpoint commit:** `6c8ec7a` (= origin/main, clean tree; untracked left as is: `reports/`, `research_notes/`, `FETCH_HEAD`).
+- **Tier-1 baseline:** `python -m pytest showrunner/tests -q` = 29 passed at `6c8ec7a`.
+- **Rida's answers to the 4 stage-1 questions (2026-10-08):** Q1 the clip check = faster-whisper on this host's CPU ·
+  Q2 the VC test now (stage 1.0) · Q3 stories/: text + images in git, clips and voice wavs out · Q4 the demo story
+  reuses the stage-0 material.
+- **Measured (free):** faster-whisper 1.2.1 in `.venv`, `large-v3` cached; one 5 s clip = 22 s load + 22 s transcription
+  on this ARM CPU (int8); the venv's `av` 19.0.1 breaks faster-whisper's own decoder → decode with ffmpeg.
+- **Regression contract (stage 1):** the live app, its endpoints (`comfy-video`, `comfy-images`) and `clipping/aistory`
+  untouched — no test (by construction: no file outside `showrunner/`, `stories/`, docs, `.gitignore` is edited);
+  the stage-0 runner keeps working — `showrunner/tests/test_stage0_offline.py` (29); the batch-a prompts stay
+  byte-identical except `CLEAN_FRAME` — golden test (stage 1.2); nothing in `showrunner/` imports `clipping` — test
+  (stage 1.3); only `showrunner-video` is used for GPU work (1.0) — `test_video_jobs_use_the_showrunner_video_key`.
+
 ## CURRENT STATE — plan 36 (`showrunner/`): stage 0 DONE, D7 = path (a) LTX-2.5 joint picture+voice, multi-speaker preferred; next = stage 1 after Rida's answers (2026-10-08 evening)
 
 - **Resume:** `_ai-story-plan-staging/plan36/NEXT_SESSION_PROMPT.md` → `docs/plans/36-stage1-plan.md` (PROPOSED, 4 blocking questions §5). Tier 1: `python -m pytest showrunner/tests -q` = 29 green at `d1959a0`.
