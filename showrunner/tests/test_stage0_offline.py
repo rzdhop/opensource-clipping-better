@@ -250,3 +250,23 @@ def test_preflight_names_the_key_scope_when_an_endpoint_refuses(monkeypatch):
     assert not ok and "key's scope" in detail
     report = preflight.format_report([(name, ok, detail), ("ffmpeg", True, "x")], {"smoke": 1})
     assert "MISSING  video endpoint abc" in report and "1 item(s) missing" in report
+
+
+def test_every_character_description_is_about_seventy_words():
+    # Rida's rule (2026-10-08): about 70 words per character description.
+    for cid, char in M.CHARACTERS.items():
+        assert 65 <= len(char["head"].split()) <= 80, cid
+
+
+def test_video_jobs_use_the_showrunner_video_key(monkeypatch):
+    from showrunner.stage0 import run_stage0 as R
+    seen = {}
+
+    class Fake:
+        def __init__(self, endpoint_id, key=None, **kw):
+            seen.update(id=endpoint_id, key=key)
+
+    monkeypatch.setattr(rp, "Endpoint", Fake)
+    monkeypatch.setenv("RUNPOD_SHOWRUNNER_VIDEO_KEY", "video-key")
+    R._video_endpoint(type("A", (), {"video_endpoint": "8o50"})())
+    assert seen == {"id": "8o50", "key": "video-key"}

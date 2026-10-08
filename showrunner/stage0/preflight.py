@@ -132,7 +132,7 @@ def format_report(rows: list, sizes: dict) -> str:
 
 def run(args) -> int:
     rows = check_hf() + check_image()
-    rows += check_endpoint("video", args.video_endpoint, "RUNPOD_API_KEY")
+    rows += check_endpoint("video", args.video_endpoint, "RUNPOD_SHOWRUNNER_VIDEO_KEY")
     rows += check_endpoint("images", args.images_endpoint, "RUNPOD_IMAGE_API_KEY")
     rows += check_local(args.seeds)
     print(format_report(rows, batch_sizes(args.seeds)))

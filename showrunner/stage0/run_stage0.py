@@ -104,6 +104,15 @@ def _ready_characters() -> list:
     return ready
 
 
+def _video_endpoint(args) -> rp.Endpoint:
+    # The showrunner-video endpoint has its own key (RUNPOD_SHOWRUNNER_VIDEO_KEY); fall back to the main one.
+    try:
+        key = rp.api_key(name="RUNPOD_SHOWRUNNER_VIDEO_KEY")
+    except rp.RunPodError:
+        key = None
+    return rp.Endpoint(args.video_endpoint, key=key)
+
+
 def _images_endpoint(args) -> rp.Endpoint:
     # The images endpoint has its own key in the app (RUNPOD_IMAGE_API_KEY); fall back to the main one.
     try:
@@ -116,7 +125,7 @@ def _images_endpoint(args) -> rp.Endpoint:
 # ------------------------------------------------------------------ commands
 
 def cmd_smoke(args) -> None:
-    ep = rp.Endpoint(args.video_endpoint)
+    ep = _video_endpoint(args)
     c = "paloma"
     jobs = [(f"smoke_{c}", "ltx25_i2v_speech",
              {"prompt": M.prompt_path_a(c, args.lang), "negative": M.negative(c), "seed": 11, "width": M.WIDTH,
@@ -141,7 +150,7 @@ def _exchange_jobs_a(lang: str, seeds: list) -> list:
 
 
 def cmd_a(args) -> None:
-    ep = rp.Endpoint(args.video_endpoint)
+    ep = _video_endpoint(args)
     jobs = []
     for c in _ready_characters():
         for seed in args.seeds:
@@ -185,7 +194,7 @@ def _seconds_for(wav: str) -> float:
 
 
 def cmd_b(args) -> None:
-    ep = rp.Endpoint(args.video_endpoint)
+    ep = _video_endpoint(args)
     chars = _ready_characters()
     _need_voices(chars)
     out_dir = os.path.join(OUT, "b")
@@ -224,7 +233,7 @@ def cmd_b(args) -> None:
 
 
 def cmd_c(args) -> None:
-    ep = rp.Endpoint(args.video_endpoint)
+    ep = _video_endpoint(args)
     chars = _ready_characters()
     _need_voices(chars)
     jobs = []
@@ -344,8 +353,9 @@ def cmd_review(args) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["preflight", "smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review"])
-    ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker (no default: "
-                                             "the .env video endpoint is the live app's)")
+    ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker; default "
+                                             "RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID (never the live app's "
+                                             "RUNPOD_COMFY_ENDPOINT_ID)")
     ap.add_argument("--images-endpoint", help="RunPod endpoint id of the images worker (Flux 2 Klein); "
                                               "default RUNPOD_IMAGE_ENDPOINT_ID from the environment or .env")
     ap.add_argument("--lang", choices=["fr", "en"], default="fr")
@@ -358,6 +368,11 @@ def main() -> None:
     ap.add_argument("--start", type=float, default=0.0, help="voice: skip this many seconds")
     ap.add_argument("--max-s", type=float, default=10.0, help="voice: keep at most this many seconds")
     args = ap.parse_args()
+    if not args.video_endpoint:
+        try:
+            args.video_endpoint = rp.api_key(name="RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID")
+        except rp.RunPodError:
+            pass
     if not args.images_endpoint:
         try:
             args.images_endpoint = rp.api_key(name="RUNPOD_IMAGE_ENDPOINT_ID")

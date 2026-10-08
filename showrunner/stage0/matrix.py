@@ -51,11 +51,11 @@ CHARACTERS = {
     "paloma": {
         "universe": "fruit",
         "name": "Paloma",
-        "head": ("Paloma, an anthropomorphic mango woman: her whole head is a single ripe mango, golden-yellow "
-                 "blushing to red-orange on top, with a short green stem and two leaves; large dark cartoon "
-                 "eyes with long lashes, pink blush cheeks, a wide friendly mouth drawn on the mango skin; "
-                 "slim human body in a mustard-yellow knit cardigan over a turquoise floral wrap dress, gold "
-                 "hoop earrings, human hands"),
+        "head": ("Paloma, an anthropomorphic mango woman: her whole head is a single ripe mango, golden-yellow at "
+                 "the bottom blushing to red-orange on top, with a short green stem and two glossy leaves; large "
+                 "brown cartoon eyes with long lashes, pink blush cheeks, a wide open smile drawn on the mango skin, "
+                 "gold hoop earrings; slim human body in a mustard-yellow knit cardigan over a knee-length turquoise "
+                 "floral wrap dress, white sneakers, human hands"),
         "voice": {"fr": "une jeune femme pétillante et joueuse, voix claire et rapide, taquine, qui sourit en parlant",
                   "en": "a bubbly, playful young woman, bright and quick, teasing, smiling as she speaks"},
         "keyframe": os.path.join(KF, "kf10_team.png"),
@@ -66,9 +66,10 @@ CHARACTERS = {
         "universe": "fruit",
         "name": "Marie-Jeanne",
         "head": ("Marie-Jeanne, an anthropomorphic strawberry woman: her whole head is a single glossy red "
-                 "strawberry with yellow seeds and a green leafy calyx on top; large almond cartoon eyes with "
-                 "long lashes and arched brows, a confident mouth drawn on the strawberry skin; slim human body "
-                 "in a white tailored blazer over a burgundy silk blouse, a gold bracelet, human hands"),
+                 "strawberry dotted with golden seeds, a crown of spiky green leaves on top; large almond brown "
+                 "cartoon eyes with long lashes and arched dark brows, a confident knowing smile drawn on the "
+                 "strawberry skin; slim human body in a cream tailored blazer over a burgundy silk blouse, slim "
+                 "black trousers, black pointed heels, a gold wristwatch, human hands"),
         "voice": {"fr": "une jeune femme assurée et rapide, fière, énergie de telenovela, articulée",
                   "en": "a confident, fast-talking young woman, proud, telenovela energy, crisp diction"},
         "keyframe": os.path.join(KF, "kf08_realisation.png"),
@@ -78,10 +79,11 @@ CHARACTERS = {
     "rida": {
         "universe": "fruit",
         "name": "Rida",
-        "head": ("Rida, an anthropomorphic kiwi man: his whole head is a single fuzzy brown kiwi fruit with a "
-                 "short stem; large round cartoon eyes with thick dark brows, a wide mouth drawn on the kiwi "
-                 "skin; slim human body in a black zip hoodie over a green t-shirt, headphones around his "
-                 "neck, dark jeans, human hands"),
+        "head": ("Rida, an anthropomorphic kiwi man: his whole head is a single fuzzy olive-brown kiwi fruit with a "
+                 "short brown stem on top; large round brown cartoon eyes under thick dark brows, rosy cheeks, a "
+                 "small rounded nose and a wide mouth with a sly half-smile drawn on the kiwi skin; slim human body "
+                 "in a charcoal zip hoodie over a green t-shirt, black over-ear headphones around his neck, dark "
+                 "grey jeans, white sneakers, human hands"),
         "voice": {"fr": "un jeune homme calme, sec et ironique, légèrement amusé, débit rapide et posé",
                   "en": "a calm young man, dry and ironic, slightly amused, quick but composed"},
         "keyframe": os.path.join(KF, "kf01_loft.png"),
@@ -92,10 +94,10 @@ CHARACTERS = {
         "universe": "cartoon_human",
         "name": "Camille",
         "head": ("Camille, a French woman in her early thirties: an oval face with soft rounded features, large "
-                 "expressive hazel eyes, thick dark arched brows, a small straight nose, full lips with a natural "
-                 "rose tint and white teeth that show when she speaks; dark brown wavy hair in a loose low bun with "
-                 "a few strands framing her face; slim body in a charcoal tailored blazer over a cream silk blouse, "
-                 "small gold stud earrings, a thin wristwatch, human hands"),
+                 "expressive hazel eyes, thick dark arched brows, a small straight nose, full rose-tinted lips with "
+                 "white teeth that show when she speaks; dark brown wavy hair in a loose low bun, a few strands "
+                 "framing her face; slim body in a charcoal tailored blazer over a cream silk blouse, small gold "
+                 "stud earrings, a thin wristwatch, human hands"),
         "voice": {"fr": "une femme de trente ans, posée mais blessée, voix grave et maîtrisée, colère contenue",
                   "en": "a woman in her thirties, composed but hurt, a low controlled voice, restrained anger"},
         # Not in the repo yet: `run_stage0 keyframe --character camille` makes candidates, `--pick` locks one.

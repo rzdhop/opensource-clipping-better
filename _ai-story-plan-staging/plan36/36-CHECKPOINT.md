@@ -51,6 +51,8 @@ Renamed the same day: `fruitstory/` → **`showrunner/`**, image `ghcr.io/rzdhop
 
 **Update 2026-10-08 (later):** HF token added to `.env`, LTX-2.5 license accepted (preflight ok); the volume filled by Rida from a pod (`/workspace/models`: diffusion_models 21G, text_encoders 24G, checkpoints 28G, latent_upscale_models 1.9G, chatterbox 3.0G — the sizes match `fill_volume.sh`). Existing endpoints kept as they are: `comfy-video` (`runpod/worker-comfyui:5.10.0-base`, the live app's Wan 2.2 / S2V) and `comfy-images` (`worker-comfyui-tts:latest`); stage 0 gets its own `showrunner-video` endpoint. Next: its id → preflight → `smoke` on Rida's go.
 
+**Update 2026-10-08 (ready for smoke):** `showrunner-video` = `8o50u2dipy57br` (L40S, its own key `RUNPOD_SHOWRUNNER_VIDEO_KEY`; both in `.env`, the runner defaults to them). Rida approved: Camille, the Gemini voices (locked: paloma Aoede 6.5 s, marie_jeanne Kore 6.4 s, rida Puck 4.7 s → `stories/_stage0/voices/`), and **~70-word character descriptions** (all four rewritten from the reference images: MJ's blazer is cream and she wears a watch). Preflight: all ok but Camille's keyframe, the three-speaker keyframe and Camille's voice (from a batch-a take). Both endpoints showed 3 throttled workers (GPU shortage in the datacenter).
+
 Still missing (the human's side):
 1. **No HF token on this system** (`HF_TOKEN=` is empty in `.env`; an earlier note here wrongly read the anonymous
    check as "license not accepted"). Only `Lightricks/LTX-2.5` is gated; LTX-2.3, LTX-2.3-fp8 and the Comfy-Org
