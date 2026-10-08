@@ -36,9 +36,9 @@ Marie-Jeanne the strawberry, Rida the kiwi) and their keyframes.
    It extends the repo's `ghcr.io/rzdhop/worker-comfyui-tts` (plan 31: Chatterbox + the handler patch that
    returns SaveAudio outputs) with the LTX model folders mapped on the volume.
 2. The existing network volume (the one the video/image/voice endpoints share, `docs/MCP.md`), or a new one
-   ≥ 150 GB in the same datacenter; from a pod with it mounted at `/runpod-volume`:
-   `HF_TOKEN=hf_... bash showrunner/worker/fill_volume.sh` (accept the gated licenses of
-   `Lightricks/LTX-2.5` and `Lightricks/LTX-2.3-fp8` first). ≈ 100 GB, 20–40 min. Chatterbox weights:
+   ≥ 150 GB in the same datacenter; from a pod with it attached (a pod mounts it at `/workspace`):
+   `HF_TOKEN=hf_... VOLUME_ROOT=/workspace bash fill_volume.sh` (a Read token of an account that accepted
+   the license of `Lightricks/LTX-2.5`, the only gated repo here). ≈ 100 GB, 20–40 min. Chatterbox weights:
    `docker/worker-comfyui-tts/fetch_weights.sh` if the volume does not have them yet.
 3. Point the **video** endpoint (`RUNPOD_COMFY_ENDPOINT_ID`) at this image with the settings of
    `worker/ENDPOINT.md` (L40S 48 GB, timeout 1200 s, the S3/R2 env vars), or make a fourth endpoint for the spike.

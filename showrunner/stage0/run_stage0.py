@@ -19,6 +19,8 @@ Order of operations (each command is one GPU batch, submitted in parallel, waite
     python -m showrunner.stage0.run_stage0 keyframe  --character camille --images-endpoint <id> [--seeds 1 2]
         start-image candidates for a character with no keyframe (t2i_flux2_klein); then, free:
     python -m showrunner.stage0.run_stage0 keyframe  --character camille --pick 2
+    python -m showrunner.stage0.run_stage0 preflight --video-endpoint <id>
+        free, read-only: HF licenses, the image on GHCR, both endpoints and their keys, local files, batch sizes
     python -m showrunner.stage0.run_stage0 review
         probes every clip (duration, audio, loudness), writes contact sheets and stories/_stage0/review.md
 
@@ -341,9 +343,11 @@ def cmd_review(args) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review"])
-    ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker")
-    ap.add_argument("--images-endpoint", help="RunPod endpoint id of the images worker (Flux 2 Klein)")
+    ap.add_argument("command", choices=["preflight", "smoke", "a", "voice", "b", "c", "keyframe3", "keyframe", "review"])
+    ap.add_argument("--video-endpoint", help="RunPod endpoint id of the showrunner video worker (no default: "
+                                             "the .env video endpoint is the live app's)")
+    ap.add_argument("--images-endpoint", help="RunPod endpoint id of the images worker (Flux 2 Klein); "
+                                              "default RUNPOD_IMAGE_ENDPOINT_ID from the environment or .env")
     ap.add_argument("--lang", choices=["fr", "en"], default="fr")
     ap.add_argument("--seeds", type=int, nargs="+", default=M.SEEDS)
     ap.add_argument("--sampler", default="euler", help="path b sampler (euler recommended for A2V lip-sync)")
@@ -354,6 +358,14 @@ def main() -> None:
     ap.add_argument("--start", type=float, default=0.0, help="voice: skip this many seconds")
     ap.add_argument("--max-s", type=float, default=10.0, help="voice: keep at most this many seconds")
     args = ap.parse_args()
+    if not args.images_endpoint:
+        try:
+            args.images_endpoint = rp.api_key(name="RUNPOD_IMAGE_ENDPOINT_ID")
+        except rp.RunPodError:
+            pass
+    if args.command == "preflight":
+        from showrunner.stage0 import preflight
+        sys.exit(1 if preflight.run(args) else 0)
     if args.command in ("smoke", "a", "b", "c") and not args.video_endpoint:
         sys.exit("--video-endpoint is required")
     if args.command == "keyframe3" and not args.images_endpoint:

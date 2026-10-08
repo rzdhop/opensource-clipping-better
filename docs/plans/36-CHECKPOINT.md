@@ -50,9 +50,11 @@ Added `.github/workflows/showrunner-worker-image.yml` (builds `ghcr.io/rzdhop/sh
 Renamed the same day: `fruitstory/` → **`showrunner/`**, image `ghcr.io/rzdhop/showrunner-worker:0.1.0`, CI `.github/workflows/showrunner-worker-image.yml` (D8: any universe, not fruit only). The `fruitstory-worker` GHCR package built by `6cd7eb0` is abandoned (the human may delete it). Stage 0 gains one non-fruit character: **Camille** (`cartoon_human` universe: 3D cartoon human, French woman, early 30s, chosen by Rida 2026-10-08); each character now carries its own universe (medium + negative), the 26 fruit prompts byte-identical; `a`/`b`/`c` skip a character until its keyframe is picked. Tests 19 green.
 
 Still missing (the human's side):
-1. The `HF_TOKEN` in `.env` has **not** accepted `Lightricks/LTX-2.5` (gated file → "Access … is restricted");
-   `LTX-2.3-fp8` is accepted. All 10 files of `fill_volume.sh` exist on HF (≈ 83 GB).
-2. The GHCR package `showrunner-worker` is new → private by default; make it public like `worker-comfyui-tts`.
+1. **No HF token on this system** (`HF_TOKEN=` is empty in `.env`; an earlier note here wrongly read the anonymous
+   check as "license not accepted"). Only `Lightricks/LTX-2.5` is gated; LTX-2.3, LTX-2.3-fp8 and the Comfy-Org
+   files download without a token. All 10 files of `fill_volume.sh` exist on HF (≈ 83 GB).
+2. ~~The GHCR package must be made public~~ — done by itself: `ghcr.io/rzdhop/showrunner-worker:0.1.0` is public
+   (preflight, 2026-10-08).
 3. The volume: size and datacenter unknown from here (the `RUNPOD_API_KEY` is restricted: no account REST); needs
    ≈ 85 GB free for the LTX weights.
 4. The spike endpoint (ENDPOINT.md settings, same volume) and its id; the restricted key must cover it.

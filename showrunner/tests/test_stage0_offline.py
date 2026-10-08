@@ -221,3 +221,32 @@ def test_a_character_without_keyframe_is_skipped_not_sent(monkeypatch, capsys):
     ready = R._ready_characters()
     assert "camille" not in ready and {"paloma", "marie_jeanne", "rida"} <= set(ready)
     assert "keyframe --character camille" in capsys.readouterr().out
+
+
+def test_preflight_counts_batches_from_the_files_present(monkeypatch, tmp_path, png):
+    from showrunner.stage0 import preflight
+    monkeypatch.setattr(M, "STAGE0_DIR", str(tmp_path))  # no kf_three.png there
+    for cid in M.CHARACTERS:
+        monkeypatch.setitem(M.CHARACTERS, cid, dict(M.CHARACTERS[cid], keyframe=png if cid != "camille" else "/no.png"))
+    monkeypatch.setitem(M.EXCHANGES, "two", dict(M.EXCHANGES["two"], keyframe=png))
+    sizes = preflight.batch_sizes([11, 22, 33])
+    # 3 ready characters x 3 seeds + the two-speaker exchange x 2 seeds (no three-speaker keyframe yet)
+    assert sizes == {"smoke": 1, "a": 11, "b": 11, "c": 10}
+
+
+def test_preflight_names_the_key_scope_when_an_endpoint_refuses(monkeypatch):
+    from showrunner.stage0 import preflight
+
+    class Refused:
+        def __init__(self, *a, **k):
+            pass
+
+        def health(self):
+            raise rp.RunPodError("HTTP 403 on GET health: forbidden")
+
+    monkeypatch.setattr(rp, "Endpoint", Refused)
+    monkeypatch.setenv("RUNPOD_API_KEY", "k")
+    [(name, ok, detail)] = preflight.check_endpoint("video", "abc", "RUNPOD_API_KEY")
+    assert not ok and "key's scope" in detail
+    report = preflight.format_report([(name, ok, detail), ("ffmpeg", True, "x")], {"smoke": 1})
+    assert "MISSING  video endpoint abc" in report and "1 item(s) missing" in report

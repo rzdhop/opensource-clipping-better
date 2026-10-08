@@ -4,9 +4,10 @@
 # Run this ONCE from a cheap pod (any GPU or CPU pod) that has the network volume mounted at
 # /runpod-volume, in the same datacenter as the serverless endpoint:
 #
-#   export HF_TOKEN=hf_...        # a token with "read access to gated repos":
-#                                 # accept the license on https://huggingface.co/Lightricks/LTX-2.5
-#                                 # and https://huggingface.co/Lightricks/LTX-2.3-fp8 first.
+#   export HF_TOKEN=hf_...        # a Read token of an account that accepted the license on
+#                                 # https://huggingface.co/Lightricks/LTX-2.5 (the only gated repo here;
+#                                 # LTX-2.3, LTX-2.3-fp8 and the Comfy-Org files download without one)
+#   VOLUME_ROOT=/workspace        # on a pod the network volume is mounted at /workspace
 #   bash fill_volume.sh           # idempotent: skips files already present with the right size
 #
 # Sizes (approx.): LTX-2.5 int8 stack 57 GB, LTX-2.3 ID-LoRA stack 40 GB (Chatterbox 3 GB: fetch_weights.sh).
@@ -17,7 +18,7 @@ set -euo pipefail
 
 ROOT="${VOLUME_ROOT:-/runpod-volume}"
 MODELS="$ROOT/models"
-: "${HF_TOKEN:?HF_TOKEN is required (gated Lightricks repos)}"
+: "${HF_TOKEN:?HF_TOKEN is required (Lightricks/LTX-2.5 is gated)}"
 
 mkdir -p "$MODELS"/{diffusion_models,text_encoders,vae,latent_upscale_models,checkpoints,loras}
 
