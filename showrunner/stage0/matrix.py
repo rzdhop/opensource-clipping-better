@@ -188,14 +188,21 @@ def prompt_keyframe(char_id: str) -> str:
 
 # ------------------------------------------------------------------ prompt builders
 
+# Rida, 2026-10-08: in an episode a character rarely speaks to the lens. The single-speaker tests use
+# the drama's real framing: talking to someone just off-screen, three-quarter view, eyeline past the lens.
+def dialogue_framing(name: str) -> str:
+    return (f"{name} talks to someone just off-screen beside the camera, in three-quarter view, the eyeline "
+            f"passing just past the lens and never looking into it, as in a conversation scene of a drama")
+
+
 def prompt_path_a(char_id: str, lang: str, line: str | None = None) -> str:
     """Path (a): LTX-2.5 I2V, the voice described and the line quoted in the prompt."""
     c = CHARACTERS[char_id]
     line = line or LINES[char_id][lang]
     return (f"Use the provided start image as the first frame. {medium(char_id)} {c['head']}. Setting: {c['setting']}. "
-            f"{c['name']} looks toward the camera and says in {LANGUAGE_NAME[lang]}, with the voice of "
+            f"{dialogue_framing(c['name'])}, and says in {LANGUAGE_NAME[lang]}, with the voice of "
             f"{c['voice']['en']}: \"{line}\" The mouth moves naturally with every word, a small head tilt, "
-            f"a breath before and a beat of silence after the line. Medium shot, the camera holds still on "
+            f"a breath before and a beat of silence after the line. Medium close-up, the camera holds still on "
             f"the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet "
             f"room tone, no music. No subtitles, no on-screen text, no black frames.")
 
@@ -204,9 +211,10 @@ def prompt_path_b(char_id: str, lang: str, setting: str | None = None) -> str:
     """Path (b): LTX-2.5 A2V, the audio is given; the prompt describes the performance only."""
     c = CHARACTERS[char_id]
     return (f"Use the provided start image as the first frame. {medium(char_id)} {c['head']}. Setting: "
-            f"{setting or c['setting']}. {c['name']} speaks the line that is heard, in {LANGUAGE_NAME[lang]}, "
+            f"{setting or c['setting']}. {dialogue_framing(c['name'])}, speaking the line that is heard, in "
+            f"{LANGUAGE_NAME[lang]}, "
             f"lips in sync with every syllable, natural blinks and small head movements, expressive brows, "
-            f"a beat of stillness after the last word. Medium shot, the camera holds still on the speaker. "
+            f"a beat of stillness after the last word. Medium close-up, the camera holds still on the speaker. "
             f"No subtitles, no on-screen text, no black frames.")
 
 
@@ -214,8 +222,8 @@ def prompt_path_c(char_id: str, lang: str, line: str | None = None) -> str:
     """Path (c): LTX-2.3 ID-LoRA, the [VISUAL]/[SPEECH]/[SOUNDS] sections of the official template."""
     c = CHARACTERS[char_id]
     line = line or LINES[char_id][lang]
-    return (f"[VISUAL]: {medium(char_id)} Medium shot, the camera slowly pushes in toward the character. {c['head']}. "
-            f"Setting: {c['setting']}. {c['name']} looks toward the camera, the mouth opens and closes "
+    return (f"[VISUAL]: {medium(char_id)} Medium close-up, the camera slowly pushes in toward the character. {c['head']}. "
+            f"Setting: {c['setting']}. {dialogue_framing(c['name'])}; the mouth opens and closes "
             f"naturally while speaking, a small head tilt, expressive brows.\n"
             f"[SPEECH]: {line}\n"
             f"[SOUNDS]: The speaker talks in {LANGUAGE_NAME[lang]} with the voice of {c['voice']['en']}, "

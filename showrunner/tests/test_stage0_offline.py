@@ -271,3 +271,12 @@ def test_video_jobs_use_the_showrunner_video_key(monkeypatch):
     monkeypatch.setenv("RUNPOD_SHOWRUNNER_VIDEO_KEY", "video-key")
     R._video_endpoint(type("A", (), {"video_endpoint": "8o50"})())
     assert seen == {"id": "8o50", "key": "video-key"}
+
+
+def test_single_speaker_prompts_use_dialogue_framing_not_the_lens():
+    # Rida, 2026-10-08: a character rarely speaks to camera in an episode.
+    for cid in M.CHARACTERS:
+        for build in (M.prompt_path_a, M.prompt_path_b, M.prompt_path_c):
+            p = build(cid, "fr")
+            assert "talks to someone just off-screen" in p and "never looking into it" in p
+            assert "looks toward the camera" not in p
