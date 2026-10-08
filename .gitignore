@@ -80,6 +80,11 @@ uv.lock
 
 # plan 36: stage-0 scratch outputs and heavy production renders stay local
 stories/_stage0/
+# plan 36 stories/: text and images in git; clips, finals and voices stay on the host + a backup (2026-10-08)
+stories/**/*.mp4
+stories/**/*.wav
+stories/**/*.flac
+stories/**/*.mp3
 productions/*/ep*/out/
 productions/*/ep*/clips/
 productions/**/__pycache__/
