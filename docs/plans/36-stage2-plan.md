@@ -1,6 +1,7 @@
 # Plan 36 — Stage 2: the MCP v2 (proposed 2026-10-08, after stage 1)
 
-Status: **PROPOSED, not approved.** Three questions (§4) block the start.
+Status: **PROPOSED, questions answered 2026-10-08** (1: a new connector · 2: inline clips for now · 3: VC as a tool); the
+final plan awaits Rida's approval.
 Read first: `docs/plans/36-CHECKPOINT.md` (top), `docs/plans/36-rebuild-from-scratch-plan.md` §4 (the tool list),
 `showrunner/README.md`.
 
@@ -31,7 +32,7 @@ Rejected: adding the tools to the live server (couples the rebuild to the old ap
 | 2.0 | Server skeleton: `runpod_health`, `templates_list`, the token door, the unit file | `showrunner/mcp_server.py`, `showrunner/mcp_auth.py`, `deploy/showrunner-mcp.service`, tests | Low | FastMCP in-process client test; `systemctl --user`-free unit reviewed by Rida before install |
 | 2.1 | Story tools: `story_list`, `story_create`, `store_read`, `store_write`, `store_lock`/`store_unlock` (reason required), `view_file` (images back as images) | same + tests | Low | tests on temp stories; a locked file refused through the tool |
 | 2.2 | GPU tools: `comfy_submit(template, values, files, story, dest)` (async, journal in the story's `costs.jsonl` + `jobs.jsonl`), `comfy_status`, `comfy_fetch` (saves into the story, contact sheet back), `cost_ledger` | same + tests (fake endpoint) | Medium: money | every submit returns the estimate first; the showrunner endpoints only (`RUNPOD_SHOWRUNNER_VIDEO_*`, images key), never `RUNPOD_COMFY_ENDPOINT_ID` (test) |
-| 2.3 | Gate tools: `verify_take(story, ep, shot, take)` (writes the verdict into `takes.json`), `contact_sheet`, `approve_take` (only after Rida's word in the chat), `assemble_episode(story, ep)` (mp4 + sheet back) | same + tests | Medium | the stage-1 tests' synthetic story through the tools |
+| 2.3 | Gate tools: `verify_take(story, ep, shot, take)` (writes the verdict into `takes.json`), `vc_clip(story, ep, shot, take)` (every line to its speaker's locked voice → the next take, DEC-323), `contact_sheet`, `approve_take` (only after Rida's word in the chat), `assemble_episode(story, ep)` (mp4 + sheet back) | same + tests | Medium | the stage-1 tests' synthetic story through the tools |
 | 2.4 | Smoke from the chat (Rida's go, ≈ $0.50): one keyframe, one clip, its check, one assembly on a scratch story | — | Medium | Rida watches the clip and the mini-episode |
 
 Each stage: tests green → commit → action-log line. The riskiest: 2.2 (spend through a tool).
@@ -42,7 +43,8 @@ Each stage: tests green → commit → action-log line. The riskiest: 2.2 (spend
    existing connector? Recommended: a new one (§2).
 2. **Clip transfer:** base64 in the job answer (works today up to ≈ 10 s at 704×1280) or an R2/S3 bucket on the
    showrunner endpoint (needed for longer or bigger outputs)? Recommended: base64 now, bucket when a clip outgrows it.
-3. **Voice conversion in the toolbox** (`vc_line`): only if the stage-1.0 test passed your listening.
+3. ~~Voice conversion in the toolbox~~ — **answered 2026-10-08:** Rida approved the locked voice (singles and
+   exchanges); `vc_clip` is in stage 2.3 and the cast step makes a `voice_ref.wav` per character (DEC-323).
 
 ## 5. Checks
 

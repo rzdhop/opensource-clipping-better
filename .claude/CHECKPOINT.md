@@ -1,9 +1,10 @@
 ## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
 
-- **In-progress header (2026-10-08 late):** Rida LOVED the locked-voice singles (DEC-323). Per-speaker VC of the
-  exchanges done (`149992e` + this commit, $0.01): `stories/_stage0/vc/vc_compare_exchanges.mp4` sent; waiting on
-  Rida's listening. If yes: the demo re-assembled with every clip in its locked voice (free), then stage 2 (MCP v2,
-  `docs/plans/36-stage2-plan.md`, a `vc_clip` tool added). Tests 76 + 2 (venv). Not pushed.
+- **In-progress header (2026-10-08 late):** Rida approved the locked voice (singles + exchanges, DEC-323); the demo
+  was rebuilt with locked voices (`319e0d5`, sent) and the .gitignore now tracks a story's .ass/.jpg (`70e48bb`).
+  **Stage 2 (MCP v2):** Rida answered — a NEW connector (own server/unit, the live rzdhop-story untouched) and clips
+  returned inline (base64) for now; VC is a tool (`vc_clip`). Phase = EXPLORE (mapping mcp_server/auth.py, server,
+  unit, proxy to copy), then the final stage-2 plan for Rida's approval. Tests 76 + 2. Not pushed.
 - **Previous header:** phase = DOCUMENT done; nothing running. Waiting on Rida: (1) watch the demo
   `stories/faille-d-amour/ep01/final.mp4` (host only; sent in chat), (2) listen to `stories/_stage0/vc/vc_compare.mp4`
   (the VC verdict decides whether a locked voice stays in the cast pack and whether stage 2 gets a `vc_line` tool),
