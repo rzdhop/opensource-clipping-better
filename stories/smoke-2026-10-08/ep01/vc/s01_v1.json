@@ -1,0 +1,16 @@
+{
+  "shot": "s01",
+  "take": "v1",
+  "clip": "ep01/clips/s01_v1.mp4",
+  "parts": [
+    {
+      "k": 0,
+      "speaker": "paloma",
+      "start_s": 0.0,
+      "end_s": 5.042,
+      "seconds": 5.042,
+      "job": "87fb8dd2-0984-4acf-a97f-1648c72a9f13-e2"
+    }
+  ],
+  "result_take": "v2"
+}

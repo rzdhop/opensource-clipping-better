@@ -1,5 +1,10 @@
 ## CURRENT STATE — plan 36 STAGE 1 DONE (`showrunner/`: store, prompts, image workflows, clip check, assembly, demo) — 2026-10-08 night, local session
 
+- **Current header (2026-10-08 23:00):** plan 36 stages 0–2 DONE and PUSHED (origin/main = local main). The showrunner
+  connector is live and Rida re-added it in claude.ai. Smoke through the public URL ran end to end ($0.16, story
+  `stories/smoke-2026-10-08`). Findings for stage 3: a `voice_ref` tool is missing (a chat cannot bring a voice
+  reference into a story); the three-quarter keyframe wording draws an extra human (A-222). Next: stage 3 (skills:
+  one per step, replacing story-director / fruit-drama-episode, which call deleted tools). Plan 36 total ≈ $2.51.
 - **In-progress header (2026-10-08 night, replacement DONE):** `760e832` deleted `mcp_server/` and replaced it with the
   showrunner server (DEC-325). Host: `showrunner-mcp` active on 8787 behind the Funnel root, `rzdhop-story-mcp` gone.
   Verified on the public URL: OAuth metadata, 401 without token, the showrunner login page, bearer → 20 tools,

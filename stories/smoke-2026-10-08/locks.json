@@ -1,0 +1,17 @@
+{
+  "locked": {
+    "ep01/clips/s01_v2.mp4": {
+      "state": "locked",
+      "at": "2026-10-08T22:50:10",
+      "note": "approved s01/v2: smoke run under Rida's go 'go merge push and run' (2026-10-08): a pipeline check, not an artistic approval"
+    }
+  },
+  "history": [
+    {
+      "action": "lock",
+      "path": "ep01/clips/s01_v2.mp4",
+      "at": "2026-10-08T22:50:10",
+      "note": "approved s01/v2: smoke run under Rida's go 'go merge push and run' (2026-10-08): a pipeline check, not an artistic approval"
+    }
+  ]
+}
