@@ -10,6 +10,18 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### The showrunner connector replaces rzdhop-story (plan 36 stages 1–2, DEC-320 to DEC-325)
+
+- **Breaking — the old MCP server is gone:** `mcp_server/` (39 tools), its unit `rzdhop-story-mcp`, its tests, the
+  ep01 production scripts that ran on its job client and the repo skill `fruit-drama-episode` are deleted. The new
+  server, `showrunner/mcp_server.py` (20 tools), takes its port (8787) and its public URL; re-add the claude.ai
+  connector at the same URL (the OAuth state is new). `MCP_HOST` / `MCP_PORT` / `MCP_PUBLIC_URL` are no longer read:
+  `SHOWRUNNER_MCP_*`, and `MCP_TOKEN` stays the secret. Guide: `docs/MCP.md`.
+- **The toolbox (`showrunner/`):** the story store (`stories/<slug>/`, lock states, takes, a ledger), prompt templates
+  pinned to the batch-a prompts, FLUX.2 klein image workflows, the clip check (speech-to-text on the CPU, DEC-321),
+  locked voices per speaker (Chatterbox voice conversion, DEC-323), the assembly from approved clips only, GPU jobs
+  journaled in the story. A demo story: `stories/faille-d-amour/`.
+
 ### The chat speaks: MCP voice tools, a file upload, an honest ledger, no still ever (plan 33, DEC-316 / DEC-317)
 
 #### Added

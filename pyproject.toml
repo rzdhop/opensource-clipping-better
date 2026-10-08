@@ -47,7 +47,7 @@ clipping = "main:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-# The story MCP server (mcp_server/): `pip install .[mcp]`, then `python -m mcp_server`.
+# The showrunner MCP server (showrunner/mcp_server.py): `pip install .[mcp]`, then `python -m showrunner.mcp_server`.
 mcp = ["fastmcp>=4,<5", "python-dotenv"]
 # Local text-to-speech engines for the AI Story mode (spec 8.3): opt-in, probed
 # at run time, never imported at startup. Versions read from PyPI on 2026-09-25.
@@ -66,7 +66,7 @@ local-tts = [
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
-include = ["clipping*", "web*", "mcp_server*", "youtube_uploader*", "youtube_tracker*", "facebook_uploader*"]
+include = ["clipping*", "web*", "showrunner*", "youtube_uploader*", "youtube_tracker*", "facebook_uploader*"]
 
 [tool.setuptools.package-data]
 clipping = ["aistory/templates/*.json", "aistory/templates/**/*.json"]

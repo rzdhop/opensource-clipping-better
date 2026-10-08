@@ -7,9 +7,11 @@ Claude is the writer and the director; these tools are the hands: the story fold
 GPU jobs on the showrunner endpoints, the clip check, the voice conversion, the assembly. No tool calls an
 LLM and no tool decides anything creative. Every tool that spends money says so in its first line.
 
-Settings (environment, else the repo's ``.env``; never the live server's ``MCP_HOST/PORT/PUBLIC_URL``):
-``SHOWRUNNER_MCP_HOST`` (127.0.0.1), ``SHOWRUNNER_MCP_PORT`` (8788), ``SHOWRUNNER_MCP_PUBLIC_URL`` (its own
-Funnel port), ``MCP_TOKEN`` (the same secret as the live server), ``SHOWRUNNER_STORIES_DIR`` (``stories/``),
+It replaced the rzdhop-story server (``mcp_server/``, deleted 2026-10-08, DEC-325): same port, same public URL.
+
+Settings (environment, else the repo's ``.env``): ``SHOWRUNNER_MCP_HOST`` (127.0.0.1), ``SHOWRUNNER_MCP_PORT``
+(8787), ``SHOWRUNNER_MCP_PUBLIC_URL`` (the Funnel URL, no ``/mcp``), ``MCP_TOKEN`` (the secret of both doors),
+``SHOWRUNNER_STORIES_DIR`` (``stories/``),
 the endpoints ``RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID`` + ``RUNPOD_SHOWRUNNER_VIDEO_KEY`` and
 ``RUNPOD_IMAGE_ENDPOINT_ID`` + ``RUNPOD_IMAGE_API_KEY``. The live app's ``RUNPOD_COMFY_ENDPOINT_ID`` is never read.
 """
@@ -43,7 +45,7 @@ from showrunner import verify  # noqa: E402
 from showrunner import voice  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_PORT = 8788
+DEFAULT_PORT = 8787
 TEXT_EXTS = (".md", ".json", ".jsonl", ".txt", ".ass")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 VIDEO_EXTS = (".mp4", ".mov", ".webm")

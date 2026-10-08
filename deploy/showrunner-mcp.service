@@ -1,8 +1,8 @@
 # systemd unit of the showrunner MCP server (showrunner/mcp_server.py, plan 36 stage 2): install with
 #   sudo cp deploy/showrunner-mcp.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now showrunner-mcp
-# and expose it on its own Funnel port (the live rzdhop-story server keeps 443):
-#   sudo tailscale funnel --bg --https=8443 http://127.0.0.1:8788
+# It replaced rzdhop-story-mcp (2026-10-08, DEC-325) on port 8787; the Funnel root already proxies it:
+#   sudo tailscale funnel --bg 8787
 # Logs: journalctl -u showrunner-mcp -f
 [Unit]
 Description=showrunner MCP server (plan 36: the AI Story toolbox driven from the chat)
@@ -14,7 +14,7 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/Documents/tools/opensource-clipping-better
-# No EnvironmentFile= on purpose, as for rzdhop-story-mcp: the server reads .env itself (its inline comments
+# No EnvironmentFile= on purpose: the server reads .env itself (its inline comments
 # would reach systemd's values). Settings: SHOWRUNNER_MCP_HOST/PORT/PUBLIC_URL, MCP_TOKEN, the RunPod ids/keys.
 ExecStart=/home/ubuntu/Documents/tools/opensource-clipping-better/.venv/bin/python -m showrunner.mcp_server
 Restart=always

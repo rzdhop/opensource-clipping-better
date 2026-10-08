@@ -1,10 +1,9 @@
 """Who may call the showrunner MCP server (plan 36 stage 2).
 
-Copied from ``mcp_server/auth.py`` (the live rzdhop-story server), not imported: ``showrunner/`` imports
-neither ``clipping`` nor ``mcp_server``. Changes: the names on the login page, the bearer client id, the
-state file (its own, so the two servers never share OAuth clients or tokens) and the log prefix.
+Taken from the rzdhop-story server's ``mcp_server/auth.py`` (that server was deleted 2026-10-08, DEC-325),
+with its own names, bearer client id, state file and log prefix.
 
-Two doors, one secret (``MCP_TOKEN``, the same as the live server):
+Two doors, one secret (``MCP_TOKEN``):
 
 * a **bearer header** -- Claude Code and any client that can send
   ``Authorization: Bearer <MCP_TOKEN>`` (``StaticTokenVerifier``);
@@ -19,8 +18,8 @@ Two doors, one secret (``MCP_TOKEN``, the same as the live server):
   2. clients and tokens are **kept on disk** (``outputs/showrunner-mcp/oauth.json``), so
      a restart of the server does not log the connector out.
 
-``SHOWRUNNER_MCP_PUBLIC_URL`` is the address clients reach the server at (its own
-Funnel port); the OAuth metadata and the login page are built on it.
+``SHOWRUNNER_MCP_PUBLIC_URL`` is the address clients reach the server at (the Funnel URL); the
+OAuth metadata and the login page are built on it.
 """
 
 from __future__ import annotations

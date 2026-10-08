@@ -25,10 +25,10 @@ showrunner/
 - `store.py` (stories/<slug>/, locks, takes, ledger) · `prompts/` + `prompts.py` (the batch-a golden) · `verify.py`
   (`verify_take`: speech-to-text on this CPU; `speaker_parts`/`join_parts`) · `voice.py` (locked voices on a clip,
   DEC-323) · `jobs.py` (GPU jobs into a story) · `assemble.py` (the episode from approved takes).
-- `mcp_server.py`: the `showrunner` connector (20 tools), see `docs/MCP.md` "The showrunner connector".
+- `mcp_server.py`: the `showrunner` connector (20 tools; it replaced rzdhop-story on 2026-10-08, DEC-325), see `docs/MCP.md`.
   Run: `.venv/bin/python -m showrunner.mcp_server`. Its tests need fastmcp (the `.venv`):
   `PYTHONPATH=<a pytest install> .venv/bin/python -m pytest showrunner/tests` — never install into `.venv` (the live
-  rzdhop-story unit runs from it). The system python runs the rest: `python3 -m pytest showrunner/tests -o addopts=""`.
+  showrunner-mcp unit runs from it). The system python runs the rest: `python3 -m pytest showrunner/tests -o addopts=""`.
 - Clips, finals and voice files of `stories/` stay on this host (DEC-322): back them up.
 
 ## Stage 0 — the voice-path spike (D1, D6)

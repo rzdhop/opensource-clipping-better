@@ -74,11 +74,11 @@ def payload(result):
 
 # ------------------------------------------------------------------ settings
 
-def test_settings_read_their_own_names_never_the_live_servers_or_the_live_endpoint():
+def test_settings_read_their_own_names_never_the_old_servers_or_the_live_endpoint():
     env = {"MCP_PORT": "8787", "MCP_PUBLIC_URL": "https://live.example", "MCP_HOST": "0.0.0.0", "MCP_TOKEN": "t",
            "RUNPOD_COMFY_ENDPOINT_ID": "LIVE", "RUNPOD_API_KEY": "main"}
     s = S.load_settings(env)
-    assert (s.host, s.port, s.public_url, s.token) == ("127.0.0.1", 8788, "", "t")
+    assert (s.host, s.port, s.public_url, s.token) == ("127.0.0.1", 8787, "", "t")   # MCP_PORT/PUBLIC_URL ignored
     assert s.endpoints == {} and "LIVE" not in json.dumps(s.endpoints) + json.dumps(s.keys)
     assert s.forbidden == {"LIVE"}                       # read only to be refused (test below)
     s = S.load_settings({"SHOWRUNNER_MCP_PORT": "9000", "SHOWRUNNER_MCP_PUBLIC_URL": "https://x.ts.net:8443/",
