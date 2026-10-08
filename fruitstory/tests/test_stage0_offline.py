@@ -181,3 +181,10 @@ def test_matrix_prompts_quote_the_line_and_name_the_language():
     assert "Marie-Jeanne says in French" in ex and "Rida says in French" in ex
     for char in M.CHARACTERS.values():
         assert "whole head is a single" in char["head"]
+
+
+def test_api_key_reads_the_named_key_and_names_it_when_missing():
+    assert rp.api_key({"RUNPOD_IMAGE_API_KEY": " img-key "}, name="RUNPOD_IMAGE_API_KEY") == "img-key"
+    assert rp.api_key({"RUNPOD_API_KEY": "main", "RUNPOD_IMAGE_API_KEY": "img"}) == "main"
+    with pytest.raises(rp.RunPodError, match="FRUITSTORY_TEST_ABSENT_KEY"):
+        rp.api_key({}, name="FRUITSTORY_TEST_ABSENT_KEY")

@@ -40,6 +40,23 @@ against it.
 4. The `rzdhop-story` MCP answered **502** from the cloud session all day (`CLIENT_HTTP_NOT_IMPLEMENTED`); the runner
    talks to RunPod directly, so stage 0 does not need it; stage 2 does. The server unit is `deploy/rzdhop-story-mcp.service`.
 
+## Session 2026-10-08 (A1 host, local) — what is ready, what the human must do
+
+Checked for free (no GPU job): `fruitstory/tests` 15 → 16 green. Found and fixed: `keyframe3` sent `RUNPOD_API_KEY`
+to the image endpoint, which has its own key (403) → `api_key(name=...)` + `RUNPOD_IMAGE_API_KEY`; the smoke command
+in ENDPOINT.md; ENDPOINT.md now says a **fourth** endpoint (the live video endpoint runs the app's S2V clips).
+Added `.github/workflows/fruitstory-worker-image.yml` (builds `ghcr.io/rzdhop/fruitstory-worker:0.1.0`).
+
+Still missing (the human's side):
+1. The `HF_TOKEN` in `.env` has **not** accepted `Lightricks/LTX-2.5` (gated file → "Access … is restricted");
+   `LTX-2.3-fp8` is accepted. All 10 files of `fill_volume.sh` exist on HF (≈ 83 GB).
+2. The GHCR package `fruitstory-worker` is new → private by default; make it public like `worker-comfyui-tts`.
+3. The volume: size and datacenter unknown from here (the `RUNPOD_API_KEY` is restricted: no account REST); needs
+   ≈ 85 GB free for the LTX weights.
+4. The spike endpoint (ENDPOINT.md settings, same volume) and its id; the restricted key must cover it.
+5. `BUCKET_*` on that endpoint: optional (base64 output fits a 5–10 s 704×1280 clip).
+6. The `rzdhop-story` MCP did not resolve from the local session either → path (d) S2V via MCP is not possible today.
+
 ## Stage 0 run order (from the repo root)
 
 ```

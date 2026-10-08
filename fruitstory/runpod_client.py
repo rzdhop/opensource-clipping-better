@@ -34,16 +34,17 @@ class RunPodError(RuntimeError):
     pass
 
 
-def api_key(env: dict | None = None) -> str:
+def api_key(env: dict | None = None, *, name: str = "RUNPOD_API_KEY") -> str:
+    """The RunPod key *name* from the environment or a ``.env`` line in the repo root."""
     env = os.environ if env is None else env
-    key = (env.get("RUNPOD_API_KEY") or "").strip()
+    key = (env.get(name) or "").strip()
     dotenv = os.path.join(REPO_ROOT, ".env")
     if not key and os.path.exists(dotenv):
         for line in open(dotenv, encoding="utf-8"):
-            if line.startswith("RUNPOD_API_KEY="):
-                key = line.split("=", 1)[1].strip().strip('"').strip("'")
+            if line.startswith(f"{name}="):
+                key = line.split("=", 1)[1].split("#", 1)[0].strip().strip('"').strip("'")
     if not key:
-        raise RunPodError("RUNPOD_API_KEY is not set (environment or .env)")
+        raise RunPodError(f"{name} is not set (environment or .env)")
     return key
 
 

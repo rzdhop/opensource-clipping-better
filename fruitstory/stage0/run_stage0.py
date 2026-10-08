@@ -229,7 +229,12 @@ def cmd_keyframe3(args) -> None:
     """The three-character keyframe with the repo's existing Flux 2 Klein multi-reference template."""
     from clipping.providers.local_comfyui import load_template, render_template  # the images endpoint's templates
 
-    ep = rp.Endpoint(args.images_endpoint)
+    # The images endpoint has its own key in the app (RUNPOD_IMAGE_API_KEY); fall back to the main one.
+    try:
+        key = rp.api_key(name="RUNPOD_IMAGE_API_KEY")
+    except rp.RunPodError:
+        key = None
+    ep = rp.Endpoint(args.images_endpoint, key=key)
     ex = M.EXCHANGES["three"]
     refs = [M.CHARACTERS[s]["ref"] for s in ex["speakers"]]
     names = [f"kf3_ref{k}.png" for k in range(len(refs))]

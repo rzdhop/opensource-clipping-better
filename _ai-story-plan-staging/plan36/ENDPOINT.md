@@ -14,12 +14,12 @@
 | Env `BUCKET_ENDPOINT_URL` / `BUCKET_ACCESS_KEY_ID` / `BUCKET_SECRET_ACCESS_KEY` | your R2/S3 bucket | clips come back as URLs, never near the 20 MB response cap |
 | Env `COMFY_LOG_LEVEL` | `INFO` | RunPod throttles DEBUG-level log floods |
 
-The app already has three endpoints (`docs/MCP.md`): **video** (`RUNPOD_COMFY_ENDPOINT_ID`, Wan 2.2 / LTX-2), **image** (`RUNPOD_IMAGE_ENDPOINT_ID`, FLUX.2 klein, same volume) and **voice** (`RUNPOD_AUDIO_ENDPOINT_ID`, the tts image). Stage 0 uses the **video** endpoint switched to this image (or a fourth endpoint on the same volume while testing) and the **image** endpoint for `keyframe3`; TTS lines can run on the video endpoint (Chatterbox is in the base image) or on the voice endpoint. Never mix image and video models on one endpoint: every job would reload 30+ GB.
+The app already has three endpoints (`docs/MCP.md`): **video** (`RUNPOD_COMFY_ENDPOINT_ID`, Wan 2.2 / LTX-2), **image** (`RUNPOD_IMAGE_ENDPOINT_ID`, FLUX.2 klein, same volume) and **voice** (`RUNPOD_AUDIO_ENDPOINT_ID`, the tts image). Stage 0 uses a **fourth endpoint** on this image, on the same volume (never switch the live **video** endpoint: the app's S2V talking clips run on it, and they are the comparison) and the **image** endpoint for `keyframe3`; TTS lines can run on the video endpoint (Chatterbox is in the base image) or on the voice endpoint. Never mix image and video models on one endpoint: every job would reload 30+ GB.
 
 Smoke test after deploy (from the repo root, `RUNPOD_API_KEY` in the environment or `.env`):
 
 ```
-python -m fruitstory.stage0.run_stage0 --video-endpoint <id> --only smoke
+python -m fruitstory.stage0.run_stage0 smoke --video-endpoint <id>
 ```
 
 It submits one 5 s `ltx25_i2v_speech` clip and prints the billed seconds.
