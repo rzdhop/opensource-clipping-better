@@ -282,6 +282,11 @@ class Story:
         os.makedirs(os.path.dirname(full), exist_ok=True)
         return full
 
+    def writable(self, relpath: str) -> str:
+        """The absolute path to write *relpath* to (folders made); ``Locked`` if it is locked. For files a
+        tool writes itself (ffmpeg outputs)."""
+        return self._guard(relpath)
+
     def write_text(self, relpath: str, text: str) -> str:
         full = self._guard(relpath)
         with open(full, "w", encoding="utf-8") as fh:
