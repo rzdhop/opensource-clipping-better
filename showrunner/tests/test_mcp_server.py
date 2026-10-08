@@ -317,3 +317,81 @@ def test_an_image_template_goes_to_the_images_endpoint_with_its_key(tmp_path):
     refused = call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"prompt": "p", "seed": 2})
     assert refused.is_error and "dest" in refused.content[0].text
     assert call(server, "comfy_submit", story=slug, template="nope", values={}, dest="x").is_error
+
+
+# ------------------------------------------------------------------ gates end to end (2.3)
+
+def _flac_b64(tmp_path, name, seconds, freq):
+    path = tmp_path / f"{name}.flac"
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", f"sine=frequency={freq}:duration={seconds}",
+                    "-ar", "24000", "-ac", "1", str(path)], check=True, capture_output=True)
+    return base64.b64encode(path.read_bytes()).decode()
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
+def test_a_two_speaker_shot_from_clip_to_episode_through_the_tools(tmp_path, monkeypatch):
+    from showrunner import verify as V
+    backend, server, slug = make_story(tmp_path)
+    root = tmp_path / "stories" / slug
+    for cid, name in (("ana", "Ana"), ("bo", "Bo")):
+        call(server, "store_write", story=slug, path=f"02-cast/{cid}/sheet.md",
+             text=f"# {name}\\n\\n## Head\\n{name}, a test character\\n\\n## Voice (en)\\nwarm\\n")
+        subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "sine=frequency=200:duration=5", "-ar", "24000",
+                        str(root / "02-cast" / cid / "voice_ref.wav")], check=True, capture_output=True)
+    call(server, "store_write", story=slug, path="ep01/shots.json", text=json.dumps({"shots": [
+        {"id": "s01", "lines": [{"speaker": "ana", "text": "C'est qui ?"}, {"speaker": "bo", "text": "Personne."}]}]}))
+    (root / "ep01" / "keyframes").mkdir(parents=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=orange:s=704x1280", "-frames:v", "1",
+                    str(root / "ep01" / "keyframes" / "s01.png")], check=True, capture_output=True)
+    # 1. the clip (fake GPU)
+    job = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"prompt": "p", "seed": 22},
+                       files={"image": "ep01/keyframes/s01.png"}, episode=1, shot="s01"))["job"]
+    FakeEndpoint.script = {job: [{"status": "COMPLETED", "executionTime": 40000, "output": {"images": [
+        {"filename": "showrunner/x_00001_.mp4", "type": "base64", "data": _clip_b64(tmp_path)}]}}]}
+    call(server, "comfy_fetch", story=slug, job=job)
+    # 2. its check (an injected transcript: the model is not in the test)
+    heard = [{"word": w, "start": a, "end": b, "prob": 1.0} for w, a, b in
+             (("C'est", 0.1, 0.3), ("qui", 0.3, 0.6), ("Personne", 1.1, 1.6))]
+    real_check = V.verify_take
+    monkeypatch.setattr(S.verify, "verify_take", lambda clip, lines, lang: real_check(clip, lines, lang, words=heard))
+    assert call(server, "vc_clip", story=slug, episode=1, shot="s01", take="v1").is_error   # no check yet
+    checked = payload(call(server, "verify_take", story=slug, episode=1, shot="s01", take="v1"))
+    assert checked["state"] == "ok" and [r["speaker"] for r in checked["lines"]] == ["ana", "bo"]
+    # 3. the locked voices: one job per speaker
+    vc = payload(call(server, "vc_clip", story=slug, episode=1, shot="s01", take="v1"))
+    assert [p["speaker"] for p in vc["parts"]] == ["ana", "bo"] and vc["parts"][0]["end_s"] == pytest.approx(0.85)
+    sent = [e for e in backend.log if e[0] == "run"][1:]
+    assert [e[4]["vc"]["class_type"] for e in sent] == ["FL_ChatterboxVC", "FL_ChatterboxVC"]
+    FakeEndpoint.script.update({vc["jobs"][0]: [{"status": "IN_QUEUE"}]})
+    FakeEndpoint.script.update({vc["jobs"][1]: [{"status": "COMPLETED", "executionTime": 1000, "output": {"audio": [
+        {"filename": "showrunner/b_00001_.flac", "type": "base64", "data": _flac_b64(tmp_path, "b", 1.2, 500)}]}}]})
+    waiting = payload(call(server, "vc_fetch", story=slug, episode=1, shot="s01", take="v1"))
+    assert waiting["waiting"] == [vc["jobs"][0]]
+    FakeEndpoint.script[vc["jobs"][0]] = [{"status": "COMPLETED", "executionTime": 1000, "output": {"audio": [
+        {"filename": "showrunner/a_00001_.flac", "type": "base64", "data": _flac_b64(tmp_path, "a", 0.9, 400)}]}}]
+    got = call(server, "vc_fetch", story=slug, episode=1, shot="s01", take="v1")
+    info = json.loads(got.content[1].text)
+    assert info["take"] == "v2" and type(got.content[0]).__name__ == "ImageContent"
+    v1, v2 = V.probe(str(root / "ep01/clips/s01_v1.mp4")), V.probe(str(root / "ep01/clips/s01_v2.mp4"))
+    assert v2["frames"] == v1["frames"] and v2["duration_s"] == pytest.approx(v1["duration_s"], abs=0.05)
+    assert json.loads(call(server, "vc_fetch", story=slug, episode=1, shot="s01", take="v1").content[1].text)["take"] == "v2"
+    # 4. Rida's approval, then the episode
+    assert call(server, "approve_take", story=slug, episode=1, shot="s01", take="v2", note=" ").is_error
+    assert call(server, "assemble_episode", story=slug, episode=1, preset="ultrafast").is_error   # nothing approved
+    assert not call(server, "approve_take", story=slug, episode=1, shot="s01", take="v2", note="Rida: ok").is_error
+    ep = call(server, "assemble_episode", story=slug, episode=1, preset="ultrafast")
+    assert not ep.is_error and type(ep.content[0]).__name__ == "ImageContent"
+    report = json.loads(ep.content[1].text)
+    assert report["segments"][0]["take"] == "v2" and report["width"] == 1080
+    ledger = payload(call(server, "cost_ledger", story=slug, episode=1))
+    assert ledger["by_kind"] == {"video": pytest.approx((40 + 1 + 1) * S.RATES["video"], abs=1e-4)}
+
+
+def test_vc_clip_names_the_missing_locked_voices(tmp_path, monkeypatch):
+    backend, server, slug = make_story(tmp_path)
+    sto = S.st.Story.open(str(tmp_path / "stories" / slug))
+    sto.write_bytes("ep01/clips/s01_v1.mp4", b"mp4")
+    sto.add_take(1, "s01", "ep01/clips/s01_v1.mp4", verdict={"duration_s": 5.0, "lines": [
+        {"speaker": "ana", "start_s": 0.0, "end_s": 2.0}]})
+    got = call(server, "vc_clip", story=slug, episode=1, shot="s01", take="v1")
+    assert got.is_error and "no locked voice" in got.content[0].text and "ana" in got.content[0].text

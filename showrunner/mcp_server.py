@@ -33,12 +33,14 @@ from fastmcp.exceptions import ToolError  # noqa: E402
 from fastmcp.utilities.types import Image  # noqa: E402
 from mcp.types import BlobResourceContents, EmbeddedResource  # noqa: E402
 
+from showrunner import assemble as asm  # noqa: E402
 from showrunner import comfy_templates  # noqa: E402
 from showrunner import jobs  # noqa: E402
 from showrunner import mcp_auth  # noqa: E402
 from showrunner import runpod_client as rp  # noqa: E402
 from showrunner import store as st  # noqa: E402
 from showrunner import verify  # noqa: E402
+from showrunner import voice  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PORT = 8788
@@ -174,6 +176,21 @@ def look(path: str, *, max_px: int = 1024) -> list:
             data = open(sheet, "rb").read()
         return [Image(data=data, format="jpeg"), {"path": path, **info}]
     raise ToolError(f"view_file shows images and clips; read text with store_read ({os.path.basename(path)})")
+
+
+def shot_entry(story: st.Story, ep: int, shot: str) -> dict:
+    sheet = story.read_json(story.shots(ep)) or {}
+    for entry in sheet.get("shots") or []:
+        if entry.get("id") == shot:
+            return entry
+    raise ToolError(f"no shot {shot} in {story.shots(ep)}")
+
+
+def take_entry(story: st.Story, ep: int, shot: str, take: str) -> dict:
+    for t in (story.read_json(story.takes(ep)) or {}).get(shot, {}).get("takes", []):
+        if t["take"] == take:
+            return t
+    raise ToolError(f"no take {shot}/{take} in {story.takes(ep)}")
 
 
 def build_server(backend: Backend | None = None) -> FastMCP:
@@ -411,6 +428,142 @@ def build_server(backend: Backend | None = None) -> FastMCP:
             by_kind[r["kind"]] = round(by_kind.get(r["kind"], 0.0) + r["usd"], 4)
         return {"story": sto.slug, "episode": episode, "total_usd": sto.total_usd(episode), "by_kind": by_kind,
                 "gpu_seconds": round(sum(r["billed_s"] for r in rows), 1), "rows": rows}
+
+    # ------------------------------------------------------------ gates (stage 2.3)
+
+    @mcp.tool
+    def verify_take(story: str, episode: int, shot: str, take: str) -> dict:
+        """Free (this server's CPU, ≈ 35 s). The clip check of a take: speech-to-text of the clip's own sound,
+        aligned to the shot's scripted lines (shots.json) — share of each line heard, where it starts and ends,
+        lines in order, the last word before the clip's end. The verdict is stored in takes.json (the assembly
+        trims and subtitles from it). States: ok · mismatch · late · no_speech. Show Rida the clip either way."""
+        sto = open_story(s, story)
+        entry = shot_entry(sto, episode, shot)
+        t = take_entry(sto, episode, shot, take)
+        lines = [(line["speaker"], line["text"]) for line in entry.get("lines") or []]
+        clip = story_file(sto, t["path"])
+        if not lines:
+            verdict = {"state": "no_lines", "duration_s": verify.probe(clip)["duration_s"], "lines": []}
+        else:
+            try:
+                verdict = verify.verify_take(clip, lines, sto.language)
+            except (RuntimeError, ImportError) as exc:
+                raise ToolError(f"the clip check failed: {exc}") from exc
+        sto.set_verdict(episode, shot, take, verdict)
+        return {"shot": shot, "take": take, **{k: verdict.get(k) for k in ("state", "matched", "in_order", "start_s",
+                                                                             "end_s", "duration_s", "extra_after_s",
+                                                                             "heard_text")},
+                "lines": [{k: r.get(k) for k in ("speaker", "heard", "words", "start_s", "end_s")}
+                          for r in verdict.get("lines") or []]}
+
+    def _vc_plan_path(ep: int, shot: str, take: str) -> str:
+        return f"{st.episode_dir(ep)}/vc/{shot}_{take}.json"
+
+    @mcp.tool
+    def vc_clip(story: str, episode: int, shot: str, take: str) -> dict:
+        """COSTS MONEY (one tiny GPU job per line, ≈ $0.001 each warm; a cold worker ≈ $0.15 once). Only after
+        Rida's go. Re-voices a checked take with its speakers' locked voices (02-cast/<char>/voice_ref.wav):
+        the clip is cut between its lines (from verify_take's timings), each part converted to its own
+        speaker's voice; picture and timing untouched (DEC-323). Returns the job ids; then vc_fetch."""
+        sto = open_story(s, story)
+        t = take_entry(sto, episode, shot, take)
+        verdict = t.get("verdict") or {}
+        if not verdict.get("lines"):
+            raise ToolError(f"{shot}/{take} has no clip check with line timings: run verify_take first")
+        try:
+            parts = voice.parts_plan(verdict, verdict.get("duration_s") or verify.probe(sto.path(t["path"]))["duration_s"])
+        except ValueError as exc:
+            raise ToolError(f"{shot}/{take} cannot be split by speaker: {exc}") from exc
+        missing = sorted({p["speaker"] for p in parts if not sto.exists(f"{sto.cast_dir(p['speaker'])}/voice_ref.wav")})
+        if missing:
+            raise ToolError(f"no locked voice (02-cast/<char>/voice_ref.wav) for: {', '.join(missing)}")
+        ep_dir = st.episode_dir(episode)
+        endpoint = backend.endpoint("video")
+        clip = story_file(sto, t["path"])
+        for p in parts:
+            stem = f"{ep_dir}/vc/{shot}_{take}_l{p['k']}_{p['speaker']}"
+            voice.cut_part(clip, p, sto.writable(stem + "_in.wav"))
+            try:
+                row = jobs.submit(sto, endpoint, "video", voice.VC_TEMPLATE, {"seed": 0},
+                                  {"input": stem + "_in.wav", "target_voice": f"{sto.cast_dir(p['speaker'])}/voice_ref.wav"},
+                                  dest=stem + "_vc", episode=episode, rate_per_s=backend.rate("video"))
+            except jobs.JobError as exc:
+                raise ToolError(str(exc)) from exc
+            p["job"] = row["job"]
+        sto.write_json(_vc_plan_path(episode, shot, take), {"shot": shot, "take": take, "clip": t["path"], "parts": parts})
+        return {"shot": shot, "take": take, "jobs": [p["job"] for p in parts],
+                "parts": [{k: p[k] for k in ("speaker", "start_s", "end_s")} for p in parts]}
+
+    @mcp.tool
+    def vc_fetch(story: str, episode: int, shot: str, take: str, wait_s: int = 0):
+        """Free (paid at vc_clip). Collects the voice conversion of a take; once every part is back, the parts are
+        joined and laid under the original picture as the shot's next take (same timing, the clip check's
+        timings carried over), and you see it. Waits up to *wait_s* (≤ 240)."""
+        sto = open_story(s, story)
+        rel = _vc_plan_path(episode, shot, take)
+        if not sto.exists(rel):
+            raise ToolError(f"no voice conversion started for {shot}/{take}: vc_clip first")
+        plan = sto.read_json(rel)
+        if plan.get("result_take"):
+            new = take_entry(sto, episode, shot, plan["result_take"])
+            return [*look(story_file(sto, new["path"]))[:1], {"shot": shot, "take": plan["result_take"], "from": take}]
+        endpoint = backend.endpoint("video")
+        deadline = backend.clock() + max(0, min(int(wait_s), 240))
+        states = []
+        for p in plan["parts"]:
+            try:
+                got = jobs.fetch(sto, endpoint, p["job"], wait_s=max(0.0, deadline - backend.clock()),
+                                 rate_per_s=backend.rate("video"), sleep=backend.sleep, clock=backend.clock)
+            except jobs.JobError as exc:
+                raise ToolError(str(exc)) from exc
+            states.append(got)
+        if any(g.get("state") in ("FAILED", "CANCELLED", "TIMED_OUT") for g in states):
+            raise ToolError("a part failed: " + "; ".join(f"{g['job']} {g['state']} {g.get('error', '')}" for g in states))
+        if not all(g.get("state") == "COMPLETED" for g in states):
+            return {"shot": shot, "take": take, "waiting": [g["job"] for g in states if g.get("state") != "COMPLETED"]}
+        src = take_entry(sto, episode, shot, take)
+        new_take = sto.next_take(episode, shot)
+        clip_rel = sto.clip(episode, shot, new_take)
+        try:
+            voice.rebuild(story_file(sto, src["path"]),
+                          [(story_file(sto, g["outputs"][0]), p["seconds"]) for g, p in zip(states, plan["parts"])],
+                          sto.writable(f"{st.episode_dir(episode)}/vc/{shot}_{take}_vc.wav"), sto.writable(clip_rel))
+        except (RuntimeError, st.StoreError) as exc:
+            raise ToolError(f"the converted clip could not be rebuilt: {exc}") from exc
+        verdict = dict(src.get("verdict") or {}, verdict_from=take)
+        sto.add_take(episode, shot, clip_rel, seed=src.get("seed"), verdict=verdict,
+                     note=f"{take} with every line in its speaker's locked voice")
+        plan["result_take"] = new_take
+        sto.write_json(rel, plan)
+        return [*look(story_file(sto, clip_rel))[:1], {"shot": shot, "take": new_take, "from": take, "clip": clip_rel}]
+
+    @mcp.tool
+    def approve_take(story: str, episode: int, shot: str, take: str, note: str) -> dict:
+        """Free. Rida approved this take: it becomes the shot's clip and its file is locked. Call it ONLY after
+        Rida said so in the chat; *note* quotes Rida's words. Nothing is assembled from an unapproved clip."""
+        if not note.strip():
+            raise ToolError("approve_take needs a note quoting Rida's approval")
+        sto = open_story(s, story)
+        take_entry(sto, episode, shot, take)
+        try:
+            path = sto.approve_take(episode, shot, take, note)
+        except st.StoreError as exc:
+            raise ToolError(str(exc)) from exc
+        return {"shot": shot, "take": take, "clip": path, "approved": True}
+
+    @mcp.tool
+    def assemble_episode(story: str, episode: int, preset: str = "medium"):
+        """Free (this server's CPU, ≈ 1 min for 30 s). The episode from its approved takes only: each clip cut after
+        its last word, never slowed; subtitles from the clip check; the music bed of shots.json ducked under the
+        voices; the end card. Refused, naming them, while a shot has no approved take. You see a contact sheet
+        and the numbers; hand Rida the mp4 with file_download (epNN/final.mp4)."""
+        sto = open_story(s, story)
+        try:
+            report = asm.assemble(sto, episode, preset=preset if preset in ("ultrafast", "veryfast", "fast", "medium") else "medium")
+        except (asm.AssemblyError, st.StoreError) as exc:
+            raise ToolError(str(exc)) from exc
+        sheet = story_file(sto, report["sheet"])
+        return [Image(data=open(sheet, "rb").read(), format="jpeg"), report]
 
     return mcp
 

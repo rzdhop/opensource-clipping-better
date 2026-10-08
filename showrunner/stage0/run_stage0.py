@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from showrunner import comfy_templates  # noqa: E402
 from showrunner import runpod_client as rp  # noqa: E402
 from showrunner import verify  # noqa: E402
+from showrunner import voice  # noqa: E402
 from showrunner.stage0 import matrix as M  # noqa: E402
 
 OUT = os.path.join(M.REPO_ROOT, "stories", "_stage0")
@@ -385,13 +386,7 @@ def _vc_jobs(take: int, lang: str) -> list:
     return jobs
 
 
-def remux(clip: str, audio: str, dest: str) -> str:
-    """The picture of *clip* with *audio* as its only sound track (video stream copied, never re-timed)."""
-    out = verify._run(["ffmpeg", "-hide_banner", "-y", "-i", clip, "-i", audio, "-map", "0:v:0", "-map", "1:a:0",
-                       "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", dest])
-    if out.returncode:
-        raise RuntimeError(f"remux failed: {out.stderr.strip()[-300:]}")
-    return dest
+remux = voice.remux  # moved to showrunner/voice.py (stage 2.3); the name stays for this runner
 
 
 def _vc_exchange_jobs(take: int, lang: str, *, verdicts: dict | None = None) -> list:
