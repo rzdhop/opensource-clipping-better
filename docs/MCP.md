@@ -47,7 +47,7 @@ journalctl -u showrunner-mcp -f
 | Group | Tools |
 |---|---|
 | Endpoints | `runpod_health` · `templates_list` |
-| Story files | `story_list` · `story_create` · `store_read` · `store_write` · `store_copy` · `store_lock` · `store_unlock` (a reason is required) |
+| Story files | `story_list` · `story_create` · `store_read` · `store_write` · `store_copy` (also from another story: a returning character) · `store_lock` · `store_unlock` (a reason is required) |
 | Look and hand over | `view_file` (an image as a picture, a clip as an 8-frame sheet + its numbers) · `file_download` (the bytes, ≤ 25 MiB) |
 | GPU jobs | `comfy_submit` (**costs money**) · `comfy_fetch` · `comfy_jobs` · `cost_ledger` |
 | Gates | `verify_take` (the clip check on the CPU) · `voice_ref_from_take` (a character's locked voice, from a take Rida approved) · `vc_clip` (**costs money**, locked voices) · `vc_fetch` · `approve_take` (a note quoting Rida) · `assemble_episode` |

@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, "showrunner", "tools"))
 
 import build_skills as B  # noqa: E402
 
-SECTIONS = ("## When to use", "## Read first", "## Ask first", "## Template", "## Checklist", "## Gate question",
+SECTIONS = ("## When to use", "## Read first", "## Template", "## Checklist", "## Gate question",
             "## What to show Rida", "## Tools", "## Next")
 # Tools of the deleted rzdhop-story server and paths plan 36 forbids: a skill naming one is a dead skill.
 DEAD = ("story_step_start", "story_make_episode", "story_estimate", "story_options", "tts_line", "tts_batch",
@@ -65,7 +65,7 @@ def test_the_entry_points_route_to_every_step_skill_and_ask(name):
     front = re.match(r"^---\nname: (.+)\ndescription: (.+)\n---\n", body)
     assert front and front.group(1) == name and len(front.group(2)) <= 1024
     assert B.expected(name, body) == body and "<!-- prompts:start -->" not in body
-    assert "Ask, never assume" in body and "## Gate question" in body
+    assert "Propose, Rida corrects" in body and "## Gate question" in body
     router = text("story-director")
     for step in B.ORDER:
         assert f"`{step}`" in router, step
@@ -110,11 +110,36 @@ def test_each_skill_names_only_real_tools_and_flags_the_paid_ones(name):
     assert pays or "Free." in description
 
 
+# Rida, 2026-10-09: Claude proposes and Rida corrects in the writing steps; the production runs without questions
+# and Rida reviews the finished cast and the whole episode.
+PROPOSE_STEPS = ("story-concepts", "story-universe", "story-cast", "story-script", "story-next-episode")
+RUN_STEPS = ("story-cast", "story-shots", "story-clips", "story-assemble")
+
+
 @pytest.mark.parametrize("name", B.ORDER)
-def test_each_step_asks_before_it_acts(name):
-    """Rida, 2026-10-09: at every step it asks for details; it never assumes anything but asks instead."""
-    asks = section(text(name), "## Ask first")
-    assert len(re.findall(r"^- .+\?", asks, re.M)) >= 3, "at least three questions, each ending with '?'"
+def test_each_step_proposes_or_runs_and_never_quizzes(name):
+    body = text(name)
+    assert ("## Propose\n" in body) == (name in PROPOSE_STEPS), name
+    assert ("## Run (no questions)\n" in body) == (name in RUN_STEPS), name
+    if name in PROPOSE_STEPS:
+        assert "No questions first" in section(body, "## Propose")
+    assert "## Ask first" not in body
+    own = body.replace(B.rules(), "").replace(B.prompt_guide(), "")
+    for internal in (r"stage[- ]0", r"\bbatch a\b", r"\bgolden\b", r"\bDEC-\d", r"\bA-\d{3}\b"):
+        assert not re.search(internal, own), (name, internal)
+
+
+@pytest.mark.parametrize("name", ("story-shots", "story-clips"))
+def test_the_production_steps_do_not_stop_for_rida(name):
+    gate = section(text(name), "## Gate question")
+    assert gate.strip().startswith("None")
+
+
+def test_the_episode_review_then_the_next_episode_question():
+    gate = section(text("story-assemble"), "## Gate question")
+    assert "Good to post" in gate and "episode N+1" in gate
+    show = section(text("story-assemble"), "## What to show Rida")
+    assert "final.mp4" in show and "locked clips" in show
 
 
 @pytest.mark.parametrize("k", range(len(B.ORDER) - 1))
@@ -136,8 +161,9 @@ def test_the_files_a_skill_points_at_exist(name):
 
 def test_the_rules_say_the_non_negotiables():
     r = B.rules()
-    for must in ("Ask, never assume", "When in doubt, ask", "explicit go", "never a still", "Ken Burns", "edge-tts", "LLM API", "You write every prompt",
-                 "values.prompt", "70 words", "Keyframes face the camera", "voice_ref_from_take"):
+    for must in ("Propose, Rida corrects", "Rida's gates", "twice that estimate", "Claude's pick", "never a still", "Ken Burns", "edge-tts", "LLM API", "You write every prompt",
+                 "values.prompt", "70 words", "Keyframes face the camera", "voice_ref_from_take",
+                 "whole episode", "next episode"):
         assert must in r, must
 
 

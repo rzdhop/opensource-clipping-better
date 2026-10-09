@@ -1,5 +1,14 @@
 # Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
 
+## 2026-10-09 noon — Claude proposes, Rida corrects; production without questions (DEC-330)
+
+- Rida's remarks on the session walk-through: no internal words; propose (approved look and returning cast first),
+  he corrects; cast pictures and voices made directly and presented with locked voices; shots, clips and assembly
+  run without questions; he reviews the whole episode, then "next episode?". Six gates: concept, universe, cast
+  sheets, finished cast, script, whole episode. Cost said once per run; stop only past 2× the estimate.
+  `store_copy(from_story=…)` for returning characters. Host pulled and restarted by Rida (21 tools seen in this
+  session); the two entry skills saved on his account. Tests 137 + 3 s / 157 + 1 s.
+
 ## 2026-10-09 late morning — the skills ask, never assume; entry skills (DEC-329)
 
 - Every skill opens with "Ask, never assume" and each step has an `## Ask first` (tested). `story-director` is the

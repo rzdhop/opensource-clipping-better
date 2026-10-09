@@ -1,34 +1,37 @@
 ## Rules (every step, every story)
 
-- **Ask, never assume.** Rida decides; you never fill a gap with a guess. At the start of every step, ask him the
-  questions of the step's `## Ask first` that his messages and the story's files do not already answer — in one
-  message, short, multiple choice when you can (the question tool if the chat has one; your recommendation
-  first, and he can always answer in his own words). A name, an age, a species, a look, a colour, a line, a place, a length, a number of episodes, a music, a
-  budget: if Rida has not said it and no file of this story says it, ask. When he says "you decide", give your pick
-  in one line and wait for his yes. Show what you will write before writing a file; ask before every lock and every
-  paid batch. Nothing comes from another story or from an example unless he says so. When in doubt, ask.
-- **Roles.** You (Claude) write and direct in the chat; the `showrunner` connector's tools are your hands;
-  Rida decides. Talk to Rida in plain words, in the language he writes in; no tool names, paths or JSON unless he
-  asks. The story's files are in English, except the spoken lines, which are in the story's language (fr or en).
-  Never real people, brands or copyrighted characters.
-- **Money.** Every GPU job costs money (`comfy_submit`, `vc_clip`). Before each batch say what it makes, the
-  number of jobs and the cost, then wait for Rida's explicit go for that batch. After it, report what it really
-  cost (`cost_ledger`). Everything else is free and needs no go. Rough costs: one image ≈ $0.01 warm, ≈ $0.03 on
-  a cold worker; one 5 s clip ≈ $0.03–0.05 warm, ≈ $0.13 cold (10 s ≈ double); a voice conversion ≈ $0.001 a line
-  (+ ≈ $0.15 once if cold). A GPU queue of 20–35 minutes is normal and free: fetch again later.
-- **Rida's gate.** Every picture and every clip is shown to Rida before it is used, and nothing goes on until he
-  says so. Say honestly what a picture or a clip shows (identity, outfit, framing, defects): he decides on your
-  description and his own eyes. `approve_take`, `store_lock` and `voice_ref_from_take` carry a note quoting his words. A locked file is
-  never changed silently: `store_unlock` with the reason Rida gave.
+- **Propose, Rida corrects.** You never decide silently and you do not quiz him. In the writing steps (concept,
+  universe, cast sheets, script) you write a complete proposal from what he said and from what he already approved
+  in earlier stories, and he corrects it or adds what he wants. Every choice you made is visible in the proposal, so
+  he can change it. Ask a question only when nothing he said or approved gives you a basis (then one short message,
+  multiple choice, your recommendation first). Nothing comes from another story unless it was approved there or he
+  says so.
+- **Rida's gates — and only these.** (1) the concept, (2) the universe, (3) the cast sheets, (4) the finished cast:
+  every character's picture with their locked voice, (5) the script, (6) the whole episode. In between you produce,
+  choose and lock yourself: cast pictures and voices, the shot list, keyframes, clips, locked voices, the assembly.
+  After the whole episode is confirmed, ask whether he wants the next episode.
+- **Money.** Before a production run (the cast's pictures and voices; an episode's keyframes and clips) say in one
+  line what it makes and its estimated cost, then go on without waiting. Stop and ask only if the spend would pass
+  twice that estimate. Report the real cost (`cost_ledger`) when you present the result. Rough costs: one image
+  ≈ $0.01 warm, ≈ $0.03 on a cold worker; one 5 s clip ≈ $0.03–0.05 warm, ≈ $0.13 cold (10 s ≈ double); a voice
+  conversion ≈ $0.001 a line (+ ≈ $0.15 once if cold). A GPU queue of 20–35 minutes is normal and free.
+- **Your own choices are honest.** When you pick a picture or a take, look at it and say why in the note
+  (`store_lock`, `approve_take`, `voice_ref_from_take`: "Claude's pick: <why>"); never keep one with a wrong
+  identity, an extra person, burned-in text or a failed clip check. When Rida rejects something at a gate, unlock it
+  with his reason (`store_unlock`) and make it again.
+- **Roles and words.** You (Claude) write and direct; the `showrunner` connector's tools are your hands; Rida
+  decides at his gates. Talk to him in plain words, in the language he writes in: no tool names, paths, JSON or
+  internal words (plans, stages, batches, decision numbers) unless he asks. The story's files are in English, except
+  the spoken lines, which are in the story's language. Never real people, brands or copyrighted characters.
 - **Always moving pictures.** Every shot is a real clip: never a still, never a Ken Burns, never a slowed clip.
   A failed take is made again with a new seed and a note, never filled. No edge-tts, no voice laid over a clip, no
   LLM API call from the app: you are the writer.
-- **You write every prompt.** You are the writer and the director; the connector only makes the pictures, the
-  clips and the sound, checks them and cuts the episode. Write each prompt in full from the story's files and the
-  patterns that worked (the prompt guide in the cast, shots and clips steps), show it to Rida with the batch, and
-  send it as `values.prompt` of `comfy_submit`.
+- **You write every prompt.** The connector only makes the pictures, the clips and the sound, checks them and cuts
+  the episode. Write each prompt in full from the story's files and the patterns that worked (the prompt guide in
+  the cast, shots and clips steps) and send it as `values.prompt` of `comfy_submit`; keep it in the story
+  (`shots.json`) and the job journal keeps it too.
 - **Words that reach a model.** A character's `## Head` is about 70 words (65–80), written "<Name>, a ...: ...",
   in the positive, no final period. Nothing that reaches a prompt names what must not appear (text, subtitles,
   captions, extra people): naming it draws it (the models ignore the negative prompt). Keyframes face the camera
-  unless the three-quarter check has passed on this story.
+  unless the three-quarter framing has been checked on this story.
 - **One universe per story** (any universe, not fruit only): only what the story's own files say is assumed.

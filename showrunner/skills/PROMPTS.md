@@ -1,15 +1,15 @@
 ## Writing the prompts (you write every one; the server only makes the picture or the clip)
 
-You write each prompt in full, show it to Rida with the batch's count and cost, and send it as `values.prompt` of
-`comfy_submit`. The story's files are your material: `01-universe.md` `## Medium`, each `sheet.md` `## Head` and
+You write each prompt in full and send it as `values.prompt` of `comfy_submit` (Rida does not need to read prompts;
+show one only if he asks). The story's files are your material: `01-universe.md` `## Medium`, each `sheet.md` `## Head` and
 `## Voice (en)`, each `03-places/<place>/plate.md` `## Setting`, the shot's lines. Write the prompt into the shot
 too (`keyframe_prompt`, `clip_prompt` in `shots.json`) so the story keeps what was sent; the job journal keeps it as
 well. The prompts are in English; only the quoted lines are in the story's language.
 
-**What has worked (batch a, chosen by Rida 2026-10-08).** The patterns below are the prompts Rida preferred (take
+**What has worked (chosen by Rida 2026-10-08).** The patterns below are the prompts Rida preferred (take
 s33 for one speaker, s22 for two or three), with one change since: the closing sentence. Keep their order and their
 fixed sentences; change only what comes from this story's files. Departing from a pattern is fine when the story
-needs it — say so to Rida and note what you changed and why, so a good result can be kept.
+needs it — note in the shot what you changed and why, so a good result can be kept.
 
 **Every prompt**
 
@@ -91,8 +91,8 @@ from the first frame to the last.
 ```
 
 **The speech budget.** About 2.4 words a second after a beat of silence: a 5 s clip says at most 10 words, a 10 s
-clip at most 22 (all its lines together). A line that does not fit is cut in the script with Rida, never sped up.
+clip at most 22 (all its lines together). A line that does not fit is cut in the script, never sped up.
 
 **Before you send, check:** the Medium and every Head are word for word; the lines are the script's exact words,
 in order; each speaker's voice is their sheet's `## Voice (en)`; the closing sentence is there (clips); nothing
-unwanted is named; the size and seconds match the template; Rida saw the prompt and said go for the batch.
+unwanted is named; the size and seconds match the template; the batch is inside the cost you announced.

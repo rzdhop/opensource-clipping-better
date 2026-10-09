@@ -1,74 +1,69 @@
 ---
 name: story-universe
-description: Step 2 of an AI Story series on the showrunner connector. Use after the concept is chosen, to agree the art of the story with Rida (medium, heads, proportions, palette, light, camera) and write 01-universe.md before any picture. Free.
+description: Step 2 of an AI Story series on the showrunner connector. Use after the concept is chosen, to propose the full universe of the story (medium, heads, proportions, palette, light, camera) for Rida to correct, and lock 01-universe.md before any picture. Free.
 ---
 
 # Story, step 2: the universe (free)
 
-The art is agreed in words before any picture (D8: any universe, fruit is only one of them). `01-universe.md`
-`## Medium` opens EVERY image and clip prompt of the story: it is the style lock. Nothing here costs money.
+You propose the art of the story in full, in words, before any picture; Rida corrects it and adds what he wants.
+`01-universe.md` `## Medium` opens EVERY image and clip prompt of the story: it is the style lock. Free.
 
 <!-- rules:start -->
 ## Rules (every step, every story)
 
-- **Ask, never assume.** Rida decides; you never fill a gap with a guess. At the start of every step, ask him the
-  questions of the step's `## Ask first` that his messages and the story's files do not already answer — in one
-  message, short, multiple choice when you can (the question tool if the chat has one; your recommendation
-  first, and he can always answer in his own words). A name, an age, a species, a look, a colour, a line, a place, a length, a number of episodes, a music, a
-  budget: if Rida has not said it and no file of this story says it, ask. When he says "you decide", give your pick
-  in one line and wait for his yes. Show what you will write before writing a file; ask before every lock and every
-  paid batch. Nothing comes from another story or from an example unless he says so. When in doubt, ask.
-- **Roles.** You (Claude) write and direct in the chat; the `showrunner` connector's tools are your hands;
-  Rida decides. Talk to Rida in plain words, in the language he writes in; no tool names, paths or JSON unless he
-  asks. The story's files are in English, except the spoken lines, which are in the story's language (fr or en).
-  Never real people, brands or copyrighted characters.
-- **Money.** Every GPU job costs money (`comfy_submit`, `vc_clip`). Before each batch say what it makes, the
-  number of jobs and the cost, then wait for Rida's explicit go for that batch. After it, report what it really
-  cost (`cost_ledger`). Everything else is free and needs no go. Rough costs: one image ≈ $0.01 warm, ≈ $0.03 on
-  a cold worker; one 5 s clip ≈ $0.03–0.05 warm, ≈ $0.13 cold (10 s ≈ double); a voice conversion ≈ $0.001 a line
-  (+ ≈ $0.15 once if cold). A GPU queue of 20–35 minutes is normal and free: fetch again later.
-- **Rida's gate.** Every picture and every clip is shown to Rida before it is used, and nothing goes on until he
-  says so. Say honestly what a picture or a clip shows (identity, outfit, framing, defects): he decides on your
-  description and his own eyes. `approve_take`, `store_lock` and `voice_ref_from_take` carry a note quoting his words. A locked file is
-  never changed silently: `store_unlock` with the reason Rida gave.
+- **Propose, Rida corrects.** You never decide silently and you do not quiz him. In the writing steps (concept,
+  universe, cast sheets, script) you write a complete proposal from what he said and from what he already approved
+  in earlier stories, and he corrects it or adds what he wants. Every choice you made is visible in the proposal, so
+  he can change it. Ask a question only when nothing he said or approved gives you a basis (then one short message,
+  multiple choice, your recommendation first). Nothing comes from another story unless it was approved there or he
+  says so.
+- **Rida's gates — and only these.** (1) the concept, (2) the universe, (3) the cast sheets, (4) the finished cast:
+  every character's picture with their locked voice, (5) the script, (6) the whole episode. In between you produce,
+  choose and lock yourself: cast pictures and voices, the shot list, keyframes, clips, locked voices, the assembly.
+  After the whole episode is confirmed, ask whether he wants the next episode.
+- **Money.** Before a production run (the cast's pictures and voices; an episode's keyframes and clips) say in one
+  line what it makes and its estimated cost, then go on without waiting. Stop and ask only if the spend would pass
+  twice that estimate. Report the real cost (`cost_ledger`) when you present the result. Rough costs: one image
+  ≈ $0.01 warm, ≈ $0.03 on a cold worker; one 5 s clip ≈ $0.03–0.05 warm, ≈ $0.13 cold (10 s ≈ double); a voice
+  conversion ≈ $0.001 a line (+ ≈ $0.15 once if cold). A GPU queue of 20–35 minutes is normal and free.
+- **Your own choices are honest.** When you pick a picture or a take, look at it and say why in the note
+  (`store_lock`, `approve_take`, `voice_ref_from_take`: "Claude's pick: <why>"); never keep one with a wrong
+  identity, an extra person, burned-in text or a failed clip check. When Rida rejects something at a gate, unlock it
+  with his reason (`store_unlock`) and make it again.
+- **Roles and words.** You (Claude) write and direct; the `showrunner` connector's tools are your hands; Rida
+  decides at his gates. Talk to him in plain words, in the language he writes in: no tool names, paths, JSON or
+  internal words (plans, stages, batches, decision numbers) unless he asks. The story's files are in English, except
+  the spoken lines, which are in the story's language. Never real people, brands or copyrighted characters.
 - **Always moving pictures.** Every shot is a real clip: never a still, never a Ken Burns, never a slowed clip.
   A failed take is made again with a new seed and a note, never filled. No edge-tts, no voice laid over a clip, no
   LLM API call from the app: you are the writer.
-- **You write every prompt.** You are the writer and the director; the connector only makes the pictures, the
-  clips and the sound, checks them and cuts the episode. Write each prompt in full from the story's files and the
-  patterns that worked (the prompt guide in the cast, shots and clips steps), show it to Rida with the batch, and
-  send it as `values.prompt` of `comfy_submit`.
+- **You write every prompt.** The connector only makes the pictures, the clips and the sound, checks them and cuts
+  the episode. Write each prompt in full from the story's files and the patterns that worked (the prompt guide in
+  the cast, shots and clips steps) and send it as `values.prompt` of `comfy_submit`; keep it in the story
+  (`shots.json`) and the job journal keeps it too.
 - **Words that reach a model.** A character's `## Head` is about 70 words (65–80), written "<Name>, a ...: ...",
   in the positive, no final period. Nothing that reaches a prompt names what must not appear (text, subtitles,
   captions, extra people): naming it draws it (the models ignore the negative prompt). Keyframes face the camera
-  unless the three-quarter check has passed on this story.
+  unless the three-quarter framing has been checked on this story.
 - **One universe per story** (any universe, not fruit only): only what the story's own files say is assumed.
 <!-- rules:end -->
 
 ## When to use
 
 - The story has a chosen concept (`00-brief.md`) and an empty `01-universe.md`.
-- Rida wants to change the look of a story: the universe is locked, so unlock it with his reason first, and
-  know that every picture already made in the old look is out of date.
+- Rida wants to change the look of a story: unlock it with his reason; every picture made in the old look is then
+  out of date (say so).
 
 ## Read first
 
-- `store_read 00-brief.md` (the chosen concept and the language).
-- `store_read 01-universe.md` (the skeleton `story_create` wrote).
-- The proven example: `stories/faille-d-amour/01-universe.md` (fruit people, a 3D cartoon in the manner of a
-  feature animation). Its Medium is the one batch a was made with; borrow its shape, not its fruit.
+- `store_read 00-brief.md` (the chosen concept, the language).
+- A universe Rida already approved that fits (e.g. `stories/faille-d-amour/01-universe.md` for fruit people: the
+  look he chose). When one fits, it is your proposal, word for word — not one option among others.
 
-## Ask first
+## Propose
 
-Before proposing any direction:
-
-- The medium: 3D cartoon (feature-animation look), claymation, anime, painted 2D, something else?
-- What a head is in this world (one fruit per character? vegetables too? animals?) and how the body looks
-  (human body in clothes, or the whole character is the object?).
-- Where and when: a city, a country, a period; office, villa, village…?
-- Colours and light he wants (warm, neon, pastel; day or night mostly)?
-- What must never appear on screen?
-- A picture to aim at? (He can attach images; you describe what you see and ask what to keep.)
+No questions first. Propose the whole file at once: the universe he approved before when it fits the concept, or
+a new one written from the concept. Then: "Here is the universe — correct anything, or add what you want."
 
 ## Template
 
@@ -83,10 +78,10 @@ The skeleton is `showrunner/prompts/universe.md`. Fill every section:
 finish. Say what IS on screen. It opens every prompt, word for word.>
 
 ## Negative
-<a comma list; sent as the negative prompt, which the models ignore at cfg 1.0 — so the Medium alone must hold>
+<a comma list; sent as the negative prompt, which the models ignore — so the Medium alone must hold>
 
 ## Heads allowed
-<what a head may be in this universe: one species, several, objects, animals…>
+<what a head may be in this universe>
 
 ## Proportions
 <head-to-body ratio, height range, the hands rule>
@@ -104,31 +99,25 @@ Vertical 9:16; medium close-ups and two-shots; the camera holds still on the spe
 <what never appears — for YOU when writing sheets, plates and lines; never copied into a prompt>
 ```
 
-Propose two or three short directions first (one paragraph each, the Medium sentence of each), let Rida choose,
-then write the full file from his choice.
-
 ## Checklist
 
-- [ ] The Medium says in the positive what the picture is; it does not list what must not appear (that goes in
-      `## Forbidden`, read by you, and `## Negative`, ignored by the models).
-- [ ] The Medium names no character and no place (they come from the sheets and the plates).
-- [ ] Head types, proportions and the hands rule are explicit (identity drift starts there).
-- [ ] The palette is in hex.
-- [ ] Camera: vertical 9:16, the camera holds still on the speaker (batch a: a moving camera relit and invented).
-- [ ] Rida said yes to the words before any picture; the file is locked with his words.
+- [ ] An approved universe that fits is reused word for word (its Medium proved itself).
+- [ ] The Medium says in the positive what the picture is; it names no character and no place.
+- [ ] Head types, proportions and the hands rule are explicit; the palette is in hex.
+- [ ] Camera: vertical 9:16, the camera holds still on the speaker.
+- [ ] Locked only after Rida's yes, with his words.
 
 ## Gate question
 
-"Is this the look of the series? (Every picture and clip will start with this Medium sentence.)"
+"Is this the look of the series? Correct or add anything."
 
 ## What to show Rida
 
-The two or three directions as short paragraphs, then the Medium sentence of the chosen one in full, then the
-whole file. Say plainly that the first real test of the look is the first full-body picture of step 3.
+The Medium sentence first, then the rest of the file in short (heads, palette, light, what never appears).
 
 ## Tools
 
-- `store_read` — free: the brief and the skeleton.
+- `store_read` — free: the brief, an approved universe to reuse.
 - `store_write` — free: `01-universe.md`.
 - `store_lock` — free: lock `01-universe.md` with Rida's words.
 - `store_unlock` — free: only to change a locked universe, with Rida's reason.

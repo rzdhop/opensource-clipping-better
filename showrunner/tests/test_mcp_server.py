@@ -475,3 +475,17 @@ def test_a_casting_clip_in_episode_zero_becomes_a_take(tmp_path):
     info = json.loads(call(server, "comfy_fetch", story=slug, job=sub["job"]).content[1].text)
     assert info["take"] == "v1" and info["outputs"] == ["ep00/clips/s01_v1.mp4"]
     assert payload(call(server, "cost_ledger", story=slug, episode=0))["total_usd"] > 0
+
+
+def test_store_copy_brings_a_returning_character_from_another_story(tmp_path):
+    backend, server, slug = make_story(tmp_path)
+    other = payload(call(server, "story_create", title="Faille", language="fr"))["slug"]
+    src = S.st.Story.open(str(tmp_path / "stories" / other))
+    src.write_bytes("02-cast/rida/voice_ref.wav", b"RIFF")
+    src.lock("02-cast/rida/voice_ref.wav", "Rida: this voice")
+    got = payload(call(server, "store_copy", story=slug, src="02-cast/rida/voice_ref.wav",
+                       dest="02-cast/rida/voice_ref.wav", from_story=other))
+    assert got["from_story"] == other
+    assert (tmp_path / "stories" / slug / "02-cast/rida/voice_ref.wav").read_bytes() == b"RIFF"
+    assert call(server, "store_copy", story=slug, src="../x", dest="a.md", from_story="../etc").is_error
+    assert call(server, "store_copy", story=slug, src="nope.wav", dest="a.wav", from_story=other).is_error

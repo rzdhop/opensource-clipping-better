@@ -55,16 +55,16 @@ IMAGE_TASKS = {"t2i", "edit"}           # templates served by the images endpoin
 RATES = {"video": 0.00053, "images": 1.58 / 3600}
 
 INSTRUCTIONS = """showrunner: the AI Story toolbox (plan 36). Before any story work, load the skill "story-director"
-(the entry point: it asks Rida, finds where the story stands and loads the skill of each step: story-concepts,
-story-universe, story-cast, story-script, story-shots, story-clips, story-assemble, story-next-episode); load each
-step's skill before doing that step. Ask Rida, never assume. You (Claude) are the writer and the director; these
-tools are the hands. A story is a folder (stories/<slug>/): 00-brief.md, 01-universe.md (the art, agreed in chat
-first), 02-cast/<char>/sheet.md (+ full_body.png, voice_ref.wav), 03-places/, epNN/script.md, shots.json,
-takes.json. Rules: every GPU job costs money — say the count and the cost and wait for Rida's go before submitting;
-every clip is shown to Rida and approved by Rida before it is used; never a still, never a slowed clip; never name
-what is unwanted in a positive prompt (the models ignore the negative prompt). You write every prompt; these tools
-only make the pictures, the clips and the sound, check them and cut the episode. A character's voice is locked from
-a take Rida picked (voice_ref_from_take)."""
+(the entry point: it finds where the story stands and loads the skill of each step: story-concepts, story-universe,
+story-cast, story-script, story-shots, story-clips, story-assemble, story-next-episode); load each step's skill before
+doing that step. You (Claude) are the writer and the director: you propose, Rida corrects; you write every prompt.
+These tools only make the pictures, the clips and the sound, check them and cut the episode. A story is a folder
+(stories/<slug>/): 00-brief.md, 01-universe.md, 02-cast/<char>/sheet.md (+ full_body.png, voice_ref.wav), 03-places/,
+epNN/script.md, shots.json, takes.json. Rida's gates: the concept, the universe, the cast sheets, the finished cast
+(pictures and locked voices), the script, the whole episode. In between (cast pictures and voices, keyframes, clips,
+locked voices, assembly) you produce, choose and lock yourself, saying the estimated cost once; stop and ask only if
+the spend would pass twice that estimate. Never a still, never a slowed clip; never name what is unwanted in a
+positive prompt (the models ignore the negative prompt)."""
 
 
 def env_value(name: str, default: str = "", env: dict | None = None) -> str:
@@ -302,22 +302,24 @@ def build_server(backend: Backend | None = None) -> FastMCP:
         return {"path": path, "bytes": len(text.encode("utf-8"))}
 
     @mcp.tool
-    def store_copy(story: str, src: str, dest: str) -> dict:
-        """Free. Copy a file inside the story (a chosen candidate image to 02-cast/<char>/full_body.png ...).
-        A locked destination is refused."""
+    def store_copy(story: str, src: str, dest: str, from_story: str = "") -> dict:
+        """Free. Copy a file into the story: inside it (a chosen candidate image to 02-cast/<char>/full_body.png ...),
+        or with *from_story* from another story (a returning character's locked sheet.md, full_body.png,
+        turnaround.png, voice_ref.wav). A locked destination is refused."""
         sto = open_story(s, story)
-        full = story_file(sto, src)
+        source = open_story(s, from_story) if from_story else sto
+        full = story_file(source, src)
         story_file(sto, dest, must_exist=False)
         try:
             sto.copy_in(full, dest)
         except st.StoreError as exc:
             raise ToolError(str(exc)) from exc
-        return {"src": src, "dest": dest}
+        return {"src": src, "dest": dest, **({"from_story": source.slug} if from_story else {})}
 
     @mcp.tool
     def store_lock(story: str, path: str, note: str) -> dict:
-        """Free. Lock a file Rida approved (a sheet, the canonical image, a voice): it is never overwritten
-        afterwards. *note*: who approved it and when, in Rida's words."""
+        """Free. Lock a file (a sheet, the canonical image, a keyframe): it is never overwritten afterwards. *note*:
+        who chose it and why — Rida's words, or "Claude's pick: <why>" in the steps where Claude chooses."""
         sto = open_story(s, story)
         story_file(sto, path)
         try:
@@ -372,8 +374,8 @@ def build_server(backend: Backend | None = None) -> FastMCP:
     @mcp.tool
     def comfy_submit(story: str, template: str, values: dict, files: dict | None = None, dest: str = "",
                      episode: int | None = None, shot: str | None = None) -> dict:
-        """COSTS MONEY (one GPU job; the answer gives its warm and cold estimate). Only after Rida's go in the chat
-        for this batch, with the count and the cost said first. Sends *template* (templates_list) with *values*
+        """COSTS MONEY (one GPU job; the answer gives its warm and cold estimate). Within the plan and the cost Rida
+        agreed (the step skills say when that is). Sends *template* (templates_list) with *values*
         (prompt — written by Claude in the chat —, seed, width, height, seconds ...) and *files* ({placeholder:
         story path}, e.g. {"image": "ep01/keyframes/s03.png"}). Where the result goes: *episode* + *shot* for a clip
         (it becomes the shot's next take, epNN/clips/sNN_vK.mp4) or *dest*, a story path without extension (e.g.
@@ -444,7 +446,7 @@ def build_server(backend: Backend | None = None) -> FastMCP:
         """Free (this server's CPU, ≈ 35 s). The clip check of a take: speech-to-text of the clip's own sound,
         aligned to the shot's scripted lines (shots.json) — share of each line heard, where it starts and ends,
         lines in order, the last word before the clip's end. The verdict is stored in takes.json (the assembly
-        trims and subtitles from it). States: ok · mismatch · late · no_speech. Show Rida the clip either way."""
+        trims and subtitles from it). States: ok · mismatch · late · no_speech."""
         sto = open_story(s, story)
         entry = shot_entry(sto, episode, shot)
         t = take_entry(sto, episode, shot, take)
@@ -469,8 +471,7 @@ def build_server(backend: Backend | None = None) -> FastMCP:
 
     @mcp.tool
     def vc_clip(story: str, episode: int, shot: str, take: str) -> dict:
-        """COSTS MONEY (one tiny GPU job per line, ≈ $0.001 each warm; a cold worker ≈ $0.15 once). Only after
-        Rida's go. Re-voices a checked take with its speakers' locked voices (02-cast/<char>/voice_ref.wav):
+        """COSTS MONEY (one tiny GPU job per line, ≈ $0.001 each warm; a cold worker ≈ $0.15 once). Re-voices a checked take with its speakers' locked voices (02-cast/<char>/voice_ref.wav):
         the clip is cut between its lines (from verify_take's timings), each part converted to its own
         speaker's voice; picture and timing untouched (DEC-323). Returns the job ids; then vc_fetch."""
         sto = open_story(s, story)
@@ -547,10 +548,11 @@ def build_server(backend: Backend | None = None) -> FastMCP:
 
     @mcp.tool
     def approve_take(story: str, episode: int, shot: str, take: str, note: str) -> dict:
-        """Free. Rida approved this take: it becomes the shot's clip and its file is locked. Call it ONLY after
-        Rida said so in the chat; *note* quotes Rida's words. Nothing is assembled from an unapproved clip."""
+        """Free. This take becomes the shot's clip and its file is locked. *note* says who chose it and why: Rida's
+        words, or "Claude's pick: <why>" in the steps where Claude chooses (Rida reviews the whole episode and any
+        take he rejects is unlocked and made again). Nothing is assembled from an unapproved clip."""
         if not note.strip():
-            raise ToolError("approve_take needs a note quoting Rida's approval")
+            raise ToolError("approve_take needs a note: Rida's words, or Claude's pick and why")
         sto = open_story(s, story)
         take_entry(sto, episode, shot, take)
         try:
@@ -561,18 +563,17 @@ def build_server(backend: Backend | None = None) -> FastMCP:
 
     @mcp.tool
     def voice_ref_from_take(story: str, episode: int, shot: str, take: str, speaker: str, note: str) -> dict:
-        """Free (this server's CPU). Locks a character's voice for the whole series, the stage-0 way: the
-        *speaker*'s line(s) of a take Rida APPROVED (approve_take), cut by the clip check's timings, silence
-        trimmed (2-10 s), saved as 02-cast/<speaker>/voice_ref.wav and locked; vc_clip then re-voices every clip
-        with it. The casting take is usually an ep00 shot of that character alone. *note* quotes Rida choosing this
-        voice. An already locked voice is refused: store_unlock it with a reason first. Hand Rida the file to hear
-        (file_download) before going on."""
+        """Free (this server's CPU). Locks a character's voice for the whole series: the *speaker*'s line(s) of an
+        approved take (approve_take), cut by the clip check's timings, silence trimmed (2-10 s), saved as
+        02-cast/<speaker>/voice_ref.wav and locked; vc_clip then re-voices every clip with it. The casting take is
+        usually an ep00 shot of that character alone. *note* says who chose this voice and why. An already locked
+        voice is refused: store_unlock it with a reason first. Rida hears it when the cast is presented."""
         if not note.strip():
-            raise ToolError("voice_ref_from_take needs a note quoting Rida choosing this voice")
+            raise ToolError("voice_ref_from_take needs a note: who chose this voice and why")
         sto = open_story(s, story)
         t = take_entry(sto, episode, shot, take)
         if not t.get("approved"):
-            raise ToolError(f"{shot}/{take} is not approved: the voice comes from a take Rida picked (approve_take)")
+            raise ToolError(f"{shot}/{take} is not approved: approve the casting take first (approve_take)")
         if not (t.get("verdict") or {}).get("lines"):
             raise ToolError(f"{shot}/{take} has no clip check with line timings: run verify_take first")
         if not sto.exists(sto.sheet(speaker)):

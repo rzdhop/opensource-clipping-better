@@ -20,11 +20,11 @@ CONTEXT
 - Rida's side before stage 4 (check it is done): host `git pull` + `sudo systemctl restart showrunner-mcp` (the connector
   must list 21 tools); the connector reconnected in claude.ai; the 10 skills on the account (story-director and
   fruit-drama-episode replaced by the new entry points, the 8 step skills uploaded from
-  `python3 showrunner/tools/build_skills.py --zip outputs/skills`). Every skill asks, never assumes (DEC-329).
+  `python3 showrunner/tools/build_skills.py --zip outputs/skills`). Claude proposes, Rida corrects; production runs without questions; six gates (DEC-330).
 
 DO NOW
-1. `git pull`; tests: `python3 -m pytest showrunner/tests -o addopts="" -q` (134 + 3 skipped) and the server's in the
-   venv: `PYTHONPATH=<a scratch pytest> .venv/bin/python -m pytest showrunner/tests -o addopts="" -q` (153 + 1 skipped).
+1. `git pull`; tests: `python3 -m pytest showrunner/tests -o addopts="" -q` (137 + 3 skipped) and the server's in the
+   venv: `PYTHONPATH=<a scratch pytest> .venv/bin/python -m pytest showrunner/tests -o addopts="" -q` (157 + 1 skipped).
    Never pip/uv-sync into `.venv` (the live unit runs from it).
 2. Ask Rida: the story of the validation run (the dry-run story — confirm its concept and universe — or a new pitch),
    and his go for the A-222 check (1 keyframe in three-quarter view, ≈ $0.03).
@@ -34,9 +34,9 @@ DO NOW
    go (tests green → commit → action-log line → push); a failed gate stops the run.
 
 RULES
-- Money only on Rida's explicit go, per batch, with the count and ≈ cost first; every picture and clip reviewed by
-  Rida; no stills, no Ken Burns, no edge-tts, no LLM API call from the app — Claude is the writer and writes every
-  prompt, shown to Rida with each batch; the MCP only makes, checks and cuts. Ask Rida before anything not his way. Character Heads ≈ 70 words; never name the unwanted in a positive prompt.
+- Rida's gates: concept, universe, cast sheets, finished cast (pictures + locked voices), script, whole episode; in
+  between Claude produces, chooses and locks, saying the cost once (stop past 2× the estimate); no stills, no Ken Burns, no edge-tts, no LLM API call from the app — Claude is the writer and writes every
+  prompt; the MCP only makes, checks and cuts. Ask Rida before changing anything about how the system works. Character Heads ≈ 70 words; never name the unwanted in a positive prompt.
 - All code and comments in English. Nothing in `showrunner/` imports `clipping` (test). The live app is not touched.
 - Plain words in chat; answer format: short problem + root cause; per solution: description, full code, why; a recap
   table (what, where, why, cost).
