@@ -7,8 +7,8 @@ honest limit of what can be proven without a render.
 
 **What these tests cannot prove** is that the .ass file still renders
 correctly. That needs one live render at the default colour, diffed against a
-pre-change .ass and expected byte-identical (RC-4, RC-7). It is recorded in
-CHECKPOINT.md, not here.
+pre-change .ass and expected byte-identical (RC-4, RC-7): a manual check,
+not part of this suite.
 
 The scans match `&H00FFFF&` WITH its trailing ampersand on purpose.
 `subtitles.py` also contains `&H00FFFFFF` — an 8-digit style colour in the

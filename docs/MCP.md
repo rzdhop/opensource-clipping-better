@@ -50,13 +50,13 @@ journalctl -u showrunner-mcp -f
 | Story files | `story_list` · `story_create` · `store_read` · `store_write` · `store_copy` (also from another story: a returning character) · `store_lock` · `store_unlock` (a reason is required) |
 | Look and hand over | `view_file` (an image as a picture, a clip as an 8-frame sheet + its numbers) · `file_download` (the bytes, ≤ 25 MiB) |
 | GPU jobs | `comfy_submit` (**costs money**) · `comfy_fetch` · `comfy_jobs` · `cost_ledger` |
-| Gates | `verify_take` (the clip check on the CPU) · `voice_ref_from_take` (a character's locked voice, from a take Rida approved) · `vc_clip` (**costs money**, locked voices) · `vc_fetch` · `approve_take` (a note quoting Rida) · `assemble_episode` |
+| Gates | `verify_take` (the clip check on the CPU) · `voice_ref_from_take` (a character's locked voice, from an approved take) · `vc_clip` (**costs money**, locked voices) · `vc_fetch` · `approve_take` (a note: Rida's words or "Claude's pick: why") · `assemble_episode` |
 
 Claude writes every prompt in the chat (DEC-328) and sends it as `values.prompt` of `comfy_submit`; the server writes
-none and keeps each one in the story's job journal. How to write them: the prompt guide of the story skills
+none and keeps each one in the story's job journal. How to write them: the prompt guide of the skill
 (`.claude/skills/rzdhop-story/PROMPTS.md`, the patterns Rida chose; the skill `rzdhop-story` is the whole
-workflow, one file per step). A character's voice is cast the stage-0
-way: a take of that character (usually an `ep00` casting shot) that Rida approved, its line cut by the clip check's
+workflow, one file per step). A character's voice is cast from
+a take of that character (usually an `ep00` casting shot) that was approved, its line cut by the clip check's
 timings (2–10 s), locked as `02-cast/<char>/voice_ref.wav` with `voice_ref.json` saying where it came from.
 
 GPU tools are submit-then-fetch: a chat tool call must answer within about 280 s, and GPU queues of 20–35 minutes are
