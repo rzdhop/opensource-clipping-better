@@ -45,9 +45,23 @@ never do a step from memory or from this page. Read `PROMPTS.md` before writing 
   the episode. Write each prompt in full from the story's files and the patterns that worked (`PROMPTS.md`) and send it as `values.prompt` of `comfy_submit`; keep it in the story
   (`shots.json`) and the job journal keeps it too.
 - **Words that reach a model.** A character's `## Head` is about 70 words (65–80), written "<Name>, a ...: ...",
-  in the positive, no final period. Nothing that reaches a prompt names what must not appear (text, subtitles,
-  captions, extra people): naming it draws it (the models ignore the negative prompt). Keyframes face the camera
+  in the positive, no final period. Nothing that reaches a prompt names what must not appear (subtitles, captions,
+  stray people): naming it draws it (the models ignore the negative prompt). Keyframes face the camera
   unless the three-quarter framing has been checked on this story.
+- **The look that holds attention (every story, every universe — Rida, 2026-10-09).** Every frame is worth
+  stopping the scroll for:
+  - **Busy sets**: every place is full and colourful, with things at three depths, never a plain room.
+  - **Background people**: the busy places are lived in, with 3–6 of the universe's own people (`## Extras`) out of
+    focus behind the action, silent, never looking like a main character.
+  - **Strong emotions**: every line has how it is said, and every shot has a physical action; big but believable,
+    a telenovela, never a gag.
+  - **More characters per clip**: most clips have two or three characters and three short lines; a clip with one
+    character is kept for a big moment.
+  - **Readable text** on a sign or a prop is welcome, in one or two words.
+  - **The camera holds still inside every clip**: the energy comes from the edit, where the assembly punches in on
+    each speaker automatically.
+
+  The patterns are in `PROMPTS.md`.
 - **One universe per story** (any universe, not fruit only): only what the story's own files say is assumed.
 
 ## The steps, their files and Rida's gates
@@ -96,6 +110,8 @@ A Fruit Drama is one universe among others: fruit people in a vertical telenovel
   ("returning: Rida as the hacker, Marie-Jeanne as the director — or new characters?") and Rida says what he wants
   more or less; a returning character keeps their picture and voice (`steps/3-cast.md`, returning characters).
 - **One fruit per character**, readable at a glance; new characters get a fruit you propose.
+- **The background people** of a fruit story are fruit people too, of fruits the cast does not use (banana, orange,
+  grapes, lemon, coconut, plum, pear, cherry…), in neutral clothes — proposed in the universe's `## Extras`.
 - **The telenovela beats**: a hook mid-conflict, one known trope (enemies to lovers, cheating reveal, who's the
   father…), the comment bait "Team X or Team Y?", a cut before the reaction, "Partie 2 demain".
 

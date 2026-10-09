@@ -14,6 +14,12 @@ subtitles), ``final.json`` (the report) and ``final_sheet.jpg``. Rules:
   above), drawn by libass from an ASS file (ffmpeg 6.1's drawtext drops accented tails).
 - An optional music bed ducked under the voices (sidechain), optional SFX cues, a limiter, then the end
   card ("Partie N+1 demain" / "Part N+1 tomorrow").
+- **The punch-in edit** (on by default): the camera never moves inside a clip, so the energy comes from the cut.
+  Each clip is split at its line boundaries; the first line plays wide, every following line punches in on its
+  speaker (a crop of the *moving* clip toward the speaker's side, never a still, never a zoom ramp). A clip with
+  one character punches in once, mid-way. Timings do not change, so the subtitles and SFX stay where they are.
+  The speaker's side comes from the order of ``characters`` (left to right, as the keyframe prompt places them)
+  unless the shot gives ``positions``.
 
 The recipe is copied from ``productions/faille_damour/render_ep01.py`` (styles, ducking, limiter) and
 ``tools/episode_cut.py`` (trim, card), not imported.
@@ -23,7 +29,11 @@ The recipe is copied from ``productions/faille_damour/render_ep01.py`` (styles, 
     {"bgm": {"file": "assets/bgm/suspense/x.mp3", "gain": 0.3} | null,
      "hook": {"text": "...", "seconds": 2.5} | null,
      "card": {"lines": ["Faille d'amour", "Partie 2 demain"], "seconds": 1.5} | null,
-     "shots": [{"id": "s01", "lines": [{"speaker": "paloma", "text": "..."}],
+     "punch_in": true,                                  # optional, default true: the punch-in edit
+     "shots": [{"id": "s01", "characters": ["paloma", "rida"],          # left to right in the picture
+                "positions": {"rida": "left"},                          # optional override: left | center | right
+                "punch_in": false,                                      # optional: this clip stays wide
+                "lines": [{"speaker": "paloma", "text": "..."}],
                 "sfx": [{"file": "assets/sfx/soap/gasp_crowd.wav", "at": 1.2, "gain": 0.8}], ...}]}
 """
 
@@ -52,6 +62,15 @@ CARD_SECONDS = 1.5
 VOICE_GAIN = 1.6
 BGM_GAIN = 0.3
 CARD_TEXT = {"fr": "Partie {n} demain", "en": "Part {n} tomorrow"}
+# The punch-in edit (Rida, 2026-10-09: camera still in the clips, the energy from the cut).
+PUNCH_SIDE = 1.25     # crop factor toward the speaker of a clip with two or three characters
+PUNCH_SOLO = 1.15     # crop factor of the mid-way punch-in of a clip with one character
+PUNCH_TOP = 0.04      # the crop keeps the top of the frame, where the heads are
+PUNCH_SOLO_AT = 0.45  # a one-character clip punches in at this share of its length...
+SOLO_MIN_S = 3.0      # ...when it lasts at least this long
+PIECE_MIN_S = 0.8     # a framing shorter than this is merged into its neighbour (no flash cuts)
+SIDES = {1: ("center",), 2: ("left", "right"), 3: ("left", "center", "right")}
+FRAMINGS = ("wide", "left", "center", "right")
 # Speaker colours (ASS &HBBGGRR&) by cast order when a sheet has no "## Colour" (render_ep01's palette).
 PALETTE = ["&H0098FF&", "&H4B4BFF&", "&H4AC38B&", "&H37AFD4&", "&HDB9DB3&", "&HFFC864&"]
 
@@ -105,6 +124,92 @@ def _run(cmd: list, *, cwd: str | None = None) -> None:
         raise AssemblyError(f"ffmpeg failed:\n{out.stderr[-2500:]}")
 
 
+# ------------------------------------------------------------------ the punch-in edit
+
+def _sides(shot: dict) -> dict:
+    """``{character: framing}``: left to right in the order of ``characters`` (else of the speakers), then the
+    shot's own ``positions``. More than three characters: only the given positions."""
+    chars = list(shot.get("characters") or [])
+    for line in shot.get("lines") or []:
+        if line.get("speaker") and line["speaker"] not in chars:
+            chars.append(line["speaker"])
+    sides = dict(zip(chars, SIDES.get(len(chars), ())))
+    for cid, side in (shot.get("positions") or {}).items():
+        if side in FRAMINGS[1:]:
+            sides[cid] = side
+    return sides
+
+
+def _merge(pieces: list) -> list:
+    """Neighbours with the same framing become one; a piece shorter than PIECE_MIN_S joins its neighbour."""
+    out = []
+    for p in pieces:
+        if out and out[-1]["framing"] == p["framing"]:
+            out[-1]["end"] = p["end"]
+        else:
+            out.append(dict(p))
+    k = 0
+    while len(out) > 1 and k < len(out):
+        if out[k]["end"] - out[k]["start"] >= PIECE_MIN_S:
+            k += 1
+            continue
+        if k == 0:
+            out[1]["start"] = out[0]["start"]
+            del out[0]
+        else:
+            out[k - 1]["end"] = out[k]["end"]
+            del out[k]
+            if k < len(out) and out[k - 1]["framing"] == out[k]["framing"]:
+                out[k - 1]["end"] = out[k]["end"]
+                del out[k]
+        k = 0
+    return out
+
+
+def pieces(shot: dict, timed: list, trim: float, *, enabled: bool = True) -> list:
+    """The framings of one clip on its own clock: ``[{"start", "end", "framing", "zoom"}]``, end to end over
+    ``[0, trim]``. The first line plays wide; each next line punches in on its speaker, from the middle of the
+    silence before it. A clip with one character (or one speaker) punches in once, at PUNCH_SOLO_AT of its
+    length, when it lasts at least SOLO_MIN_S."""
+    wide = [{"start": 0.0, "end": trim, "framing": "wide", "zoom": 1.0}]
+    if not enabled or shot.get("punch_in") is False or trim <= 0:
+        return wide
+    sides = _sides(shot)
+    lines = shot.get("lines") or []
+    rows = [(line.get("speaker"), (timed[k] if k < len(timed) else {})) for k, line in enumerate(lines)]
+    rows = [(who, r) for who, r in rows if r.get("start_s") is not None and r.get("end_s") is not None]
+    speakers = {who for who, _ in rows}
+    if len(sides) >= 2 and len(speakers) >= 2:
+        cuts = [(0.0, "wide")]
+        for k in range(1, len(rows)):
+            at = (rows[k - 1][1]["end_s"] + rows[k][1]["start_s"]) / 2
+            side = sides.get(rows[k][0])
+            cuts.append((frames_floor(min(max(at, 0.0), trim)), side or "wide"))
+        out = [{"start": a, "end": (cuts[i + 1][0] if i + 1 < len(cuts) else trim), "framing": f,
+                "zoom": PUNCH_SIDE if f != "wide" else 1.0} for i, (a, f) in enumerate(cuts)]
+        out = [p for p in out if p["end"] > p["start"]]
+    else:
+        if trim < SOLO_MIN_S:
+            return wide
+        at = frames_floor(min(max(trim * PUNCH_SOLO_AT, 1.5), trim - 1.2))
+        side = sides.get(next(iter(speakers)), "center") if len(speakers) == 1 and len(sides) >= 2 else "center"
+        zoom = PUNCH_SOLO if side == "center" else PUNCH_SIDE
+        out = [{"start": 0.0, "end": at, "framing": "wide", "zoom": 1.0},
+               {"start": at, "end": trim, "framing": side, "zoom": zoom}]
+    out = _merge(out)
+    out[0]["start"], out[-1]["end"] = 0.0, trim
+    return [{**p, "start": round(p["start"], 4), "end": round(p["end"], 4)} for p in out]
+
+
+def punch_filter(framing: str, zoom: float) -> str:
+    """The crop of one framing, scaled back to the frame (an empty string for the wide framing)."""
+    if framing == "wide" or zoom <= 1.0:
+        return ""
+    x = {"left": "0", "center": "(iw-ow)/2", "right": "iw-ow"}[framing]
+    return (f"crop=w=trunc(iw/{zoom}/2)*2:h=trunc(ih/{zoom}/2)*2:x={x}:y=ih*{PUNCH_TOP},"
+            f"scale={W}:{H},setsar=1")
+
+
 # ------------------------------------------------------------------ the plan
 
 def _speakers(story: Story) -> dict:
@@ -128,6 +233,7 @@ def plan(story: Story, n: int) -> dict:
         raise AssemblyError(f"no approved clip for {', '.join(missing)}: approve a take or make the clip again "
                             f"(a shot is never filled with a still)")
     speakers = _speakers(story)
+    punch_in = sheet.get("punch_in", True) is not False
     segments, events, t = [], [], 0.0
     for shot in sheet["shots"]:
         take = story.approved_take(n, shot["id"])
@@ -155,7 +261,7 @@ def plan(story: Story, n: int) -> dict:
                            "text": line["text"], "start": round(start, 3), "end": round(end, 3)})
         segments.append({"shot": shot["id"], "take": take["take"], "clip": clip, "start": round(t, 3),
                          "seconds": trim, "source_s": info["duration_s"], "has_audio": info["has_audio"],
-                         "sfx": shot.get("sfx") or []})
+                         "pieces": pieces(shot, timed, trim, enabled=punch_in), "sfx": shot.get("sfx") or []})
         t += trim
     card = sheet.get("card") or {"lines": [story.meta.get("title", ""), CARD_TEXT[story.language].format(n=n + 1)]}
     card = {"lines": [x for x in card.get("lines", []) if x], "seconds": float(card.get("seconds") or CARD_SECONDS)}
@@ -202,10 +308,23 @@ def ffmpeg_command(cut: dict, ass_name: str, dest: str, *, preset: str = "medium
             args += ["-f", "lavfi", "-t", f"{seg['seconds']}", "-i", "anullsrc=r=48000:cl=stereo"]
             a, k = f"{k}:a", k + 1
         T = f"{seg['seconds']:.4f}"
-        vf.append(f"[{v}:v]trim=duration={T},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,"
-                  f"crop={W}:{H},fps={FPS},format=yuv420p,setsar=1[v{len(seg_labels)}]")
+        n = len(seg_labels)
+        parts = seg.get("pieces") or [{"start": 0.0, "end": seg["seconds"], "framing": "wide", "zoom": 1.0}]
+        base = (f"[{v}:v]trim=duration={T},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,"
+                f"crop={W}:{H},fps={FPS},format=yuv420p,setsar=1")
+        if len(parts) == 1 and not punch_filter(parts[0]["framing"], parts[0]["zoom"]):
+            vf.append(f"{base}[v{n}]")
+        else:
+            # The punch-in edit: the same moving clip, split at the line boundaries, each piece cropped
+            # toward its speaker; the pieces are cut back to back, so the clip keeps its length and its sound.
+            vf.append(f"{base},split={len(parts)}" + "".join(f"[p{n}_{j}]" for j in range(len(parts))))
+            for j, p in enumerate(parts):
+                crop = punch_filter(p["framing"], p["zoom"])
+                vf.append(f"[p{n}_{j}]trim=start={p['start']:.4f}:end={p['end']:.4f},setpts=PTS-STARTPTS"
+                          + (f",{crop}" if crop else "") + f"[q{n}_{j}]")
+            vf.append("".join(f"[q{n}_{j}]" for j in range(len(parts))) + f"concat=n={len(parts)}:v=1:a=0[v{n}]")
         vf.append(f"[{a}]atrim=duration={T},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,"
-                  f"volume={VOICE_GAIN}[a{len(seg_labels)}]")
+                  f"volume={VOICE_GAIN}[a{n}]")
         seg_labels.append(len(seg_labels))
     card_s = cut["card"]["seconds"]
     args += ["-f", "lavfi", "-i", f"color=c=0x0B0B10:s={W}x{H}:r={FPS}:d={card_s}",
@@ -268,6 +387,7 @@ def assemble(story: Story, n: int, *, preset: str = "medium") -> dict:
     report = {"final": story.rel(final), "duration_s": info["duration_s"], "expected_s": cut["total_s"],
               "width": info["width"], "height": info["height"], "fps": info["fps"], "mean_db": info["mean_db"],
               "max_db": info["max_db"], "subtitles": events, "sheet": story.rel(sheet),
+              "cuts": sum(len(s["pieces"]) for s in cut["segments"]),
               "unsubtitled": [e["shot"] for e in cut["events"] if e["start"] is None],
               "segments": [{k: v for k, v in s.items() if k not in ("clip", "sfx")} | {"clip": story.rel(s["clip"])}
                            for s in cut["segments"]], "bgm": (cut.get("bgm") or {}).get("file")}

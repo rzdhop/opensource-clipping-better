@@ -50,7 +50,7 @@ journalctl -u showrunner-mcp -f
 | Story files | `story_list` · `story_create` · `store_read` · `store_write` · `store_copy` (also from another story: a returning character) · `store_lock` · `store_unlock` (a reason is required) |
 | Look and hand over | `view_file` (an image as a picture, a clip as an 8-frame sheet + its numbers) · `file_download` (the bytes, ≤ 25 MiB) |
 | GPU jobs | `comfy_submit` (**costs money**) · `comfy_fetch` · `comfy_jobs` · `cost_ledger` |
-| Gates | `verify_take` (the clip check on the CPU) · `voice_ref_from_take` (a character's locked voice, from an approved take) · `vc_clip` (**costs money**, locked voices) · `vc_fetch` · `approve_take` (a note: Rida's words or "Claude's pick: why") · `assemble_episode` |
+| Gates | `verify_take` (the clip check on the CPU) · `voice_ref_from_take` (a character's locked voice, from an approved take) · `vc_clip` (**costs money**, locked voices) · `vc_fetch` · `approve_take` (a note: Rida's words or "Claude's pick: why") · `assemble_episode` (free: the cut, with the automatic punch-in on each next speaker; shots.json `positions` / `punch_in` steer it) |
 
 Claude writes every prompt in the chat (DEC-328) and sends it as `values.prompt` of `comfy_submit`; the server writes
 none and keeps each one in the story's job journal. How to write them: the prompt guide of the skill

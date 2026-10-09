@@ -91,6 +91,23 @@ def test_the_rules_say_the_non_negotiables():
         assert must in rules, must
 
 
+def test_the_upgrade_rida_asked_for_is_in_every_layer():
+    """Rida, 2026-10-09: busy sets, background people, strong emotions, more characters per clip, short readable
+    text, the camera still and the energy from the punch-in edit — for every story and every universe."""
+    rules, guide = B.read("SKILL.md"), _flat(B.read("PROMPTS.md"))
+    for must in ("Busy sets", "Background people", "Strong emotions", "More characters per clip", "Readable text",
+                 "punches in on"):
+        assert must in rules, must
+    for must in ("every one of them with a whole fruit for a head and cartoon eyes drawn on the fruit's skin",
+                 "<how it is said>", "on the left and <B> on the right", "the main characters sharp and large"):
+        assert must in guide, must
+    assert "## Extras" in step("2-universe") and "## Extras" in step("4-script")
+    assert "how it is said" in step("4-script") and "physical action" in step("4-script")
+    assert "positions" in step("5a-shots") and "left to right" in step("5a-shots")
+    assert "subtitle-like writing" in step("5b-clips")
+    assert "punch_in" in step("6-assemble") and "pieces" in step("6-assemble")
+
+
 @pytest.mark.parametrize("name", B.STEPS)
 def test_each_step_has_its_sections_in_order(name):
     body = step(name)

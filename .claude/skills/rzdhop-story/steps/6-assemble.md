@@ -2,8 +2,10 @@
 
 You choose the music bed, the effects, the hook text and the end card yourself; the server cuts the episode from
 the approved takes (each clip trimmed after its last word, never slowed, subtitles from the clip check, the music
-ducked under the voices). Then Rida reviews the whole episode — his gate — and, once he confirms it, you ask
-whether he wants the next one.
+ducked under the voices) and makes the faster edit by itself: inside each clip the first line plays wide, then the
+picture punches in on each next speaker (a crop of the same moving clip toward the speaker, from the order of
+`characters` or the shot's `positions`), and a long one-character clip punches in once mid-way. Then Rida reviews
+the whole episode — his gate — and, once he confirms it, you ask whether he wants the next one.
 
 ## When to use
 
@@ -27,9 +29,13 @@ whether he wants the next one.
 
    and per shot, when a pause needs one: `"sfx": [{"file": "assets/sfx/soap/dramatic_sting.wav", "at": 4.2,
    "gain": 0.8}]` (`at` = seconds into that shot's clip, inside a pause, never over a line; a sting on the
-   cliffhanger).
+   cliffhanger; a soft hit such as `whoosh_soft` or `impact_hit` on the one or two strongest punch-ins, at the
+   piece's start).
 2. `assemble_episode(story, N)` → check the report: total length (≈ 60–90 s), no clip slowed, loudness not
-   clipping, subtitles off the faces on the contact sheet. Fix and re-assemble if needed.
+   clipping, subtitles off the faces on the contact sheet, and the punch-ins (`cuts`, each segment's `pieces`):
+   about two to three framings per two-character clip, each punch-in on its speaker with the head whole. A speaker
+   on the wrong side → set the shot's `positions`; a clip that should stay wide → `"punch_in": false`; then
+   re-assemble (free).
 3. Write `epNN/metadata.md` (template below).
 4. Present the episode (below) and wait for Rida's review.
 
@@ -71,7 +77,7 @@ then re-assemble and present again.
 - [ ] Every shot approved (the tool names any that is not).
 - [ ] Music matches the episode's mood; gain 0.2–0.3; no effect over a line.
 - [ ] The hook is readable without sound; the card says "Part N+1" in the story's language.
-- [ ] The report checked before Rida sees the episode.
+- [ ] The report checked before Rida sees the episode, the punch-ins included (each on its speaker, heads whole).
 - [ ] `metadata.md` written: title with the series label and episode number, two hook variants, the comment bait.
 - [ ] After Rida confirms: `store_lock epNN/final.mp4` with his words, then the next-episode question.
 

@@ -38,7 +38,8 @@ clips ≈ $0.60 warm, up to $1.50 cold"), then go on. Per character:
 2. **Turnaround** — 1 edit of the locked full body (`edit_flux2_klein_multiref`, the full body in `ref1`–`ref4`,
    832×1216) → check it is the same character → `store_copy` to `turnaround.png` → `store_lock`.
 3. **Casting keyframe** — a plate for the casting place if the story has none (`03-places/<place>/plate.md`,
-   `## Setting`, one sentence, nobody in it); `ep00/shots.json` with one 5 s shot per character
+   `## Setting`, a full set as for any place, `## Extras` none: the casting clip is about the voice);
+   `ep00/shots.json` with one 5 s shot per character
    (`{"id": "sNN", "seconds": 5, "place": …, "characters": ["<id>"], "lines": [{"speaker": "<id>", "text": <8–10
    words in the story's language, said the way they talk>}], "keyframe_prompt": …, "clip_prompt": …}`); 2 seeds
    of the keyframe (`edit_flux2_klein_multiref`, the full body as references, 704×1280, `faces_camera`) → pick →

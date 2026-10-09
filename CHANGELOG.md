@@ -10,6 +10,16 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### Stories look busier and cut faster, for every story (DEC-334 / DEC-335)
+
+- **Automatic punch-in edit:** `assemble_episode` cuts inside each clip at the silence between lines: the first
+  line wide, each next line a 1.25× crop toward its speaker (side from the shot's `characters` order, or
+  `positions`), a long one-character clip punches in once. Same length, same subtitles; `"punch_in": false` per
+  shot or episode turns it off. The report adds `cuts` and each segment's `pieces`.
+- **The skill:** busy sets at three depths, background people of the same universe (`## Extras`), stronger
+  emotions with a physical action per shot, more two- and three-character clips, short readable text; new prompt
+  patterns and checks in `PROMPTS.md` and the steps. Re-upload `rzdhop-story.zip`.
+
 ### The old AI Story is removed; one skill, rzdhop-story (plan 36, DEC-331 / DEC-332)
 
 - **Breaking — the dashboard's AI Story mode is gone:** the `/story` pages, the story, budget and hardware routes,

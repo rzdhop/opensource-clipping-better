@@ -38,6 +38,13 @@ finish. Say what IS on screen. It opens every prompt, word for word.>
 ## Heads allowed
 <what a head may be in this universe>
 
+## Extras
+<the background people of this world, who make every busy place feel real: 6–10 kinds, each in a few words with its
+head and neutral clothes (a fruit story: "a yellow banana-headed man in a grey sweater", "an orange-headed woman in a
+beige blouse"…); the head rule they all follow, word for word as the prompts will say it ("every one of them with a
+whole fruit for a head and cartoon eyes drawn on the fruit's skin"). Never a head, a colour or an outfit of the main
+cast. They stay out of focus and silent.>
+
 ## Proportions
 <head-to-body ratio, height range, the hands rule>
 
@@ -48,18 +55,24 @@ finish. Say what IS on screen. It opens every prompt, word for word.>
 <day / night looks; practical lights>
 
 ## Camera
-Vertical 9:16; medium close-ups and two-shots; the camera holds still on the speaker. <anything specific>
+Vertical 9:16; two-shots and three-shots first, medium close-ups for the big moments; the camera holds still inside
+every clip (the energy comes from the edit's punch-ins). <anything specific>
 
 ## Forbidden
-<what never appears — for YOU when writing sheets, plates and lines; never copied into a prompt>
+<what never appears — for YOU when writing sheets, plates and lines; never copied into a prompt. Short readable
+text on a sign or a prop is allowed (Rida, 2026-10-09); do not forbid it by default.>
 ```
+
+When an approved universe is reused word for word and has no `## Extras` yet, add one: it is the only part you
+write new, and you say so.
 
 ## Checklist
 
 - [ ] An approved universe that fits is reused word for word (its Medium proved itself).
 - [ ] The Medium says in the positive what the picture is; it names no character and no place.
 - [ ] Head types, proportions and the hands rule are explicit; the palette is in hex.
-- [ ] Camera: vertical 9:16, the camera holds still on the speaker.
+- [ ] `## Extras` lists 6–10 background people with the head rule; none looks like a main character.
+- [ ] Camera: vertical 9:16, the camera holds still inside every clip.
 - [ ] Locked only after Rida's yes, with his words.
 
 ## Gate question

@@ -22,14 +22,21 @@ before sending.
 For every shot, the whole episode in one batch:
 
 1. Write the clip prompt (the one-speaker, two/three-speaker or silent pattern of `PROMPTS.md`) into the shot's
-   `clip_prompt`.
+   `clip_prompt`, with how each line is said, the shot's action and the background people's silent action.
 2. 2 seeds per shot: `comfy_submit(story, "ltx25_i2v_speech", {"prompt": <yours>, "seed": <s>, "seconds": <5|10>},
    files={"image": "epNN/keyframes/sNN.png"}, episode=N, shot="sNN")`. Each clip becomes the shot's next take.
 3. `comfy_fetch(story, job, wait_s=240)` each (a long queue is normal: fetch again later), then
    `verify_take(story, N, "sNN", "vK")`. States: `ok` · `mismatch` (a line not heard, or out of order) · `late`
    (the last word too close to the end) · `no_speech`.
-4. Among the `ok` takes, look at the contact sheets: identity held, mouths moving only on their own lines, no
-   extra person, no burned-in text, the universe kept, no camera drift. Keep the best.
+4. Among the `ok` takes, look at the contact sheets:
+   - identity held, mouths moving only on their own lines, the emotion and the action played;
+   - the background people stay silent and in the background (no mouth on a line, no one walking into the cast);
+   - no new person in the foreground;
+   - no subtitle-like writing drawn over the picture (the clip model sometimes writes the line on screen; the signs
+     and props of the keyframe are fine);
+   - the universe kept, no camera drift (a slow push-in on a one-character clip is the usual one).
+
+   Keep the best.
 5. `vc_clip(story, N, "sNN", "vK")` → `vc_fetch(…)`: the same picture with every line in its speaker's locked voice
    (a new take). → `approve_take(story, N, "sNN", <the voiced take>, note="Claude's pick: <why>")`.
 
@@ -50,13 +57,15 @@ When every shot has an approved voiced take, go straight on to `steps/6-assemble
 ```
 - s04 v1, v2 — mismatch: Théo's line not heard (the strawberry spoke it); next: one-speaker shot of Théo
 - s07 v3 — picture: a second kiwi appeared at the edge; next: new seed, "only this one character" kept
+- s03 v1 — picture: the line written over the picture like a subtitle; next: new seed
 ```
 
 ## Checklist
 
 - [ ] No open jobs left behind before a new batch.
-- [ ] Every clip prompt written from its pattern (Medium and Heads word for word, the script's exact lines, each
-      speaker's voice, the closing sentence).
+- [ ] Every clip prompt written from its pattern (Medium and Heads word for word, the script's exact lines with how
+      each is said, each speaker's voice, the action, the closing sentence).
+- [ ] No kept take with writing drawn over the picture or a background person speaking.
 - [ ] Every take checked with `verify_take`; only an `ok` take is kept.
 - [ ] Every kept take re-voiced with the locked voices before it is approved.
 - [ ] Every approval's note says why; every defect written in `epNN/defects.md`.

@@ -591,9 +591,11 @@ def build_server(backend: Backend | None = None) -> FastMCP:
     @mcp.tool
     def assemble_episode(story: str, episode: int, preset: str = "medium"):
         """Free (this server's CPU, ≈ 1 min for 30 s). The episode from its approved takes only: each clip cut after
-        its last word, never slowed; subtitles from the clip check; the music bed of shots.json ducked under the
-        voices; the end card. Refused, naming them, while a shot has no approved take. You see a contact sheet
-        and the numbers; hand Rida the mp4 with file_download (epNN/final.mp4)."""
+        its last word, never slowed; the punch-in edit (each next line punches in on its speaker, from the order of
+        the shot's characters or its positions; shots.json punch_in false turns it off); subtitles from the clip
+        check; the music bed of shots.json ducked under the voices; the end card. Refused, naming them, while a shot
+        has no approved take. You see a contact sheet and the numbers (cuts, each segment's pieces); hand Rida the
+        mp4 with file_download (epNN/final.mp4)."""
         sto = open_story(s, story)
         try:
             report = asm.assemble(sto, episode, preset=preset if preset in ("ultrafast", "veryfast", "fast", "medium") else "medium")

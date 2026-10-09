@@ -24,10 +24,18 @@ before sending.
    `comfy_submit(story, "edit_flux2_klein_multiref", {"prompt": <yours>, "seed": <k>, "width": 704, "height":
    1280}, files={"ref1": "02-cast/<a>/full_body.png", …}, dest="epNN/keyframes/candidates/sNN_c<k>")`.
    Send the whole episode's batch at once; the workers run in parallel.
-3. `comfy_fetch` each; look at each: the right characters and only them, identity held (head, colours, outfit,
-   signature item), the universe's look, hands, the shot's framing, nothing written. Pick the better one →
-   `store_copy` to `epNN/keyframes/sNN.png` → `store_lock` ("Claude's pick: <why>"). Both wrong → 2 new seeds,
-   with the prompt adjusted to what went wrong (in the positive).
+3. `comfy_fetch` each; look at each:
+   - the main characters, identity held (head, colours, outfit, signature item), the universe's look, hands;
+   - the framing, and the characters left to right in the order of `characters`;
+   - a full background;
+   - every background person has the universe's head, with no human face and nobody who could pass for a main
+     character;
+   - the emotion and the action you asked for;
+   - any text spelled right.
+
+   Pick the better one → `store_copy` to `epNN/keyframes/sNN.png` → `store_lock` ("Claude's pick: <why>"). Both
+   wrong → 2 new seeds, with the prompt adjusted to what went wrong (in the positive). If the picture came out with
+   the characters swapped, keep it and set `positions` in the shot instead.
 4. Go straight on to `steps/5b-clips.md`.
 
 ## Template
@@ -41,10 +49,14 @@ before sending.
   "card": null,
   "shots": [
     {"id": "s01", "seconds": 10, "place": "cafe", "characters": ["ana", "bo"],
-     "lines": [{"speaker": "ana", "text": "…"}, {"speaker": "bo", "text": "…"}],
-     "expression": "a tense and composed expression", "keyframe_prompt": "…", "clip_prompt": "…"},
+     "lines": [{"speaker": "ana", "text": "…", "how": "through gritted teeth, furious and low"},
+               {"speaker": "bo", "text": "…", "how": "quietly, glancing around"},
+               {"speaker": "ana", "text": "…", "how": "exploding, loud and outraged"}],
+     "action": "ana slams her hand flat on a sheet of paper; around them the customers glance over",
+     "extras": ["a yellow banana-headed man in a denim jacket", "an orange-headed woman in a beige coat"],
+     "expression": "ana furious, bo wary", "keyframe_prompt": "…", "clip_prompt": "…"},
     {"id": "s02", "seconds": 5, "place": "loft", "characters": ["bo"],
-     "lines": [{"speaker": "bo", "text": "…"}], "framing": "faces_camera"},
+     "lines": [{"speaker": "bo", "text": "…", "how": "his voice breaking"}], "framing": "faces_camera"},
     {"id": "s03", "seconds": 5, "place": "loft", "characters": ["ana"],
      "reaction": "the smile drops, the eyes harden"}
   ]
@@ -52,16 +64,24 @@ before sending.
 ```
 
 - `id`: `s01`, `s02`… in script order. `seconds`: 5 or 10 (the clip model makes nothing else).
-- `characters`: who is in the picture, 1–3, in order; a speaking shot's speakers are all in it.
-- `lines`: the script's exact words, in the order spoken. No lines: a silent shot, with `reaction`.
+- `characters`: who is in the picture, 1–3, **left to right as the keyframe prompt places them**; a speaking
+  shot's speakers are all in it. The assembly punches in toward each speaker from this order.
+- `positions` (optional): `{"bo": "left"}` when the locked keyframe shows someone elsewhere than the order says
+  (`left`, `center`, `right`). `punch_in: false` keeps a shot wide in the edit (rarely needed).
+- `lines`: the script's exact words, in the order spoken, each with `how` it is said. No lines: a silent shot,
+  with `reaction`.
+- `action`, `extras`: the shot's physical action and its background people (from the place's `## Extras`).
 - `framing` (one character): `faces_camera` unless the three-quarter framing has been checked on this story.
 - `bgm`, `hook`, `card`: `null` here, filled at the assembly.
 
 ## Checklist
 
 - [ ] One shot per script block, same order, same words; every shot 5 or 10 s and within its word budget.
-- [ ] Every keyframe prompt written from the pattern (Medium and Heads word for word, nobody else named).
-- [ ] Every pick looked at and explained in its note; never a keyframe with an extra person, text or a broken face.
+- [ ] Every keyframe prompt written from the pattern (Medium and Heads word for word, the full Setting, each
+      background person named with the universe's head, the emotion and the action, the characters left to right).
+- [ ] Every pick looked at and explained in its note; never a keyframe with a human face in the crowd, a stray
+      double of a main character, misspelled text or a broken face.
+- [ ] `characters` matches the left-to-right order of each locked keyframe (else `positions` is set).
 - [ ] The spend stays under twice the episode's estimate (else stop and ask).
 
 ## Gate question

@@ -2,7 +2,7 @@
 
 One line per rule: `DEC-NNN | area | rule`. A changed rule is rewritten in place under a new number; a dead one is
 deleted. The full history with context (DEC-001…DEC-332) is in git: `git show 9f0ce43:.claude/DECISIONS.md`.
-Next free id: **DEC-334**.
+Next free id: **DEC-336**.
 
 ## AI stories (showrunner + skill)
 DEC-319 | showrunner | The engine is universe-agnostic (`showrunner/`, image `ghcr.io/rzdhop/showrunner-worker`). A story's universe lives only in its `01-universe.md`, agreed in chat before any picture; nothing hard-wires fruit.
@@ -19,6 +19,8 @@ DEC-317 | skill | Every shot is a real video clip: never a still, a Ken Burns or
 DEC-330 | skill | Claude proposes complete choices and Rida corrects. His six gates: concept, universe, cast sheets, finished cast (pictures + locked voices), script, whole episode; then "next episode?". Between gates Claude produces and locks ("Claude's pick: <why>"), says the cost once, stops only past 2× the estimate.
 DEC-307 | skill | On pictures Rida approves what he wants; Claude states the risk once in plain words, then does what he chose.
 DEC-331 | skill | One skill `.claude/skills/rzdhop-story/` (SKILL.md, steps/*.md read before each step, PROMPTS.md); `build_skills.py` checks and zips it for claude.ai.
+DEC-334 | skill | The look that holds attention, every story and universe (Rida, 2026-10-09): busy sets at three depths, named background people of the same universe (silent, in the back; `## Extras` in the universe and each plate), strong but believable emotion with one physical action per shot, ≈ 7 clips in 10 with 2–3 characters, short readable text allowed, placement left to right matching `characters`.
+DEC-335 | showrunner | The camera holds still inside clips; `assemble_episode` adds the energy by itself: each next line punches in (1.25× crop toward the speaker, cut mid-silence, top kept), a one-character clip ≥ 3 s once at 45 % (1.15×); pieces < 0.8 s merged; timings unchanged. shots.json `positions` overrides sides, `punch_in: false` turns it off (per shot or episode) (2026-10-09).
 DEC-332 | clips-engine | The old in-app AI Story is deleted; the app is Clips only (plus the CLI Story Clip recipe). Stories are made only through the chat and the showrunner.
 D4 | skill | Each story is French or English (in `00-brief.md`); spoken lines use it, story files and prompts stay in English.
 D7 | showrunner | Lines are quoted in the prompt and voices described; at cfg 1.0 the negative prompt is ignored, so prompts never name what is unwanted. Keyframes are drawn in the shot's framing; the camera holds still on the speaker.

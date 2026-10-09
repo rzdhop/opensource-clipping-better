@@ -100,6 +100,66 @@ def test_a_locked_final_is_not_overwritten(story):
         A.assemble(story, 1, preset="ultrafast")
 
 
+def _framings(ps):
+    return [(p["framing"], round(p["start"], 3), round(p["end"], 3)) for p in ps]
+
+
+def test_the_punch_in_follows_the_speaker_from_the_middle_of_the_silence():
+    shot = {"characters": ["octave", "marie_jeanne"],
+            "lines": [{"speaker": "octave"}, {"speaker": "marie_jeanne"}, {"speaker": "octave"}]}
+    timed = [{"start_s": 0.0, "end_s": 3.98}, {"start_s": 4.06, "end_s": 6.0}, {"start_s": 6.32, "end_s": 9.06}]
+    ps = A.pieces(shot, timed, 9.375)
+    assert [p["framing"] for p in ps] == ["wide", "right", "left"]
+    assert ps[0]["start"] == 0 and ps[-1]["end"] == 9.375                           # the clip keeps its length
+    assert all(a["end"] == b["start"] for a, b in zip(ps, ps[1:]))                    # back to back
+    assert ps[1]["start"] == pytest.approx(A.frames_floor((3.98 + 4.06) / 2))
+    assert ps[1]["zoom"] == A.PUNCH_SIDE and ps[0]["zoom"] == 1.0
+
+
+def test_positions_override_the_order_and_three_characters_get_a_centre():
+    shot = {"characters": ["a", "b", "c"], "positions": {"a": "right", "c": "left"},
+            "lines": [{"speaker": "a"}, {"speaker": "b"}, {"speaker": "c"}]}
+    timed = [{"start_s": 0, "end_s": 2}, {"start_s": 2.2, "end_s": 4}, {"start_s": 4.2, "end_s": 6}]
+    assert [p["framing"] for p in A.pieces(shot, timed, 6.5)] == ["wide", "center", "left"]
+
+
+def test_a_one_character_clip_punches_in_once_when_long_enough():
+    solo = {"characters": ["rida"], "lines": [{"speaker": "rida"}]}
+    ps = A.pieces(solo, [{"start_s": 0, "end_s": 6.9}], 7.375)
+    assert _framings(ps) == [("wide", 0, round(A.frames_floor(7.375 * A.PUNCH_SOLO_AT), 3)),
+                             ("center", round(A.frames_floor(7.375 * A.PUNCH_SOLO_AT), 3), 7.375)]
+    assert ps[1]["zoom"] == A.PUNCH_SOLO
+    assert _framings(A.pieces(solo, [{"start_s": 0, "end_s": 2.4}], 2.7)) == [("wide", 0, 2.7)]
+
+
+def test_flash_cuts_merge_and_the_edit_can_be_switched_off():
+    shot = {"characters": ["a", "b"], "lines": [{"speaker": "a"}, {"speaker": "b"}, {"speaker": "a"}]}
+    timed = [{"start_s": 0, "end_s": 2}, {"start_s": 2.1, "end_s": 2.5}, {"start_s": 2.6, "end_s": 5}]
+    ps = A.pieces(shot, timed, 5.5)                      # b's piece (0.5 s) is too short: it joins a neighbour
+    assert all(p["end"] - p["start"] >= A.PIECE_MIN_S for p in ps)
+    assert all(a["framing"] != b["framing"] for a, b in zip(ps, ps[1:]))
+    assert _framings(A.pieces(shot, timed, 5.5, enabled=False)) == [("wide", 0, 5.5)]
+    assert _framings(A.pieces({**shot, "punch_in": False}, timed, 5.5)) == [("wide", 0, 5.5)]
+
+
+def test_the_crop_keeps_the_frame_size_and_the_top():
+    assert A.punch_filter("wide", 1.0) == ""
+    f = A.punch_filter("right", 1.25)
+    assert "x=iw-ow" in f and f"y=ih*{A.PUNCH_TOP}" in f and f.endswith(f"scale={A.W}:{A.H},setsar=1")
+
+
+def test_the_punched_episode_keeps_its_length(story):
+    story.approve_take(1, "s01", "v1", "ok")
+    story.approve_take(1, "s02", "v1", "ok")
+    cut = A.plan(story, 1)
+    assert [p["framing"] for p in cut["segments"][1]["pieces"]] == ["wide", "right"]   # paloma then rida
+    report = A.assemble(story, 1, preset="ultrafast")
+    assert report["cuts"] == 3
+    info = verify.probe(story.path(story.final(1)))
+    assert (info["width"], info["height"]) == (1080, 1920)
+    assert info["duration_s"] == pytest.approx(report["expected_s"], abs=0.1)
+
+
 def test_ass_helpers():
     assert A.ass_time(61.234) == "0:01:01.23"
     assert A.ass_colour("#4B8BC3") == "&HC38B4B&" and A.ass_colour("nope") is None

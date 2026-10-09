@@ -1,15 +1,15 @@
 # ASSUMPTIONS — open questions only
 
 `A-NNN | area | the open question | how it gets checked`. Delete a line when it is settled (say how in the action
-log). History: `git show 9f0ce43:.claude/ASSUMPTIONS.md`. Next free id: **A-230**.
+log). History: `git show 9f0ce43:.claude/ASSUMPTIONS.md`. Next free id: **A-233**.
 
-## AI stories (showrunner + skill) — checked during the first real episode
+## AI stories (showrunner + skill)
+A-230 | skill / extras | Does naming each background person with the universe's head rule keep every extra in-universe (Bouc émissaire test: generic "coworkers" drew human faces 4/6, named ones held) across other universes? | The next story's keyframes
+A-231 | assemble.py / punch-in | Does the 1.25× side crop keep the speaker's head whole when they stand near the frame edge or the keyframe swaps sides? | Contact sheet of the next episode (fix with `positions`)
+A-232 | skill / clips | How often does the clip model burn subtitle-like text or push in on a one-character clip, now that sets carry readable text? | Rate in the next episode's defects.md
 A-222 | skill / keyframes | Does the three-quarter wording ("head turned three-quarters to the right, eyes looking past the right edge of the frame") draw no extra person? Until then keyframes face the camera. | One keyframe (≈ $0.03)
 A-228 | skill / reaction clip | Does "listens to someone just off-screen beside the camera" avoid inventing a person in an I2V clip? | First silent reaction clip
 A-229 | skill / exchange prompt | Does the exchange wording ("two distinct voices") keep the listener silent when only one line is scripted? | `verify_take` on the first one-line two-character shot
-A-221 | showrunner voice.py | Does per-line Chatterbox conversion of a multi-speaker clip keep timing and lip sync with the right voice per speaker? | First multi-speaker clip with locked voices
-A-225 | showrunner workflows | Do the FLUX.2 klein copies (`t2i_flux2_klein`, `edit_flux2_klein_multiref`) behave like the app's verified ones did? | First image jobs
-A-226 | showrunner assemble.py | Is the default look right (Montserrat Black 74 subtitles, coloured speaker name, music ducked under voices, 2 s end card)? | Rida's review of the first episode
 A-216 | showrunner billing | RunPod bills only `executionTime` (queue and cold start unbilled), as the ledger assumes. | Ledger vs the RunPod balance
 A-223 | RunPod | Were the 20–35 min queues of 2026-10-08 a time-of-day shortage, not the norm? | Queue times on later runs
 A-201 | worker volume | With `<volume>/models/chatterbox` present, the node's first download writes through the symlink once. | Fresh volume + first VC job

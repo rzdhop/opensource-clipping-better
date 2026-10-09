@@ -1,23 +1,22 @@
 # CHECKPOINT — where the work stands (replace this file, never append)
 
-**2026-10-09 — plan 36 (AI stories rebuilt as Claude + the showrunner connector): stages 0–3 and 5 done.**
+**2026-10-09 — the first real episode is done (Bouc émissaire ep01, Rida: "the full runtime test was successful"),
+and the story look is upgraded for every story.**
 
 ## Live on Rida's host
-- `main` pulled; `showrunner-mcp` restarted (21 tools); web app rebuilt (Clips only, no Story pages).
-- The `rzdhop-story` skill is on Rida's claude.ai account; the old story skills are gone.
-- The claude.ai project "AI gen App" holds only the current context (CLAUDE.md, .claude/*, docs/MCP.md,
-  showrunner/README.md); refresh them there after changing them here.
-- Old Story data under `outputs/` removed by Rida. Plan 36 GPU spend so far ≈ $2.51.
+- `showrunner-mcp` (21 tools) and the `rzdhop-story` skill on claude.ai; the claude.ai project "AI gen App" holds the
+  current context (CLAUDE.md, .claude/*, docs/MCP.md, showrunner/README.md) — refresh it after changing them here.
+- Story `bouc-emissaire` (French; Rida the apple, Marie-Jeanne the peach, Octave the pineapple, Paloma the mango from
+  Faille d'amour): brief, universe, cast with locked voices, ep01 script and approved takes, final.mp4 (not locked).
+  Remaining ep01 defects are script-level; Rida does not want ep01 redone in the new style.
 
-## Next: the first real episode (plan 36 stage 4)
-- In a **fresh claude.ai chat** with the connector and the skill. Rida gives a pitch (e.g. the hacker vs sales
-  director fruit drama); the skill proposes, Rida corrects at the six gates; production runs without questions.
-- Expected cost ≈ $1–3 (new character ≈ $0.10–0.30; a returning Faille d'amour character $0; ~12 shots
-  ≈ $0.60–1.50; each cold start ≈ $0.13–0.15).
-- Watch the open story items in `.claude/ASSUMPTIONS.md` (A-222, A-228, A-229, A-221, A-225, A-226). Log every defect
-  in `stories/<slug>/ep01/defects.md`; fix the skill (PROMPTS.md, steps) or the server as you go; tests green →
-  commit → action-log line → `build_skills.py --zip` for Rida when the skill changed.
+## Just changed (deploy: `git pull && sudo systemctl restart showrunner-mcp`, then upload the new skill zip)
+- `assemble.py`: automatic punch-in edit (DEC-335). The skill: busy sets, extras, emotions, multi-character clips,
+  readable text (DEC-334). Tested on real ep01 clips through `assemble()` (length kept, 8 cuts, framings right).
 
-## After that (plan 36 stage 6)
-- Episode 2 and series memory: `memory.md` from episode 1 (what happened, relationships, open threads, the end
-  frame), Rida's audience feedback, the next-episode step proposes three directions; continuity from last frames.
+## Next
+- Rida starts a **new story** in a fresh claude.ai chat with the upgraded skill. Watch A-230 (extras stay in
+  universe), A-231 (punch-in crop on edge characters), A-232 (burned subtitles, solo push-in); log defects in
+  `epNN/defects.md`; fix PROMPTS.md / steps / server as you go.
+- Then episode 2 and series memory (plan 36 stage 6): `memory.md` from the episode, Rida's audience feedback,
+  three directions for the next episode, continuity from the last frames.
