@@ -275,7 +275,7 @@ def test_the_live_video_endpoint_is_refused_even_if_configured(tmp_path):
     server = S.build_server(backend)
     slug = payload(call(server, "story_create", title="T", language="en"))["slug"]
     got = call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"prompt": "p", "seed": 1},
-               episode=1, shot="s01", hand_prompt_reason="test")
+               episode=1, shot="s01")
     assert got.is_error and "live app" in got.content[0].text
     assert not [e for e in backend.log if e[0] == "run"]
 
@@ -289,7 +289,7 @@ def test_submit_then_fetch_a_clip_through_the_tools(tmp_path):
                     str(kf / "s01.png")], check=True, capture_output=True)
     sub = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech",
                        values={"prompt": "Ana says: \"Salut\"", "seed": 33, "seconds": 5},
-                       files={"image": "ep01/keyframes/s01.png"}, episode=1, shot="s01", hand_prompt_reason="test"))
+                       files={"image": "ep01/keyframes/s01.png"}, episode=1, shot="s01"))
     assert sub["kind"] == "video" and sub["job"] == "video-job1" and sub["estimate"]["cold_usd"] > sub["estimate"]["warm_usd"]
     run = [e for e in backend.log if e[0] == "run"][0]
     assert run[1:4] == ("video", "vid-ep", "kv")
@@ -312,10 +312,9 @@ def test_submit_then_fetch_a_clip_through_the_tools(tmp_path):
 def test_an_image_template_goes_to_the_images_endpoint_with_its_key(tmp_path):
     backend, server, slug = make_story(tmp_path)
     sub = payload(call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"prompt": "p", "seed": 2},
-                       dest="02-cast/ana/candidates/c1", hand_prompt_reason="test"))
+                       dest="02-cast/ana/candidates/c1"))
     assert sub["kind"] == "images" and [e[1:4] for e in backend.log if e[0] == "run"] == [("images", "img-ep", "ki")]
-    refused = call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"prompt": "p", "seed": 2},
-                   hand_prompt_reason="test")
+    refused = call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"prompt": "p", "seed": 2})
     assert refused.is_error and "dest" in refused.content[0].text
     assert call(server, "comfy_submit", story=slug, template="nope", values={}, dest="x").is_error
 
@@ -346,7 +345,7 @@ def test_a_two_speaker_shot_from_clip_to_episode_through_the_tools(tmp_path, mon
                     str(root / "ep01" / "keyframes" / "s01.png")], check=True, capture_output=True)
     # 1. the clip (fake GPU)
     job = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"prompt": "p", "seed": 22},
-                       files={"image": "ep01/keyframes/s01.png"}, episode=1, shot="s01", hand_prompt_reason="test"))["job"]
+                       files={"image": "ep01/keyframes/s01.png"}, episode=1, shot="s01"))["job"]
     FakeEndpoint.script = {job: [{"status": "COMPLETED", "executionTime": 40000, "output": {"images": [
         {"filename": "showrunner/x_00001_.mp4", "type": "base64", "data": _clip_b64(tmp_path)}]}}]}
     call(server, "comfy_fetch", story=slug, job=job)
@@ -412,47 +411,25 @@ def _cast_story(tmp_path):
     return backend, server, slug
 
 
-def test_the_prompt_tools_build_from_the_story_and_record_in_the_shot(tmp_path):
+def test_comfy_submit_sends_claudes_prompt_as_written_and_journals_it(tmp_path):
+    """The server writes no prompt: what Claude wrote in the chat is what the GPU gets, kept in the journal."""
     backend, server, slug = _cast_story(tmp_path)
-    clip = payload(call(server, "prompt_clip", story=slug, episode=1, shot="s01"))
-    assert clip["prompt"].startswith("Use the provided start image as the first frame. A 3D cartoon")
-    assert '"Salut."' in clip["prompt"] and clip["recorded"] is True and clip["budget"]["fits"]
-    kf = payload(call(server, "prompt_keyframe", story=slug, episode=1, shot="s01"))
-    assert "Ana faces the camera" in kf["prompt"] and kf["template"] == "t2i_flux2_klein"
-    shots = json.loads(payload(call(server, "store_read", story=slug, path="ep01/shots.json"))["text"])["shots"]
-    assert shots[0]["clip_prompt"] == clip["prompt"] and shots[0]["keyframe_prompt"] == kf["prompt"]
-    fb = payload(call(server, "prompt_cast", story=slug, character="ana", kind="full_body"))
-    assert "A full-body character reference" in fb["prompt"] and (fb["width"], fb["height"]) == (832, 1216)
-    bad = call(server, "prompt_cast", story=slug, character="ana", kind="turnaround")
-    assert bad.is_error and "locked" in bad.content[0].text
-
-
-def test_comfy_submit_sends_the_built_prompt_and_refuses_a_hand_written_one(tmp_path):
-    backend, server, slug = _cast_story(tmp_path)
-    hand = call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"prompt": "p", "seed": 1},
-                files={}, episode=1, shot="s01")
-    assert hand.is_error and "prompt_from" in hand.content[0].text
-    assert not [e for e in backend.log if e[0] == "run"]
-    other = call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech",
-                 values={"prompt": "something else", "seed": 1}, prompt_from="clip:1:s01")
-    assert other.is_error and "differs" in other.content[0].text
-    wrong = call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"seed": 1},
-                 prompt_from="clip:1:s01", dest="x")
-    assert wrong.is_error and "built for ltx25_i2v_speech" in wrong.content[0].text
-    built = payload(call(server, "prompt_clip", story=slug, episode=1, shot="s01"))["prompt"]
+    written = "A 3D cartoon, fully computer-generated. Ana, a cartoon woman with a red scarf. A full-body reference."
+    sub = payload(call(server, "comfy_submit", story=slug, template="t2i_flux2_klein",
+                       values={"prompt": written, "seed": 7, "width": 832, "height": 1216},
+                       dest="02-cast/ana/candidates/full_body_c1"))
     sto = S.st.Story.open(str(tmp_path / "stories" / slug))
-    sto.write_bytes("ep01/keyframes/s01.png", b"png")
-    sub = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"seed": 33},
-                       files={"image": "ep01/keyframes/s01.png"}, prompt_from="clip:1:s01"))
-    assert (sub["episode"], sub["shot"], sub["prompt_from"]) == (1, "s01", "clip:1:s01")
     row = [r for r in S.jobs.journal(sto) if r["job"] == sub["job"]][0]
-    assert row["prompt"] == built and row["values"]["seconds"] == 5 and row["prompt_from"] == "clip:1:s01"
-    img = payload(call(server, "comfy_submit", story=slug, template="t2i_flux2_klein", values={"seed": 7},
-                       prompt_from="cast:ana:full_body", dest="02-cast/ana/candidates/full_body_c1"))
-    row = [r for r in S.jobs.journal(sto) if r["job"] == img["job"]][0]
-    assert row["values"]["width"] == 832 and row["values"]["height"] == 1216 and "A full-body" in row["prompt"]
-    assert call(server, "comfy_submit", story=slug, template="vc_chatterbox", values={},
-                prompt_from="cast:ana:full_body", dest="x").is_error            # no prompt in that template
+    assert row["prompt"] == written and row["values"]["width"] == 832
+    sent = [e for e in backend.log if e[0] == "run"][0][4]
+    assert written in json.dumps(sent)
+    tools = {t.name for t in asyncio.run(_list_tools(server))}
+    assert not {t for t in tools if t.startswith("prompt_")}            # no prompt writer on the server
+
+
+async def _list_tools(server):
+    async with fastmcp.Client(server) as client:
+        return await client.list_tools()
 
 
 @pytest.mark.skipif(not FFMPEG, reason="ffmpeg")
@@ -489,8 +466,9 @@ def test_a_casting_clip_in_episode_zero_becomes_a_take(tmp_path):
          "lines": [{"speaker": "ana", "text": "Je ne mens jamais, sauf le mardi."}]}]}))
     sto = S.st.Story.open(str(tmp_path / "stories" / slug))
     sto.write_bytes("ep00/keyframes/s01.png", b"png")
-    sub = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"seed": 11},
-                       files={"image": "ep00/keyframes/s01.png"}, prompt_from="clip:0:s01"))
+    sub = payload(call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech",
+                       values={"prompt": "Ana says in French: \"Je ne mens jamais, sauf le mardi.\"", "seed": 11},
+                       files={"image": "ep00/keyframes/s01.png"}, episode=0, shot="s01"))
     assert (sub["episode"], sub["shot"]) == (0, "s01")
     FakeEndpoint.script = {sub["job"]: [{"status": "COMPLETED", "executionTime": 40000, "output": {"images": [
         {"filename": "showrunner/x_00001_.mp4", "type": "base64", "data": _clip_b64(tmp_path)}]}}]}

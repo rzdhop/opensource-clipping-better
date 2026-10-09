@@ -42,10 +42,14 @@ def section(body: str, heading: str) -> str:
     return after.split("\n## ", 1)[0]
 
 
-def test_the_server_has_the_stage_three_tools():
+def test_the_server_makes_and_checks_but_writes_no_prompt():
+    """DEC-328: Claude writes every prompt; the server only makes pictures, clips and sound, checks and cuts."""
     tools = server_tools()
-    assert len(tools) == 24
-    assert {"prompt_keyframe", "prompt_clip", "prompt_cast", "voice_ref_from_take"} <= tools
+    assert len(tools) == 21 and "voice_ref_from_take" in tools
+    assert not [t for t in tools if t.startswith("prompt")]
+    with open(os.path.join(ROOT, "showrunner", "mcp_server.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    assert "showrunner.prompts" not in src and "import prompts" not in src
 
 
 def test_one_skill_per_step_in_the_plans_order():
@@ -63,7 +67,8 @@ def test_each_skill_has_its_frontmatter_sections_and_the_shared_rules(name):
     assert 40 < len(front.group(2)) <= 1024 and "<" not in front.group(2)
     positions = [body.index(h + "\n") for h in SECTIONS]
     assert positions == sorted(positions), "sections out of order"
-    assert B.with_rules(body, B.rules()) == body, "rules block stale: run showrunner/tools/build_skills.py"
+    assert B.expected(name, body) == body, "shared block stale: run showrunner/tools/build_skills.py"
+    assert ("<!-- prompts:start -->" in body) == (name in B.PROMPT_SKILLS)
     for dead in DEAD:
         assert dead not in body, dead
 
@@ -105,9 +110,31 @@ def test_the_files_a_skill_points_at_exist(name):
 
 def test_the_rules_say_the_non_negotiables():
     r = B.rules()
-    for must in ("explicit go", "never a still", "Ken Burns", "edge-tts", "LLM API", "prompt_from", "70 words",
-                 "Keyframes face the camera", "voice_ref_from_take"):
+    for must in ("explicit go", "never a still", "Ken Burns", "edge-tts", "LLM API", "You write every prompt",
+                 "values.prompt", "70 words", "Keyframes face the camera", "voice_ref_from_take"):
         assert must in r, must
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_the_prompt_guide_keeps_the_wording_that_worked():
+    """Every fixed sentence of the batch-a templates (prompts/*.md, the golden) is in the guide, word for word:
+    the guide is what Claude writes from, so the wording Rida chose cannot drift out of it."""
+    from showrunner import prompts as P
+    guide = _flat(B.prompt_guide())
+    for name in ("clip_dialogue", "clip_exchange", "clip_reaction", "keyframe", "full_body", "turnaround", "emotions",
+                 "framing_dialogue"):
+        for chunk in P.PLACEHOLDER.split(_flat(P.load(name)))[::2]:
+            chunk = chunk.strip(" .:,")
+            if len(chunk) > 12:
+                assert chunk in guide, (name, chunk)
+    assert P.CLEAN_FRAME in guide
+    for wording in P.KEYFRAME_FRAMINGS.values():
+        assert wording.split("}", 1)[1].strip() in guide, wording
+    for unwanted in ("no subtitles", "no on-screen text", "no black frames"):
+        assert unwanted not in guide.lower()
 
 
 def test_the_zips_hold_one_skill_each(tmp_path):

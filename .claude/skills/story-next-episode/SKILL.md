@@ -26,10 +26,10 @@ The universe, the cast pictures and the voices stay locked: the next episode reu
 - **Always moving pictures.** Every shot is a real clip: never a still, never a Ken Burns, never a slowed clip.
   A failed take is made again with a new seed and a note, never filled. No edge-tts, no voice laid over a clip, no
   LLM API call from the app: you are the writer.
-- **Prompts are built, never typed.** `prompt_keyframe`, `prompt_clip` and `prompt_cast` build every prompt from
-  the story's files through the tested templates; `comfy_submit(prompt_from="keyframe:<ep>:<shot>" |
-  "clip:<ep>:<shot>" | "cast:<char>:<kind>")` sends exactly that. To change a prompt, change the story file it comes
-  from (the universe, a sheet, a plate, `shots.json`) and build it again.
+- **You write every prompt.** You are the writer and the director; the connector only makes the pictures, the
+  clips and the sound, checks them and cuts the episode. Write each prompt in full from the story's files and the
+  patterns that worked (the prompt guide in the cast, shots and clips steps), show it to Rida with the batch, and
+  send it as `values.prompt` of `comfy_submit`.
 - **Words that reach a model.** A character's `## Head` is about 70 words (65–80), written "<Name>, a ...: ...",
   in the positive, no final period. Nothing that reaches a prompt names what must not appear (text, subtitles,
   captions, extra people): naming it draws it (the models ignore the negative prompt). Keyframes face the camera

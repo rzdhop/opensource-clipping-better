@@ -7,7 +7,9 @@
 The skills live in the repo (``.claude/skills/story-*/SKILL.md``, the source of truth, loaded by Claude Code on
 this host) and are uploaded to the claude.ai account (Settings -> Capabilities -> Skills) as the zips, where
 Rida chats with the showrunner connector. The rules are written once in ``showrunner/skills/RULES.md`` and copied
-between the ``<!-- rules:start -->`` / ``<!-- rules:end -->`` markers: a skill uploaded alone must carry them.
+between the ``<!-- rules:start -->`` / ``<!-- rules:end -->`` markers: a skill uploaded alone must carry them. The
+prompt guide (``showrunner/skills/PROMPTS.md``: the patterns that worked; Claude writes every prompt) goes the same
+way between ``<!-- prompts:start -->`` / ``<!-- prompts:end -->`` into the steps that send GPU jobs.
 Stdlib only.
 """
 
@@ -22,8 +24,14 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SKILLS_DIR = os.path.join(ROOT, ".claude", "skills")
 RULES_PATH = os.path.join(ROOT, "showrunner", "skills", "RULES.md")
+PROMPTS_PATH = os.path.join(ROOT, "showrunner", "skills", "PROMPTS.md")
 START, END = "<!-- rules:start -->", "<!-- rules:end -->"
 BLOCK = re.compile(re.escape(START) + r".*?" + re.escape(END), re.S)
+P_START, P_END = "<!-- prompts:start -->", "<!-- prompts:end -->"
+P_BLOCK = re.compile(re.escape(P_START) + r".*?" + re.escape(P_END), re.S)
+
+# The steps that send GPU jobs carry the prompt guide (you write every prompt; the server writes none).
+PROMPT_SKILLS = ("story-cast", "story-shots", "story-clips")
 
 # The order Rida goes through (plan 36 §2.2): each skill's "## Next" names the one after it.
 ORDER = ("story-concepts", "story-universe", "story-cast", "story-script", "story-shots", "story-clips",
@@ -32,6 +40,11 @@ ORDER = ("story-concepts", "story-universe", "story-cast", "story-script", "stor
 
 def rules() -> str:
     with open(RULES_PATH, encoding="utf-8") as fh:
+        return fh.read().strip()
+
+
+def prompt_guide() -> str:
+    with open(PROMPTS_PATH, encoding="utf-8") as fh:
         return fh.read().strip()
 
 
@@ -46,15 +59,30 @@ def with_rules(text: str, block: str) -> str:
     return BLOCK.sub(lambda _: f"{START}\n{block}\n{END}", text)
 
 
+def with_guide(name: str, text: str, guide: str) -> str:
+    """*text* with its prompt-guide block filled (the steps of PROMPT_SKILLS only, exactly once)."""
+    found = len(P_BLOCK.findall(text))
+    if name not in PROMPT_SKILLS:
+        if found:
+            raise ValueError(f"{name} sends no GPU job: no {P_START} block")
+        return text
+    if found != 1:
+        raise ValueError(f"{name} needs exactly one {P_START} ... {P_END} block")
+    return P_BLOCK.sub(lambda _: f"{P_START}\n{guide}\n{P_END}", text)
+
+
+def expected(name: str, text: str) -> str:
+    return with_guide(name, with_rules(text, rules()), prompt_guide())
+
+
 def build(check: bool = False) -> list:
     """Write (or with *check*, only compare) every skill's rules block; returns the skills out of date."""
-    block = rules()
     stale = []
     for name in ORDER:
         path = skill_path(name)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        new = with_rules(text, block)
+        new = expected(name, text)
         if new != text:
             stale.append(name)
             if not check:
@@ -83,7 +111,7 @@ def main() -> int:
     stale = build(check=args.check)
     if args.check:
         if stale:
-            print("stale rules block: " + ", ".join(stale))
+            print("stale shared block: " + ", ".join(stale))
             return 1
         print(f"{len(ORDER)} skills up to date")
     else:

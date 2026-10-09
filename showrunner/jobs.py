@@ -72,11 +72,9 @@ def _append(story: Story, row: dict) -> None:
 
 
 def submit(story: Story, endpoint, kind: str, template: str, values: dict, files: dict, *, dest: str = "",
-           episode: int | None = None, shot: str | None = None, rate_per_s: float = 0.0,
-           extra: dict | None = None) -> dict:
+           episode: int | None = None, shot: str | None = None, rate_per_s: float = 0.0) -> dict:
     """Send one job. *files*: ``{placeholder: story path}``; *dest*: where the outputs go in the story (a path
-    without extension), or *episode* + *shot* for a clip that becomes the shot's next take. *extra*: more
-    fields for the journal row (where the prompt came from)."""
+    without extension), or *episode* + *shot* for a clip that becomes the shot's next take."""
     if not dest and not (episode is not None and shot):
         raise JobError("say where the result goes: dest (a story path without extension) or episode + shot")
     local = {}
@@ -99,7 +97,7 @@ def submit(story: Story, endpoint, kind: str, template: str, values: dict, files
     row = {"job": job, "state": "SUBMITTED", "template": template, "kind": kind, "endpoint": endpoint.id,
            "dest": dest, "episode": episode, "shot": shot, "files": files or {}, "submitted_at": _now(),
            "values": {k: v for k, v in values.items() if k != "prompt"}, "prompt": values.get("prompt"),
-           "estimate": estimate(template, values, rate_per_s), **(extra or {})}
+           "estimate": estimate(template, values, rate_per_s)}
     _append(story, row)
     return row
 

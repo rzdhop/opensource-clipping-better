@@ -41,7 +41,6 @@ from showrunner import jobs  # noqa: E402
 from showrunner import mcp_auth  # noqa: E402
 from showrunner import runpod_client as rp  # noqa: E402
 from showrunner import store as st  # noqa: E402
-from showrunner import story_prompts as sp  # noqa: E402
 from showrunner import verify  # noqa: E402
 from showrunner import voice  # noqa: E402
 
@@ -60,9 +59,9 @@ tools are the hands. A story is a folder (stories/<slug>/): 00-brief.md, 01-univ
 first), 02-cast/<char>/sheet.md (+ full_body.png, voice_ref.wav), 03-places/, epNN/script.md, shots.json,
 takes.json. Rules: every GPU job costs money — say the count and the cost and wait for Rida's go before submitting;
 every clip is shown to Rida and approved by Rida before it is used; never a still, never a slowed clip; never name
-what is unwanted in a positive prompt (the models ignore the negative prompt). Prompts are never written by hand:
-prompt_keyframe / prompt_clip / prompt_cast build them from the story's files, and comfy_submit(prompt_from=...)
-sends exactly that. A character's voice is locked from a take Rida picked (voice_ref_from_take)."""
+what is unwanted in a positive prompt (the models ignore the negative prompt). You write every prompt; these tools
+only make the pictures, the clips and the sound, check them and cut the episode. A character's voice is locked from
+a take Rida picked (voice_ref_from_take)."""
 
 
 def env_value(name: str, default: str = "", env: dict | None = None) -> str:
@@ -362,46 +361,6 @@ def build_server(backend: Backend | None = None) -> FastMCP:
         return EmbeddedResource(type="resource", resource=BlobResourceContents(uri=f"file://{full}", mimeType=mime,
                                                                                blob=blob))
 
-    # ------------------------------------------------------------ prompts (stage 3)
-
-    def _built(fn, sto, *args) -> dict:
-        try:
-            return fn(sto, *args)
-        except sp.StoryPromptError as exc:
-            raise ToolError(str(exc)) from exc
-
-    @mcp.tool
-    def prompt_keyframe(story: str, episode: int, shot: str) -> dict:
-        """Free. The keyframe prompt of a shot, built from the story's files through the proven templates
-        (01-universe.md ## Medium, each sheet's ## Head, the place's ## Setting, the shot's characters, framing,
-        expression in shots.json); written into the shot as keyframe_prompt. Also says the template (text to
-        image, or the multi-reference edit once every character's full_body.png is locked), the files, the size
-        and where candidates go. Read it to Rida with the job count and cost; then comfy_submit with
-        prompt_from="keyframe:<episode>:<shot>"."""
-        sto = open_story(s, story)
-        built = _built(sp.keyframe, sto, episode, shot)
-        built["recorded"] = sp.record(sto, built)
-        return built
-
-    @mcp.tool
-    def prompt_clip(story: str, episode: int, shot: str) -> dict:
-        """Free. The clip prompt of a shot (LTX-2.5, picture and voice in one pass): the proven one-speaker or
-        two/three-speaker template with the lines quoted and each speaker's voice, or the silent reaction template;
-        written into the shot as clip_prompt. Also gives the speech budget (words vs the most a 5 or 10 s clip can
-        say) and whether the keyframe exists. Then comfy_submit with prompt_from="clip:<episode>:<shot>"."""
-        sto = open_story(s, story)
-        built = _built(sp.clip, sto, episode, shot)
-        built["recorded"] = sp.record(sto, built)
-        return built
-
-    @mcp.tool
-    def prompt_cast(story: str, character: str, kind: str) -> dict:
-        """Free. A cast image prompt: kind "full_body" (the canonical picture, text to image, 832x1216; 3-5
-        candidates, Rida picks ONE, it is locked), then "turnaround" and "emotions" (edits of the locked
-        full_body.png). Then comfy_submit with prompt_from="cast:<character>:<kind>" and a dest under
-        02-cast/<character>/candidates/."""
-        return _built(sp.cast, open_story(s, story), character, kind)
-
     # ------------------------------------------------------------ GPU jobs (stage 2.2)
 
     def _job_error(exc: Exception):
@@ -409,62 +368,26 @@ def build_server(backend: Backend | None = None) -> FastMCP:
 
     @mcp.tool
     def comfy_submit(story: str, template: str, values: dict, files: dict | None = None, dest: str = "",
-                     episode: int | None = None, shot: str | None = None, prompt_from: str = "",
-                     hand_prompt_reason: str = "") -> dict:
+                     episode: int | None = None, shot: str | None = None) -> dict:
         """COSTS MONEY (one GPU job; the answer gives its warm and cold estimate). Only after Rida's go in the chat
         for this batch, with the count and the cost said first. Sends *template* (templates_list) with *values*
-        (seed, and width/height/seconds when not built) and *files* ({placeholder: story path}, e.g. {"image":
-        "ep01/keyframes/s03.png"}). THE PROMPT IS BUILT HERE: *prompt_from* is "keyframe:<ep>:<shot>",
-        "clip:<ep>:<shot>" or "cast:<char>:<full_body|turnaround|emotions>" (what prompt_keyframe / prompt_clip /
-        prompt_cast show); leave values.prompt out. A hand-written values.prompt is refused unless
-        *hand_prompt_reason* says why (kept in the job journal). Where the result goes: *episode* + *shot* for a
-        clip (the shot's next take, epNN/clips/sNN_vK.mp4; a clip spec fills them) or *dest*, a story path without
-        extension (e.g. "02-cast/ana/candidates/full_body_c1"). Returns at once with the job id: then comfy_fetch."""
+        (prompt — written by Claude in the chat —, seed, width, height, seconds ...) and *files* ({placeholder:
+        story path}, e.g. {"image": "ep01/keyframes/s03.png"}). Where the result goes: *episode* + *shot* for a clip
+        (it becomes the shot's next take, epNN/clips/sNN_vK.mp4) or *dest*, a story path without extension (e.g.
+        "02-cast/ana/candidates/full_body_c1"). The prompt is kept in the story's job journal. Returns at once with
+        the job id: then comfy_fetch."""
         sto = open_story(s, story)
         try:
             kind = template_kind(template)
-            needs_prompt = "prompt" in (comfy_templates.load_template(template).get("placeholders") or [])
         except (OSError, ValueError) as exc:
             raise ToolError(f"no template {template!r} (templates_list)") from exc
-        values = dict(values or {})
-        extra: dict = {}
-        if prompt_from:
-            try:
-                built = sp.from_spec(sto, prompt_from)
-            except sp.StoryPromptError as exc:
-                raise ToolError(str(exc)) from exc
-            if not needs_prompt:
-                raise ToolError(f"{template} takes no prompt; drop prompt_from")
-            if built["template"] != template and not (built["kind"] == "keyframe" and template in (sp.T2I_TEMPLATE,
-                                                                                                 sp.EDIT_TEMPLATE)):
-                raise ToolError(f"{prompt_from} is built for {built['template']}, not {template}")
-            if "prompt" in values and values["prompt"] != built["prompt"]:
-                raise ToolError("values.prompt differs from the built prompt: leave it out, prompt_from fills it")
-            if built["kind"] == "clip":
-                if (episode, shot) not in ((None, None), (built["episode"], built["shot"])):
-                    raise ToolError(f"{prompt_from} is the clip of ep{built['episode']} {built['shot']}, not ep{episode} {shot}")
-                episode, shot = built["episode"], built["shot"]
-                values.setdefault("seconds", built["seconds"])
-            else:
-                values.setdefault("width", built["width"])
-                values.setdefault("height", built["height"])
-            values["prompt"] = built["prompt"]
-            extra["prompt_from"] = prompt_from
-            sp.record(sto, built)
-        elif needs_prompt:
-            if not hand_prompt_reason.strip():
-                raise ToolError(f"{template} prompts are built by the server: pass prompt_from (keyframe:/clip:/cast:)"
-                                " — or hand_prompt_reason to send a hand-written values.prompt")
-            if not str(values.get("prompt", "")).strip():
-                raise ToolError("hand_prompt_reason given but values.prompt is empty")
-            extra["hand_prompt_reason"] = hand_prompt_reason.strip()
         ep = backend.endpoint(kind)
         try:
-            row = jobs.submit(sto, ep, kind, template, values, files or {}, dest=dest, episode=episode, shot=shot,
-                              rate_per_s=backend.rate(kind), extra=extra)
+            row = jobs.submit(sto, ep, kind, template, values or {}, files or {}, dest=dest, episode=episode, shot=shot,
+                              rate_per_s=backend.rate(kind))
         except jobs.JobError as exc:
             _job_error(exc)
-        return {k: row[k] for k in ("job", "template", "kind", "dest", "episode", "shot", "estimate", *extra)}
+        return {k: row[k] for k in ("job", "template", "kind", "dest", "episode", "shot", "estimate")}
 
     @mcp.tool
     def comfy_fetch(story: str, job: str, wait_s: int = 0):
