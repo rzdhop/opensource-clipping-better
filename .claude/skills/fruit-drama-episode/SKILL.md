@@ -55,7 +55,7 @@ step's skill before doing the step, every time.
   Medium sentence is in `stories/faille-d-amour/01-universe.md` (`store_read`). In the universe step, show it to
   Rida as one option among two or three and ask.
 - **One fruit per character**, readable at a glance (mango, strawberry, kiwi worked); ask which fruit for each.
-- **The existing cast** of *Faille d'amour* (Rida the kiwi hacker, Marie-Jeanne the strawberry sales director,
+- **The existing cast** of *Faille d'amour* (Rida the kiwi hacker, Marie-Jeanne the strawberry who runs the deal,
   Paloma the mango) has locked sheets, pictures and voices. A new story never reuses them unless Rida says so: ask.
 - **The telenovela beats**: a hook mid-conflict, one known trope (enemies to lovers, cheating reveal, who's the
   father…), the comment bait "Team X or Team Y?", a cut before the reaction, "Partie 2 demain".
