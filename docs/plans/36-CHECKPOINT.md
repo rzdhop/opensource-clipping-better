@@ -1,5 +1,15 @@
 # Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
 
+## STAGE 3 CORRECTED 2026-10-09 morning — Claude writes every prompt (DEC-328, reverses DEC-326)
+
+- **Rida:** "Claude must be the one writing prompts […] the MCP as a way to produce the video and images only";
+  "ask me questions instead of doing things that do not go my way". The server-side prompt builder and the strict
+  `comfy_submit` are removed (never live: the host was at `4889401`). 21 tools. The skills carry a prompt guide
+  (`showrunner/skills/PROMPTS.md`, the batch-a patterns) in the cast, shots and clips steps. Dry run redone with
+  every prompt written by Claude (17 calls, 1 expected refusal, $0). Tests: system 124 + 3 s / venv 143 + 1 s.
+- **Open with Rida:** what "delete all the things from before the full rebuild" covers (the inventory is in the
+  chat); the first GPU batch of the cast (count, cost, his go); the host pull + restart once he agrees.
+
 ## STAGE 3 DONE — the toolbox gaps closed, the eight skills, the dry run (2026-10-09 night, cloud session)
 
 - **Rida, 2026-10-09:** "Do as the previous works have done for the voices […]; for the rest of questions decide for

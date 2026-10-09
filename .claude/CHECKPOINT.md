@@ -1,6 +1,9 @@
 ## CURRENT STATE — plan 36 STAGE 3 DONE (toolbox gaps closed, 8 story skills, dry run passed) — 2026-10-09 night, cloud session
 
-- **Current header (2026-10-09):** stage 3 done and pushed (see `docs/plans/36-CHECKPOINT.md` top): prompt tools +
+- **Current header (2026-10-09 morning):** DEC-328 — Claude writes every prompt; the prompt tools and the strict
+  `comfy_submit` (DEC-326) removed, 21 tools, the skills carry the prompt guide; dry run redone. Waiting on Rida:
+  the scope of "delete everything from before the rebuild", the first cast batch's go, then host pull + restart.
+- **Earlier header (2026-10-09 night):** stage 3 done and pushed (see `docs/plans/36-CHECKPOINT.md` top): prompt tools +
   strict `comfy_submit` (DEC-326), `voice_ref_from_take` (DEC-327), `full_body.md`, the A-222 wording, ep00 accepted,
   24 tools; `.claude/skills/story-*` (8) + `showrunner/skills/RULES.md` + `tools/build_skills.py`; dry run
   `stories/les-heritiers-du-fournil` ($0). Tests: system 130+3s / with server deps 150+1s. **Waiting on Rida:** host

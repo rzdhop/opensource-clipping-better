@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fastmcp  # noqa: E402
 
 from cast import CAST  # noqa: E402
-from showrunner import mcp_server as S, prompts as P, story_prompts as SP  # noqa: E402
+from showrunner import mcp_server as S, prompts as P, store as ST  # noqa: E402
 
 SLUG = "les-heritiers-du-fournil"
 LOG: list = []
@@ -188,6 +188,36 @@ CASTING = {  # ep00: one casting shot per character, a line in their own way of 
 }
 
 
+CLEAN = "One continuous, clean cinematic shot from the first frame to the last."
+
+
+def head(cid):
+    return CAST[cid]["head"] + "."
+
+
+def write_full_body(medium, cid):
+    """Claude's full-body prompt (the guide's full-body pattern)."""
+    return (f"{medium} {head(cid)} A full-body character reference: the whole figure from head to feet, standing "
+            "upright in a relaxed neutral pose, arms loose at the sides, facing the camera, centred on a plain neutral "
+            "light-grey background, flat even studio light, only this one character, nobody else.")
+
+
+def write_keyframe(medium, cid, setting):
+    return (f"{medium} {head(cid)} Setting: {setting}. Medium close shot from the waist up, {CAST[cid]['name']} faces "
+            "the camera, mouth closed, a tense and composed expression, soft cinematic light, vertical 9:16 framing, "
+            "only this one character, nobody else.")
+
+
+def write_one_speaker(medium, cid, setting, line):
+    n = CAST[cid]["name"]
+    return (f"Use the provided start image as the first frame. {medium} {head(cid)} Setting: {setting}. {n} talks to "
+            "someone just off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens "
+            "and never looking into it, as in a conversation scene of a drama, and says in French, with the voice of "
+            f"{CAST[cid]['voice_en']}: \"{line}\" The mouth moves naturally with every word, a small head tilt, a breath "
+            "before and a beat of silence after the line. Medium close-up, the camera holds still on the speaker, soft "
+            "natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. " + CLEAN)
+
+
 def script_md() -> str:
     names = {k: c["name"] for k, c in CAST.items()}
     out = ["# Le Testament du Fournil — épisode 1 (dry run)", ""]
@@ -201,7 +231,7 @@ def script_md() -> str:
     return "\n".join(out)
 
 
-def shots_json(ep_shots) -> dict:
+def _unused_shots_json(ep_shots) -> dict:
     rows = []
     for sid, seconds, place, frame, lines, reaction in ep_shots:
         row = {"id": sid, "seconds": seconds, "place": place, "characters": frame}
@@ -219,8 +249,9 @@ def main() -> None:
     settings = S.Settings(stories_dir=os.path.join(REPO, "stories"), state_dir=state, endpoints={}, keys={})
     server = S.build_server(S.Backend(settings))
     report = ["# Plan 36 stage 3 — dry run of steps 1–4 (no GPU, $0)", "",
-              f"Story `stories/{SLUG}/`, French, claymation animal people (a non-fruit universe, D8). Every step went "
-              "through the showrunner server's own tools, in process, with no GPU endpoint configured.", ""]
+              f"Story `stories/{SLUG}/`, French, claymation animal people (a non-fruit universe, D8). Claude wrote "
+              "everything — the story files and every prompt; the showrunner server's own tools (in process, no GPU "
+              "endpoint configured) only stored them, and refused the paid call.", ""]
 
     # step 1
     _, listed = call(server, "story_list")
@@ -237,7 +268,7 @@ def main() -> None:
 
     # step 2
     call(server, "store_write", story=SLUG, path="01-universe.md", text=UNIVERSE)
-    medium = SP.medium(S.st.Story.open(os.path.join(REPO, "stories", SLUG)))
+    medium = " ".join(ST.Story.open(os.path.join(REPO, "stories", SLUG)).sections("01-universe.md")["Medium"].split())
     report += ["## Step 2 — universe (`story-universe`)", "", f"`## Medium` ({P.words(medium)} words), the style lock of "
                "every prompt:", "", f"> {medium}", ""]
 
@@ -257,77 +288,73 @@ def main() -> None:
         {"shots": [{"id": f"s{k + 1:02d}", "seconds": 5, "place": "boutique", "characters": [cid],
                     "lines": [{"speaker": cid, "text": line}]} for k, (cid, line) in enumerate(CASTING.items())]},
         ensure_ascii=False, indent=2))
-    report += ["## Step 3 — cast (`story-cast`): the sheets, and the prompts it would send", "",
+    report += ["## Step 3 — cast (`story-cast`): the sheets, and the prompts Claude wrote", "",
+               "Every prompt below was written by Claude from the story's files and the prompt guide "
+               "(`showrunner/skills/PROMPTS.md`); the server writes none.", "",
                "| Character | Head words | full_body prompt words | template | size |", "|---|---|---|---|---|"]
-    cast_prompts = {}
+    cast_prompts = {cid: write_full_body(medium, cid) for cid in CAST}
     for cid, c in CAST.items():
-        _, fb = call(server, "prompt_cast", story=SLUG, character=cid, kind="full_body")
-        cast_prompts[cid] = fb["prompt"]
-        report.append(f"| {c['name']} | {P.words(c['head'])} | {P.words(fb['prompt'])} | {fb['template']} | "
-                      f"{fb['width']}x{fb['height']} |")
-    res, refused = call(server, "prompt_cast", story=SLUG, character="mireille", kind="turnaround")
-    report += ["", f"- Turnaround before a full body is locked: refused as it should be — *{refused}*"]
-    casting = []
-    for k, cid in enumerate(CASTING):
-        sid = f"s{k + 1:02d}"
-        _, kf = call(server, "prompt_keyframe", story=SLUG, episode=0, shot=sid)
-        _, clip = call(server, "prompt_clip", story=SLUG, episode=0, shot=sid)
-        casting.append((cid, sid, kf, clip))
-        assert P.framing_intruders(P.KEYFRAME_FRAMINGS[kf["framing"]]) == [] and P.unwanted_words(clip["prompt"]) == []
-    report += ["- The casting reel `ep00/shots.json`: one 5 s shot per character, a line in their voice; every keyframe "
-               "and clip prompt built (t2i until the full bodies are locked), budgets:", ""]
-    report += [f"  - {CAST[c]['name']} ({sid}): « {CASTING[c]} » — {clip['budget']['words']}/{clip['budget']['max_words']} "
-               f"words, fits: {clip['budget']['fits']}" for c, sid, kf, clip in casting]
-    res, paid = call(server, "comfy_submit", story=SLUG, template="t2i_flux2_klein", values={"seed": 1},
-                     prompt_from="cast:mireille:full_body", dest="02-cast/mireille/candidates/full_body_c1")
+        report.append(f"| {c['name']} | {P.words(c['head'])} | {P.words(cast_prompts[cid])} | t2i_flux2_klein | 832x1216 |")
+    setting = PLACES["boutique"][1]
+    reel = []
+    for k, (cid, line) in enumerate(CASTING.items()):
+        reel.append({"id": f"s{k + 1:02d}", "seconds": 5, "place": "boutique", "characters": [cid],
+                     "lines": [{"speaker": cid, "text": line}],
+                     "keyframe_prompt": write_keyframe(medium, cid, setting),
+                     "clip_prompt": write_one_speaker(medium, cid, setting, line)})
+    call(server, "store_write", story=SLUG, path="ep00/shots.json",
+         text=json.dumps({"shots": reel}, ensure_ascii=False, indent=2))
+    for r in reel:
+        assert P.unwanted_words(r["clip_prompt"]) == [] and P.unwanted_words(r["keyframe_prompt"]) == []
+    report += ["", "- The casting reel `ep00/shots.json`: one 5 s shot per character, a line in their voice, with the "
+               "keyframe and clip prompts Claude wrote kept in each shot. Word budgets (5 s ≤ 10 words):", ""]
+    report += [f"  - {CAST[r['characters'][0]]['name']} ({r['id']}): « {r['lines'][0]['text']} » — "
+               f"{P.words(r['lines'][0]['text'])}/10" for r in reel]
+    res, paid = call(server, "comfy_submit", story=SLUG, template="t2i_flux2_klein",
+                     values={"prompt": cast_prompts["mireille"], "seed": 1, "width": 832, "height": 1216},
+                     dest="02-cast/mireille/candidates/full_body_c1")
     assert res.is_error
-    report += ["", f"- A paid call in the dry run is refused (no endpoint): *{paid}*", "",
+    report += ["", f"- Sending Mireille's full body with Claude's prompt is refused here, as it must be (no GPU in the "
+               f"dry run): *{paid}*", "",
                "What the cast step would cost, after Rida's go per batch (4 characters): 4 × (4 full-body candidates + "
                "2 turnaround + 2 expression grids + 2 casting keyframes) = 40 images ≈ $0.40 warm / $1.20 cold; 4 × 3 "
                "casting clips = 12 clips ≈ $0.40–0.60 warm / ≈ $1.60 cold. Total ≈ $0.80–2.80.", ""]
 
-    # step 4: the script, the places, the budgets
+    # step 4: the script and its budgets (the shot list and its prompts are step 5)
     call(server, "store_write", story=SLUG, path="ep01/script.md", text=script_md())
-    # The shot list is step 5 — written here as a scratch copy only to run the budget check through prompt_clip.
-    call(server, "store_write", story=SLUG, path="ep01/shots.json",
-         text=json.dumps(shots_json(SHOTS), ensure_ascii=False, indent=2))
     report += ["## Step 4 — script (`story-script`)", "",
                "`ep01/script.md`: 11 shots, 12 lines, 80 s of clips (+ the end card), cliffhanger first "
                "(« Suzon ? Notre vendeuse ? », cut on Suzon before her answer), two silent reactions, four two-character "
-               "shots (three with both speaking, D7). The word budget of every shot, from `prompt_clip`:", "",
+               "shots (three with both speaking, D7). The word budget of every shot (5 s ≤ 10, 10 s ≤ 22):", "",
                "| Shot | s | In frame | Words / max | Fits |", "|---|---|---|---|---|"]
-    for sid, seconds, _, frame, _, _ in SHOTS:
-        _, clip = call(server, "prompt_clip", story=SLUG, episode=1, shot=sid)
-        b = clip["budget"]
-        report.append(f"| {sid} | {seconds} | {', '.join(CAST[c]['name'] for c in frame)} | {b['words']} / "
-                      f"{b['max_words']} | {'yes' if b['fits'] else 'NO'} |")
-        assert P.unwanted_words(clip["prompt"]) == []
+    for sid, seconds, _, frame, lines, _ in SHOTS:
+        words = sum(P.words(t) for _, t in (lines or []))
+        cap = 10 if seconds == 5 else 22
+        report.append(f"| {sid} | {seconds} | {', '.join(CAST[c]['name'] for c in frame)} | {words} / {cap} | "
+                      f"{'yes' if words <= cap else 'NO'} |")
+        assert words <= cap, sid
     lines = sum(len(s[4] or []) for s in SHOTS)
     words = [P.words(t) for s in SHOTS for _, t in (s[4] or [])]
     report += ["", f"Lines: {lines} (≤ 12); words per line {min(words)}–{max(words)}.", ""]
 
     # the prompts themselves, for Rida to read
-    report += ["## The prompts the GPU would receive (built by the server, not typed)", "",
+    report += ["## Prompts Claude wrote (what the GPU would receive)", "",
                "### Cast: Mireille, full body", "", "```", cast_prompts["mireille"], "```", "",
-               "### ep00 s01: Mireille's casting keyframe", "", "```", casting[0][2]["prompt"], "```", "",
-               "### ep01 s03: a two-speaker clip (Suzon, Mireille)", "", "```"]
-    _, s03 = call(server, "prompt_clip", story=SLUG, episode=1, shot="s03")
-    report += [s03["prompt"], "```", "", "### ep01 s04: a silent reaction (Suzon)", "", "```"]
-    _, s04 = call(server, "prompt_clip", story=SLUG, episode=1, shot="s04")
-    report += [s04["prompt"], "```", ""]
+               "### ep00 s01: Mireille's casting keyframe", "", "```", reel[0]["keyframe_prompt"], "```", "",
+               "### ep00 s01: Mireille's casting clip", "", "```", reel[0]["clip_prompt"], "```", ""]
 
     report += ["## What the dry run found (for Rida)", "",
-               "1. **The silent-reaction template still says \"listens to someone just off-screen\"** "
+               "1. **The silent-reaction pattern still says \"listens to someone just off-screen\"** "
                "(`prompts/clip_reaction.md`, s04 and s07 above). That is the wording that drew a stray human in a keyframe "
                "(A-222). In a clip the start image holds the frame, and the one-speaker golden (s33) says the same and "
                "passed batch a, so it is left as it is; watch the first reaction clips, and if one invents a person, "
-               "the fix is the reaction template, not a re-roll.",
+               "the fix is the reaction wording, not a re-roll.",
                "2. **\"animal people\" in the Medium.** The universe's own noun (like the demo's \"fruit people\") "
                "contains *people*; batch a held with \"fruit people\". Watch the first full bodies for a human.",
-               "3. **A one-line shot with a silent listener (s11, the cliffhanger) uses the exchange golden**, whose audio "
-               "sentence says \"two distinct voices\" (kept word for word, `clip_exchange.md`). The clip check will show "
-               "whether the listener starts talking; if so, the cliffhanger becomes a one-character shot of Mireille "
-               "followed by a silent reaction of Suzon.",
+               "3. **A one-line shot with a silent listener (s11, the cliffhanger).** The exchange pattern says \"two distinct "
+               "voices\"; when Claude writes s11's clip prompt at step 5 it should describe Suzon as listening in silence. The "
+               "clip check will show whether she starts talking; if so, the cliffhanger becomes a one-character shot of "
+               "Mireille followed by a silent reaction of Suzon.",
                "4. Nothing was locked: every lock needs Rida's words. To go on with this story: Rida picks the concept "
                "(or another), approves the universe, then the cast step's first paid batch (4 full-body candidates per "
                "character, ≈ $0.16–0.48).", ""]
