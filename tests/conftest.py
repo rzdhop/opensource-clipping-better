@@ -63,20 +63,6 @@ def render_stack_stubbed(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _forget_budget_day(monkeypatch):
-    """The budget module keeps a settings reader, the resolved budget-day
-    zone and the default spend store for the life of the process (plan 23
-    A7). Tests share one process, so none may inherit another's, nor the
-    developer's own BUDGET_TIMEZONE: the day is UTC unless a test sets it."""
-    from clipping.providers import budget
-
-    monkeypatch.delenv(budget.TIMEZONE_ENV, raising=False)
-    budget.reset()
-    yield
-    budget.reset()
-
-
-@pytest.fixture(autouse=True)
 def _forget_model_swaps():
     """A model swap is remembered per key for the life of the process
     (DEC-087). Tests share one process, so none may inherit another's swap."""
@@ -86,14 +72,3 @@ def _forget_model_swaps():
     yield
     llm.reset_model_fallbacks()
 
-
-@pytest.fixture(autouse=True)
-def _forget_comfyui_status():
-    """The story page's ComfyUI status probe is remembered per server for a
-    minute, for the life of the process. Tests share one process, so none
-    may inherit another's answer."""
-    from clipping.providers import local_comfyui
-
-    local_comfyui.reset_status_cache()
-    yield
-    local_comfyui.reset_status_cache()

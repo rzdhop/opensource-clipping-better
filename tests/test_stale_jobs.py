@@ -73,36 +73,24 @@ def test_a_custom_reason_is_used(seeded):
     assert seeded["running1"]["error"] == "the machine caught fire"
 
 
-@pytest.fixture
-def story_steps(monkeypatch):
-    """Story-step jobs (AI Story phase 1): one waiting for the user, one at work."""
-    jobs = {
-        "awaiting": {"id": "awaiting", "kind": "story_step",
-                     "status": JobStatus.AWAITING_APPROVAL.value, "error": None},
-        "stepping": {"id": "stepping", "kind": "story_step",
-                     "status": JobStatus.RUNNING.value, "error": None},
-    }
-    monkeypatch.setattr(job_store, "_jobs", jobs)
-    monkeypatch.setattr(job_store, "_persist", lambda force=True: None)
-    return jobs
+def test_a_retired_story_step_job_is_dropped_when_the_store_loads(monkeypatch, tmp_path):
+    """The retired AI Story mode left "story_step" records in jobs.json; the
+    store skips them on load, so they never show as stuck jobs."""
+    import json
 
-
-def test_a_step_awaiting_approval_survives_a_restart(story_steps):
-    """It is finished for the worker, not for the user: the story waits on it."""
-    job_store.fail_stale_jobs()
-    assert story_steps["awaiting"]["status"] == JobStatus.AWAITING_APPROVAL.value
-    assert story_steps["awaiting"]["error"] is None
-
-
-def test_a_step_that_was_running_is_failed_like_any_interrupted_job(story_steps):
-    changed = job_store.fail_stale_jobs()
-    assert changed == ["stepping"]
-    assert story_steps["stepping"]["status"] == JobStatus.FAILED.value
-    assert "restart" in story_steps["stepping"]["error"].lower()
+    path = tmp_path / "jobs.json"
+    path.write_text(json.dumps({
+        "old": {"id": "old", "kind": "story_step", "status": "awaiting_approval"},
+        "clip": {"id": "clip", "kind": "clip", "status": JobStatus.COMPLETED.value},
+    }), encoding="utf-8")
+    monkeypatch.setattr(job_store, "PERSIST_PATH", str(path))
+    monkeypatch.setattr(job_store, "_jobs", {})
+    job_store._load()
+    assert list(job_store._jobs) == ["clip"]
 
 
 def test_needs_upload_is_still_failed_at_restart(monkeypatch):
-    """Pins today's behaviour, which the story-step change must not move. It is
+    """Pins today's behaviour. It is
     a known mishandling (the job loses the source it was waiting for) with its
     own follow-up; that fix changes this test on purpose, nothing else may."""
     jobs = {"parked": {"id": "parked", "status": JobStatus.NEEDS_UPLOAD.value,

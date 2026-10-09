@@ -55,7 +55,7 @@ def test_both_actions_are_wired_and_confirmed():
 
 
 def test_a_deleted_job_leaves_its_page():
-    # The job list lives at /clips since the two-mode shell (DEC-094).
+    # The job list lives at /clips.
     assert "navigate('/clips')" in _handler_calling("deleteJob(jobId)") + PAGE[PAGE.index("deleteJob(jobId)"):][:200]
 
 

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchJob, createSSEConnection } from '../api'
 import { parseTime, formatDuration, formatClock, useSecondsTicker, jobClocks } from '../time'
 import { IconButton, useToast } from '../ui'
 import { copyText } from '../lib/clipboard'
@@ -10,19 +9,12 @@ import {
   Volume2, Wrench,
 } from '../ui/icons'
 
-/**
- * Statuses a job (clip or story-step) never leaves. A story step also stops
- * here: it is finished for the worker once it awaits the user's approval --
- * the slot is freed and the stream closes -- so the page and its feed must
- * stop polling it exactly like a completed job, even though the *story* is
- * not done.
- */
-export const TERMINAL = ['completed', 'failed', 'cancelled', 'awaiting_approval', 'awaiting_uploads']
+/** Statuses a job never leaves: the page and its feed stop polling there. */
+export const TERMINAL = ['completed', 'failed', 'cancelled']
 
 /**
- * Merge incoming events into the events already held, by `seq`. Pure, so the
- * live page and any future feed (a story step's own activity view) share one
- * de-duplication rule -- the REST poll and the SSE stream both deliver
+ * Merge incoming events into the events already held, by `seq`. Pure, so every
+ * feed shares one de-duplication rule -- the REST poll and the SSE stream both deliver
  * events and routinely overlap.
  */
 export function mergeEvents(previous, incoming) {
@@ -39,11 +31,7 @@ export function mergeEvents(previous, incoming) {
 // are read here as an icon, a tone and a group header -- the raw line stays
 // in each row's tooltip and in "Copy log", untouched.
 
-// A fast-track sub-step ("⏩ Fast track 3/6: paid check"): when a job prints
-// these, they alone (with the worker's own step lines) start the groups.
-const FAST_TRACK_HEADER = /^⏩ Fast track \d+\/\d+: /
-// The section starts a step prints (voices, images, the keyframe check, its
-// auto-fix, the clips and the render). A run of lines opening with the same
+// The section starts a step prints. A run of lines opening with the same
 // one ("🎬 Animating 8 shots", then "🎬 sh01 via …") stays one group.
 const SECTION_EMOJI = new Set(['🎬', '🎙', '🖼', '👁', '🛠'])
 // One leading pictograph (its variation selector dropped), after any indent.
@@ -139,17 +127,14 @@ const worse = (a, b) => ((TONE_RANK[b] || 0) > (TONE_RANK[a] || 0) ? b : a)
  * One feed line read for display: its icon (from the leading emoji), the text
  * after it, its tone, its indent depth, and whether it starts a group. Pure.
  */
-export function classifyLine(event, { fastTrack = false } = {}) {
+export function classifyLine(event) {
   const raw = event.message || ''
   const body = raw.trimStart()
   const indent = raw.length - body.length
   const match = body.match(LEADING_EMOJI)
   const emoji = match ? match[1] : null
   const entry = emoji ? LINE_ICONS[emoji] : null
-  const isFastTrack = FAST_TRACK_HEADER.test(body)
-  const header = indent === 0 && (
-    event.level === 'step' || isFastTrack || (!fastTrack && SECTION_EMOJI.has(emoji))
-  )
+  const header = indent === 0 && (event.level === 'step' || SECTION_EMOJI.has(emoji))
   return {
     emoji,
     icon: entry ? entry.icon : null,
@@ -160,24 +145,21 @@ export function classifyLine(event, { fastTrack = false } = {}) {
     tone: lineTone(event, emoji, body),
     depth: indent >= 6 ? 2 : indent >= 2 ? 1 : 0,
     header,
-    fastTrack: isFastTrack,
   }
 }
 
 /**
  * The events as groups: `[{key, head: {event, line} | null, lines: [{event,
- * line}], tone}]`. A group opens at each header line -- a fast-track
- * sub-step, a step line of the worker, or (in a job with no fast track) a
- * section start -- and holds every line until the next one; lines before the
+ * line}], tone}]`. A group opens at each header line -- a step line of the
+ * worker or a section start -- and holds every line until the next one; lines before the
  * first header form a group with no head. Pure.
  */
 export function groupEvents(events) {
-  const fastTrack = events.some(event => FAST_TRACK_HEADER.test((event.message || '').trimStart()))
   const groups = []
   let current = null
   for (const event of events) {
-    const line = classifyLine(event, { fastTrack })
-    const sameSection = current && current.head && !line.fastTrack && event.level !== 'step'
+    const line = classifyLine(event)
+    const sameSection = current && current.head && event.level !== 'step'
       && current.head.event.level !== 'step' && current.head.line.emoji === line.emoji
     if (line.header && !sameSection) {
       current = { key: `g${event.seq}`, head: { event, line }, lines: [], tone: line.tone }
@@ -463,114 +445,4 @@ export function LiveActivity({ job, events, streamState }) {
       )}
     </div>
   )
-}
-
-/**
- * What JobDetail does today, as a hook: initial fetch, SSE via
- * createSSEConnection, merge incoming events by `seq`, a 3s poll fallback,
- * and stop (both the stream and the poll) once the job reaches a terminal
- * status -- `awaiting_approval` included, so a step job's feed goes quiet the
- * moment it is the user's turn.
- *
- * Not wired into JobDetail yet (phase-1 stage 10): JobDetail also lets
- * onCancel/onDelete/recoverExpiredMedia push a fresh job into its own state,
- * which this hook does not expose a setter for. `onJob`, called whenever the
- * hook obtains a new job (initial load, SSE completion, or poll), is here for
- * the story step page of stage 11, which only needs to observe the job, not
- * mutate it from outside.
- */
-export function useJobFeed(jobId, { onJob } = {}) {
-  const [job, setJob] = useState(null)
-  const [events, setEvents] = useState([])
-  const [streamState, setStreamState] = useState('connecting')
-
-  const mergeIncoming = (incoming) => {
-    if (!incoming || incoming.length === 0) return
-    setEvents(previous => mergeEvents(previous, incoming))
-  }
-
-  const applyJob = (data) => {
-    setJob(data)
-    if (onJob) onJob(data)
-  }
-
-  useEffect(() => {
-    // No job to watch yet -- the story wizard (stage 11) calls this hook on
-    // every render with `myJob ? myJob.id : null`, since a hook cannot be
-    // called conditionally. Skip the request rather than asking the API for
-    // `/jobs/null` and logging a spurious failure every time nothing is running.
-    if (!jobId) {
-      setJob(null)
-      setEvents([])
-      setStreamState('closed')
-      return
-    }
-
-    let sse = null
-    let cancelled = false
-
-    const load = async () => {
-      try {
-        const data = await fetchJob(jobId)
-        if (cancelled) return
-        applyJob(data)
-        mergeIncoming(data.events)
-
-        if (!TERMINAL.includes(data.status)) {
-          sse = createSSEConnection(
-            jobId,
-            (event) => {
-              if (event.type === 'completed') {
-                fetchJob(jobId).then(fresh => {
-                  applyJob(fresh)
-                  mergeIncoming(fresh.events)
-                })
-              } else if (event.type === 'progress') {
-                setJob(prev => prev ? { ...prev, status: event.status, progress: event.progress, error: event.error } : prev)
-                // A step ends in awaiting_approval, failed or cancelled with
-                // no 'completed' frame, and the poll below stops once the
-                // status is terminal: fetch the finished job here so the
-                // caller's onJob hears about it.
-                if (TERMINAL.includes(event.status)) {
-                  fetchJob(jobId).then(fresh => {
-                    applyJob(fresh)
-                    mergeIncoming(fresh.events)
-                  }).catch(() => {})
-                }
-              } else if (event.type === 'events') {
-                mergeIncoming(event.events)
-              }
-            },
-            setStreamState,
-          )
-        } else {
-          setStreamState('closed')
-        }
-      } catch (err) {
-        console.error(err)
-      }
-    }
-
-    load()
-    return () => { cancelled = true; if (sse) sse.close() }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId])
-
-  // Also poll for updates
-  useEffect(() => {
-    if (!job) return
-    if (TERMINAL.includes(job.status)) return
-
-    const interval = setInterval(async () => {
-      try {
-        const data = await fetchJob(jobId)
-        applyJob(data)
-        mergeIncoming(data.events)
-      } catch {}
-    }, 3000)
-    return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, job?.status])
-
-  return { job, events, streamState }
 }

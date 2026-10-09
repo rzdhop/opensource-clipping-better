@@ -5,17 +5,11 @@ import NewJob from './pages/NewJob'
 import JobDetail from './pages/JobDetail'
 import Login from './pages/Login'
 import Settings from './pages/Settings'
-import StoriesList from './pages/story/StoriesList'
-import NewStoryWizard from './pages/story/NewStoryWizard'
-import StoryWorkspace from './pages/story/StoryWorkspace'
-import EpisodeStudio from './pages/story/EpisodeStudio'
-import HandoffPage from './pages/story/episode/HandoffPage'
-import ModeSwitch, { modeFromPath, readMode, rememberMode } from './components/ModeSwitch'
 import { checkToken, clearToken, getToken } from './api'
-import { BookOpen, Clapperboard, LayoutDashboard, Lock, MenuIcon, Plus, Settings as SettingsIcon, X } from './ui/icons'
+import { Clapperboard, LayoutDashboard, Lock, MenuIcon, Plus, Settings as SettingsIcon, X } from './ui/icons'
 
 // Move focus into the page itself (the skip link's target): a plain #hash
-// link would also change the router's location, which the story pages read.
+// link would also change the router's location.
 function skipToContent(event) {
   event.preventDefault()
   const main = document.getElementById('main-content')
@@ -57,11 +51,6 @@ function useNavDrawer(pathname) {
   return { open, setOpen, buttonRef, drawerRef }
 }
 
-// `/` and any unknown path open the last mode used (DEC-094).
-function ModeRedirect() {
-  return <Navigate to={readMode() === 'story' ? '/story' : '/clips'} replace />
-}
-
 // The path the product shipped with: bookmarks and the PC helper's printed
 // link still say /job/<id>.
 function LegacyJobRedirect() {
@@ -92,13 +81,7 @@ function App() {
     return () => { cancelled = true }
   }, [auth])
 
-  // The URL decides the mode; storage only remembers it for next time.
-  const mode = modeFromPath(location.pathname) || readMode()
   const drawer = useNavDrawer(location.pathname)
-  useEffect(() => {
-    const current = modeFromPath(location.pathname)
-    if (current) rememberMode(current)
-  }, [location.pathname])
 
   // Ask the server again rather than assume: one with no API_TOKEN answers
   // "in", so signing out there never reaches the Login screen (DEC-173).
@@ -126,8 +109,7 @@ function App() {
       >
         <div className="sidebar-brand">
           <h1><Clapperboard className="sidebar-brand-icon" size={18} aria-hidden="true" />rzdhop AI</h1>
-          <p>clips &amp; AI stories, on free APIs</p>
-          <ModeSwitch />
+          <p>AI clips, on free APIs</p>
           <button
             type="button"
             className="sidebar-close ui-icon-btn ui-icon-btn-ghost ui-icon-btn-md"
@@ -138,23 +120,14 @@ function App() {
           </button>
         </div>
         <nav className="sidebar-nav" aria-label="Main">
-          {mode === 'story' ? (
-            <NavLink to="/story" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <span className="icon"><BookOpen size={18} aria-hidden="true" /></span>
-              Stories
-            </NavLink>
-          ) : (
-            <>
-              <NavLink to="/clips" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                <span className="icon"><LayoutDashboard size={18} aria-hidden="true" /></span>
-                Dashboard
-              </NavLink>
-              <NavLink to="/clips/new" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                <span className="icon"><Plus size={18} aria-hidden="true" /></span>
-                New Job
-              </NavLink>
-            </>
-          )}
+          <NavLink to="/clips" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <span className="icon"><LayoutDashboard size={18} aria-hidden="true" /></span>
+            Dashboard
+          </NavLink>
+          <NavLink to="/clips/new" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <span className="icon"><Plus size={18} aria-hidden="true" /></span>
+            New Job
+          </NavLink>
           <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             <span className="icon"><SettingsIcon size={18} aria-hidden="true" /></span>
             Settings
@@ -179,7 +152,7 @@ function App() {
 
       {/* Main Content */}
       <main className="main-content" id="main-content" tabIndex={-1}>
-        {/* The sidebar is hidden under 768 px; the mode switch stays here and the menu opens it as a drawer. */}
+        {/* The sidebar is hidden under 768 px; the menu opens it as a drawer. */}
         <header className="mobile-topbar">
           <button
             type="button"
@@ -193,26 +166,17 @@ function App() {
             <MenuIcon size={20} aria-hidden="true" />
           </button>
           <span className="topbar-brand"><Clapperboard className="sidebar-brand-icon" size={16} aria-hidden="true" />rzdhop AI</span>
-          <ModeSwitch compact />
         </header>
         <Routes>
-          <Route path="/" element={<ModeRedirect />} />
+          <Route path="/" element={<Navigate to="/clips" replace />} />
           <Route path="/clips" element={<Dashboard />} />
           <Route path="/clips/new" element={<NewJob />} />
           <Route path="/clips/job/:jobId" element={<JobDetail />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="/story" element={<StoriesList />} />
-          <Route path="/story/new" element={<NewStoryWizard />} />
-          {/* The story workspace: /story/:storyId opens the step to do next (DEC-255). */}
-          <Route path="/story/:storyId/:step?" element={<StoryWorkspace />} />
-          <Route path="/story/:storyId/episodes/:ep" element={<EpisodeStudio />} />
-          {/* Plan 25 stage 3 (DEC-301): the episode's handoff -- prompts, modes and uploads, shot by shot. */}
-          <Route path="/story/:storyId/episodes/:ep/handoff" element={<HandoffPage />} />
-          <Route path="/story/*" element={<Navigate to="/story" replace />} />
           {/* The paths the product shipped with keep working through a redirect. */}
           <Route path="/new" element={<Navigate to="/clips/new" replace />} />
           <Route path="/job/:jobId" element={<LegacyJobRedirect />} />
-          <Route path="*" element={<ModeRedirect />} />
+          <Route path="*" element={<Navigate to="/clips" replace />} />
         </Routes>
       </main>
     </div>

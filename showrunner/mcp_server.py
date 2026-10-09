@@ -13,7 +13,7 @@ Settings (environment, else the repo's ``.env``): ``SHOWRUNNER_MCP_HOST`` (127.0
 (8787), ``SHOWRUNNER_MCP_PUBLIC_URL`` (the Funnel URL, no ``/mcp``), ``MCP_TOKEN`` (the secret of both doors),
 ``SHOWRUNNER_STORIES_DIR`` (``stories/``),
 the endpoints ``RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID`` + ``RUNPOD_SHOWRUNNER_VIDEO_KEY`` and
-``RUNPOD_IMAGE_ENDPOINT_ID`` + ``RUNPOD_IMAGE_API_KEY``. The live app's ``RUNPOD_COMFY_ENDPOINT_ID`` is never read.
+``RUNPOD_IMAGE_ENDPOINT_ID`` + ``RUNPOD_IMAGE_API_KEY``. The old app endpoint ``RUNPOD_COMFY_ENDPOINT_ID`` is read only to be refused.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class Settings:
     state_dir: str = os.path.join(REPO_ROOT, "outputs")
     endpoints: dict = field(default_factory=dict)   # kind -> endpoint id ("video", "images")
     keys: dict = field(default_factory=dict)        # kind -> RunPod key
-    forbidden: set = field(default_factory=set)     # endpoint ids never used: the live app's video endpoint
+    forbidden: set = field(default_factory=set)     # endpoint ids never used: the old app's video endpoint
 
 
 def load_settings(env: dict | None = None) -> Settings:
@@ -126,7 +126,7 @@ class Backend:
         if not eid:
             raise ToolError(f"no {kind} endpoint configured (RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID / RUNPOD_IMAGE_ENDPOINT_ID)")
         if eid in self.settings.forbidden:
-            raise ToolError(f"endpoint {eid} is the live app's video endpoint (RUNPOD_COMFY_ENDPOINT_ID): never used here")
+            raise ToolError(f"endpoint {eid} is the old app's video endpoint (RUNPOD_COMFY_ENDPOINT_ID): never used here")
         return self._endpoint_factory(kind, eid, self.settings.keys.get(kind))
 
     def rate(self, kind: str) -> float:

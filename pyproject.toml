@@ -1,11 +1,10 @@
 [project]
 name = "rzdhop-ai"
 version = "3.0.0"
-description = "Clips from long videos and serialized AI Story episodes, on free hosted AI endpoints"
+description = "Clips from long videos on free hosted AI endpoints, and the showrunner MCP server for AI stories"
 readme = "README.md"
 # Bounded above: the render stack (torch, mediapipe, numpy<2) has no wheels past
-# 3.12, and uv resolves the whole range at once -- an open bound made it try 3.14,
-# where chatterbox-tts wants numpy>=2 and the resolution has no solution.
+# 3.12, and uv resolves the whole range at once.
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "yt-dlp[default]",  # asset fetching only: studio/effects.py, studio/transitions.py, youtube_tracker
@@ -14,7 +13,6 @@ dependencies = [
     "google-genai",
     "openai>=2.24.0,<3",  # OpenAI-compatible client for every provider in clipping/providers/
     "anthropic>=1.11.0,<2",  # Claude on the Anthropic API: clipping/providers/anthropic_llm.py
-    "tzdata==2026.5",  # the IANA zone files zoneinfo reads when the OS has none: BUDGET_TIMEZONE (clipping/providers/budget.py)
     "numpy<2.0.0",
     "mediapipe",
     "opencv-python",
@@ -49,37 +47,21 @@ clipping = "main:main"
 dev = ["pytest>=8"]
 # The showrunner MCP server (showrunner/mcp_server.py): `pip install .[mcp]`, then `python -m showrunner.mcp_server`.
 mcp = ["fastmcp>=4,<5", "python-dotenv"]
-# Local text-to-speech engines for the AI Story mode (spec 8.3): opt-in, probed
-# at run time, never imported at startup. Versions read from PyPI on 2026-09-25.
-local-tts = [
-    "piper-tts>=1.8.0,<2",
-    "kokoro>=0.9.4,<1",
-    "chatterbox-tts>=0.1.7,<1",
-]
 
 # What `pip install .` ships. Setuptools' automatic discovery refuses a flat
 # layout with this many top-level folders (assets, outputs, wiki, ...), so the
 # packages are named: the app, the web backend, the uploaders, the MCP server,
-# and the `main` module the scripts point at. The JSON templates the app reads
-# at run time ride along; an editable install (`-e`) reads them from the tree.
+# and the `main` module the scripts point at.
 [tool.setuptools]
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 include = ["clipping*", "web*", "showrunner*", "youtube_uploader*", "youtube_tracker*", "facebook_uploader*"]
 
-[tool.setuptools.package-data]
-clipping = ["aistory/templates/*.json", "aistory/templates/**/*.json"]
-
 # uv resolves for every platform the project could run on; the render stack is
 # only ever installed on Linux and Windows, so macOS splits are not resolved.
 [tool.uv]
 environments = ["sys_platform == 'linux'", "sys_platform == 'win32'"]
-# uv locks every extra at once; these two cannot share an environment (chatterbox-tts
-# pins starlette<1 through gradio, fastmcp 4 needs starlette>=1). A story told
-# from the chat speaks through edge/hosted voices or the local engines of the
-# backend's own environment; the MCP's environment does without [local-tts].
-conflicts = [[{ extra = "mcp" }, { extra = "local-tts" }]]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

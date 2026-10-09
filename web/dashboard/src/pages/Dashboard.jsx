@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchJobs, fetchHealth, fetchStories } from '../api'
+import { fetchJobs, fetchHealth } from '../api'
 import { elapsedSince, formatDuration, useSecondsTicker } from '../time'
 
-// Every value of web/api/models.py JobStatus. `needs_upload` predates AI
-// Story (a source URL the server could not fetch); `running` and
-// `awaiting_approval` are new with it (a story step at work, and one waiting
-// on the user) -- a badge or a job list with no label for one of these would
-// just print the raw enum value.
+// Every value of web/api/models.py JobStatus. `needs_upload` is a source URL
+// the server could not fetch -- a badge or a job list with no label for one of
+// these would just print the raw enum value.
 const STATUS_LABELS = {
   queued: 'Queued',
   downloading: 'Downloading',
@@ -15,10 +13,6 @@ const STATUS_LABELS = {
   transcribing: 'Transcribing',
   analyzing: 'Analyzing',
   rendering: 'Rendering',
-  running: 'Running',
-  awaiting_approval: 'Awaiting approval',
-  // Plan 22 stage 5: a story step that waits for the user's own clips.
-  awaiting_uploads: 'Waiting for your clips',
   completed: 'Completed',
   failed: 'Failed',
   cancelled: 'Cancelled',
@@ -33,12 +27,7 @@ function formatDate(dateStr) {
   })
 }
 
-const RUNNING = ['queued', 'downloading', 'transcribing', 'analyzing', 'rendering', 'running']
-
-// A story-step job is never a clip card (its own story page, stage 11, owns
-// it); it earns a line above the grid only while it is still something the
-// user would want to know about here -- queued, at work, or waiting on them.
-const STORY_STEP_ACTIVE = ['queued', 'running', 'awaiting_approval', 'awaiting_uploads']
+const RUNNING = ['queued', 'downloading', 'transcribing', 'analyzing', 'rendering']
 
 /**
  * The list view's answer to "is anything wrong with that one?".
@@ -70,10 +59,6 @@ function Dashboard() {
   const [jobs, setJobs] = useState([])
   const [health, setHealth] = useState(null)
   const [loading, setLoading] = useState(true)
-  // story_id -> title, for the "AI Story · ..." lines below. Fetched once
-  // rather than on the 5s job poll: a title changing mid-session is not
-  // worth a request that often, and the line falls back to the id without it.
-  const [storyTitles, setStoryTitles] = useState({})
 
   const loadData = async () => {
     try {
@@ -90,37 +75,7 @@ function Dashboard() {
     }
   }
 
-  useEffect(() => {
-    let cancelled = false
-    fetchStories()
-      .then(data => {
-        if (cancelled) return
-        const byId = {}
-        for (const story of data.stories || []) byId[story.story_id] = story.title
-        setStoryTitles(byId)
-      })
-      .catch(err => console.error('Failed to load story titles:', err))
-    return () => { cancelled = true }
-  }, [])
-
-  // GET /api/jobs now answers story-step jobs too (kind "story_step"); the
-  // clip grid, its stats cards and its summaries stay about clip jobs only --
-  // a story step gets its own quiet line above the grid instead.
-  const clipJobs = jobs.filter(job => job.kind !== 'story_step')
-  const storyStepJobs = jobs.filter(
-    job => job.kind === 'story_step' && STORY_STEP_ACTIVE.includes(job.status)
-  )
-  // One line per STORY, not per job: the API refuses a second step of the
-  // same story while one is already in flight, so there is normally exactly
-  // one to show per story anyway; this just guards the general case.
-  const seenStories = new Set()
-  const storyLines = storyStepJobs.filter(job => {
-    if (seenStories.has(job.story_id)) return false
-    seenStories.add(job.story_id)
-    return true
-  })
-
-  useSecondsTicker(clipJobs.some(job => RUNNING.includes(job.status)))
+  useSecondsTicker(jobs.some(job => RUNNING.includes(job.status)))
 
   useEffect(() => {
     loadData()
@@ -128,9 +83,9 @@ function Dashboard() {
     return () => clearInterval(interval)
   }, [])
 
-  const totalCompleted = clipJobs.filter(j => j.status === 'completed').length
-  const totalClips = clipJobs.reduce((acc, j) => acc + (j.clips?.length || 0), 0)
-  const running = clipJobs.filter(j => !['completed', 'failed', 'cancelled'].includes(j.status)).length
+  const totalCompleted = jobs.filter(j => j.status === 'completed').length
+  const totalClips = jobs.reduce((acc, j) => acc + (j.clips?.length || 0), 0)
+  const running = jobs.filter(j => !['completed', 'failed', 'cancelled'].includes(j.status)).length
 
   return (
     <div className="fade-in">
@@ -148,7 +103,7 @@ function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '12px', marginBottom: '24px' }}>
         <div className="card">
           <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>Total Jobs</div>
-          <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px', background: 'linear-gradient(135deg, var(--accent), #c4b5fd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{clipJobs.length}</div>
+          <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px', background: 'linear-gradient(135deg, var(--accent), #c4b5fd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{jobs.length}</div>
         </div>
         <div className="card">
           <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>Completed</div>
@@ -171,32 +126,13 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* AI Story step jobs: never a clip card, just a quiet pointer back to
-          their story (stage 11 gives that page its own activity view). */}
-      {storyLines.length > 0 && (
-        <div className="story-step-lines">
-          {storyLines.map(job => (
-            <Link
-              key={job.story_id}
-              to={`/story/${job.story_id}`}
-              className="story-step-line"
-            >
-              <span className="story-step-line-title">
-                AI Story · {storyTitles[job.story_id] || job.story_id}
-              </span>
-              <span>— {job.step}: {STATUS_LABELS[job.status] || job.status}</span>
-            </Link>
-          ))}
-        </div>
-      )}
-
       {/* Job List */}
       {loading ? (
         <div className="empty-state">
           <div className="spinner"></div>
           <p style={{ marginTop: '12px' }}>Loading...</p>
         </div>
-      ) : clipJobs.length === 0 ? (
+      ) : jobs.length === 0 ? (
         <div className="empty-state">
           <div className="icon">🎬</div>
           <h3>No jobs yet</h3>
@@ -205,7 +141,7 @@ function Dashboard() {
         </div>
       ) : (
         <div className="job-grid">
-          {clipJobs.map(job => (
+          {jobs.map(job => (
             <Link to={`/clips/job/${job.id}`} key={job.id} className="job-card">
               <div className="job-info">
                 <h3>

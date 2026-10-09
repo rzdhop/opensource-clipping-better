@@ -191,14 +191,6 @@ RENDER_OUTPUT_HEIGHT = 1080
 
 from clipping.analysis.presets import DEFAULT_PRESET, PRESET_NAMES
 from clipping.providers.registry import DEFAULT_LLM_CHAIN, NVIDIA_DEFAULT_MODEL
-from clipping.providers.budget import (
-    ALLOW_PAID as _BUDGET_ALLOW_PAID_DEFAULT,
-    BUDGET_PROFILE as _BUDGET_PROFILE_DEFAULT,
-    DAILY_CAP_USD as _DAILY_CAP_USD_DEFAULT,
-    PER_EPISODE_CAP_USD as _PER_EPISODE_CAP_USD_DEFAULT,
-    PER_STORY_CAP_USD as _PER_STORY_CAP_USD_DEFAULT,
-    budget_from_env as _budget_from_env,
-)
 
 # AI Provider
 # "chain" walks LLM_CHAIN with the three-pass analyzer (clipping/analysis/) and
@@ -237,16 +229,6 @@ LLM_TIMEOUT = 0  # 0 = use each provider's own default
 ALLOW_SLOW_CHAIN = (
     os.environ.get("ALLOW_SLOW_CHAIN", "").strip().lower() in {"1", "true", "yes"}
 )
-
-# Paid generation (AI Story) is opt-in and capped (DEC-097). The defaults are
-# defined once in clipping/providers/budget.py; these read the environment the
-# same way ALLOW_SLOW_CHAIN does. A garbage amount raises, it is not ignored.
-_BUDGET = _budget_from_env()
-ALLOW_PAID = _BUDGET.allow_paid if _BUDGET.allow_paid else _BUDGET_ALLOW_PAID_DEFAULT
-PER_EPISODE_CAP_USD = _BUDGET.per_episode_cap_usd
-DAILY_CAP_USD = _BUDGET.daily_cap_usd
-PER_STORY_CAP_USD = _BUDGET.per_story_cap_usd
-BUDGET_PROFILE = os.environ.get("BUDGET_PROFILE", _BUDGET_PROFILE_DEFAULT).strip().lower()
 
 # Hosted transcription, same "<provider>/<model>" spelling. Empty uses the
 # default in clipping/providers/stt.py; "none" disables transcription entirely
@@ -291,15 +273,9 @@ def _parse_speakers(val: str) -> str | int:
         raise argparse.ArgumentTypeError(f"'{val}' is not a valid integer or 'auto'")
 
 
-# The clip parser's one line about AI Story, which has a parser of its own
-# (clipping/aistory/cli.py, dispatched by main.py before this one; DEC-114).
-AI_STORY_POINTER = "AI Story has its own commands: python main.py --ai-story --help"
-
-
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="🎬 rzdhop AI — AI Auto-Clipper & Teaser Generator",
-        epilog=AI_STORY_POINTER,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -861,48 +837,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Instruct AI to aggressively trim silence/dead air from clips.",
     )
 
-    # --- Story Clip (assembly): the multi-source recipe of the CLI, not the
-    # dashboard's AI Story mode (DEC-095) ---
+    # --- Story Clip (assembly): the multi-source recipe of the CLI ---
     story_group = p.add_argument_group("Story Clip (assembly)")
-    # --- Budget (AI Story): five-place defaults, see clipping/providers/budget.py ---
-    # (BUDGET_TIMEZONE, the zone of the daily cap's day, is a setting with no flag: budget.TIMEZONE_ENV.)
-    budget_group = p.add_argument_group("Budget (AI Story)")
-    budget_group.add_argument(
-        "--allow-paid",
-        action="store_true",
-        default=False,
-        help="Let AI Story call paid providers, within the caps. Off by default. Also settable as ALLOW_PAID=1.",
-    )
-    budget_group.add_argument(
-        "--per-episode-cap-usd",
-        type=float,
-        default=PER_EPISODE_CAP_USD,
-        help="Most a single episode may spend on paid providers, in USD.",
-    )
-    budget_group.add_argument(
-        "--daily-cap-usd",
-        type=float,
-        default=DAILY_CAP_USD,
-        help="Most all stories together may spend per budget day, in USD. The day runs in BUDGET_TIMEZONE (an IANA name such as Europe/Paris; UTC when unset).",
-    )
-    budget_group.add_argument(
-        "--per-story-cap-usd",
-        type=float,
-        default=PER_STORY_CAP_USD,
-        help="Most one story may spend over its life, in USD.",
-    )
-    budget_group.add_argument(
-        "--budget-profile",
-        choices=("free", "one_dollar", "quality", "native_speech", "native_speech_manual", "own_gpu"),
-        default=None,
-        help="Where paid money goes. Default: free until --allow-paid, one_dollar from then on.",
-    )
-
     story_group.add_argument(
         "--story-mode",
         action="store_true",
         default=False,
-        help="Enable Story Clip (assembly): assemble clips from multiple video sources using a JSON recipe. Not the dashboard's AI Story mode.",
+        help="Enable Story Clip (assembly): assemble clips from multiple video sources using a JSON recipe.",
     )
     story_group.add_argument(
         "--story-recipe",
@@ -1047,13 +988,11 @@ PROVIDER_KEYS = {
     "groq": ("api_key_groq", "GROQ_API_KEY"),
     "openrouter": ("api_key_openrouter", "OPENROUTER_API_KEY"),
     "mistral": ("api_key_mistral", "MISTRAL_API_KEY"),
-    # The premium LLM chain's writer (plan 22 stage 1): a separate, billing
-    # -enabled Google project, never GOOGLE_API_KEY (RC-V4's shape, now also
-    # for the LLM chain: "gemini" never reads this, "gemini-paid" never
-    # reads GOOGLE_API_KEY).
+    # A separate, billing-enabled Google project, never GOOGLE_API_KEY:
+    # "gemini" never reads this, "gemini-paid" never reads GOOGLE_API_KEY.
     "gemini-paid": ("api_key_gemini_paid", "GEMINI_PAID_API_KEY"),
-    # Claude on the Anthropic API (plan 23 stage D1): billed per request,
-    # read by the "anthropic" provider and by nothing else (RC-W4).
+    # Claude on the Anthropic API: billed per request, read by the
+    # "anthropic" provider and by nothing else.
     "anthropic": ("api_key_anthropic", "ANTHROPIC_API_KEY"),
     "custom": ("api_key_custom", "LLM_CUSTOM_API_KEY"),
     # The legacy single-request path's own custom endpoint, kept alongside the
@@ -1640,12 +1579,6 @@ def build_config(argv: list[str] | None = None) -> SimpleNamespace:
         llm_timeout=args.llm_timeout,
         preflight=not args.no_preflight,
         allow_slow_chain=args.allow_slow_chain or ALLOW_SLOW_CHAIN,
-        # Budget (AI Story), five-place defaults (DEC-097)
-        allow_paid=args.allow_paid or ALLOW_PAID,
-        per_episode_cap_usd=args.per_episode_cap_usd,
-        daily_cap_usd=args.daily_cap_usd,
-        per_story_cap_usd=args.per_story_cap_usd,
-        budget_profile=args.budget_profile or BUDGET_PROFILE,
         stt_chain=args.stt_chain,
         # Filled in by a hosted transcription provider that reports what it
         # heard; beats guessing the language from stopwords afterwards.

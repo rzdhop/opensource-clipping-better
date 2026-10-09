@@ -5,7 +5,7 @@ import { MoreHorizontal } from './icons'
 /**
  * An overflow menu: an icon button that opens a small list of actions.
  *
- *   <Menu label="Story actions" items={[
+ *   <Menu label="Job actions" items={[
  *     { label: 'Open', icon: ArrowRight, onSelect: open },
  *     { label: 'Delete…', icon: Trash2, tone: 'danger', onSelect: remove },
  *   ]} />

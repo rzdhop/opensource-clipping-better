@@ -4,16 +4,15 @@ on: [push, pull_request]
 
 jobs:
   test:
-    # Pinned, not -latest: the AI-Story golden render's framemd5 is keyed by
-    # ffmpeg version x machine (DEC-156), and 24.04's apt ffmpeg is 6.1.1.
+    # Pinned, not -latest: the render tests run the apt ffmpeg (6.1.1 on 24.04).
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # ffmpeg is the one system package: tests/test_aistory_render_golden.py
-      # renders a real episode and never skips (DEC-156).
+      # ffmpeg is the one system package: the loudness, cut and transition
+      # tests run it on real media.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: ffmpeg -version | head -1
       # Deliberately minimal otherwise. Every Python test in this suite is

@@ -1,5 +1,13 @@
 # Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
 
+## 2026-10-09 afternoon — one skill, and the old AI Story deleted (DEC-331, DEC-332)
+
+- One skill `rzdhop-story` (SKILL.md + steps/ + PROMPTS.md) replaces the ten. The old AI Story is deleted from the
+  app (code, routes, dashboard pages, providers, tests, old tools, scratch stories, stage 0); the app is Clips only.
+  `stories/faille-d-amour` stays. Tests: Clips suite green except the two root-only checks; showrunner 94 + 1 s.
+  **Rida:** host `git pull`, `sudo systemctl restart showrunner-mcp`, rebuild/restart the web app; upload
+  `rzdhop-story.zip`; delete the `story-director` and `fruit-drama-episode` account skills. Next: stage 4.
+
 ## 2026-10-09 noon — Claude proposes, Rida corrects; production without questions (DEC-330)
 
 - Rida's remarks on the session walk-through: no internal words; propose (approved look and returning cast first),

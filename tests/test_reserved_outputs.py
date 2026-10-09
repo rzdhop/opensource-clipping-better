@@ -2,23 +2,22 @@
 
 ``POST /api/jobs`` takes ``reuse_job_id`` from the client and makes it the job
 id, and the id names the job's output directory: ``outputs/<id>/``. Deleting
-the job removes that directory (``cleanup.remove_job_files``). AI Story keeps
-every story in ``outputs/stories/`` and the Settings chain test its samples in
-``outputs/_chain_test/``, so a job called ``stories`` would render into every
-story workspace and, once deleted, wipe all of them.
+the job removes that directory (``cleanup.remove_job_files``). The retired AI
+Story mode left its stories in ``outputs/stories/`` and its chain-test samples
+in ``outputs/_chain_test/`` (kept on disk, owned by no job), so a job called
+``stories`` would render into them and, once deleted, wipe all of them.
 
 Closed three ways: the cleanup never removes a reserved directory, the route
 refuses a reserved ``reuse_job_id`` before anything is created or queued, and
 ``GET /api/outputs/stories`` is refused so the outputs route cannot enumerate
 story ids (``_chain_test`` stays served -- its samples are signed URLs).
 
-The cleanup and agreement tests are stdlib and run in the pytest-only CI
+The cleanup tests are stdlib and run in the pytest-only CI
 environment; the route tests skip without fastapi.
 """
 
 import os
 import pathlib
-import re
 
 import pytest
 
@@ -39,7 +38,8 @@ def roots(tmp_path):
 # ------------------------------------------------------------ cleanup (CI)
 
 def test_the_reserved_names():
-    assert cleanup.RESERVED_OUTPUT_NAMES == frozenset({"stories", "_chain_test", "stories.json", "jobs.json"})
+    assert cleanup.RESERVED_OUTPUT_NAMES == frozenset({"stories", "_chain_test", "showrunner-mcp", "mcp",
+                                                       "stories.json", "jobs.json"})
 
 
 @pytest.mark.parametrize("name", ["stories", "_chain_test"])
@@ -87,21 +87,6 @@ def test_an_ordinary_job_directory_next_to_them_is_still_removed(roots):
 
     assert report == {"removed": ["outputs/stories2/"], "kept": []}
     assert (outputs / "stories").is_dir() and (outputs / "_chain_test").is_dir()
-
-
-def test_the_reserved_names_agree_with_their_owners():
-    """The story store and the chain test name their own directories; the
-    cleanup cannot import either (stdlib only, and clipping/ never imports
-    web/), so the three are held together here."""
-    from clipping.aistory import store as story_store
-
-    assert story_store.STORIES_DIRNAME == cleanup.STORIES_DIRNAME
-    assert cleanup.STORIES_DIRNAME in cleanup.RESERVED_OUTPUT_NAMES
-
-    settings_src = (ROOT / "web" / "api" / "routes" / "settings.py").read_text(encoding="utf-8")
-    found = re.search(r'^CHAIN_TEST_DIRNAME = "([^"]+)"$', settings_src, re.MULTILINE)
-    assert found, "routes/settings.py no longer defines CHAIN_TEST_DIRNAME"
-    assert found.group(1) in cleanup.RESERVED_OUTPUT_NAMES
 
 
 # ------------------------------------------------------------ POST /api/jobs

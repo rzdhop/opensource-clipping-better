@@ -26,7 +26,7 @@
 ## Two modes
 
 - **Clips** (`/clips`) — the long-form video → vertical highlight clips pipeline this README is mostly about: karaoke subtitles, B-roll, BGM, hooks, auto-metadata.
-- **AI Story** (`/story`) — a gated, step-by-step studio that turns a concept into a persistent story workspace (world, cast, a locked visual style, a season arc) and produces serialized ~60-second AI episodes with consistent characters. Steps 1–12 are available: episode 1 goes from concept to a rendered vertical episode with its own metadata pack; episode 2 onward is a later phase. See [docs/AI_STORY.md](docs/AI_STORY.md).
+- **AI stories** — written and directed by Claude in a claude.ai chat, made through the `showrunner` MCP connector (pictures, clips, voices and the cut on a RunPod GPU). See [showrunner/README.md](showrunner/README.md).
 
 ## 🔱 About this fork
 
@@ -116,7 +116,7 @@ job.
 | **AI Voice-Over** | Converts auto-clips into original commentary/reaction videos using **Gemini** (script generation) and **edge-tts** (free text-to-speech), complete with audio ducking, text override, and ambient edge glow |
 
 > 🎬 **Story Clip (assembly)** (`--story-mode`)  
-> Need to assemble a narrative from multiple specific video sources (like a brand campaign)? The multi-source Story Clip (assembly) recipe does that from the CLI. It is not the dashboard's **AI Story** mode, which writes and renders serialized AI episodes.  
+> Need to assemble a narrative from multiple specific video sources (like a brand campaign)? The multi-source Story Clip (assembly) recipe does that from the CLI.  
 > 👉 **[Read the full Story Clip Documentation](docs/STORY_CLIP.md)**
 
 ## 📋 Prerequisites
@@ -262,38 +262,14 @@ job is refused with `429` until one starts.
 
 ---
 
-## 🎭 MVP: AI Story
+## 🎭 AI stories (showrunner)
 
-Next to Clips, **AI Story** (`/story`) is its own mode: pick or
-invent a concept, lock a visual style, cast characters with reference sheets
-and voices, plan places, props and a season arc, then write, storyboard,
-image, voice and render one episode — end to end, from a blank story to a
-finished vertical `.mp4` with a TikTok/Shorts/Reels metadata pack ready to
-paste in. **Fast track**, on the episode page, runs the whole thing — script
-through metadata — as a single job.
-
-It runs free by default on hosted free tiers (Gemini or Groq for text,
-Pollinations or Cloudflare for images, Gemini or a local engine for voices). Paid
-generation is off until you turn it on, and even then it stays inside
-per-episode, per-day and per-story spending caps.
-
-Episode 1 is what this MVP delivers; episode 2 and later wait on a memory
-step still to come. Output lands under
-`outputs/stories/<id>/episodes/ep01/` — see
-[docs/AI_STORY.md](docs/AI_STORY.md) for the full walkthrough, the CLI and
-what's kept on disk. Added since, each described there:
-
-- The daily spending cap names three numbers when it refuses a job, offers
-  "allow more for today only", and counts its day in your time zone
-  (`BUDGET_TIMEZONE`).
-- Optional paid providers, never used unless you set the key and allow paid
-  spending: Claude as the premium writer (`ANTHROPIC_API_KEY`), ElevenLabs
-  voices (`ELEVENLABS_API_KEY`), Gemini as a second image link, and
-  `fal/ltx-2.5-fast` as the last video link.
-- Per-story choices: a subtitle look, ten universes with a Viral 3D style, a
-  one-image front-and-back character sheet, and action-style clip prompts.
-- A story's frame (9:16, 16:9 or 1:1), a character's own voice cloned locally by
-  chatterbox (with consent), and opt-in free stock cutaways for establishing shots.
+AI stories are no longer made in the dashboard. Claude writes and directs them
+in a claude.ai chat, with the **rzdhop-story** skill, and the `showrunner` MCP
+connector makes the pictures (FLUX.2 klein), the speaking clips (LTX-2.5) and
+the voices (Chatterbox) on RunPod, checks each clip and cuts the episode. A
+story lives in `stories/<slug>/`. Setup and tools:
+[showrunner/README.md](showrunner/README.md) and [docs/MCP.md](docs/MCP.md).
 
 ---
 

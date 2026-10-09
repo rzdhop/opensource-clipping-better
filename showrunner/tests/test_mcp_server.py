@@ -276,7 +276,7 @@ def test_the_live_video_endpoint_is_refused_even_if_configured(tmp_path):
     slug = payload(call(server, "story_create", title="T", language="en"))["slug"]
     got = call(server, "comfy_submit", story=slug, template="ltx25_i2v_speech", values={"prompt": "p", "seed": 1},
                episode=1, shot="s01")
-    assert got.is_error and "live app" in got.content[0].text
+    assert got.is_error and "old app" in got.content[0].text
     assert not [e for e in backend.log if e[0] == "run"]
 
 

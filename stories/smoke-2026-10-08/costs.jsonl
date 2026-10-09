@@ -1,3 +1,0 @@
-{"at": "2026-10-08T22:44:16", "kind": "images", "template": "t2i_flux2_klein", "job": "2f4978e5-7324-487f-95bb-695a1a2e95d6-e1", "billed_s": 59.766, "delay_s": 199.047, "usd": 0.0262, "episode": null, "note": "ep01/keyframes/candidates/s01_c1 COMPLETED"}
-{"at": "2026-10-08T22:49:13", "kind": "video", "template": "ltx25_i2v_speech", "job": "64faee2c-1620-452f-9a93-812671285e21-e1", "billed_s": 242.998, "delay_s": 51.495, "usd": 0.1288, "episode": 1, "note": "s01 COMPLETED"}
-{"at": "2026-10-08T22:50:09", "kind": "video", "template": "vc_chatterbox", "job": "87fb8dd2-0984-4acf-a97f-1648c72a9f13-e2", "billed_s": 14.611, "delay_s": 0.1, "usd": 0.0077, "episode": 1, "note": "ep01/vc/s01_v1_l0_paloma_vc COMPLETED"}

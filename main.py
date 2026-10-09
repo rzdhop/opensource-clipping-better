@@ -10,7 +10,6 @@ Usage:
     python main.py --video talk.mp4 --transcript talk.vtt   # skips Whisper
     python main.py --video talk.mp4 --transcript talk.vtt --clips 5 --ratio 16:9
     python main.py --help                                   # all options
-    python main.py --ai-story --help                        # AI Story (its own commands)
 """
 
 import sys
@@ -19,13 +18,6 @@ from clipping.config import build_config
 
 
 def main():
-    # AI Story has a parser of its own (DEC-114), taken before the clip parser
-    # sees argv or a config is built; the clip CLI is untouched by it.
-    if sys.argv[1:2] == ["--ai-story"]:
-        from clipping.aistory import cli
-
-        sys.exit(cli.main(sys.argv[2:]))
-
     cfg = build_config(sys.argv[1:])
 
     from clipping import __version__ as version

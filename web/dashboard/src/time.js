@@ -42,8 +42,8 @@ export function formatClock(value) {
  * clock instead, a clip job that took 54 minutes read "34h 50m total" a day
  * and a half later. Where it stopped is the earlier of `updated_at` and the
  * last feed line: every finishing write lands both in the same instant, but
- * approving or superseding a story step moves `updated_at` again, hours later,
- * and a record from before the feed has no lines. Neither known means no total
+ * a later write can move `updated_at` again, hours later, and a record from
+ * before the feed has no lines. Neither known means no total
  * rather than a wrong one.
  */
 export function jobClocks(job, events, running, now = Date.now()) {

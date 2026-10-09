@@ -184,7 +184,7 @@ Complete reference for all command-line arguments. Run `python main.py --help` f
 
 | Argument | Default | Description |
 |---|---|---|
-| `--story-mode` | `False` | Enable Story Clip (assembly), the multi-source recipe (not the dashboard's AI Story mode) |
+| `--story-mode` | `False` | Enable Story Clip (assembly), the multi-source recipe |
 | `--story-recipe` | `story_recipe.json` | Path to story recipe JSON file |
 | `--sources-json` | `sources.json` | Path to sources registry JSON |
 | `--story-output-dir` | `outputs/story_clips` | Output directory for story clips |

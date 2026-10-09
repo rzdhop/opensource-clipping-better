@@ -26,7 +26,7 @@ Settings, from the environment or `.env` (never committed):
 | `RUNPOD_IMAGE_ENDPOINT_ID` + `RUNPOD_IMAGE_API_KEY` | the images endpoint (FLUX.2 klein) |
 | `SHOWRUNNER_STORIES_DIR` | the stories (`stories/`) |
 
-The live app's `RUNPOD_COMFY_ENDPOINT_ID` is read only to be refused. The OAuth clients and tokens are kept in
+The old app endpoint `RUNPOD_COMFY_ENDPOINT_ID` is read only to be refused. The OAuth clients and tokens are kept in
 `outputs/showrunner-mcp/oauth.json` (mode 600), so a restart does not log the connector out.
 
 ## Expose it (Tailscale Funnel) and connect

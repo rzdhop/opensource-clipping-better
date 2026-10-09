@@ -21,9 +21,8 @@ from showrunner.store import Story, StoreError
 JOURNAL = "jobs.jsonl"
 MEDIA_FIRST = (".mp4", ".flac", ".wav", ".mp3", ".png", ".jpg", ".webp")
 # A rough price before a job runs (the ledger has the real one): GPU seconds per job, warm worker.
-WARM_SECONDS = {"i2v_speech": 8.0, "a2v_speech": 8.0, "idlora_speech": 25.0, "tts_line": 5.0, "voice_conversion": 1.0,
-                "t2i": 5.0, "edit": 8.0}   # i2v: ≈ 40 s for 5 s of clip, ≈ 80 s for 10 s -> 8 GPU-s per clip second
-PER_CLIP_SECOND = {"i2v_speech", "a2v_speech", "idlora_speech"}
+WARM_SECONDS = {"i2v_speech": 8.0, "voice_conversion": 1.0, "t2i": 5.0, "edit": 8.0}   # i2v: ≈ 40 s for 5 s of clip, ≈ 80 s for 10 s -> 8 GPU-s per clip second
+PER_CLIP_SECOND = {"i2v_speech"}
 COLD_START_S = 300.0
 
 

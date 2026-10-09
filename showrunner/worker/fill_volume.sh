@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# showrunner — fill the RunPod network volume with the weights of the stage-0 workflows.
+# showrunner — fill the RunPod network volume with the weights of the showrunner workflows.
 #
 # Run this ONCE from a cheap pod (any GPU or CPU pod) that has the network volume mounted at
 # /runpod-volume, in the same datacenter as the serverless endpoint:
 #
 #   export HF_TOKEN=hf_...        # a Read token of an account that accepted the license on
-#                                 # https://huggingface.co/Lightricks/LTX-2.5 (the only gated repo here;
-#                                 # LTX-2.3, LTX-2.3-fp8 and the Comfy-Org files download without one)
+#                                 # https://huggingface.co/Lightricks/LTX-2.5 (the only gated repo here)
 #   VOLUME_ROOT=/workspace        # on a pod the network volume is mounted at /workspace
 #   bash fill_volume.sh           # idempotent: skips files already present with the right size
 #
-# Sizes (approx.): LTX-2.5 int8 stack 57 GB, LTX-2.3 ID-LoRA stack 40 GB (Chatterbox 3 GB: fetch_weights.sh).
+# Sizes (approx.): LTX-2.5 int8 stack 57 GB (Chatterbox 3 GB: fetch_weights.sh).
 # Volume: 150 GB minimum (leave room for the Flux 2 Klein / Qwen-Image-Edit stack of the
 # images endpoint if it shares the volume).
 
@@ -47,19 +46,7 @@ fetch "$LTX25/vae/ltx-2.5-audio-vae-bf16.safetensors" "$MODELS/vae/ltx-2.5-audio
 fetch "$LTX25/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors" \
       "$MODELS/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
 
-# ---------------------------------------------------------------- LTX-2.3 ID-LoRA (path c)
-fetch "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-dev-fp8.safetensors" \
-      "$MODELS/checkpoints/ltx-2.3-22b-dev-fp8.safetensors"
-fetch "https://huggingface.co/Comfy-Org/ltx-2.3/resolve/main/split_files/loras/ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors" \
-      "$MODELS/loras/ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors"
-fetch "https://huggingface.co/Comfy-Org/ltx-2.3/resolve/main/split_files/loras/ltx-2.3-id-lora-talkvid-3k.safetensors" \
-      "$MODELS/loras/ltx-2.3-id-lora-talkvid-3k.safetensors"
-fetch "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors" \
-      "$MODELS/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors"
-fetch "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors" \
-      "$MODELS/latent_upscale_models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
-
-# ---------------------------------------------------------------- Chatterbox (TTS lines, path b)
+# ---------------------------------------------------------------- Chatterbox (voice conversion)
 # The node reads <ComfyUI>/models/chatterbox/chatterbox_multilingual/, symlinked to the volume by
 # the base image (docker/worker-comfyui-tts). Its weights are fetched by the repo's own script:
 #   sh docker/worker-comfyui-tts/fetch_weights.sh      (destination: $ROOT/models/chatterbox)

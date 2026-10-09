@@ -57,45 +57,12 @@ PERSISTED_KEYS = frozenset({
     "DEFAULT_WHISPER_MODEL",
     "DEFAULT_WHISPER_DEVICE",
     "DEFAULT_AI_PROVIDER",
-    # AI Story's own chain override (phase 7 stage 2b, DEC-224). Not a secret:
-    # a provider/model list, like LLM_CHAIN -- which is deliberately NOT in
-    # this set. LLM_CHAIN has only ever been a per-job or process-env value;
-    # STORY_LLM_CHAIN is the first chain spec a Settings save can persist.
-    "STORY_LLM_CHAIN",
-    # The premium writing chain (plan 22 stage 1, DEC-273): same shape and
-    # the same "not a secret" reasoning as STORY_LLM_CHAIN above.
-    "STORY_LLM_PREMIUM_CHAIN",
     # Not a secret: a switch. Stored as "1" or not at all (DEC-043, DEC-073).
     "ALLOW_SLOW_CHAIN",
-    # Budget (AI Story, DEC-097): a switch stored like ALLOW_SLOW_CHAIN, three
-    # amounts in USD, and the profile name.
-    "ALLOW_PAID",
-    "PER_EPISODE_CAP_USD",
-    "DAILY_CAP_USD",
-    "PER_STORY_CAP_USD",
-    "BUDGET_PROFILE",
-    # The budget day's zone (plan 23 A7): an IANA name, not a secret.
-    "BUDGET_TIMEZONE",
-    # Generation providers (AI Story, spec 8.6): keys, and the two local URLs.
-    "FAL_KEY",
-    "OPENAI_API_KEY",
-    "CLOUDFLARE_API_TOKEN",
-    "CLOUDFLARE_ACCOUNT_ID",
-    "POLLINATIONS_API_KEY",
-    # Veo only: a separate, billing-enabled Google project (RC-V4).
+    # The paid links of the analysis chain: a billing-enabled Google project
+    # (gemini-paid/) and Claude on the Anthropic API (anthropic/).
     "GEMINI_PAID_API_KEY",
-    # Claude on the Anthropic API, the premium writing chain's links (plan 23
-    # stage D1): billed per request.
     "ANTHROPIC_API_KEY",
-    # ElevenLabs voices (plan 23 stage B3): billed per character.
-    "ELEVENLABS_API_KEY",
-    # RunPod Serverless (DEC-310): the key is a secret; the endpoint id and
-    # the optional GPU price are plain values.
-    "RUNPOD_API_KEY",
-    "RUNPOD_COMFY_ENDPOINT_ID",
-    "RUNPOD_GPU_USD_PER_HOUR",
-    "LOCAL_COMFYUI_URL",
-    "LOCAL_OLLAMA_URL",
 })
 
 # Values that are secrets. Listed explicitly rather than pattern-matched on
@@ -111,17 +78,8 @@ SECRET_KEYS = frozenset({
     "PEXELS_API_KEY",
     "PIXABAY_API_KEY",
     "HF_TOKEN",
-    # Generation providers. The Cloudflare account id is not a credential on
-    # its own, but it is half of one and names the account: redacted too.
-    "FAL_KEY",
-    "OPENAI_API_KEY",
-    "CLOUDFLARE_API_TOKEN",
-    "CLOUDFLARE_ACCOUNT_ID",
-    "POLLINATIONS_API_KEY",
     "GEMINI_PAID_API_KEY",
     "ANTHROPIC_API_KEY",
-    "ELEVENLABS_API_KEY",
-    "RUNPOD_API_KEY",
 })
 
 

@@ -192,26 +192,6 @@ PROVIDERS = {
         api="anthropic",
         free_probe="models",
     ),
-    "chat": Provider(
-        # The story MCP server (mcp_server/director.py, DEC-312): the model
-        # driving the chat is the writer. A step run there is given a runner
-        # that hands each prompt to the conversation and takes its reply as
-        # the answer; ``run_chain`` itself never reaches this provider (no
-        # key, so a web or CLI job that names it skips it with a printed
-        # line). Free: nothing is billed for a reply the person's own chat
-        # wrote. The timeout is how long a step may wait for that reply.
-        name="chat",
-        base_url="",
-        env_key="",
-        rpm=None,
-        tpm=None,
-        structured=("json_schema",),
-        default_timeout=3600,
-        notes="The person's own Claude chat, through the MCP server; answers only there.",
-        probe_timeout=1.0,
-        signup_url="",
-        api="chat",
-    ),
     "custom": Provider(
         name="custom",
         base_url="",  # resolved from LLM_CUSTOM_BASE_URL at build time
@@ -543,97 +523,11 @@ DEFAULT_LLM_CHAIN = (
 )
 
 
-# AI Story's own default chain (phase 7 stage 2b), separate from the Clips
-# chain above (DEFAULT_LLM_CHAIN) because the two jobs were measured on
-# different requests and want different links (DEC-224).
-#
-# The 2026-10-01 free bench (story B FR and story A EN; E1/E2/T1; 3 samples;
-# thinking disabled on every NIM model, see llm.py's _NIM_REASONING_FAMILIES):
-#
-#   nvidia/nemotron-3-ultra-550b-a55b   the strongest beat sheets; 11-70s when
-#                                        it answers, but frequent HTTP 500
-#                                        (fails in <1s, so a dead link costs
-#                                        nothing and the chain falls through)
-#   nvidia/nemotron-3-super-120b-a12b   1-23s, ~65% valid (failures are
-#                                        word-cap overruns, not malformed JSON)
-#   openrouter/mistralai/mistral-medium-3.1  paid, placed after the two NIM
-#                                        links so a funded key is only spent
-#                                        when both free NIM links failed
-#   gemini/gemini-3.5-flash-lite        the free floor: today's AI Story
-#                                        default in practice (see GEMINI_
-#                                        DEFAULT_MODEL above), kept last
-#
-# NVIDIA's default NIM model, nemotron-3.5-lightning, timed out at 300s on all
-# three prompts; z-ai/glm-5.3 was too slow (110-300s). Neither is in this
-# chain. Re-pick with tools/bench_llm.py.
-STORY_NVIDIA_ULTRA_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
-STORY_NVIDIA_SUPER_MODEL = "nvidia/nemotron-3-super-120b-a12b"
-STORY_OPENROUTER_MODEL = "mistralai/mistral-medium-3.1"
-
-# DEC-305 (amending DEC-224): the order above is the bench's ranking by answer
-# quality; the order below is the order a call walks, reliability first. The
-# 2026-10-05 run saw nemotron-3-ultra answer HTTP 500/503 on 3 of 3 attempts
-# for eight scenes in a row (about 19 s each). So the free Gemini link leads,
-# the paid mistral-medium (cents; skipped while allow_paid is off) follows, and
-# the two Nvidia links come last.
-DEFAULT_STORY_LLM_CHAIN = (
-    f"gemini/{GEMINI_DEFAULT_MODEL},"
-    f"openrouter/{STORY_OPENROUTER_MODEL},"
-    f"nvidia/{STORY_NVIDIA_ULTRA_MODEL},"
-    f"nvidia/{STORY_NVIDIA_SUPER_MODEL}"
-)
-
-
-# The premium writing chain (plan 22 stage 1, DEC-273): the calls the human
-# singled out as the ones that matter (concepts, the bible, the episode
-# script in every version, the first-watch judge -- prompts.PREMIUM_PROMPT_IDS)
-# are written on the paid Gemini project first, with DEFAULT_STORY_LLM_CHAIN
-# kept as its free tail -- the same chain a non-premium prompt runs on, so a
-# host with no paid key or allow_paid off still writes exactly as it does
-# today (the paid link is skipped like any other, DEC-115).
-#
-# gemini-3.8-flash and gemini-3.1-pro-preview (A-145): confirmed live
-# 2026-10-04 with a free GET /v1beta/models against the human's own
-# GEMINI_PAID_API_KEY, which also listed gemini-3.5-flash,
-# gemini-3.5-flash-lite, gemini-3.8-flash-tts and gemini-3.5-transcribe.
-# gemini-3.1-pro-preview is priced (pricing.LLM_PRICES) and parseable but
-# never a default link: it is the per-story "premium" switch stage 4 wires
-# up, not shipped in this chain.
-STORY_PREMIUM_MODEL = "gemini-3.8-flash"
-
-PREMIUM_STORY_LLM_CHAIN = f"gemini-paid/{STORY_PREMIUM_MODEL}," + DEFAULT_STORY_LLM_CHAIN
-
-# Thinking room (plan 22 stage 1): a reasoning reply on these links needs more
-# than the prompt's own word-limited answer to fit the cap it is sent with
-# the thinking tokens come out of the same max_tokens an OpenAI-compatible
-# request sends, so a reply that reasons at length before answering can be
-# cut off mid-JSON unless the cap leaves it room. Added to the cap
-# ``llm_call.call_json`` sends (and to the meter's estimate) only when the
-# resolved chain actually names one of these links -- a non-premium call
-# never carries this extra room, so its cap (and every pinned budget test)
-# is unchanged. Read with the price rows on 2026-10-04 at
-# ai.google.dev/gemini-api/docs/pricing (A-145/A-146).
-MODEL_OUTPUT_HEADROOM = {
-    ("gemini-paid", STORY_PREMIUM_MODEL): 2048,
-    ("gemini-paid", "gemini-3.1-pro-preview"): 4096,
-}
-
-
-# Claude as a writer (plan 23 stage D1). An Anthropic link may carry its
-# effort as a suffix -- ``anthropic/claude-opus-5-5@xhigh`` -- which outranks
-# the per-prompt effort (``prompts.ANTHROPIC_EFFORT``); without either, the
-# model's own default runs. The suffix is never part of the model id the API
-# is sent, the price row or the headroom lookup (``split_effort``).
+# Claude on the Anthropic API. A link may carry its effort as a suffix --
+# ``anthropic/claude-opus-5-5@xhigh``; the suffix is never part of the model
+# id the API is sent or the price row (``split_effort``).
 ANTHROPIC_EFFORTS = ("low", "medium", "high", "xhigh")
 ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-5-5"
-# Each model's own default effort, read from the claude-api reference on
-# 2026-10-04: Opus 5.5 defaults to medium, Sonnet 5.5 to high. Used only to
-# size the thinking room when neither the link nor the prompt names one.
-ANTHROPIC_DEFAULT_EFFORT = {"claude-opus-5-5": "medium", "claude-sonnet-5-5": "high"}
-# Thinking counts against max_tokens on these models (adaptive thinking is
-# on: Opus 5.5 cannot switch it off), so the cap a call sends gains this
-# room by effort, as MODEL_OUTPUT_HEADROOM does for the paid Gemini writer.
-MODEL_OUTPUT_HEADROOM_BY_EFFORT = {"low": 1024, "medium": 3072, "high": 6144, "xhigh": 12288}
 
 
 def split_effort(link):
@@ -646,27 +540,6 @@ def split_effort(link):
         return model, None
     base, _sep, effort = model.partition("@")
     return base, (effort or None)
-
-
-def anthropic_effort(link, prompt_effort=None):
-    """The effort an Anthropic *link* is sent with: its ``@`` suffix, else
-    *prompt_effort* (``prompts.anthropic_effort``), else None -- the model's
-    own default, sent by omitting ``output_config.effort``."""
-    _model, suffix = split_effort(link)
-    return suffix or prompt_effort or None
-
-
-def output_headroom(link, effort=None) -> int:
-    """The thinking room added to a call's cap for *link*: an Anthropic link's
-    by its effort (:func:`anthropic_effort`, the model's default when none is
-    named, ``high``'s for an unknown model), every other link's
-    ``MODEL_OUTPUT_HEADROOM`` row (0 without one)."""
-    provider = PROVIDERS.get(link.provider)
-    if getattr(provider, "api", "openai") == "anthropic":
-        model, _suffix = split_effort(link)
-        level = anthropic_effort(link, effort) or ANTHROPIC_DEFAULT_EFFORT.get(model, "high")
-        return MODEL_OUTPUT_HEADROOM_BY_EFFORT.get(level, MODEL_OUTPUT_HEADROOM_BY_EFFORT["xhigh"])
-    return MODEL_OUTPUT_HEADROOM.get((link.provider, link.model), 0)
 
 
 def chain_from_env(default: str = DEFAULT_LLM_CHAIN) -> list:

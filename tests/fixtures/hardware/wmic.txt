@@ -1,4 +1,0 @@
-Name                          
-NVIDIA GeForce RTX 3060       
-Intel(R) UHD Graphics 770     
-

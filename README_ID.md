@@ -47,7 +47,7 @@
 | **AI Voice-Over** | Mengubah auto-clip menjadi video reaksi/komentar original menggunakan **Gemini** (pembuat script) dan **edge-tts** (text-to-speech gratis), lengkap dengan audio ducking, penimpaan teks subtitle, dan ambient edge glow |
 
 > 🎬 **Story Clip (assembly)** (`--story-mode`)  
-> Perlu merakit cerita dari potongan adegan spesifik di berbagai sumber video (misalnya untuk *campaign* brand)? Gunakan resep Story Clip (assembly) multi-sumber dari CLI. Ini bukan mode **AI Story** di dashboard, yang menulis dan merender episode AI berseri.  
+> Perlu merakit cerita dari potongan adegan spesifik di berbagai sumber video (misalnya untuk *campaign* brand)? Gunakan resep Story Clip (assembly) multi-sumber dari CLI.  
 > 👉 **[Baca dokumentasi lengkap Story Clip di sini](docs/STORY_CLIP.md)**
 
 ## 📋 Prasyarat

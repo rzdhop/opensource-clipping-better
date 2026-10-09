@@ -1,6 +1,9 @@
-## CURRENT STATE — plan 36 STAGE 3 DONE (toolbox gaps closed, 8 story skills, dry run passed) — 2026-10-09 night, cloud session
+## CURRENT STATE — plan 36: one skill, old AI Story deleted (DEC-331, DEC-332) — 2026-10-09 afternoon, cloud session
 
-- **Current header (2026-10-09 morning):** DEC-328 — Claude writes every prompt; the prompt tools and the strict
+- **Current header (2026-10-09 afternoon):** one skill `rzdhop-story` (DEC-331); the old AI Story deleted from the
+  app, which is Clips only (DEC-332). Waiting on Rida: host pull + restart showrunner-mcp + rebuild the web app,
+  upload `rzdhop-story.zip`, delete the two old account skills. Next: stage 4 (`docs/plans/36-NEXT_SESSION_PROMPT.md`).
+- **Earlier header (2026-10-09 morning):** DEC-328 — Claude writes every prompt; the prompt tools and the strict
   `comfy_submit` (DEC-326) removed, 21 tools, the skills carry the prompt guide; dry run redone. Waiting on Rida:
   the scope of "delete everything from before the rebuild", the first cast batch's go, then host pull + restart.
 - **Earlier header (2026-10-09 night):** stage 3 done and pushed (see `docs/plans/36-CHECKPOINT.md` top): prompt tools +

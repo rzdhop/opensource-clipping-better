@@ -17,8 +17,8 @@ record cannot reach anything else:
   Without a usable timestamp the upload is kept -- a leaked file is recoverable,
   a deleted one is not.
 - Some names under outputs/ belong to no job (``RESERVED_OUTPUT_NAMES``):
-  ``stories/`` holds every AI Story workspace and ``_chain_test/`` the Settings
-  chain-test samples. A job named after one -- ``reuse_job_id`` again -- would
+  ``stories/`` and ``_chain_test/`` (data of the retired AI Story mode, kept on
+  disk), ``showrunner-mcp/`` and ``mcp/`` (the MCP servers' state). A job named after one -- ``reuse_job_id`` again -- would
   otherwise remove all of it when deleted, so those directories are never
   removed here, and ``POST /api/jobs`` refuses such an id up front.
 
@@ -35,13 +35,13 @@ from datetime import datetime
 # before the job that uses it is created.
 _MTIME_SLACK_SECONDS = 2.0
 
-# outputs/ entries that are not a job's. The story store's own name for the
-# first is clipping/aistory/store.py STORIES_DIRNAME; the second is
-# routes/settings.py CHAIN_TEST_DIRNAME. Tests keep the three in agreement.
+# outputs/ entries that are not a job's: the retired AI Story mode's data (kept on
+# disk) and the MCP servers' state (showrunner-mcp/: the connector's OAuth file).
 STORIES_DIRNAME = "stories"
 # The two index files are reserved too: a job directory named after one would
 # stop the file from being written.
-RESERVED_OUTPUT_NAMES = frozenset({STORIES_DIRNAME, "_chain_test", "stories.json", "jobs.json"})
+RESERVED_OUTPUT_NAMES = frozenset({STORIES_DIRNAME, "_chain_test", "showrunner-mcp", "mcp", "stories.json",
+                                   "jobs.json"})
 
 
 def is_reserved(name, reserved=RESERVED_OUTPUT_NAMES) -> bool:

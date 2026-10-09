@@ -60,7 +60,7 @@ picture is made again; the voice stays).
 
 ## Template
 
-`02-cast/<id>/sheet.md` (skeleton `showrunner/prompts/character_sheet.md`; `<id>` lowercase, `_` between words):
+`02-cast/<id>/sheet.md` (`<id>` lowercase, `_` between words):
 
 ```
 # <Name>

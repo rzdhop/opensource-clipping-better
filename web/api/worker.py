@@ -15,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from clipping.cancel import Cancelled, CancelToken
-from clipping.providers import budget as budget_mod
 
 from .config_adapter import build_config_from_payload
 from . import children
@@ -158,10 +157,6 @@ def set_settings_env(env: dict[str, str], *, persist: bool = True) -> None:
             _settings_env.pop(name, None)
         else:
             _settings_env[name] = value
-    # The budget day's zone is a Settings value (plan 23 A7): the budget
-    # module reads it through this process's Settings, not the process env.
-    budget_mod.set_settings_reader(get_settings_env)
-
     if persist:
         # Write through, so the value is on disk before the response says it is set.
         settings_store.save(_settings_env)
@@ -170,11 +165,6 @@ def set_settings_env(env: dict[str, str], *, persist: bool = True) -> None:
 def get_settings_env() -> dict[str, str]:
     """Get current settings environment."""
     return dict(_settings_env)
-
-
-# Registered at import too, so a process that never loads the stored Settings
-# still has the budget read them (empty: the process environment decides).
-budget_mod.set_settings_reader(get_settings_env)
 
 
 def load_settings_env() -> int:
@@ -191,19 +181,11 @@ def load_settings_env() -> int:
 
 def _run_pipeline_sync(job_id: str, payload: dict, token: CancelToken | None = None) -> None:
     """Run the pipeline, attributing everything it prints -- and every process
-    it starts -- to this job.
-
-    A story-step job runs its step instead; anything else -- a record written
-    before kinds existed included -- is a clip job.
-    """
+    it starts -- to this job."""
     token = token or CancelToken()
-    job = store.get_job(job_id) or {}
     with activity.capture(job_id), children.attributed(job_id, token):
         try:
-            if job.get("kind", store.KIND_CLIP) == store.KIND_STORY_STEP:
-                _execute_story_step(job_id, job, token)
-            else:
-                _execute_pipeline(job_id, payload, token)
+            _execute_pipeline(job_id, payload, token)
         finally:
             children.forget(job_id)
 
@@ -220,162 +202,6 @@ def _finish_cancelled(job_id: str) -> None:
         job_id, "Cancelled. The job stopped at its next checkpoint.",
         "warning", "worker",
     )
-
-
-def _execute_story_step(job_id: str, job: dict, token: CancelToken) -> None:
-    """Run one AI Story step (a job of kind ``story_step``; spec 9.1).
-
-    Ends in AWAITING_APPROVAL -- finished for this worker, so the slot is freed
-    as soon as this returns, but not for the user -- or, for a step with
-    nothing to approve (``steps.ends_completed``: render, metadata,
-    fast-track, a metadata regenerate; DEC-161), COMPLETED; or failed, or
-    cancelled. Once a fast track has ended, the older jobs awaiting a
-    document it approved in-process are completed
-    (:func:`_complete_approved_jobs`).
-    What the step prints reaches the job's feed through the stdout tee, as the
-    clip pipeline's output does, and is mirrored into the story's activity.log
-    once the step is over.
-    """
-    step = job.get("step")
-    story_id = job.get("story_id")
-    last = store.last_event(job_id)
-    first_seq = last.get("seq", 0) if last else 0
-
-    try:
-        # Imported here, so a clip job's imports stay exactly what they were.
-        from clipping.aistory import steps
-
-        # Cancelled while it waited for a worker slot: it never starts.
-        token.check()
-        store.set_status(job_id, JobStatus.RUNNING)
-        store.append_event(job_id, f"Story step '{step}' started.", "step", "worker")
-
-        ctx = steps.StepContext(
-            job_id=job_id,
-            story_id=story_id,
-            step=step,
-            ep=job.get("ep"),
-            params=dict(job.get("params") or {}),
-            cancel=token,
-            settings_env=dict(_settings_env),
-            outputs_dir=OUTPUTS_ROOT,
-            # Through the tee, like everything the clip pipeline prints.
-            on_log=print,
-            # Plan 21 stage 1: the part a chained step is on, on the job record.
-            on_sub_step=lambda name: store.update_job(job_id, sub_step=name),
-        )
-        result = steps.run(step, ctx)
-
-        # A result that lands after a cancel is not offered for approval.
-        token.check()
-        if steps.awaiting_uploads(result):
-            # Plan 22 stage 5: the step waits for the user's own clips; an upload that leaves
-            # nothing missing runs it again (routes.stories.resume_after_upload).
-            uploads = result.get("uploads") or {}
-            store.update_job(job_id, uploads=uploads)
-            store.set_status(job_id, JobStatus.AWAITING_UPLOADS)
-            current = store.get_job(job_id) or {}
-            if current.get("status") == JobStatus.CANCELLED.value:
-                raise Cancelled("The job was cancelled.")
-            waiting = uploads.get("message") or "waiting for your clips"
-            brief = uploads.get("brief") or "the shot brief"
-            store.append_event(job_id, f"Story step '{step}' is paused: {waiting} ({brief}). It goes on by itself "
-                                       "once every clip is uploaded.", "step", "worker")
-            return
-        completed = steps.ends_completed(step, job.get("params"))
-        store.set_status(job_id, JobStatus.COMPLETED if completed else JobStatus.AWAITING_APPROVAL)
-        # The cancel can also land between that check and the write, which the
-        # store then drops (DEC-076). Once awaiting or completed, a cancel is refused.
-        current = store.get_job(job_id) or {}
-        if current.get("status") == JobStatus.CANCELLED.value:
-            raise Cancelled("The job was cancelled.")
-        store.append_event(
-            job_id,
-            f"Story step '{step}' is done." if completed
-            else f"Story step '{step}' is ready: awaiting your approval.",
-            "step", "worker",
-        )
-
-    except Cancelled:
-        _finish_cancelled(job_id)
-
-    except Exception as exc:
-        if token.cancelled:
-            # An interrupted request looks like a failure to the code that
-            # made it. The job was cancelled; it did not fail.
-            _finish_cancelled(job_id)
-            return
-        tb = traceback.format_exc()
-        error_msg = f"{type(exc).__name__}: {exc}"
-        store.set_error(job_id, error_msg)
-        store.append_event(
-            job_id, f"Story step '{step}' failed: {error_msg}", "error", "worker",
-        )
-        print(f"[Worker] Job {job_id} failed:\n{tb}", file=sys.stderr)
-
-    finally:
-        if step in APPROVING_STEPS:
-            _complete_approved_jobs(story_id, job.get("ep"))
-        elif step in AGENT_STEPS:
-            _complete_agent_jobs(story_id)
-        _mirror_to_story_log(job_id, story_id, step, first_seq)
-
-
-# The story steps that approve episode documents in-process: the fast track
-# auto-approves the script, the storyboard and the assets it makes (DEC-162).
-APPROVING_STEPS = ("fast-track",)
-# Plan 21 stage 1: the agent run approves the story's documents and, through
-# the fast track, episode 1's (``story-fast-track``).
-AGENT_STEPS = ("story-fast-track",)
-
-
-def _complete_agent_jobs(story_id) -> None:
-    """Once an agent run has ended, the older step jobs still awaiting a
-    document it approved are completed (``routes.stories.
-    complete_agent_jobs``). Best effort, as :func:`_complete_approved_jobs`."""
-    try:
-        from .routes import stories as story_routes  # the story routes import this module
-
-        story_routes.complete_agent_jobs(story_id)
-    except Exception as exc:  # noqa: BLE001 - the step itself is done
-        print(f"[Worker] Story {story_id}: the jobs awaiting the documents the agent run approved were not "
-              f"completed ({type(exc).__name__}: {exc}).", file=sys.stderr)
-
-
-def _complete_approved_jobs(story_id, ep) -> None:
-    """Once a step of :data:`APPROVING_STEPS` has ended -- completed, or
-    stopped after approving some of them -- the older step jobs of its
-    episode still awaiting a document that is approved now are completed, as
-    approving it completes them (``routes.stories.complete_approved_jobs``).
-    Best effort, like the activity mirror: it never fails or changes the step
-    that ended."""
-    try:
-        from .routes import stories as story_routes  # the story routes import this module
-
-        story_routes.complete_approved_jobs(story_id, ep)
-    except Exception as exc:  # noqa: BLE001 - the step itself is done
-        print(f"[Worker] Story {story_id}: the jobs awaiting episode {ep}'s approved documents were not "
-              f"completed ({type(exc).__name__}: {exc}).", file=sys.stderr)
-
-
-def _mirror_to_story_log(job_id: str, story_id, step, after_seq: int) -> None:
-    """Copy this run's feed lines into the story's activity.log.
-
-    Best effort, like the job store's own persistence: a story whose folder is
-    gone, or a log that cannot be written, never fails the step. What the ring
-    buffer (store.MAX_EVENTS) already dropped is not copied.
-    """
-    try:
-        from clipping.aistory.store import StoryStore
-
-        stories = StoryStore(OUTPUTS_ROOT)
-        for event in store.get_events_since(job_id, after_seq):
-            stories.append_activity(
-                story_id,
-                f"{event.get('ts', '')} [{job_id} {step}] {event.get('message', '')}",
-            )
-    except Exception:
-        pass
 
 
 TOTAL_STEPS = 7

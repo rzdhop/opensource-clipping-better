@@ -1,8 +1,7 @@
 """Every liveness question to an Anthropic link is free (plan 23 stage D1).
 
-Every request on the Anthropic API is billed, so the preflight ping, the
-Settings "Test provider chain" diagnostic and the new free route
-``POST /api/settings/check-anthropic-key`` ask only ``models.retrieve``
+Every request on the Anthropic API is billed, so the preflight ping and the
+Settings "Test provider chain" diagnostic ask only ``models.retrieve``
 (``AnthropicChat.check_model``) -- never ``messages.create``. The fake SDK
 client below fails the test the moment a completion is attempted.
 
@@ -128,8 +127,7 @@ def client(tmp_path, monkeypatch, sdk):
     monkeypatch.setattr(worker, "_settings_env", {})
     for _name, (_attr, env_name) in PROVIDER_KEYS.items():
         monkeypatch.delenv(env_name, raising=False)
-    for name in ("LLM_CHAIN", "STORY_LLM_CHAIN", "STORY_LLM_PREMIUM_CHAIN"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("LLM_CHAIN", raising=False)
     monkeypatch.setenv("DISABLE_AUTH", "1")
     app = FastAPI()
     app.include_router(settings.router)
@@ -146,45 +144,6 @@ def test_the_key_is_saved_as_a_secret_and_reported_as_a_boolean(client):
     body = client.http.put("/api/settings", json={"anthropic_api_key": KEY}).json()
     assert body["anthropic_api_key_set"] is True
     assert KEY not in str(body)
-
-
-def test_check_anthropic_key_asks_each_anthropic_link_for_free(client, sdk):
-    client.worker.set_settings_env({
-        "STORY_LLM_PREMIUM_CHAIN": "anthropic/claude-sonnet-5-5,anthropic/claude-opus-5-5@xhigh,"
-                                   "gemini/gemini-3.5-flash-lite",
-        "ANTHROPIC_API_KEY": KEY,
-    })
-    body = client.http.post("/api/settings/check-anthropic-key").json()
-
-    assert body["verdict"] == "ready"
-    assert [row["label"] for row in body["results"]] == ["anthropic/claude-sonnet-5-5",
-                                                         "anthropic/claude-opus-5-5@xhigh"]
-    assert all(row["status"] == "ok" and LISTED in row["text"] for row in body["results"])
-    assert sdk.retrieved == ["claude-sonnet-5-5", "claude-opus-5-5"]
-    assert sdk.built and all(kwargs["api_key"] == KEY for kwargs in sdk.built)
-    assert KEY not in str(body)
-
-
-def test_check_anthropic_key_without_a_key_or_a_link(client, sdk):
-    client.worker.set_settings_env({"STORY_LLM_PREMIUM_CHAIN": "anthropic/claude-sonnet-5-5"})
-    body = client.http.post("/api/settings/check-anthropic-key").json()
-    assert body["verdict"] == "blocked"
-    assert body["results"][0]["status"] == "no_key"
-
-    client.worker.set_settings_env({"STORY_LLM_PREMIUM_CHAIN": "gemini/gemini-3.5-flash-lite",
-                                    "ANTHROPIC_API_KEY": KEY})
-    body = client.http.post("/api/settings/check-anthropic-key").json()
-    assert (body["verdict"], body["results"]) == ("blocked", [])
-    assert sdk.retrieved == []
-
-
-def test_check_anthropic_key_reports_a_missing_model(client, sdk):
-    sdk.missing.add("claude-opus-5-5")
-    client.worker.set_settings_env({"STORY_LLM_PREMIUM_CHAIN": "anthropic/claude-opus-5-5",
-                                    "ANTHROPIC_API_KEY": KEY})
-    body = client.http.post("/api/settings/check-anthropic-key").json()
-    assert body["verdict"] == "blocked"
-    assert body["results"][0]["status"] == "no_model"
 
 
 def test_a_chain_test_row_for_an_anthropic_link_says_listed(client, sdk):

@@ -22,7 +22,7 @@ a new one written from the concept. Then: "Here is the universe — correct anyt
 
 ## Template
 
-The skeleton is `showrunner/prompts/universe.md`. Fill every section:
+Fill every section:
 
 ```
 # Universe — <name>

@@ -2,10 +2,6 @@ services:
   backend:
     build:
       context: .
-      args:
-        # 0 (default) = the image as it always was; 1 adds the local TTS
-        # engines (chatterbox voice cloning): about +2 GB, see the Dockerfile.
-        INSTALL_LOCAL_TTS: ${INSTALL_LOCAL_TTS:-0}
     container_name: rzc-backend
     # The bind mounts below replace the image's own directories, which throws
     # away the Dockerfile's build-time `chown appuser`. What the container sees
@@ -77,43 +73,10 @@ services:
       # LLM_CUSTOM_BASE_URL set" no matter what the host .env said.
       - LLM_CUSTOM_BASE_URL=${LLM_CUSTOM_BASE_URL:-}
       - LLM_CUSTOM_API_KEY=${LLM_CUSTOM_API_KEY:-}
-      # Generation providers, chains, local servers and the budget of the AI
-      # Story mode (spec 8.1 / 8.5 / 8.6). All optional; Settings can set the
-      # keys, the URLs and the budget at run time.
-      - FAL_KEY=${FAL_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
-      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
-      - POLLINATIONS_API_KEY=${POLLINATIONS_API_KEY:-}
+      # The paid LLM links of the chain (gemini-paid/<model>, anthropic/<model>):
+      # skipped while their key is unset. Settings can set them at run time.
       - GEMINI_PAID_API_KEY=${GEMINI_PAID_API_KEY:-}
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
-      - IMAGE_CHAIN=${IMAGE_CHAIN:-}
-      - IMAGE_EDIT_CHAIN=${IMAGE_EDIT_CHAIN:-}
-      - VIDEO_CHAIN=${VIDEO_CHAIN:-}
-      - TTS_CHAIN=${TTS_CHAIN:-}
-      - VISION_CHAIN=${VISION_CHAIN:-}
-      - LOCAL_COMFYUI_URL=${LOCAL_COMFYUI_URL:-}
-      - LOCAL_OLLAMA_URL=${LOCAL_OLLAMA_URL:-}
-      # RunPod Serverless ComfyUI (DEC-310): the runpod/<template> video links.
-      # Listed here on purpose: a name missing from this block never reaches
-      # the container, whatever the host .env says (see LLM_CUSTOM_* above).
-      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
-      - RUNPOD_COMFY_ENDPOINT_ID=${RUNPOD_COMFY_ENDPOINT_ID:-}
-      - RUNPOD_GPU_USD_PER_HOUR=${RUNPOD_GPU_USD_PER_HOUR:-}
-      # Plan 32 close-out: the image endpoint's three names (DEC-312: images run there when set; the voice
-      # lines' fallback too) were never forwarded -- the container sent every image to the video endpoint.
-      - RUNPOD_IMAGE_ENDPOINT_ID=${RUNPOD_IMAGE_ENDPOINT_ID:-}
-      - RUNPOD_IMAGE_API_KEY=${RUNPOD_IMAGE_API_KEY:-}
-      - RUNPOD_IMAGE_GPU_USD_PER_HOUR=${RUNPOD_IMAGE_GPU_USD_PER_HOUR:-}
-      # The voice lines (runpod/tts_chatterbox, plan 32): an endpoint of their own when set.
-      - RUNPOD_AUDIO_ENDPOINT_ID=${RUNPOD_AUDIO_ENDPOINT_ID:-}
-      - RUNPOD_AUDIO_API_KEY=${RUNPOD_AUDIO_API_KEY:-}
-      - RUNPOD_AUDIO_GPU_USD_PER_HOUR=${RUNPOD_AUDIO_GPU_USD_PER_HOUR:-}
-      - ALLOW_PAID=${ALLOW_PAID:-}
-      - PER_EPISODE_CAP_USD=${PER_EPISODE_CAP_USD:-}
-      - DAILY_CAP_USD=${DAILY_CAP_USD:-}
-      - PER_STORY_CAP_USD=${PER_STORY_CAP_USD:-}
-      - BUDGET_PROFILE=${BUDGET_PROFILE:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Server-side downloading. On by default and best-effort: sites refuse
       # datacenter IPs often, and a refusal parks the job in `needs_upload`
       # rather than failing it. Set to 0 to stop trying entirely.

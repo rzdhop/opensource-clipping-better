@@ -11,15 +11,12 @@ edit this file, not the JSON. Each template follows the repo's ``comfy_workflow_
 
 Sources (read 2026-10-08):
 - ``ltx25_i2v_speech``: Comfy-Org/workflow_templates ``video_ltx2_5_i2v.json`` (subgraph flattened).
-- ``ltx25_a2v_speech``: Lightricks/ComfyUI-LTXVideo ``2.5/LTX-2.5_A2V_Two_Stage_Distilled.json``
-  (its custom-node prompt switches dropped: core nodes only).
-- ``ltx23_idlora_speech``: Comfy-Org/workflow_templates ``video_ltx2_3_id_lora.json``.
-- ``t2i_flux2_klein`` / ``edit_flux2_klein_multiref``: copied node for node from the app's verified-live
-  ``clipping/aistory/templates/workflows/*.json`` (FLUX.2 [klein] 4B, 4 steps, cfg 1.0); only the output
-  prefix changes and the four reference slots become file placeholders ``ref1``..``ref4``.
-- ``tts_chatterbox_line``: Comfy-Org ``audio-chatterbox_tts_multilingual.json`` + ComfyUI_Fill-ChatterBox
-  (the pack pinned in docker/worker-comfyui-tts; the repo's ``tts_chatterbox.json`` template is the
-  app's equivalent).
+- ``t2i_flux2_klein`` / ``edit_flux2_klein_multiref``: FLUX.2 [klein] 4B, 4 steps, cfg 1.0 (verified live in
+  2026-10); the four reference slots are file placeholders ``ref1``..``ref4``.
+- ``vc_chatterbox``: ComfyUI_Fill-ChatterBox voice conversion (the pack pinned in docker/worker-comfyui-tts).
+
+The audio-to-video, ID-LoRA and TTS-line templates tested in plan 36 stage 0 were removed with the old code
+(2026-10-09): D7 chose LTX-2.5 picture-and-voice; git history keeps them.
 
 Every node class used here exists in ComfyUI 0.34.0 (the version pinned by worker-comfyui
 5.10.0); ``showrunner/tools/validate_workflows.py`` checks that against the ComfyUI source.
@@ -34,8 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Distilled schedules of the official templates.
 SIGMAS_8_STEP = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
-SIGMAS_STAGE2_I2V = "0.85, 0.7250, 0.4219, 0.0"          # LTX-2.5 I2V and LTX-2.3 ID-LoRA templates
-SIGMAS_STAGE2_A2V = "0.909375, 0.725, 0.421875, 0.0"     # LTX-2.5 A2V template
+SIGMAS_STAGE2_I2V = "0.85, 0.7250, 0.4219, 0.0"          # LTX-2.5 I2V template
 
 NEGATIVE_DEFAULT = ("live action, real people, photograph, human skin, mask, costume, "
                     "blurry, deformed mouth, extra limbs, text, subtitles, watermark, pc game, "
@@ -47,13 +43,6 @@ LTX25 = {
     "vae": "ltx-2.5-video-vae-bf16.safetensors",
     "audio_vae": "ltx-2.5-audio-vae-bf16.safetensors",
     "upscaler": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
-}
-LTX23 = {
-    "ckpt": "ltx-2.3-22b-dev-fp8.safetensors",
-    "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
-    "distilled_lora": "ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors",
-    "id_lora": "ltx-2.3-id-lora-talkvid-3k.safetensors",
-    "upscaler": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
 }
 
 
@@ -196,127 +185,6 @@ def ltx25_i2v_speech() -> dict:
     )
 
 
-def ltx25_a2v_speech() -> dict:
-    """Path (b): LTX-2.5 audio-to-video from a keyframe: the line's audio (TTS in the character's
-    locked voice) is encoded, frozen in both stages and muxed back unchanged; the model performs
-    lips, breath and body to it."""
-    g: dict = {}
-    _image_in(g)
-    _ltx25_loaders(g)
-    g["audio"] = node("LoadAudio", audio="{{audio}}")
-    g["trim"] = node("TrimAudioDuration", audio=link("audio"), start_index=0.0, duration="{{seconds}}")
-    g["aenc"] = node("LTXVAudioVAEEncode", audio=link("trim"), audio_vae=link("avae"))
-    g["mask"] = node("SolidMask", value=0.0, width=1024, height=1024)
-    g["frozen"] = node("SetLatentNoiseMask", samples=link("aenc"), mask=link("mask"))
-    _two_stage(g, model1=link("unet"), model2=link("unet"), pos1=link("cond", 0), neg1=link("cond", 1),
-               pos2=link("cond", 0), neg2=link("cond", 1), vae=link("vae"), audio_latent1=link("frozen"),
-               audio_latent2=link("frozen"), guider="CFGGuider", sampler="{{sampler}}",
-               sigmas2=SIGMAS_STAGE2_A2V, cfg_inputs={"cfg": 1.0})
-    _video_out(g, vae=link("vae"), audio=link("trim"))
-    tpl = _template(
-        "ltx25_a2v_speech", "a2v_speech",
-        "LTX-2.5 22B distilled int8 audio-to-video, two-stage: the uploaded line audio is trimmed to "
-        "`seconds`, encoded by the audio VAE and frozen (noise mask 0) through both stages; the "
-        "original waveform is muxed into the mp4. Sampler `euler` by default (the ancestral sampler "
-        "and modality guidance are what the community reports as breaking lip-sync on 2.5, HF "
-        "discussion #44); CFG 1. Authored from ComfyUI-LTXVideo 2.5/LTX-2.5_A2V_Two_Stage_Distilled.json "
-        "(2026-10-08) with its API/enhancer switches removed: only core nodes of ComfyUI 0.34.0.",
-        g, ["image", "audio", "prompt", "negative", "seed", "width", "height", "seconds", "fps", "sampler", "name"],
-        {"image": "the keyframe (png)", "audio": "the line's audio (wav/mp3), uploaded like an image"},
-        [_req("unet", "unet_name", LTX25["unet"], "diffusion_models"),
-         _req("clip", "clip_name", LTX25["clip"], "text_encoders"),
-         _req("vae", "vae_name", LTX25["vae"], "vae"),
-         _req("avae", "vae_name", LTX25["audio_vae"], "vae"),
-         _req("up_model", "model_name", LTX25["upscaler"], "latent_upscale_models")],
-    )
-    tpl["defaults"]["sampler"] = "euler"
-    tpl["derived"]["seconds"] = "audio duration + 0.7 s tail, rounded up to the frame rule (set by the runner)"
-    return tpl
-
-
-def ltx23_idlora_speech() -> dict:
-    """Path (c): LTX-2.3 ID-LoRA, one generation: keyframe + ~5 s reference voice -> the character
-    speaks the [SPEECH] text with that voice (native LTXVReferenceAudio node)."""
-    g: dict = {}
-    _image_in(g)
-    g["ckpt"] = node("CheckpointLoaderSimple", ckpt_name=LTX23["ckpt"])
-    g["te"] = node("LTXAVTextEncoderLoader", text_encoder=LTX23["text_encoder"], ckpt_name=LTX23["ckpt"],
-                   device="default")
-    g["avae"] = node("LTXVAudioVAELoader", ckpt_name=LTX23["ckpt"])
-    g["lora_d"] = node("LoraLoaderModelOnly", model=link("ckpt", 0), lora_name=LTX23["distilled_lora"],
-                       strength_model=0.5)
-    g["lora_id"] = node("LoraLoaderModelOnly", model=link("lora_d"), lora_name=LTX23["id_lora"], strength_model=1.0)
-    g["up_model"] = node("LatentUpscaleModelLoader", model_name=LTX23["upscaler"])
-    g["pos"] = node("CLIPTextEncode", text="{{prompt}}", clip=link("te"))
-    g["neg"] = node("CLIPTextEncode", text="{{negative}}", clip=link("te"))
-    g["refaudio"] = node("LoadAudio", audio="{{voice_ref}}")
-    g["ref"] = node("LTXVReferenceAudio", model=link("lora_id"), positive=link("pos"), negative=link("neg"),
-                    reference_audio=link("refaudio"), audio_vae=link("avae"),
-                    identity_guidance_scale="{{identity_guidance}}", start_percent=0.0, end_percent=1.0)
-    g["cond"] = node("LTXVConditioning", positive=link("ref", 1), negative=link("ref", 2), frame_rate="{{fps}}")
-    g["alat"] = node("LTXVEmptyLatentAudio", audio_vae=link("avae"), frames_number="{{frames}}",
-                     frame_rate="{{fps}}", batch_size=1)
-    # Stage 1 samples the ID-LoRA model with the reference-audio conditioning; stage 2 refines with
-    # the distilled LoRA only, its conditioning cropped to the stage-1 latent (as the official template).
-    g["crop"] = node("LTXVCropGuides", positive=link("cond", 0), negative=link("cond", 1), latent=link("sep1", 0))
-    _two_stage(g, model1=link("ref", 0), model2=link("lora_d"), pos1=link("cond", 0), neg1=link("cond", 1),
-               pos2=link("crop", 0), neg2=link("crop", 1), vae=link("ckpt", 2), audio_latent1=link("alat"),
-               audio_latent2="stage1", guider="CFGGuider", sampler="euler",
-               sigmas2=SIGMAS_STAGE2_I2V, cfg_inputs={"cfg": 1.0})
-    g["adec"] = node("LTXVAudioVAEDecode", samples=link("sep2", 1), audio_vae=link("avae"))
-    _video_out(g, vae=link("ckpt", 2), audio=link("adec"), tiled=(768, 64, 4096, 4))
-    tpl = _template(
-        "ltx23_idlora_speech", "idlora_speech",
-        "LTX-2.3 22B dev fp8 + distilled LoRA 0.5 + ID-LoRA (TalkVid) 1.0, two-stage, 24 fps. The "
-        "reference voice (~5 s wav) conditions the model through the native LTXVReferenceAudio node; "
-        "the prompt uses the [VISUAL]/[SPEECH]/[SOUNDS] sections. Authored from ComfyUI's "
-        "video_ltx2_3_id_lora.json (2026-10-08), subgraph flattened. Only core nodes of ComfyUI 0.34.0.",
-        g, ["image", "voice_ref", "prompt", "negative", "seed", "width", "height", "seconds", "fps",
-            "identity_guidance", "name"],
-        {"image": "the keyframe (png)", "voice_ref": "the character's locked voice reference (wav, 5-10 s)"},
-        [_req("ckpt", "ckpt_name", LTX23["ckpt"], "checkpoints"),
-         _req("te", "text_encoder", LTX23["text_encoder"], "text_encoders"),
-         _req("lora_d", "lora_name", LTX23["distilled_lora"], "loras"),
-         _req("lora_id", "lora_name", LTX23["id_lora"], "loras"),
-         _req("up_model", "model_name", LTX23["upscaler"], "latent_upscale_models")],
-    )
-    tpl["defaults"]["identity_guidance"] = 3.0
-    return tpl
-
-
-def tts_chatterbox_line() -> dict:
-    """One spoken line in a character's locked voice (Chatterbox Multilingual, 5-10 s reference).
-
-    Core ``SaveAudio`` writes a flac; the repo's worker image (docker/worker-comfyui-tts) patches
-    the handler to return it under the ``audio`` key, which :mod:`showrunner.runpod_client` reads.
-    """
-    g: dict = {}
-    g["ref"] = node("LoadAudio", audio="{{voice_ref}}")
-    g["tts"] = node("FL_ChatterboxMultilingualTTS", text="{{text}}", language="{{language}}",
-                    exaggeration="{{exaggeration}}", cfg_weight=0.5, temperature=0.8, repetition_penalty=2.0,
-                    min_p=0.05, top_p=1.0, seed="{{seed}}", audio_prompt=link("ref"), use_cpu=False,
-                    keep_model_loaded=True)
-    g["save"] = node("SaveAudio", audio=link("tts", 0), filename_prefix="showrunner/{{name}}")
-    return {
-        "$schema": "comfy_workflow_v1",
-        "name": "tts_chatterbox_line",
-        "task": "tts_line",
-        "core_nodes_only": False,
-        "custom_nodes": ["comfyui_fill-chatterbox"],
-        "verified_live": False,
-        "description": "Chatterbox Multilingual TTS (23 languages incl. French) cloning the character's "
-                       "reference voice for one line, saved as flac by core SaveAudio and returned under the "
-                       "`audio` key by the repo's patched worker handler (docker/worker-comfyui-tts). Language "
-                       "values are the node's labels, e.g. 'French (fr)', 'English (en)'.",
-        "placeholders": ["voice_ref", "text", "language", "exaggeration", "seed", "name"],
-        "files": {"voice_ref": "the character's locked voice reference (wav, 5-10 s)"},
-        "defaults": {"language": "French (fr)", "exaggeration": 0.5},
-        "requires": [],
-        "output_node": "save",
-        "graph": g,
-    }
-
-
 def vc_chatterbox() -> dict:
     """Voice conversion (plan 36 stage 1.0, A-221): the audio of a clip re-voiced as the character's
     locked voice, timing kept, so the clip's lips stay in sync. ``FL_ChatterboxVC`` of the pinned
@@ -428,9 +296,6 @@ def edit_flux2_klein_multiref() -> dict:
 
 TEMPLATES = {
     "ltx25_i2v_speech": ltx25_i2v_speech,
-    "ltx25_a2v_speech": ltx25_a2v_speech,
-    "ltx23_idlora_speech": ltx23_idlora_speech,
-    "tts_chatterbox_line": tts_chatterbox_line,
     "vc_chatterbox": vc_chatterbox,
     "t2i_flux2_klein": t2i_flux2_klein,
     "edit_flux2_klein_multiref": edit_flux2_klein_multiref,

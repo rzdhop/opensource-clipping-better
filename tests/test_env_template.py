@@ -66,17 +66,9 @@ def test_the_getting_started_guide_names_a_primary_key():
     assert "GROQ_API_KEY" in guide
 
 
-def test_the_elevenlabs_key_is_documented_as_paid_and_shipped_empty():
-    """Plan 23 stage B3: a keyless install skips the ElevenLabs link, so the key is documented, empty, and says it bills."""
+def test_the_showrunner_names_are_documented_and_shipped_empty():
+    """The showrunner MCP server reads its RunPod endpoints and its token from .env; each is listed, empty."""
     text = TEMPLATE.read_text(encoding="utf-8")
-    assert re.search(r"^ELEVENLABS_API_KEY=\s*$", text, re.MULTILINE)
-    assert "PAID per character" in text[:text.index("ELEVENLABS_API_KEY=")][-600:]
-
-
-def test_the_runpod_audio_names_are_documented_empty_and_say_they_bill():
-    """Plan 32 stage 6: the app's runpod/tts_chatterbox link reads the MCP's three audio names; shipped empty."""
-    text = TEMPLATE.read_text(encoding="utf-8")
-    for name in ("RUNPOD_AUDIO_ENDPOINT_ID", "RUNPOD_AUDIO_API_KEY", "RUNPOD_AUDIO_GPU_USD_PER_HOUR"):
+    for name in ("RUNPOD_API_KEY", "RUNPOD_SHOWRUNNER_VIDEO_ENDPOINT_ID", "RUNPOD_SHOWRUNNER_VIDEO_KEY",
+                 "RUNPOD_IMAGE_ENDPOINT_ID", "RUNPOD_IMAGE_API_KEY", "MCP_TOKEN"):
         assert re.search(rf"^{name}=\s*$", text, re.MULTILINE), name
-    before = text[:text.index("RUNPOD_AUDIO_ENDPOINT_ID=")][-700:]
-    assert "runpod/tts_chatterbox" in before and "PAID" in before

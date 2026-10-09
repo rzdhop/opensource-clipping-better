@@ -99,37 +99,12 @@ def test_a_completed_job_reads_the_same_total_a_day_later():
 
 @needs_node
 def test_a_finished_job_has_no_step_clock():
-    # "done", "error" and "awaiting approval" are where a job ends, not steps
-    # it spends time on.
+    # "done" and "error" are where a job ends, not steps it spends time on.
     failed = dict(COMPLETED_CLIP, status="failed",
                   progress={"step": "error", "step_started_at": "2026-09-26T08:54:10+00:00"})
-    awaiting = dict(COMPLETED_CLIP, status="awaiting_approval")
-    for answer in _clocks(
-        _case(failed, COMPLETED_CLIP_EVENTS, False, "2026-09-27T18:50:00Z"),
-        _case(awaiting, COMPLETED_CLIP_EVENTS, False, "2026-09-27T18:50:00Z"),
-    ):
-        assert answer["inStep"] is None
-        assert answer["inJob"] == "54m 10s"
-
-
-@needs_node
-def test_an_approved_story_step_stops_at_its_last_line_not_at_the_approval():
-    # Approving moves updated_at to the click, hours after the step finished;
-    # its last feed line is the worker's "awaiting your approval".
-    approved = {
-        "status": "completed",
-        "created_at": "2026-09-27T10:00:00+00:00",
-        "updated_at": "2026-09-27T13:12:00+00:00",
-        "approved_at": "2026-09-27T13:12:00+00:00",
-        "progress": None,
-    }
-    events = [
-        {"seq": 1, "ts": "2026-09-27T10:00:01+00:00", "message": "Story step 'bible' started."},
-        {"seq": 9, "ts": "2026-09-27T10:00:20+00:00",
-         "message": "Story step 'bible' is ready: awaiting your approval."},
-    ]
-    [answer] = _clocks(_case(approved, events, False, "2026-09-27T20:00:00Z"))
-    assert answer == {"inStep": None, "inJob": "20s"}
+    [answer] = _clocks(_case(failed, COMPLETED_CLIP_EVENTS, False, "2026-09-27T18:50:00Z"))
+    assert answer["inStep"] is None
+    assert answer["inJob"] == "54m 10s"
 
 
 @needs_node

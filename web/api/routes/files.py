@@ -137,9 +137,8 @@ def resolve_output_path(job_id, filename=None):
         if not part or part in (".", "..") or os.path.isabs(part):
             raise HTTPException(status_code=400, detail="Invalid path")
 
-    # outputs/stories/ holds every AI Story workspace: listing it here would
-    # enumerate the story ids. Story media gets its own route. (_chain_test/,
-    # the other reserved name, stays served: its samples are signed URLs.)
+    # outputs/stories/ holds the retired AI Story mode's workspaces, kept on disk:
+    # never served or listed here.
     if cleanup.is_reserved(job_id, (cleanup.STORIES_DIRNAME,)):
         raise HTTPException(status_code=400, detail="Invalid path")
 

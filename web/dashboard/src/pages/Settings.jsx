@@ -1,14 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
-import {
-  checkAnthropicKey, checkVideoKeys, clearTodayExtra, fetchBrollStatus, fetchHardware, fetchSettings, testChain, testGenerationChain,
-  updateSettings,
-} from '../api'
+import { useState, useEffect } from 'react'
+import { fetchBrollStatus, fetchSettings, testChain, updateSettings } from '../api'
 import { Badge, Button, Card, CardBody, CardHeader, Field } from '../ui'
-import { formatBudgetDay, formatCents } from '../lib/format'
-import {
-  AlertTriangle, Brain, CircleCheck, CircleDollarSign, Cpu, Eye, EyeOff, Film, Gauge, ImageIcon, KeyRound, LinkIcon, Mic, Monitor,
-  Palette, RefreshCw, Save, Server, Wallet, Wand2,
-} from '../ui/icons'
+import { Brain, CircleCheck, Eye, EyeOff, Film, KeyRound, LinkIcon, Monitor, Save } from '../ui/icons'
 
 /**
  * A write-only secret: the server reports whether one is set, never its
@@ -69,8 +62,7 @@ const KeyField = ({ id, label, note, isSet, tested, value, onChange, placeholder
 )
 
 // Which tested links speak for which key: a chain test's row label is
-// "<provider>/<model>". Veo and the nano-banana images run on the paid
-// Gemini key (DEC-222), every other gemini/ link on the free one.
+// "<provider>/<model>".
 const KEY_PROVIDERS = {
   groq_api_key: 'groq',
   nvidia_api_key: 'nvidia',
@@ -78,32 +70,20 @@ const KEY_PROVIDERS = {
   openrouter_api_key: 'openrouter',
   mistral_api_key: 'mistral',
   openai_compat_api_key: 'custom',
-  fal_key: 'fal',
-  openai_api_key: 'openai',
-  cloudflare_api_token: 'cloudflare',
-  cloudflare_account_id: 'cloudflare',
-  pollinations_api_key: 'pollinations',
   gemini_paid_api_key: 'gemini_paid',
   anthropic_api_key: 'anthropic',
-  elevenlabs_api_key: 'elevenlabs',
-  runpod_api_key: 'runpod',
 }
 
 function providerOfLabel(label) {
   const text = String(label || '')
-  if (/^gemini\/(veo|nano-banana)/.test(text)) return 'gemini_paid'
-  // The premium writing chain's own provider (plan 22 stage 1): the same
-  // paid, billing-enabled Google project as Veo and nano-banana above.
+  // gemini-paid/ links run on the paid, billing-enabled Google project's key.
   if (/^gemini-paid\//.test(text)) return 'gemini_paid'
   return text.split('/')[0]
 }
 
-/** The providers a test on this page got a real answer from (status "ok"). */
-function testedProviders(testResult, genResults) {
-  const rows = [
-    ...((testResult && testResult.results) || []),
-    ...Object.values(genResults || {}).flatMap((result) => (result && result.results) || []),
-  ]
+/** The providers the chain test on this page got a real answer from (status "ok"). */
+function testedProviders(testResult) {
+  const rows = (testResult && testResult.results) || []
   return new Set(rows.filter((row) => row.status === 'ok').map((row) => providerOfLabel(row.label)))
 }
 
@@ -124,90 +104,6 @@ const ENDPOINT_PRESETS = [
   { label: 'Ollama (local)', url: 'http://localhost:11434/v1' },
 ]
 
-// The four tabs of spec 8.6. The last one opened is remembered per browser.
-const SETTINGS_TABS = [
-  { id: 'providers', icon: KeyRound, label: 'Providers' },
-  { id: 'generation', icon: Palette, label: 'Images, video & voices' },
-  { id: 'hardware', icon: Cpu, label: 'Local hardware' },
-  { id: 'budget', icon: Wallet, label: 'Budget' },
-]
-const TAB_KEY = 'rzc_settings_tab'
-
-// Plan 28 stage S2: the spending plans (the budget profile ids) as the Budget tab says them.
-const SPENDING_PLAN_NAMES = {
-  free: 'Free', one_dollar: 'About $1 per episode', quality: 'Quality (paid, every shot animated)',
-  native_speech: 'Quality, characters speak in their clips', native_speech_manual: 'Your own clips',
-  own_gpu: 'Quality on your own GPU (RunPod)',
-}
-
-function readTab() {
-  // A link to "/settings#budget" (the refusal panel's "Budget settings") opens that tab.
-  const hashed = (window.location.hash || '').replace(/^#/, '')
-  if (SETTINGS_TABS.some(t => t.id === hashed)) return hashed
-  try {
-    const stored = localStorage.getItem(TAB_KEY)
-    return SETTINGS_TABS.some(t => t.id === stored) ? stored : 'providers'
-  } catch {
-    return 'providers'
-  }
-}
-
-/**
- * The tab strip: a WAI-ARIA tablist (arrow keys, Home and End move between
- * tabs; only the selected one is in the tab order). It scrolls sideways on a
- * phone instead of wrapping.
- */
-function SettingsTabs({ tab, onSelect }) {
-  const refs = useRef({})
-  // On a phone the strip scrolls: keep the open tab in view (the remembered
-  // one may be the last).
-  useEffect(() => {
-    const el = refs.current[tab]
-    const strip = el && el.parentElement
-    if (strip && strip.scrollWidth > strip.clientWidth) {
-      const offset = el.getBoundingClientRect().left - strip.getBoundingClientRect().left
-      strip.scrollLeft += offset - (strip.clientWidth - el.offsetWidth) / 2
-    }
-  }, [tab])
-  const onKeyDown = (event) => {
-    const index = SETTINGS_TABS.findIndex(t => t.id === tab)
-    let next = null
-    if (event.key === 'ArrowRight') next = (index + 1) % SETTINGS_TABS.length
-    else if (event.key === 'ArrowLeft') next = (index - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length
-    else if (event.key === 'Home') next = 0
-    else if (event.key === 'End') next = SETTINGS_TABS.length - 1
-    if (next == null) return
-    event.preventDefault()
-    const id = SETTINGS_TABS[next].id
-    onSelect(id)
-    if (refs.current[id]) refs.current[id].focus()
-  }
-  return (
-    <div className="settings-tabs" role="tablist" aria-label="Settings sections" onKeyDown={onKeyDown}>
-      {SETTINGS_TABS.map(t => {
-        const Icon = t.icon
-        return (
-          <button
-            key={t.id}
-            ref={(el) => { refs.current[t.id] = el }}
-            type="button"
-            role="tab"
-            id={`settings-tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`settings-panel-${t.id}`}
-            tabIndex={tab === t.id ? 0 : -1}
-            className={`settings-tab${tab === t.id ? ' active' : ''}`}
-            onClick={() => onSelect(t.id)}
-          >
-            <Icon size={16} aria-hidden="true" />
-            {t.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 // The three B-roll sources (plan 23 stage B2), the same names the server accepts.
 const BROLL_SOURCE_NAMES = ['local', 'pexels', 'pixabay']
 
@@ -220,21 +116,6 @@ function Settings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-  const [tab, setTab] = useState(readTab)
-  const switchTab = (id) => {
-    setTab(id)
-    try { localStorage.setItem(TAB_KEY, id) } catch { /* private mode: the tab still switches */ }
-  }
-  // Generation chain tests (DEC-103): one at a time, the last result kept per kind.
-  const [genTesting, setGenTesting] = useState(null)
-  const [genResults, setGenResults] = useState({})
-  const [genError, setGenError] = useState('')
-  // Local hardware (GET /api/hardware), probed when its tab opens.
-  const [hardware, setHardware] = useState(null)
-  const [hwLoading, setHwLoading] = useState(false)
-  const [hwError, setHwError] = useState('')
-  const [localComfyuiUrl, setLocalComfyuiUrl] = useState('')
-  const [localOllamaUrl, setLocalOllamaUrl] = useState('')
 
   // API keys are write-only: the backend reports whether each is set, never its
   // value, so these stay empty unless a new one is being entered.
@@ -246,22 +127,10 @@ function Settings() {
   const [openrouterKey, setOpenrouterKey] = useState('')
   const [mistralKey, setMistralKey] = useState('')
   const [compatKey, setCompatKey] = useState('')
-  // Generation providers (AI Story, spec 8.6)
-  const [falKey, setFalKey] = useState('')
-  const [openaiKey, setOpenaiKey] = useState('')
-  const [cloudflareToken, setCloudflareToken] = useState('')
-  const [cloudflareAccountId, setCloudflareAccountId] = useState('')
-  const [pollinationsKey, setPollinationsKey] = useState('')
-  // Veo and nano-banana: a separate, billing-enabled Google project (phase 6 stage 12, RC-V4; DEC-222).
+  // Paid analysis links: gemini-paid/ (a separate, billing-enabled Google
+  // project) and anthropic/ (Claude on the Anthropic API).
   const [geminiPaidKey, setGeminiPaidKey] = useState('')
-  // Claude on the Anthropic API, for anthropic/ links of the premium writing chain (plan 23 stage D1).
   const [anthropicKey, setAnthropicKey] = useState('')
-  // ElevenLabs voices, billed per character (plan 23 stage B3).
-  const [elevenlabsKey, setElevenlabsKey] = useState('')
-  // A rented GPU by the second (DEC-310): the key is a secret; the endpoint id and the price are prefilled.
-  const [runpodKey, setRunpodKey] = useState('')
-  const [runpodEndpointId, setRunpodEndpointId] = useState('')
-  const [runpodGpuRate, setRunpodGpuRate] = useState('')
   // B-roll sources (plan 23 stage B2): the Pixabay key is a secret; the order and the folder are prefilled.
   const [pixabayKey, setPixabayKey] = useState('')
   const [brollSources, setBrollSources] = useState('')
@@ -271,25 +140,9 @@ function Settings() {
   // The endpoint URL and model are not secrets, so they are prefilled.
   const [compatUrl, setCompatUrl] = useState('')
   const [compatModel, setCompatModel] = useState('')
-  // AI Story's premium writing chain (plan 22 stage 1, DEC-273): not a
-  // secret, like compatUrl/compatModel above -- prefilled, sent only when it
-  // changed, "" falls through to STORY_LLM_CHAIN, then LLM_CHAIN, then the
-  // shipped default (the paid Gemini writer first).
-  const [storyLlmPremiumChain, setStoryLlmPremiumChain] = useState('')
 
   // Run a job even when only the slow floor (NVIDIA) has a key. Prefilled.
   const [allowSlowChain, setAllowSlowChain] = useState(false)
-  // Budget (AI Story, DEC-097)
-  const [allowPaid, setAllowPaid] = useState(false)
-  const [perEpisodeCap, setPerEpisodeCap] = useState('')
-  const [dailyCap, setDailyCap] = useState('')
-  const [perStoryCap, setPerStoryCap] = useState('')
-  const [budgetProfile, setBudgetProfile] = useState('')
-  // The budget day's zone (plan 23 A7): an IANA name, '' = UTC.
-  const [budgetTimezone, setBudgetTimezone] = useState('')
-  // Today's extra (plan 23): what was allowed for today only, and taking it back.
-  const [extraBusy, setExtraBusy] = useState(false)
-  const [extraError, setExtraError] = useState('')
 
   // The chain test. It can take a couple of minutes, so it counts seconds
   // while it runs: a bare spinner reads as "hung" long before NVIDIA answers.
@@ -320,37 +173,6 @@ function Settings() {
     }
   }
 
-  const handleTestGeneration = async (kind, link) => {
-    setGenTesting(link ? `${kind}:${link}` : kind)
-    setGenError('')
-    try {
-      const result = await testGenerationChain({ kind, link: link || '' })
-      setGenResults(prev => ({ ...prev, [kind]: result }))
-      // A paid test changes today's spend and the rows' "allowed": refresh.
-      if (link) setSettings(await fetchSettings())
-    } catch (err) {
-      setGenError(err.message)
-    } finally {
-      setGenTesting(null)
-    }
-  }
-
-  const loadHardware = async (refresh = false) => {
-    setHwLoading(true)
-    setHwError('')
-    try {
-      setHardware(await fetchHardware(refresh))
-    } catch (err) {
-      setHwError(err.message)
-    } finally {
-      setHwLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (tab === 'hardware' && !hardware && !hwLoading) loadHardware()
-  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
-
   const loadBrollStatus = () => {
     fetchBrollStatus().then(setBrollStatus).catch(() => setBrollStatus(null))
   }
@@ -364,18 +186,7 @@ function Settings() {
         setBrollLocalDir(data.broll_local_dir || '')
         setCompatUrl(data.openai_compat_base_url || '')
         setCompatModel(data.openai_compat_model || '')
-        setStoryLlmPremiumChain(data.story_llm_premium_chain || '')
         setAllowSlowChain(Boolean(data.allow_slow_chain))
-        setAllowPaid(Boolean(data.allow_paid))
-        setPerEpisodeCap(String(data.per_episode_cap_usd ?? ''))
-        setDailyCap(String(data.daily_cap_usd ?? ''))
-        setPerStoryCap(String(data.per_story_cap_usd ?? ''))
-        setBudgetProfile(data.budget_profile || '')
-        setBudgetTimezone(data.budget_timezone || '')
-        setRunpodEndpointId(data.runpod_comfy_endpoint_id || '')
-        setRunpodGpuRate(data.runpod_gpu_usd_per_hour || '')
-        setLocalComfyuiUrl(data.local_comfyui_url || '')
-        setLocalOllamaUrl(data.local_ollama_url || '')
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -395,15 +206,8 @@ function Settings() {
       if (openrouterKey) payload.openrouter_api_key = openrouterKey
       if (mistralKey) payload.mistral_api_key = mistralKey
       if (compatKey) payload.openai_compat_api_key = compatKey
-      if (falKey) payload.fal_key = falKey
-      if (openaiKey) payload.openai_api_key = openaiKey
-      if (cloudflareToken) payload.cloudflare_api_token = cloudflareToken
-      if (cloudflareAccountId) payload.cloudflare_account_id = cloudflareAccountId
-      if (pollinationsKey) payload.pollinations_api_key = pollinationsKey
       if (geminiPaidKey) payload.gemini_paid_api_key = geminiPaidKey
       if (anthropicKey) payload.anthropic_api_key = anthropicKey
-      if (elevenlabsKey) payload.elevenlabs_api_key = elevenlabsKey
-      if (runpodKey) payload.runpod_api_key = runpodKey
       if (pixabayKey) payload.pixabay_api_key = pixabayKey
 
       // B-roll order and folder: sent when changed; "" restores the default order / clears the folder.
@@ -429,47 +233,9 @@ function Settings() {
       if (compatModel !== (settings?.openai_compat_model || '')) {
         payload.openai_compat_model = compatModel.trim()
       }
-      if (storyLlmPremiumChain.trim() !== (settings?.story_llm_premium_chain || '')) {
-        payload.story_llm_premium_chain = storyLlmPremiumChain.trim()
-      }
       // Same rule: turning it OFF must be sent too, or it could never be undone.
       if (allowSlowChain !== Boolean(settings?.allow_slow_chain)) {
         payload.allow_slow_chain = allowSlowChain
-      }
-      // Budget (DEC-097): the switch follows the same rule; an amount is sent
-      // when it changed and is a positive number; the profile when it changed.
-      if (allowPaid !== Boolean(settings?.allow_paid)) {
-        payload.allow_paid = allowPaid
-      }
-      if (perEpisodeCap !== String(settings?.per_episode_cap_usd ?? '') && Number(perEpisodeCap) > 0) {
-        payload.per_episode_cap_usd = Number(perEpisodeCap)
-      }
-      if (dailyCap !== String(settings?.daily_cap_usd ?? '') && Number(dailyCap) > 0) {
-        payload.daily_cap_usd = Number(dailyCap)
-      }
-      if (perStoryCap !== String(settings?.per_story_cap_usd ?? '') && Number(perStoryCap) > 0) {
-        payload.per_story_cap_usd = Number(perStoryCap)
-      }
-      if (budgetProfile !== (settings?.budget_profile || '')) {
-        payload.budget_profile = budgetProfile
-      }
-      // The zone is sent when it changed; '' clears it (the day is UTC again).
-      if (budgetTimezone.trim() !== (settings?.budget_timezone || '')) {
-        payload.budget_timezone = budgetTimezone.trim()
-      }
-      // RunPod (DEC-310): the endpoint id and the price are sent when changed; "" clears.
-      if (runpodEndpointId.trim() !== (settings?.runpod_comfy_endpoint_id || '')) {
-        payload.runpod_comfy_endpoint_id = runpodEndpointId.trim()
-      }
-      if (runpodGpuRate.trim() !== (settings?.runpod_gpu_usd_per_hour || '')) {
-        payload.runpod_gpu_usd_per_hour = runpodGpuRate.trim()
-      }
-      // Local servers (spec 8.1): sent when changed; "" clears back to the default.
-      if (localComfyuiUrl.trim() !== (settings?.local_comfyui_url || '')) {
-        payload.local_comfyui_url = localComfyuiUrl.trim()
-      }
-      if (localOllamaUrl.trim() !== (settings?.local_ollama_url || '')) {
-        payload.local_ollama_url = localOllamaUrl.trim()
       }
 
       if (Object.keys(payload).length === 0) {
@@ -482,18 +248,7 @@ function Settings() {
       setSettings(updated)
       setCompatUrl(updated.openai_compat_base_url || '')
       setCompatModel(updated.openai_compat_model || '')
-      setStoryLlmPremiumChain(updated.story_llm_premium_chain || '')
       setAllowSlowChain(Boolean(updated.allow_slow_chain))
-      setAllowPaid(Boolean(updated.allow_paid))
-      setPerEpisodeCap(String(updated.per_episode_cap_usd ?? ''))
-      setDailyCap(String(updated.daily_cap_usd ?? ''))
-      setPerStoryCap(String(updated.per_story_cap_usd ?? ''))
-      setBudgetProfile(updated.budget_profile || '')
-      setBudgetTimezone(updated.budget_timezone || '')
-      setRunpodEndpointId(updated.runpod_comfy_endpoint_id || '')
-      setRunpodGpuRate(updated.runpod_gpu_usd_per_hour || '')
-      setLocalComfyuiUrl(updated.local_comfyui_url || '')
-      setLocalOllamaUrl(updated.local_ollama_url || '')
       setGoogleKey('')
       setPexelsKey('')
       setHfToken('')
@@ -502,13 +257,8 @@ function Settings() {
       setOpenrouterKey('')
       setMistralKey('')
       setCompatKey('')
-      setFalKey('')
-      setOpenaiKey('')
-      setCloudflareToken('')
-      setCloudflareAccountId('')
-      setPollinationsKey('')
-      setElevenlabsKey('')
-      setRunpodKey('')
+      setGeminiPaidKey('')
+      setAnthropicKey('')
       setPixabayKey('')
       setBrollSources(updated.broll_sources || '')
       setBrollLocalDir(updated.broll_local_dir || '')
@@ -521,67 +271,25 @@ function Settings() {
     }
   }
 
-  // Take today's extra back; the day's new totals replace the budget fields.
-  const removeExtra = async () => {
-    setExtraBusy(true)
-    setExtraError('')
-    try {
-      const day = await clearTodayExtra()
-      setSettings(prev => ({
-        ...prev,
-        spend_day: day.day,
-        spend_zone: day.zone,
-        spend_zone_error: day.zone_error || null,
-        spend_today_usd: day.spent_usd,
-        day_extra_usd: day.extra_usd,
-        daily_cap_below_spend: day.cap_below_spend,
-        day_contributors: day.stories || [],
-      }))
-    } catch (err) {
-      setExtraError(err.message)
-    } finally {
-      setExtraBusy(false)
-    }
-  }
-
   if (loading) return <div className="empty-state"><div className="spinner"></div></div>
 
   const endpointReady = Boolean(
     settings?.openai_compat_api_key_set && compatUrl && compatModel
   )
-  const tested = testedProviders(testResult, genResults)
+  const tested = testedProviders(testResult)
   const isTested = (key) => tested.has(KEY_PROVIDERS[key])
-  const spentToday = Number(settings?.spend_today_usd || 0)
-  const dailyCapNow = Number(settings?.daily_cap_usd || 0)
-  const dailyShare = dailyCapNow > 0 ? Math.min(100, Math.round((spentToday / dailyCapNow) * 100)) : 0
-  // The budget day (plan 23): its zone, what was allowed for today only, who spent it.
-  const dayZone = settings?.spend_zone || 'UTC'
-  const zoneError = settings?.spend_zone_error || ''
-  const dayLabel = formatBudgetDay(settings?.spend_day)
-  const extraToday = Number(settings?.day_extra_usd || 0)
-  const contributors = settings?.day_contributors || []
-  // While the cap field is edited the warning follows the field live; saved, it
-  // follows the server's own flag. An extra that covers the spending lifts it.
-  const capDraft = Number(dailyCap)
-  const capEdited = dailyCap !== String(settings?.daily_cap_usd ?? '')
-  const capBelowSpend = capEdited
-    ? capDraft > 0 && spentToday > capDraft + extraToday
-    : Boolean(settings?.daily_cap_below_spend) && spentToday > dailyCapNow + extraToday
 
   return (
     <div className="fade-in settings-page">
       <div className="page-header">
         <div>
           <h2>Settings</h2>
-          <p>Your keys, how pictures and voices are made, and how much the app may spend</p>
+          <p>Your keys and where the app finds extra footage</p>
         </div>
       </div>
 
       <form onSubmit={handleSave}>
-        <SettingsTabs tab={tab} onSelect={switchTab} />
-
-        {tab === 'providers' && (
-          <div className="settings-grid" role="tabpanel" id="settings-panel-providers" aria-labelledby="settings-tab-providers">
+        <div className="settings-grid">
           {/* API keys */}
           <Card className="settings-card">
             <CardHeader icon={KeyRound} title="API keys" subtitle="The keys that let the app analyse your videos, speak and find extra footage." />
@@ -694,6 +402,30 @@ function Settings() {
               placeholder="For split-screen mode (optional)"
               hint="Only for speaker diarization. Split-screen can key off face detection instead, which needs no token."
             />
+
+            <KeyField
+              id="settings-gemini-paid-key"
+              label="Gemini paid key"
+              note="optional, paid"
+              isSet={settings?.gemini_paid_api_key_set}
+              tested={isTested('gemini_paid_api_key')}
+              value={geminiPaidKey}
+              onChange={setGeminiPaidKey}
+              placeholder="Paste the billing-enabled project's key"
+              hint="A separate Google project with billing on. Only used by gemini-paid/ links of the list of analysis services."
+            />
+
+            <KeyField
+              id="settings-anthropic-key"
+              label="Anthropic API key"
+              note="optional, paid"
+              isSet={settings?.anthropic_api_key_set}
+              tested={isTested('anthropic_api_key')}
+              value={anthropicKey}
+              onChange={setAnthropicKey}
+              placeholder="sk-ant-…"
+              hint="To let Claude analyse your videos, add an anthropic/ link to the list of analysis services. Every request is billed."
+            />
             </CardBody>
           </Card>
           {/* Chain test */}
@@ -725,56 +457,6 @@ function Settings() {
               </p>
             )}
             {testResult && <ChainTestResult result={testResult} />}
-            </CardBody>
-          </Card>
-          {/* AI Story's premium writing chain (plan 22 stage 1, DEC-273) */}
-          <Card className="settings-card">
-            <CardHeader icon={Brain} title="Better writing for stories"
-              subtitle="Which AI writes the concepts, the bible, the episode script and checks the first watch." />
-            <CardBody>
-            <p className="form-hint settings-card-lead">
-              The rest of AI Story's writing uses the services above.
-              Left empty, the app uses your paid Gemini key (on the
-              Images, video & voices tab) first, then the free services.
-            </p>
-            {/* advanced */}
-            <details className="story-profile" open={Boolean(storyLlmPremiumChain || settings?.story_llm_premium_chain) || undefined}>
-            <summary>Advanced: choose the writing services yourself</summary>
-            <Field
-              label="Premium chain"
-              aside={<KeyBadge set={Boolean(storyLlmPremiumChain || settings?.story_llm_premium_chain)}
-                               tested={false} />}
-              hint="e.g. gemini-paid/gemini-3.8-flash,gemini/gemini-3.5-flash-lite — a provider/model list, same grammar as LLM_CHAIN."
-              htmlFor="settings-story-premium-chain"
-            >
-              <input
-                id="settings-story-premium-chain"
-                className="form-input"
-                type="text"
-                value={storyLlmPremiumChain}
-                onChange={(e) => setStoryLlmPremiumChain(e.target.value)}
-                placeholder="gemini-paid/gemini-3.8-flash,nvidia/nvidia/nemotron-3-ultra-550b-a55b,gemini/gemini-3.5-flash-lite"
-                spellCheck={false}
-              />
-            </Field>
-            <p className="form-hint">
-              Not a secret, and never spent by "Test my keys" above:
-              that button only tests the services of the analysis list, never this one.
-            </p>
-            </details>
-            {/* /advanced */}
-            <KeyField
-              id="settings-anthropic-key"
-              label="Anthropic API key"
-              note="paid, to let Claude write"
-              isSet={settings?.anthropic_api_key_set}
-              tested={isTested('anthropic_api_key')}
-              value={anthropicKey}
-              onChange={setAnthropicKey}
-              placeholder="sk-ant-…"
-              hint="To let Claude write, add it to the list above. Every request is billed, so paid providers must be allowed on the Budget tab."
-            />
-            <AnthropicKeyCheck />
             </CardBody>
           </Card>
           {/* Custom OpenAI-compatible endpoint */}
@@ -931,143 +613,6 @@ function Settings() {
             </p>
             </CardBody>
           </Card>
-          </div>
-        )}
-
-        {tab === 'generation' && (
-          <div className="settings-grid" role="tabpanel" id="settings-panel-generation" aria-labelledby="settings-tab-generation">
-          {/* Generation providers (AI Story, spec 8.6) */}
-          <Card className="settings-card">
-            <CardHeader icon={Palette} title="Picture, video and voice accounts" subtitle="The accounts the app uses to make pictures, video and voices for stories." />
-            <CardBody>
-            <p className="form-hint settings-card-lead">
-              Gemini reuses the Google key of the Providers tab.
-              Paid services never run until the Budget tab allows them.
-            </p>
-            <KeyField
-              id="settings-fal-key"
-              label="fal.ai key"
-              note="paid: pictures and video"
-              isSet={settings?.fal_key_set}
-              tested={isTested('fal_key')}
-              value={falKey}
-              onChange={setFalKey}
-              placeholder="Paste your fal.ai key"
-            />
-            <KeyField
-              id="settings-openai-key"
-              label="OpenAI API key"
-              note="paid: gpt-image-2"
-              isSet={settings?.openai_api_key_set}
-              tested={isTested('openai_api_key')}
-              value={openaiKey}
-              onChange={setOpenaiKey}
-              placeholder="Paste your OpenAI API key"
-            />
-            <KeyField
-              id="settings-cloudflare-token"
-              label="Cloudflare Workers AI token"
-              note="free allowance, ~170 images a day"
-              isSet={settings?.cloudflare_api_token_set}
-              tested={isTested('cloudflare_api_token')}
-              value={cloudflareToken}
-              onChange={setCloudflareToken}
-              placeholder="Paste your Cloudflare API token"
-            />
-            <KeyField
-              id="settings-cloudflare-account"
-              label="Cloudflare account id"
-              isSet={settings?.cloudflare_account_id_set}
-              tested={isTested('cloudflare_account_id')}
-              value={cloudflareAccountId}
-              onChange={setCloudflareAccountId}
-              placeholder="The account id the token belongs to"
-            />
-            <KeyField
-              id="settings-pollinations-key"
-              label="Pollinations key"
-              note="optional, keyless works slowly"
-              isSet={settings?.pollinations_api_key_set}
-              tested={isTested('pollinations_api_key')}
-              value={pollinationsKey}
-              onChange={setPollinationsKey}
-              placeholder="Paste your Pollinations key (optional)"
-            />
-            <KeyField
-              id="settings-gemini-paid-key"
-              label="Gemini paid key"
-              note="paid: Veo video and fast pictures — a separate Google project with billing on"
-              isSet={settings?.gemini_paid_api_key_set}
-              tested={isTested('gemini_paid_api_key')}
-              value={geminiPaidKey}
-              onChange={setGeminiPaidKey}
-              placeholder="Paste the billing-enabled project's key"
-            />
-            <KeyField
-              id="settings-elevenlabs-key"
-              label="ElevenLabs key"
-              note="paid per character: voices"
-              isSet={settings?.elevenlabs_api_key_set}
-              tested={isTested('elevenlabs_api_key')}
-              value={elevenlabsKey}
-              onChange={setElevenlabsKey}
-              placeholder="Paste your ElevenLabs API key"
-            />
-            <KeyField
-              id="settings-runpod-key"
-              label="RunPod key"
-              note="paid per GPU second: clips on your own ComfyUI workflows"
-              isSet={settings?.runpod_api_key_set}
-              tested={isTested('runpod_api_key')}
-              value={runpodKey}
-              onChange={setRunpodKey}
-              placeholder="Paste your RunPod API key (Serverless)"
-            />
-            <Field label="RunPod endpoint id" htmlFor="settings-runpod-endpoint">
-              <input id="settings-runpod-endpoint" className="form-input" type="text" value={runpodEndpointId}
-                onChange={e => setRunpodEndpointId(e.target.value)} placeholder="the Serverless endpoint's id"
-                autoComplete="off" spellCheck={false} />
-            </Field>
-            <Field label="RunPod GPU price per hour (USD)" htmlFor="settings-runpod-rate"
-              hint="Optional: the flex price of the endpoint's GPU, used only to log what RunPod really billed next to the estimate.">
-              <input id="settings-runpod-rate" className="form-input" type="number" min="0.01" step="0.01"
-                inputMode="decimal" value={runpodGpuRate}
-                onChange={e => setRunpodGpuRate(e.target.value)} placeholder="1.75" />
-            </Field>
-            </CardBody>
-          </Card>
-          <ChainLinksPanel
-            chains={settings?.generation_chains}
-            usage={settings?.usage_today}
-            results={genResults}
-            testing={genTesting}
-            error={genError}
-            onTest={handleTestGeneration}
-          />
-          </div>
-        )}
-
-        {tab === 'hardware' && (
-          <div className="settings-grid" role="tabpanel" id="settings-panel-hardware" aria-labelledby="settings-tab-hardware">
-          <HardwarePanel hardware={hardware} loading={hwLoading} error={hwError} onRefresh={loadHardware} />
-
-          <Card className="settings-card">
-            <CardHeader icon={Server} title="Programs on this computer" subtitle="Where the app finds ComfyUI and Ollama, if you run them yourself." />
-            <CardBody>
-            <p className="form-hint settings-card-lead">
-              Leave these empty to use the usual address. Only change them if
-              the program runs somewhere else.
-            </p>
-            <Field label="ComfyUI URL" htmlFor="settings-comfyui-url" hint={hardware?.comfyui?.note || undefined}>
-              <input id="settings-comfyui-url" className="form-input" type="url" value={localComfyuiUrl}
-                onChange={e => setLocalComfyuiUrl(e.target.value)} placeholder="http://127.0.0.1:8188" />
-            </Field>
-            <Field label="Ollama URL" htmlFor="settings-ollama-url" hint={hardware?.ollama?.note || undefined}>
-              <input id="settings-ollama-url" className="form-input" type="url" value={localOllamaUrl}
-                onChange={e => setLocalOllamaUrl(e.target.value)} placeholder="http://127.0.0.1:11434" />
-            </Field>
-            </CardBody>
-          </Card>
           <Card className="settings-card">
             <CardHeader icon={Monitor} title="System info" subtitle="What this computer and the app are set up with." />
             <CardBody>
@@ -1085,142 +630,7 @@ function Settings() {
             </dl>
             </CardBody>
           </Card>
-          </div>
-        )}
-
-        {tab === 'budget' && (
-          <div className="settings-grid" role="tabpanel" id="settings-panel-budget" aria-labelledby="settings-tab-budget">
-          {/* Budget (AI Story, DEC-097) */}
-          <Card className="settings-card settings-card-wide">
-            <CardHeader
-              icon={Wallet}
-              title="Budget"
-              subtitle="Paid services are never used unless you allow them here, and never past these limits."
-              actions={allowPaid
-                ? <Badge tone="warning" icon={CircleDollarSign}>Paid allowed</Badge>
-                : <Badge tone="success">Free only</Badge>}
-            />
-            <CardBody>
-            <p className="form-hint settings-card-lead">Every estimate is shown before it is spent.</p>
-            <label className="settings-check" htmlFor="settings-allow-paid">
-              <input
-                id="settings-allow-paid"
-                type="checkbox"
-                checked={allowPaid}
-                onChange={e => setAllowPaid(e.target.checked)}
-              />
-              <span>Allow paid services (within the limits)</span>
-            </label>
-            <div className="settings-table-wrap">
-              <table className="settings-caps">
-                <caption className="sr-only">Spending limits, in US dollars, and the spend so far</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Limit</th>
-                    <th scope="col">Limit (USD)</th>
-                    <th scope="col">Spent so far</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <th scope="row"><label htmlFor="settings-cap-episode">Per episode</label></th>
-                    <td>
-                      <input id="settings-cap-episode" className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
-                        value={perEpisodeCap} onChange={e => setPerEpisodeCap(e.target.value)} />
-                    </td>
-                    <td className="settings-caps-spend">On each episode's page</td>
-                  </tr>
-                  <tr>
-                    <th scope="row">
-                      <label htmlFor="settings-cap-daily">Daily</label>
-                      <span className="settings-caps-zone" title={`The day runs from 00:00 to 24:00 ${dayZone}`}>{dayZone} day</span>
-                    </th>
-                    <td>
-                      <input id="settings-cap-daily" className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
-                        value={dailyCap} onChange={e => setDailyCap(e.target.value)} />
-                    </td>
-                    <td className="settings-caps-spend">
-                      <span className="settings-caps-amount">
-                        ${spentToday.toFixed(2)} of ${dailyCapNow.toFixed(2)}{extraToday > 0 ? ` + ${formatCents(extraToday)}` : ''} today
-                      </span>
-                      <span
-                        className={`settings-caps-meter${dailyShare >= 90 ? ' settings-caps-meter-high' : ''}`}
-                        role="img"
-                        aria-label={`${dailyShare}% of today's limit spent`}
-                      >
-                        <span style={{ width: `${dailyShare}%` }}></span>
-                      </span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <th scope="row"><label htmlFor="settings-cap-story">Per story</label></th>
-                    <td>
-                      <input id="settings-cap-story" className="form-input" type="number" min="0.01" step="0.01" inputMode="decimal"
-                        value={perStoryCap} onChange={e => setPerStoryCap(e.target.value)} />
-                    </td>
-                    <td className="settings-caps-spend">On each story's episodes</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div className="settings-budget-day">
-              <p className="form-hint">Day of {dayLabel} ({dayZone}); it resets at 00:00 {dayZone}.</p>
-              {zoneError && <p className="settings-budget-error" role="alert">{zoneError}</p>}
-              {extraToday > 0 && (
-                <p className="settings-budget-extra">
-                  Allowed for today only: +{formatCents(extraToday)}
-                  <Button size="sm" variant="ghost" loading={extraBusy} onClick={removeExtra}>Remove</Button>
-                </p>
-              )}
-              {extraError && <p className="settings-budget-error" role="alert">{extraError}</p>}
-              {capBelowSpend && (
-                <p className="settings-budget-warning" role="status">
-                  <AlertTriangle size={14} aria-hidden="true" />
-                  <span>
-                    This limit is below what was already spent today ({formatCents(spentToday)}). Every paid call is
-                    refused until 00:00 {dayZone} unless you allow more for today.
-                  </span>
-                </p>
-              )}
-              {contributors.length > 0 && (
-                <div className="settings-budget-stories">
-                  <p className="settings-budget-stories-title">Spent today, by story</p>
-                  <ul>
-                    {contributors.map(story => (
-                      <li key={story.story_id}>
-                        <span className="settings-budget-story-title">{story.title || story.story_id}</span>
-                        <span className="settings-budget-story-usd">{formatCents(story.usd)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-            <Field
-              label="Day time zone"
-              htmlFor="settings-budget-timezone"
-              hint="IANA name, e.g. Europe/Paris; empty = UTC"
-            >
-              <input id="settings-budget-timezone" className="form-input" type="text" autoComplete="off" spellCheck={false}
-                placeholder="UTC" value={budgetTimezone} onChange={e => setBudgetTimezone(e.target.value)} />
-            </Field>
-            <Field
-              label="Spending plan"
-              htmlFor="settings-budget-profile"
-              hint={<>In force now: <strong>{SPENDING_PLAN_NAMES[settings?.effective_budget_profile || 'free'] || settings?.effective_budget_profile}</strong></>}
-            >
-              <select id="settings-budget-profile" className="form-input" value={budgetProfile} onChange={e => setBudgetProfile(e.target.value)}>
-                <option value="">Automatic — free until paid services are allowed, then about $1 per episode</option>
-                <option value="free">Free — nothing bought: free services or this computer, pictures with motion</option>
-                <option value="one_dollar">About $1 per episode — reference pictures and a few animated key shots</option>
-                <option value="quality">Quality — paid services, up to $4 per episode, every shot animated with its own sound</option>
-                <option value="own_gpu">Your own GPU — RunPod endpoints for the pictures and the clips, up to $2 per episode</option>
-              </select>
-            </Field>
-            </CardBody>
-          </Card>
-          </div>
-        )}
+        </div>
 
         <div className="settings-savebar">
           <Button type="submit" variant="primary" icon={Save} loading={saving}>
@@ -1333,303 +743,6 @@ function ChainTestResult({ result }) {
   )
 }
 
-// One per GenerationLinkResult.status in web/api/models.py (tests/test_settings_tabs.py keeps them in step).
-const GEN_STATUS_GLYPH = { ok: '✅', failed: '✖', no_key: '⏭', no_adapter: '·', unreachable: '🔌', refused: '🔒', skipped: '💸' }
-
-// One per GenerationChainTestResponse.verdict.
-const GEN_VERDICT_STYLE = {
-  ready: { color: 'var(--success)' },
-  paid_only: { color: 'var(--warning)' },
-  blocked: { color: 'var(--error)' },
-  no_adapter: { color: 'var(--text-tertiary)' },
-}
-
-const KIND_LABELS = {
-  image: 'Pictures',
-  image_edit: 'Picture edits (from reference pictures)',
-  video: 'Video clips',
-  tts: 'Voices',
-  vision: 'Picture descriptions',
-}
-
-function linkGlyph(row) {
-  if (!row.adapter) return '·'
-  if (!row.keyed) return '⏭'
-  if (row.paid) return row.allowed ? '💸' : '🔒'
-  return '✅'
-}
-
-/** The rows of one generation chain test, then its verdict. */
-function GenerationChainResult({ result }) {
-  return (
-    <div style={{ marginTop: '12px', fontSize: '13px' }}>
-      {result.results.map((row, index) => (
-        <div key={index} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
-            <span>{GEN_STATUS_GLYPH[row.status] || '·'}</span>
-            <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
-            {row.latency_seconds != null && (
-              <span style={{ color: 'var(--text-tertiary)' }}>{row.latency_seconds.toFixed(1)}s</span>
-            )}
-            {row.paid && (
-              <span style={{ color: 'var(--text-tertiary)' }}>paid · ${Number(row.est_usd).toFixed(3)}</span>
-            )}
-          </div>
-          {row.reason && (
-            <div className="form-hint" style={{
-              marginLeft: '24px',
-              color: row.status === 'failed' || row.status === 'refused' ? 'var(--error)' : 'var(--text-tertiary)',
-              wordBreak: 'break-word',
-            }}>
-              {row.reason}
-            </div>
-          )}
-          {row.note && (
-            <div className="form-hint" style={{ marginLeft: '24px', wordBreak: 'break-word' }}>{row.note}</div>
-          )}
-          {row.artifact_url && row.artifact_kind === 'image' && (
-            <img
-              src={row.artifact_url}
-              alt={`sample from ${row.label}`}
-              style={{ display: 'block', marginLeft: '24px', marginTop: '6px', maxWidth: '160px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
-            />
-          )}
-          {row.artifact_url && row.artifact_kind === 'audio' && (
-            <audio controls src={row.artifact_url} style={{ display: 'block', marginLeft: '24px', marginTop: '6px', maxWidth: 'calc(100% - 24px)' }} />
-          )}
-        </div>
-      ))}
-      <div style={{
-        marginTop: '10px',
-        ...(GEN_VERDICT_STYLE[result.verdict] || GEN_VERDICT_STYLE.blocked),
-        whiteSpace: 'pre-wrap',
-        lineHeight: 1.45,
-      }}>
-        {result.verdict === 'ready'
-          ? `✅ ${result.message} (${result.elapsed_seconds.toFixed(0)}s)`
-          : `${result.verdict === 'paid_only' ? '💸' : result.verdict === 'no_adapter' ? '·' : '✖'} ${result.message}`}
-      </div>
-    </div>
-  )
-}
-
-const KEY_CHECK_GLYPH = { ok: '✅', bad_key: '✖', no_model: '⚠️', no_key: '⏭', unreachable: '✖', failed: '✖', skipped: '·' }
-
-/**
- * Video links are never test-generated, so a wrong key used to show only on
- * the first clip bought. This asks each keyed hosted link's provider (fal's
- * pricing, Gemini's models.get) whether the key is accepted and the model
- * live -- free, nothing generated (POST /api/settings/check-video-keys).
- * For a fal link it also reads the endpoint's public schema for the prompt
- * limit it publishes (or "not published"); the server keeps what it read and
- * refuses a longer prompt before sending it. Each row's text carries it.
- */
-function VideoKeyCheck() {
-  const [checking, setChecking] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
-
-  const run = async () => {
-    setChecking(true)
-    setError('')
-    try {
-      setResult(await checkVideoKeys())
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  return (
-    <div style={{ marginTop: '10px' }}>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-secondary" disabled={checking} onClick={run}>
-          {checking ? <><span className="spinner"></span> Asking…</> : 'Ask the providers (free)'}
-        </button>
-        <span className="form-hint" style={{ margin: 0 }}>
-          Checks each video key and model with the provider itself, and reads fal's published prompt limit;
-          nothing is generated or billed.
-        </span>
-      </div>
-      {error && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)' }}>{error}</p>}
-      {result && (
-        <div style={{ marginTop: '10px', fontSize: '13px' }}>
-          {result.results.map((row) => (
-            <div key={row.label} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-              <span>{KEY_CHECK_GLYPH[row.status] || '·'}</span>{' '}
-              <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
-              {row.text && (
-                <div className="form-hint" style={{
-                  marginLeft: '24px', wordBreak: 'break-word',
-                  color: row.status === 'ok' ? undefined : row.status === 'skipped' ? 'var(--text-tertiary)' : 'var(--error)',
-                }}>
-                  {row.text}
-                </div>
-              )}
-            </div>
-          ))}
-          <div style={{ marginTop: '10px', ...(GEN_VERDICT_STYLE[result.verdict] || GEN_VERDICT_STYLE.blocked) }}>
-            {result.verdict === 'ready' ? '✅' : '✖'} {result.message}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * Plan 23 stage D1: is ANTHROPIC_API_KEY accepted, and is each anthropic/ link
- * of the premium chain available? One free models.retrieve per link (POST
- * /api/settings/check-anthropic-key) -- never a completion, since every
- * request on this provider is billed. Save the key first.
- */
-function AnthropicKeyCheck() {
-  const [checking, setChecking] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
-
-  const run = async () => {
-    setChecking(true)
-    setError('')
-    try {
-      setResult(await checkAnthropicKey())
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  return (
-    <div style={{ marginTop: '10px' }}>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-secondary" disabled={checking} onClick={run}>
-          {checking ? <><span className="spinner"></span> Asking…</> : 'Check the Anthropic key (free)'}
-        </button>
-        <span className="form-hint" style={{ margin: 0 }}>
-          Proves: key valid, model available — not exercised: every request is billed, so only a free model lookup is sent.
-        </span>
-      </div>
-      {error && <p style={{ marginTop: '8px', fontSize: '13px', color: 'var(--error)' }}>{error}</p>}
-      {result && (
-        <div style={{ marginTop: '10px', fontSize: '13px' }}>
-          {result.results.map((row) => (
-            <div key={row.label} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-              <span>{KEY_CHECK_GLYPH[row.status] || '·'}</span>{' '}
-              <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
-              {row.text && (
-                <div className="form-hint" style={{
-                  marginLeft: '24px', wordBreak: 'break-word',
-                  color: row.status === 'ok' ? undefined : 'var(--error)',
-                }}>
-                  {row.text}
-                </div>
-              )}
-            </div>
-          ))}
-          <div style={{ marginTop: '10px', ...(GEN_VERDICT_STYLE[result.verdict] || GEN_VERDICT_STYLE.blocked) }}>
-            {result.verdict === 'ready' ? '✅' : '✖'} {result.message}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Plan 28 stage S2: the one line each generation card opens with.
-const KIND_PURPOSES = {
-  image: 'The services that draw a picture from a description, tried in this order.',
-  image_edit: 'The services that change a picture using reference pictures, tried in this order.',
-  video: 'The services that turn a picture into a video clip, tried in this order.',
-  tts: 'The services that speak a line aloud, tried in this order.',
-  vision: 'The services that look at a picture and describe it, tried in this order.',
-}
-
-const KIND_ICONS = { image: ImageIcon, image_edit: Wand2, video: Film, tts: Mic, vision: Eye }
-
-/** One card per generation chain: its links as the runner sees them, a chain test, a test per paid link. */
-function ChainLinksPanel({ chains, usage, results, testing, error, onTest }) {
-  const entries = Object.entries(chains || {})
-  const usageRows = Object.entries(usage || {}).filter(([name]) => name !== 'day')
-  return (
-    <>
-      {entries.map(([kind, chain]) => (
-        <Card className="settings-card" key={kind}>
-          <CardHeader
-            icon={KIND_ICONS[kind] || Palette}
-            title={KIND_LABELS[kind] || kind}
-            subtitle={KIND_PURPOSES[kind] || undefined}
-          />
-          <CardBody>
-          {chain.error && <p className="settings-error" role="alert">{chain.error}</p>}
-          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" disabled={testing !== null} onClick={() => onTest(kind)}>
-              {testing === kind ? <><span className="spinner"></span> Testing…</> : 'Test these services'}
-            </button>
-            <span className="form-hint" style={{ margin: 0 }}>
-              Tries the free services and this computer; a paid service is only listed — test it from its row under Advanced, once.
-            </span>
-          </div>
-          {error && testing === null && <p className="settings-error" role="alert">{error}</p>}
-          {results[kind] && <GenerationChainResult result={results[kind]} />}
-          {kind === 'video' && <VideoKeyCheck />}
-          {/* advanced */}
-          <details className="story-profile">
-          <summary>Advanced: the services, in order</summary>
-          <p className="form-hint settings-card-lead" style={{ wordBreak: 'break-all' }}>
-            {chain.source === 'env' ? 'Set on this server' : 'App default'} · <code>{chain.chain}</code> · <code className="settings-env">{chain.env}</code>
-          </p>
-          <div style={{ fontSize: '13px' }}>
-            {(chain.links || []).map(row => (
-              <div key={row.label} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-                <span aria-hidden="true">{linkGlyph(row)}</span>
-                <code style={{ wordBreak: 'break-all' }}>{row.label}</code>
-                <span className="link-chip">{row.paid ? `paid · est $${Number(row.est_usd).toFixed(3)}` : 'free'}</span>
-                {!row.adapter && <span className="link-chip">not supported yet</span>}
-                {row.adapter && !row.keyed && (
-                  <span className="link-chip">
-                    no key: {row.missing_keys.join(', ')}
-                    {row.signup_url && <> · <a href={row.signup_url} target="_blank" rel="noopener" style={linkStyle}>get one →</a></>}
-                  </span>
-                )}
-                {row.paid && row.keyed && row.adapter && (row.allowed
-                  ? (
-                    <button type="button" className="btn btn-secondary btn-sm" disabled={testing !== null} onClick={() => onTest(kind, row.label)}>
-                      {testing === `${kind}:${row.label}` ? <><span className="spinner"></span> Testing…</> : `Test (est $${Number(row.est_usd).toFixed(3)})`}
-                    </button>
-                  )
-                  : <span className="link-chip link-chip-warn">{row.reason}</span>)}
-              </div>
-            ))}
-          </div>
-          </details>
-          {/* /advanced */}
-          </CardBody>
-        </Card>
-      ))}
-      <Card className="settings-card">
-        <CardHeader icon={Gauge} title="Free allowance today" subtitle="How many free requests each service has left today." />
-        <CardBody>
-        <p className="form-hint settings-card-lead">
-          Requests made today to each free service, against its daily limit (UTC day{usage?.day ? ` ${usage.day}` : ''}).
-        </p>
-        <dl className="settings-facts">
-          {usageRows.map(([name, row]) => (
-            <Row
-              key={name}
-              label={name}
-              value={<>{row.calls} / {row.rpd} <span style={{ color: 'var(--text-tertiary)' }}>({row.left} left)</span></>}
-            />
-          ))}
-        </dl>
-        {usageRows.length === 0 && <span className="form-hint">No daily limit to show.</span>}
-        </CardBody>
-      </Card>
-    </>
-  )
-}
-
 /** One fact of a <dl className="settings-facts">: a term and its value on one row. */
 const Row = ({ label, value }) => (
   <div className="settings-fact">
@@ -1637,79 +750,5 @@ const Row = ({ label, value }) => (
     <dd>{value}</dd>
   </div>
 )
-
-/**
- * What this machine can generate locally (GET /api/hardware, spec 8.2). On a
- * host that cannot run a good image or video model (no GPU, or under 8 GB:
- * hardware.BILLED_PRESET_PROFILES) the first recommendation is the billed
- * Quality preset (phase 7 stage 7, A18): its row carries the preset's
- * estimate (media_policy.preset_estimate, priced from pricing.py) and the
- * keys it needs, and is shown first, apart from the local models.
- */
-function HardwarePanel({ hardware, loading, error, onRefresh }) {
-  const recommendations = hardware?.recommendations || []
-  const advice = recommendations.filter((r) => r.estimate)
-  const rows = recommendations.filter((r) => !r.estimate)
-  return (
-    <Card className="settings-card">
-      <CardHeader
-        icon={Cpu}
-        title="Local hardware"
-        subtitle="What this computer can make on its own, without paid services."
-        actions={(
-          <Button size="sm" icon={RefreshCw} disabled={loading} onClick={() => onRefresh(true)}>
-            Check again
-          </Button>
-        )}
-      />
-      <CardBody>
-      {loading && <p className="form-hint" role="status"><span className="spinner"></span> Checking this computer…</p>}
-      {error && <p className="settings-error" role="alert">{error}</p>}
-      {hardware && (
-        <>
-          <dl className="settings-facts">
-            <Row label="Profile" value={<strong>{hardware.profile}</strong>} />
-            <Row label="GPU" value={hardware.gpu_name ? `${hardware.gpu_name}${hardware.vram_gb != null ? ` · ${hardware.vram_gb} GB` : ''}` : 'none found'} />
-            <Row label="Backend" value={hardware.backend} />
-            <Row label="RAM" value={hardware.ram_gb != null ? `${hardware.ram_gb} GB` : '?'} />
-            <Row label="Free disk" value={hardware.disk_free_gb != null ? `${hardware.disk_free_gb} GB` : '?'} />
-            <Row label="Container" value={hardware.in_container ? 'yes (Docker)' : 'no'} />
-            <Row label="ComfyUI" value={hardware.comfyui?.note} />
-            <Row label="Ollama" value={hardware.ollama?.reachable
-              ? `${hardware.ollama.note}${hardware.ollama.models?.length ? ` — ${hardware.ollama.models.join(', ')}` : ''}`
-              : hardware.ollama?.note} />
-          </dl>
-          {hardware.errors?.length > 0 && (
-            <p className="form-hint" style={{ color: 'var(--warning)', wordBreak: 'break-word' }}>
-              Problems found: {hardware.errors.join(' · ')}
-            </p>
-          )}
-          {advice.map((r, index) => (
-            <div key={`advice-${index}`} className="settings-advice">
-              <div><strong>Recommended: {r.model}</strong></div>
-              <p style={{ margin: '6px 0', wordBreak: 'break-word' }}>{r.install_hint}</p>
-              <p className="form-hint" style={{ wordBreak: 'break-word' }}>{r.estimate.assumptions}</p>
-              {r.keys?.length > 0 && (
-                <p className="form-hint" style={{ wordBreak: 'break-word' }}>
-                  Keys: {r.keys.join(', ')} (Images, video & voices tab). Paid calls also need “Allow paid services” (Budget tab).
-                </p>
-              )}
-            </div>
-          ))}
-          <h4 className="settings-subheading">Recommended locally</h4>
-          <div style={{ fontSize: '13px' }}>
-            {rows.map((r, index) => (
-              <div key={index} style={{ padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-                <div><strong>{r.task}</strong> · {r.model}{r.workflow && <span className="link-chip" style={{ marginLeft: '6px' }}>workflow {r.workflow}</span>}</div>
-                <div className="form-hint" style={{ wordBreak: 'break-word' }}>{r.install_hint}</div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-      </CardBody>
-    </Card>
-  )
-}
 
 export default Settings

@@ -10,6 +10,16 @@ All notable changes to the **rzdhop AI** project will be documented in this file
 
 ## [Unreleased]
 
+### The old AI Story is removed; one skill, rzdhop-story (plan 36, DEC-331 / DEC-332)
+
+- **Breaking — the dashboard's AI Story mode is gone:** the `/story` pages, the story, budget and hardware routes,
+  story-step jobs, `--ai-story`, `clipping/aistory/` and the generation providers only it used. AI stories are made
+  in a claude.ai chat with the `rzdhop-story` skill and the `showrunner` connector (`showrunner/README.md`).
+- **One skill:** `.claude/skills/rzdhop-story/` (`SKILL.md`, `steps/`, `PROMPTS.md`) replaces the ten story skills;
+  `python3 showrunner/tools/build_skills.py --zip outputs/skills` makes `rzdhop-story.zip`.
+- **Packaging:** the `local-tts` extra, `INSTALL_LOCAL_TTS`, `tzdata` and the story env names are removed;
+  `.env.example` lists the showrunner's names.
+
 ### The showrunner connector replaces rzdhop-story (plan 36 stages 1–2, DEC-320 to DEC-325)
 
 - **Breaking — the old MCP server is gone:** `mcp_server/` (39 tools), its unit `rzdhop-story-mcp`, its tests, the

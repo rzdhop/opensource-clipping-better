@@ -133,16 +133,6 @@ def _job_to_response(job: dict) -> JobResponse:
         events=[JobEvent(**e) for e in job.get("events", []) if isinstance(e, dict)],
         # A record written before kinds existed is a clip job.
         kind=job.get("kind", store.KIND_CLIP),
-        story_id=job.get("story_id"),
-        ep=job.get("ep"),
-        step=job.get("step"),
-        params=job.get("params"),
-        approved_at=job.get("approved_at"),
-        superseded_by=job.get("superseded_by"),
-        discarded=job.get("discarded"),
-        sub_step=job.get("sub_step"),
-        uploads=job.get("uploads"),
-        resumed_by=job.get("resumed_by"),
     )
 
 
@@ -177,7 +167,7 @@ def _chain_readiness_refusal(chain, env, *, ai_provider="chain") -> str | None:
     """The DEC-073 refusal for *chain* under the Settings values *env*, or None.
 
     One rule for every job that calls the LLM chain: a clip job
-    (``_slow_chain_refusal``) and an AI Story step (``routes/stories.py``).
+    (``_slow_chain_refusal``).
     *chain* is anything ``chain_readiness`` takes -- a spec string, "" for
     "the process env, else the default", or a list of links. The keys, the
     ALLOW_SLOW_CHAIN switch and the hint are resolved here, the same way for
@@ -237,8 +227,8 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
     reuse_job_id = payload.pop("reuse_job_id", None)
 
     # The id names the job's output directory, and some outputs/ entries are
-    # no job's (cleanup.RESERVED_OUTPUT_NAMES): a job called "stories" would
-    # render into every AI Story workspace, and deleting it would remove them.
+    # no job's (cleanup.RESERVED_OUTPUT_NAMES): a job named after one would render
+    # into that data, and deleting the job would remove it.
     # Refused before anything is created or queued.
     if reuse_job_id and cleanup.is_reserved(reuse_job_id):
         raise HTTPException(
@@ -252,15 +242,6 @@ async def create_job(req: JobCreateRequest) -> JobResponse:
     # A rerun reuses the job's id and output directory. Two workers on one
     # directory would overwrite each other's files, and the old one's late
     # writes would land on the new record.
-    # A rerun replaces the record it names, so rerunning a story step as a
-    # clip job would erase the step. Steps are regenerated from their story.
-    reused = store.get_job(reuse_job_id) if reuse_job_id else None
-    if reused is not None and reused.get("kind", store.KIND_CLIP) != store.KIND_CLIP:
-        raise HTTPException(
-            status_code=409,
-            detail="That job is an AI Story step. Regenerate it from its story instead.",
-        )
-
     if reuse_job_id and worker.is_active(reuse_job_id):
         raise HTTPException(
             status_code=409,
@@ -452,14 +433,10 @@ async def job_status_sse(job_id: str):
         # from a dead one -- to the user and to any proxy in between.
         ticks_since_output = 0
         HEARTBEAT_TICKS = 15
-        # A story step awaiting approval is over as far as this stream goes:
-        # nothing more happens until the user acts, and that is not streamed.
         terminal_states = {
             JobStatus.COMPLETED.value,
             JobStatus.FAILED.value,
             JobStatus.CANCELLED.value,
-            JobStatus.AWAITING_APPROVAL.value,
-            JobStatus.AWAITING_UPLOADS.value,
         }
 
         def feed_frame():

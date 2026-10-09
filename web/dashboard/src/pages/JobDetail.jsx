@@ -73,7 +73,7 @@ function JobDetail() {
 
   // Merged by sequence number, never replaced: the REST poll and the SSE stream
   // both deliver events and routinely overlap. The merge rule itself lives in
-  // components/ActivityFeed so it is shared with useJobFeed.
+  // components/ActivityFeed.
   const mergeEvents = (incoming) => {
     if (!incoming || incoming.length === 0) return
     setEvents(previous => mergeEventsPure(previous, incoming))

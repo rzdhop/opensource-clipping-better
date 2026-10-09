@@ -87,15 +87,9 @@ def test_with_auth_off_a_clip_url_is_the_plain_path():
     assert auth.media_url("abc123", "clip 1.mp4") == "/api/outputs/abc123/clip%201.mp4"
 
 
-def test_with_auth_off_a_story_url_is_the_plain_path():
-    assert auth.story_media_url("s1", 1, "episode_final.mp4") == (
-        "/api/stories/s1/episodes/1/media/episode_final.mp4")
-
-
 def test_with_auth_on_urls_are_still_signed(monkeypatch):
     monkeypatch.setenv("API_TOKEN", TOKEN)
     assert "?exp=" in auth.media_url("abc123", "clip.mp4")
-    assert "?exp=" in auth.story_media_url("s1", 1, "cover.jpg")
 
 
 def test_an_explicit_token_always_signs():
@@ -107,13 +101,10 @@ def test_signing_never_uses_a_known_key():
     """With no token, the signing key must not fall back to str(None) or ''."""
     with pytest.raises(ValueError):
         auth.sign_media("abc123", "clip.mp4", 1)
-    with pytest.raises(ValueError):
-        auth.sign_story_media("s1", 1, "cover.jpg", 1)
 
 
 def test_verification_without_a_token_refuses_instead_of_raising():
     assert auth.media_signature_is_valid("abc123", "clip.mp4", int(time.time()) + 600, "00") is False
-    assert auth.story_media_signature_is_valid("s1", 1, "cover.jpg", int(time.time()) + 600, "00") is False
 
 
 # ------------------------------------------------------------- the banner
@@ -193,7 +184,7 @@ def _client(monkeypatch, **env):
     return TestClient(app)
 
 
-@pytest.mark.parametrize("path", ["/api/jobs", "/api/settings", "/api/stories"])
+@pytest.mark.parametrize("path", ["/api/jobs", "/api/settings"])
 def test_with_no_token_every_router_answers(monkeypatch, path):
     with _client(monkeypatch) as client:
         assert client.get(path).status_code == 200, path
@@ -226,25 +217,12 @@ def test_a_cross_site_write_is_refused_when_open(monkeypatch):
         assert "cross-site" in response.json()["detail"].lower()
 
 
-def test_a_cross_site_approve_all_is_refused_when_open(monkeypatch):
-    """Plan 28 C1: the story's "Approve all" is a write like the others; another
-    website cannot make it, the dashboard (same-origin) and curl still can."""
-    with _client(monkeypatch) as client:
-        for group in ("cast", "places"):
-            response = client.post(f"/api/stories/0123456789ab/approve-all/{group}",
-                                   headers={"Sec-Fetch-Site": "cross-site"})
-            assert response.status_code == 403, group
-        for headers in ({"Sec-Fetch-Site": "same-origin"}, {}):
-            response = client.post("/api/stories/0123456789ab/approve-all/cast", headers=headers)
-            assert response.status_code == 404, headers  # the route, answering: no such story
-
-
 def test_same_origin_and_non_browser_writes_pass_the_guard(monkeypatch):
     """The dashboard is same-origin and curl sends no Sec-Fetch-Site; neither
     may be caught. A bad body answering 4xx from the route proves it got there."""
     with _client(monkeypatch) as client:
         for headers in ({"Sec-Fetch-Site": "same-origin"}, {}):
-            response = client.post("/api/stories", json={}, headers=headers)
+            response = client.post("/api/jobs", data={}, headers=headers)
             assert response.status_code not in (401, 403), headers
 
 

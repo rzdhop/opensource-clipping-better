@@ -11,7 +11,7 @@
 # comfy-cli and extra_model_paths.yaml (volume mounted at /runpod-volume). Four
 # things are added: the ComfyUI_Fill-ChatterBox node pack (pinned commit), a symlink
 # that puts the Chatterbox weights on the network volume, a second one for the
-# audio_encoders folder (Wan 2.2 S2V, plan 32), and a build-time patch of
+# audio_encoders folder, and a build-time patch of
 # /handler.py so SaveAudio outputs come back like images.
 # The 5090 / RTX PRO 6000 need CUDA >= 12.8, hence the cuda12.8.1 base tag (the same
 # pin as deploy/runpod/worker-comfyui.Dockerfile).
@@ -50,10 +50,9 @@ RUN set -eux; \
 RUN rm -rf /comfyui/models/chatterbox \
     && ln -s /runpod-volume/models/chatterbox /comfyui/models/chatterbox
 
-# The Wan 2.2 S2V workflow (plan 32, templates/workflows/s2v_wan22.json) loads its
-# wav2vec2 audio encoder from models/audio_encoders, a folder the worker's
-# extra_model_paths.yaml does not map: the same kind of link puts it on the volume.
-# Dangling at build time: expected. Weights: see README.md (fetch_weights_s2v.sh).
+# models/audio_encoders, a folder the worker's extra_model_paths.yaml does not
+# map, on the volume through the same kind of link (any audio encoder a workflow
+# loads with core AudioEncoderLoader). Dangling at build time: expected.
 RUN rm -rf /comfyui/models/audio_encoders \
     && ln -s /runpod-volume/models/audio_encoders /comfyui/models/audio_encoders
 

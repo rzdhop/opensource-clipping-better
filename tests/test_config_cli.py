@@ -295,10 +295,6 @@ def test_every_registry_provider_has_a_key_mapping():
     rewritten into one over the ``custom`` provider before anything reads it --
     so it is deliberately absent from the registry while keeping a key mapping.
     The direction that matters is unchanged: every chain provider needs one.
-
-    The one exception is a provider with no key at all (``env_key == ""``):
-    ``chat`` (DEC-312) answers only through the MCP server's runner, and
-    ``run_chain`` skipping it for "no API key" is exactly what it should do.
     """
     from clipping.providers.registry import PROVIDERS
 
@@ -307,7 +303,7 @@ def test_every_registry_provider_has_a_key_mapping():
     assert missing == set(), f"chain providers with no key mapping: {sorted(missing)}"
     for name in keyed:
         assert config_module.PROVIDER_KEYS[name][1] == PROVIDERS[name].env_key
-    assert set(PROVIDERS) - keyed == {"chat"}
+    assert set(PROVIDERS) == keyed
 
 
 def test_provider_can_be_overridden(video):

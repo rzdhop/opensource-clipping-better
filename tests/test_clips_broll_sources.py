@@ -277,23 +277,16 @@ def client(tmp_path, monkeypatch, root):
     pytest.importorskip("httpx")
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from clipping.providers import budget, limits
     from web.api import worker
     from web.api.routes import settings
 
     monkeypatch.setenv("WEB_SETTINGS_FILE", str(tmp_path / "settings.json"))
-    monkeypatch.setenv("USAGE_PATH", str(tmp_path / "usage.json"))
-    monkeypatch.setenv("SPEND_PATH", str(tmp_path / "spend.json"))
     monkeypatch.setenv("DISABLE_AUTH", "1")
     monkeypatch.setattr(worker, "_settings_env", {})
-    limits.reset()
-    budget.reset()
     app = FastAPI()
     app.include_router(settings.router)
     with TestClient(app) as test_client:
         yield test_client
-    limits.reset()
-    budget.reset()
 
 
 def test_settings_validate_store_and_echo_the_broll_values(client, root, tmp_path):

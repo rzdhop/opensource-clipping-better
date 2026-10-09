@@ -102,9 +102,7 @@ def test_chain_from_env_falls_back_to_the_default(monkeypatch):
 def test_every_provider_declares_a_key_and_a_timeout():
     for name, provider in registry.PROVIDERS.items():
         assert provider.name == name
-        # DEC-312: "chat" is the person's own Claude chat through the MCP server --
-        # no key, no sign-up: run_chain skips it, only the director's runner answers it.
-        assert provider.env_key or name == "chat", f"{name} has no env key"
+        assert provider.env_key, f"{name} has no env key"
         assert provider.default_timeout > 0, f"{name} has no timeout"
         for level in provider.structured:
             assert level in ("json_schema", "json_object"), f"{name}: {level}"
@@ -401,8 +399,8 @@ def test_nim_is_the_floor_and_something_else_is_primary():
 
 def test_every_hosted_provider_names_where_to_get_its_free_key():
     for name, provider in registry.PROVIDERS.items():
-        if name in ("custom", "chat"):
-            continue  # the user's own endpoint / own chat; there is nothing to sign up for
+        if name == "custom":
+            continue  # the user's own endpoint; there is nothing to sign up for
         assert provider.signup_url.startswith("https://"), name
 
 
@@ -426,9 +424,9 @@ def test_only_openrouter_gemini_paid_and_anthropic_are_marked_paid():
 
 
 def test_gemini_paid_reads_only_the_paid_key_gemini_never_reads_it(monkeypatch):
-    """RC-V4's shape, now also for the LLM chain (plan 22 stage 1): the paid
-    writer and the free "gemini" provider never share a key."""
-    from clipping.aistory.steps import llm_call
+    """The paid "gemini-paid" provider and the free "gemini" provider never
+    share a key."""
+    from web.api import config_adapter
     from clipping.config import PROVIDER_KEYS
 
     assert PROVIDER_KEYS["gemini-paid"] == ("api_key_gemini_paid", "GEMINI_PAID_API_KEY")
@@ -438,14 +436,14 @@ def test_gemini_paid_reads_only_the_paid_key_gemini_never_reads_it(monkeypatch):
         monkeypatch.delenv(env_name, raising=False)
 
     env = {"GOOGLE_API_KEY": "free-key", "GEMINI_PAID_API_KEY": "paid-key"}
-    keys = llm_call.resolve_keys(env)
+    keys = config_adapter.resolve_provider_keys(env)
     assert keys["gemini"] == "free-key"
     assert keys["gemini-paid"] == "paid-key"
 
     # Only one of the two set: the other provider's link is simply unkeyed,
     # never falls back to the key that IS set.
-    assert llm_call.resolve_keys({"GOOGLE_API_KEY": "free-key"}) == {"gemini": "free-key"}
-    assert llm_call.resolve_keys({"GEMINI_PAID_API_KEY": "paid-key"}) == {"gemini-paid": "paid-key"}
+    assert config_adapter.resolve_provider_keys({"GOOGLE_API_KEY": "free-key"}) == {"gemini": "free-key"}
+    assert config_adapter.resolve_provider_keys({"GEMINI_PAID_API_KEY": "paid-key"}) == {"gemini-paid": "paid-key"}
 
 
 def test_gemini_paid_is_otherwise_shaped_like_gemini():
@@ -472,16 +470,14 @@ def test_the_anthropic_row():
     assert (row.api, row.free_probe) == ("anthropic", "models")
     assert row.base_url == "https://api.anthropic.com"
     for name, provider in registry.PROVIDERS.items():
-        if name == "chat":
-            assert (provider.api, provider.free_probe, provider.env_key, provider.free_tier) == ("chat", "", "", True)
-        elif name != "anthropic":
+        if name != "anthropic":
             assert (provider.api, provider.free_probe) == ("openai", ""), name
 
 
 def test_anthropic_reads_only_its_key_and_no_other_provider_reads_it(monkeypatch):
     """RC-W4: the anthropic link is keyed on ANTHROPIC_API_KEY and nothing
     else; no other provider's link ever reads it."""
-    from clipping.aistory.steps import llm_call
+    from web.api import config_adapter
     from clipping.config import PROVIDER_KEYS
 
     assert PROVIDER_KEYS["anthropic"] == ("api_key_anthropic", "ANTHROPIC_API_KEY")
@@ -489,10 +485,10 @@ def test_anthropic_reads_only_its_key_and_no_other_provider_reads_it(monkeypatch
     for _name, (_attr, env_name) in PROVIDER_KEYS.items():
         monkeypatch.delenv(env_name, raising=False)
 
-    assert llm_call.resolve_keys({"ANTHROPIC_API_KEY": "test-anthropic-key"}) == {"anthropic": "test-anthropic-key"}
+    assert config_adapter.resolve_provider_keys({"ANTHROPIC_API_KEY": "test-anthropic-key"}) == {"anthropic": "test-anthropic-key"}
     # Every other key set, the Anthropic one not: the link is simply unkeyed.
     others = {env: "other" for name, (_attr, env) in PROVIDER_KEYS.items() if name != "anthropic"}
-    assert "anthropic" not in llm_call.resolve_keys(others)
+    assert "anthropic" not in config_adapter.resolve_provider_keys(others)
 
 
 def test_the_anthropic_client_passes_only_its_key_and_the_pinned_base_url(monkeypatch):
@@ -536,21 +532,3 @@ def test_an_unknown_effort_is_a_chain_error(spec):
 def test_an_at_sign_means_nothing_on_another_provider():
     link = registry.parse_spec("openrouter/some/model@v2")
     assert registry.split_effort(link) == ("some/model@v2", None)
-
-
-def test_effort_precedence_and_the_thinking_room():
-    """The link's suffix, then the prompt's family effort, then the model's
-    default; the room follows the effort (thinking counts against max_tokens)."""
-    assert registry.MODEL_OUTPUT_HEADROOM_BY_EFFORT == {"low": 1024, "medium": 3072, "high": 6144, "xhigh": 12288}
-    opus, sonnet = Link("anthropic", "claude-opus-5-5"), Link("anthropic", "claude-sonnet-5-5")
-    pinned = Link("anthropic", "claude-opus-5-5@xhigh")
-    assert registry.anthropic_effort(pinned, "low") == "xhigh"
-    assert registry.anthropic_effort(opus, "low") == "low"
-    assert registry.anthropic_effort(opus) is None
-    assert registry.output_headroom(pinned, "low") == 12288
-    assert registry.output_headroom(opus, "high") == 6144
-    assert registry.output_headroom(opus) == 3072      # Opus 5.5 defaults to medium
-    assert registry.output_headroom(sonnet) == 6144    # Sonnet 5.5 defaults to high
-    # Every other link keeps its MODEL_OUTPUT_HEADROOM row, effort or not.
-    assert registry.output_headroom(Link("gemini-paid", "gemini-3.8-flash"), "low") == 2048
-    assert registry.output_headroom(Link("gemini", "gemini-3.5-flash-lite"), "high") == 0

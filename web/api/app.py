@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from clipping import __version__
 
 from .auth import CrossSiteWriteGuard, announce, open_public_exposure, require_token
-from .routes import jobs, files, settings, hardware, stories, budget
+from .routes import jobs, files, settings
 
 
 @asynccontextmanager
@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="rzdhop AI",
-    description="Clips from long videos, and serialized AI Story episodes.",
+    description="Clips from long videos.",
     version=__version__,
     lifespan=lifespan,
 )
@@ -111,9 +111,6 @@ app.add_middleware(CrossSiteWriteGuard, allowed_origins=_ALLOWED)
 app.include_router(jobs.router)
 app.include_router(files.router)
 app.include_router(settings.router)
-app.include_router(hardware.router)
-app.include_router(stories.router)
-app.include_router(budget.router)
 
 
 @app.get("/api")

@@ -8,7 +8,6 @@
 .ui-icon-btn:focus-visible,
 .ui-chip-button:focus-visible,
 .nav-link:focus-visible,
-.mode-link:focus-visible,
 .ui-card-interactive:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
@@ -27,8 +26,7 @@
 .ui-btn svg,
 .chip svg,
 .ui-badge svg,
-.nav-link .icon svg,
-.mode-link svg {
+.nav-link .icon svg {
   flex-shrink: 0;
 }
 
@@ -45,12 +43,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.mode-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 /* --- Button (the .btn classes) --- */
@@ -487,12 +479,6 @@
 .ui-menu-item-danger:hover,
 .ui-menu-item-danger:focus-visible { background: var(--error-dim); }
 .ui-menu-item:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* --- Money --- */
-.ui-money {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 
 /* --- Motion --- */
 @keyframes ui-fade {
