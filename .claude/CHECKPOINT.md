@@ -4,8 +4,9 @@
 
 ## Live on Rida's host
 - `main` pulled; `showrunner-mcp` restarted (21 tools); web app rebuilt (Clips only, no Story pages).
-- The `rzdhop-story` skill is uploaded to claude.ai; the old account skills (`story-director`,
-  `fruit-drama-episode`) are to be deleted by Rida if still listed.
+- The `rzdhop-story` skill is on Rida's claude.ai account; the old story skills are gone.
+- The claude.ai project "AI gen App" holds only the current context (CLAUDE.md, .claude/*, docs/MCP.md,
+  showrunner/README.md); refresh them there after changing them here.
 - Old Story data under `outputs/` removed by Rida. Plan 36 GPU spend so far ≈ $2.51.
 
 ## Next: the first real episode (plan 36 stage 4)
