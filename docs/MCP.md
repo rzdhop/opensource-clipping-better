@@ -54,7 +54,8 @@ journalctl -u showrunner-mcp -f
 
 Claude writes every prompt in the chat (DEC-328) and sends it as `values.prompt` of `comfy_submit`; the server writes
 none and keeps each one in the story's job journal. How to write them: the prompt guide of the story skills
-(`showrunner/skills/PROMPTS.md`, the batch-a patterns Rida chose). A character's voice is cast the stage-0
+(`.claude/skills/rzdhop-story/PROMPTS.md`, the patterns Rida chose; the skill `rzdhop-story` is the whole
+workflow, one file per step). A character's voice is cast the stage-0
 way: a take of that character (usually an `ep00` casting shot) that Rida approved, its line cut by the clip check's
 timings (2–10 s), locked as `02-cast/<char>/voice_ref.wav` with `voice_ref.json` saying where it came from.
 

@@ -26,7 +26,7 @@ showrunner/
   (`verify_take`: speech-to-text on this CPU; `speaker_parts`/`join_parts`) · `voice.py` (locked voices on a clip,
   DEC-323) · `jobs.py` (GPU jobs into a story) · `assemble.py` (the episode from approved takes).
 - `voice.reference_from_take` (stage 3) locks a character's voice from an approved take. Claude writes every
-  prompt (DEC-328): `prompts/*.md` are the reference patterns, the skills' guide is `showrunner/skills/PROMPTS.md`.
+  prompt (DEC-328): `prompts/*.md` are the reference patterns, the skill `rzdhop-story` (`.claude/skills/rzdhop-story/`: SKILL.md, steps/, PROMPTS.md) is the workflow.
 - `mcp_server.py`: the `showrunner` connector (21 tools; it replaced rzdhop-story on 2026-10-08, DEC-325), see `docs/MCP.md`.
   Run: `.venv/bin/python -m showrunner.mcp_server`. Its tests need fastmcp (the `.venv`):
   `PYTHONPATH=<a pytest install> .venv/bin/python -m pytest showrunner/tests` — never install into `.venv` (the live

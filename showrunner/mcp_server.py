@@ -54,10 +54,8 @@ IMAGE_TASKS = {"t2i", "edit"}           # templates served by the images endpoin
 # RunPod Serverless list prices per second (check against the invoice); billed = execution time (DEC-316).
 RATES = {"video": 0.00053, "images": 1.58 / 3600}
 
-INSTRUCTIONS = """showrunner: the AI Story toolbox (plan 36). Before any story work, load the skill "story-director"
-(the entry point: it finds where the story stands and loads the skill of each step: story-concepts, story-universe,
-story-cast, story-script, story-shots, story-clips, story-assemble, story-next-episode); load each step's skill before
-doing that step. You (Claude) are the writer and the director: you propose, Rida corrects; you write every prompt.
+INSTRUCTIONS = """showrunner: the AI Story toolbox (plan 36). Before any story work, load the skill "rzdhop-story" and
+read the file of each step (steps/*.md in that skill) before doing that step, and PROMPTS.md before writing a prompt. You (Claude) are the writer and the director: you propose, Rida corrects; you write every prompt.
 These tools only make the pictures, the clips and the sound, check them and cut the episode. A story is a folder
 (stories/<slug>/): 00-brief.md, 01-universe.md, 02-cast/<char>/sheet.md (+ full_body.png, voice_ref.wav), 03-places/,
 epNN/script.md, shots.json, takes.json. Rida's gates: the concept, the universe, the cast sheets, the finished cast
