@@ -12,6 +12,13 @@ effects, the hook text and the card; Rida watches the result.
 <!-- rules:start -->
 ## Rules (every step, every story)
 
+- **Ask, never assume.** Rida decides; you never fill a gap with a guess. At the start of every step, ask him the
+  questions of the step's `## Ask first` that his messages and the story's files do not already answer — in one
+  message, short, multiple choice when you can (your recommendation first, and he can always answer in his own
+  words). A name, an age, a species, a look, a colour, a line, a place, a length, a number of episodes, a music, a
+  budget: if Rida has not said it and no file of this story says it, ask. When he says "you decide", give your pick
+  in one line and wait for his yes. Show what you will write before writing a file; ask before every lock and every
+  paid batch. Nothing comes from another story or from an example unless he says so. When in doubt, ask.
 - **Roles.** You (Claude) write and direct in the chat; the `showrunner` connector's tools are your hands;
   Rida decides. Talk to Rida in plain words, in the language he writes in; no tool names, paths or JSON unless he
   asks. The story's files are in English, except the spoken lines, which are in the story's language (fr or en).
@@ -46,6 +53,15 @@ effects, the hook text and the card; Rida watches the result.
 
 - `store_read epNN/shots.json`, `epNN/script.md` (the cliffhanger), `00-brief.md` (the comment bait),
   `04-season.md` (this episode's place in the season).
+
+## Ask first
+
+Before cutting the episode:
+
+- Which music mood (suspense, sad, epic, chill, upbeat), which track (name the candidates), and how loud?
+- Sound effects: yes or no, and where (a sting on the cliffhanger)?
+- Which hook text on the first seconds (or none), and which lines on the end card?
+- Which title, and which comment-bait question?
 
 ## Template
 

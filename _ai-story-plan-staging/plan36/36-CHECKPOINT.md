@@ -1,5 +1,13 @@
 # Plan 36 — CHECKPOINT (2026-10-08 night, local session on the A1 host)
 
+## 2026-10-09 late morning — the skills ask, never assume; entry skills (DEC-329)
+
+- Every skill opens with "Ask, never assume" and each step has an `## Ask first` (tested). `story-director` is the
+  entry point (checks the connector, asks which story, reads where it stands, loads the step skill);
+  `fruit-drama-episode` routes to it (the fruit look only as a proposal). The connector's instructions say load
+  `story-director` first. 10 skills; tests 134 + 3 s / 153 + 1 s. Found: the claude.ai connector entry is still named
+  `rzdhop-story` and needs a reconnect (same URL); the 8 step skills are not on the account yet.
+
 ## STAGE 3 CORRECTED 2026-10-09 morning — Claude writes every prompt (DEC-328, reverses DEC-326)
 
 - **Rida:** "Claude must be the one writing prompts […] the MCP as a way to produce the video and images only";

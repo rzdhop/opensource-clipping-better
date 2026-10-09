@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, "showrunner", "tools"))
 
 import build_skills as B  # noqa: E402
 
-SECTIONS = ("## When to use", "## Read first", "## Template", "## Checklist", "## Gate question",
+SECTIONS = ("## When to use", "## Read first", "## Ask first", "## Template", "## Checklist", "## Gate question",
             "## What to show Rida", "## Tools", "## Next")
 # Tools of the deleted rzdhop-story server and paths plan 36 forbids: a skill naming one is a dead skill.
 DEAD = ("story_step_start", "story_make_episode", "story_estimate", "story_options", "tts_line", "tts_batch",
@@ -55,8 +55,27 @@ def test_the_server_makes_and_checks_but_writes_no_prompt():
 def test_one_skill_per_step_in_the_plans_order():
     assert B.ORDER == ("story-concepts", "story-universe", "story-cast", "story-script", "story-shots",
                        "story-clips", "story-assemble", "story-next-episode")
-    on_disk = sorted(d for d in os.listdir(B.SKILLS_DIR) if d.startswith("story-"))
-    assert on_disk == sorted(B.ORDER)
+    on_disk = sorted(d for d in os.listdir(B.SKILLS_DIR) if d.startswith("story-") or d == "fruit-drama-episode")
+    assert on_disk == sorted(B.ALL)
+
+
+@pytest.mark.parametrize("name", B.ENTRY)
+def test_the_entry_points_route_to_every_step_skill_and_ask(name):
+    body = text(name)
+    front = re.match(r"^---\nname: (.+)\ndescription: (.+)\n---\n", body)
+    assert front and front.group(1) == name and len(front.group(2)) <= 1024
+    assert B.expected(name, body) == body and "<!-- prompts:start -->" not in body
+    assert "Ask, never assume" in body and "## Gate question" in body
+    router = text("story-director")
+    for step in B.ORDER:
+        assert f"`{step}`" in router, step
+    assert "load that skill before doing the step" in router
+    if name != "story-director":
+        assert "load `story-director`" in body
+    for dead in DEAD:
+        assert dead not in body.replace("`story_step_start`", "").replace("`story_get`", "").replace("`tts_line`", ""), dead
+    listed = re.findall(r"^- `(\w+)` — free", section(body, "## Tools"), re.M)
+    assert listed and set(listed) <= server_tools()
 
 
 @pytest.mark.parametrize("name", B.ORDER)
@@ -91,6 +110,13 @@ def test_each_skill_names_only_real_tools_and_flags_the_paid_ones(name):
     assert pays or "Free." in description
 
 
+@pytest.mark.parametrize("name", B.ORDER)
+def test_each_step_asks_before_it_acts(name):
+    """Rida, 2026-10-09: at every step it asks for details; it never assumes anything but asks instead."""
+    asks = section(text(name), "## Ask first")
+    assert len(re.findall(r"^- .+\?", asks, re.M)) >= 3, "at least three questions, each ending with '?'"
+
+
 @pytest.mark.parametrize("k", range(len(B.ORDER) - 1))
 def test_each_skill_hands_over_to_the_next_step(k):
     assert f"`{B.ORDER[k + 1]}`" in section(text(B.ORDER[k]), "## Next")
@@ -110,7 +136,7 @@ def test_the_files_a_skill_points_at_exist(name):
 
 def test_the_rules_say_the_non_negotiables():
     r = B.rules()
-    for must in ("explicit go", "never a still", "Ken Burns", "edge-tts", "LLM API", "You write every prompt",
+    for must in ("Ask, never assume", "When in doubt, ask", "explicit go", "never a still", "Ken Burns", "edge-tts", "LLM API", "You write every prompt",
                  "values.prompt", "70 words", "Keyframes face the camera", "voice_ref_from_take"):
         assert must in r, must
 
@@ -139,6 +165,6 @@ def test_the_prompt_guide_keeps_the_wording_that_worked():
 
 def test_the_zips_hold_one_skill_each(tmp_path):
     made = B.zip_all(str(tmp_path))
-    assert len(made) == len(B.ORDER)
+    assert len(made) == len(B.ALL)
     with zipfile.ZipFile(made[0]) as zf:
-        assert zf.namelist() == [f"{B.ORDER[0]}/SKILL.md"]
+        assert zf.namelist() == [f"{B.ALL[0]}/SKILL.md"]

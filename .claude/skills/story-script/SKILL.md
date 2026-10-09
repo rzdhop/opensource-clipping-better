@@ -11,6 +11,13 @@ line sized to the clip that will say it. Nothing here costs money; the shot list
 <!-- rules:start -->
 ## Rules (every step, every story)
 
+- **Ask, never assume.** Rida decides; you never fill a gap with a guess. At the start of every step, ask him the
+  questions of the step's `## Ask first` that his messages and the story's files do not already answer — in one
+  message, short, multiple choice when you can (your recommendation first, and he can always answer in his own
+  words). A name, an age, a species, a look, a colour, a line, a place, a length, a number of episodes, a music, a
+  budget: if Rida has not said it and no file of this story says it, ask. When he says "you decide", give your pick
+  in one line and wait for his yes. Show what you will write before writing a file; ask before every lock and every
+  paid batch. Nothing comes from another story or from an example unless he says so. When in doubt, ask.
 - **Roles.** You (Claude) write and direct in the chat; the `showrunner` connector's tools are your hands;
   Rida decides. Talk to Rida in plain words, in the language he writes in; no tool names, paths or JSON unless he
   asks. The story's files are in English, except the spoken lines, which are in the story's language (fr or en).
@@ -46,6 +53,17 @@ line sized to the clip that will say it. Nothing here costs money; the shot list
 - `store_read 00-brief.md` (the chosen concept, the last 5 s of episode 1, the language),
   `store_read 04-season.md`, `store_read memory.md` (from episode 2).
 - Every `02-cast/<id>/sheet.md` (Wants, Fears, Secret, How they speak) and the `03-places/` that exist.
+
+## Ask first
+
+Before writing the episode:
+
+- How long: 60, 75 or 90 s (and so how many shots)?
+- Which characters are in this episode, and where it happens (existing places or new ones?).
+- Which cliffhanger does he want, or does he approve the one you propose (it is written before the rest)?
+- The register of the lines: formal or casual, "vous" or "tu" (French), swearing or not.
+- Is there anything that must be said or shown in this episode?
+- From episode 2: what did the audience say (comments, numbers), and which open thread moves now?
 
 ## Template
 

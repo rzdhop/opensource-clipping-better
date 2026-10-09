@@ -1,3 +1,18 @@
+---
+name: fruit-drama-episode
+description: Use when Rida asks for a Fruit Drama (fruit people telenovela) story, cast or episode on the showrunner connector. Same flow as story-director - it asks him at every step and loads the step skills; the fruit universe is only a proposal to discuss, never assumed.
+---
+
+# Fruit Drama (an entry point for one kind of story)
+
+A Fruit Drama is one universe among others (D8): fruit people in a vertical telenovela. It runs through exactly the
+same steps and skills as any story — this page only says what is known to work for fruit, so you can **propose** it;
+Rida decides every part of it.
+
+**First, load `story-director`** and follow it: it finds where the story stands and loads the step skill. Load each
+step's skill before doing the step, every time.
+
+<!-- rules:start -->
 ## Rules (every step, every story)
 
 - **Ask, never assume.** Rida decides; you never fill a gap with a guess. At the start of every step, ask him the
@@ -30,3 +45,37 @@
   captions, extra people): naming it draws it (the models ignore the negative prompt). Keyframes face the camera
   unless the three-quarter check has passed on this story.
 - **One universe per story** (any universe, not fruit only): only what the story's own files say is assumed.
+<!-- rules:end -->
+
+## What is known to work for fruit (to propose, never to assume)
+
+- **The look of the stage-0 tests** (Rida liked batch a): a stylised 3D cartoon in the manner of a feature
+  animation, fully computer-generated; each character's whole head IS the fruit (stem, leaves and skin intact),
+  large cartoon eyes and a wide mouth drawn on the skin; a slim human body in real clothes, human hands. The proven
+  Medium sentence is in `stories/faille-d-amour/01-universe.md` (`store_read`). In the universe step, show it to
+  Rida as one option among two or three and ask.
+- **One fruit per character**, readable at a glance (mango, strawberry, kiwi worked); ask which fruit for each.
+- **The existing cast** of *Faille d'amour* (Rida the kiwi hacker, Marie-Jeanne the strawberry sales director,
+  Paloma the mango) has locked sheets, pictures and voices. A new story never reuses them unless Rida says so: ask.
+- **The telenovela beats**: a hook mid-conflict, one known trope (enemies to lovers, cheating reveal, who's the
+  father…), the comment bait "Team X or Team Y?", a cut before the reaction, "Partie 2 demain".
+
+## Ask first
+
+Before loading the first step (skip what Rida already said):
+
+- A new Fruit Drama story, or a new episode of an existing one (which)?
+- The language: French or English?
+- Keep the look of the stage-0 tests, or discuss another fruit look?
+- New characters, or does any of the *Faille d'amour* cast come back?
+
+## Gate question
+
+"OK: a <new / continued> Fruit Drama in <language>, starting with <step> — shall we go?"
+
+## Tools
+
+- `story_list` — free: the stories (is there a Fruit Drama already?).
+- `store_read` — free: the proven fruit universe and sheets of *Faille d'amour*, to show Rida.
+
+Everything else is used by the step skills, through `story-director`.

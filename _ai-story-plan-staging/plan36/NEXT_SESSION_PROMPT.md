@@ -18,12 +18,13 @@ CONTEXT
   casting reel. Plan 36 spent ≈ $2.51. Dry-run story: `stories/les-heritiers-du-fournil` (French, claymation; nothing
   locked, every lock waits for Rida).
 - Rida's side before stage 4 (check it is done): host `git pull` + `sudo systemctl restart showrunner-mcp` (the connector
-  must list 21 tools); the 8 skill zips uploaded in claude.ai (`python3 showrunner/tools/build_skills.py --zip
-  outputs/skills`), story-director / fruit-drama-episode turned off.
+  must list 21 tools); the connector reconnected in claude.ai; the 10 skills on the account (story-director and
+  fruit-drama-episode replaced by the new entry points, the 8 step skills uploaded from
+  `python3 showrunner/tools/build_skills.py --zip outputs/skills`). Every skill asks, never assumes (DEC-329).
 
 DO NOW
-1. `git pull`; tests: `python3 -m pytest showrunner/tests -o addopts="" -q` (124 + 3 skipped) and the server's in the
-   venv: `PYTHONPATH=<a scratch pytest> .venv/bin/python -m pytest showrunner/tests -o addopts="" -q` (143 + 1 skipped).
+1. `git pull`; tests: `python3 -m pytest showrunner/tests -o addopts="" -q` (134 + 3 skipped) and the server's in the
+   venv: `PYTHONPATH=<a scratch pytest> .venv/bin/python -m pytest showrunner/tests -o addopts="" -q` (153 + 1 skipped).
    Never pip/uv-sync into `.venv` (the live unit runs from it).
 2. Ask Rida: the story of the validation run (the dry-run story — confirm its concept and universe — or a new pitch),
    and his go for the A-222 check (1 keyframe in three-quarter view, ≈ $0.03).

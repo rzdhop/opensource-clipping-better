@@ -12,6 +12,13 @@ the take, its line becomes the character's locked voice for the whole series).
 <!-- rules:start -->
 ## Rules (every step, every story)
 
+- **Ask, never assume.** Rida decides; you never fill a gap with a guess. At the start of every step, ask him the
+  questions of the step's `## Ask first` that his messages and the story's files do not already answer — in one
+  message, short, multiple choice when you can (your recommendation first, and he can always answer in his own
+  words). A name, an age, a species, a look, a colour, a line, a place, a length, a number of episodes, a music, a
+  budget: if Rida has not said it and no file of this story says it, ask. When he says "you decide", give your pick
+  in one line and wait for his yes. Show what you will write before writing a file; ask before every lock and every
+  paid batch. Nothing comes from another story or from an example unless he says so. When in doubt, ask.
 - **Roles.** You (Claude) write and direct in the chat; the `showrunner` connector's tools are your hands;
   Rida decides. Talk to Rida in plain words, in the language he writes in; no tool names, paths or JSON unless he
   asks. The story's files are in English, except the spoken lines, which are in the story's language (fr or en).
@@ -149,6 +156,20 @@ unwanted is named; the size and seconds match the template; Rida saw the prompt 
 - `store_read 00-brief.md` (the cast, their wants) and `store_read 01-universe.md` (Medium, heads, proportions,
   palette, Forbidden).
 - The proven sheets: `stories/faille-d-amour/02-cast/*/sheet.md` (≈ 70-word heads that held in batch a).
+
+## Ask first
+
+Per character, before writing the sheet (ask only what the brief and the universe do not already say):
+
+- What is their name, age and gender, and their role in the story?
+- What are they (which fruit / species), and what do people notice first (colours, outfit, one mark, one
+  signature item)?
+- Their personality in three words? What they want, what they fear, their secret (or shall you propose)?
+- Their voice: what age, tone, pace and accent (regional or not)?
+- How do they talk: formal or slang, a catchphrase, "vous" or "tu" in French?
+
+Before each paid batch: how many candidates per picture (3–5 for the full body), and the most he wants to spend on
+the cast. Before the casting reel: the line each character says (or approve yours).
 
 ## Template
 

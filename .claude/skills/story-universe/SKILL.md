@@ -11,6 +11,13 @@ The art is agreed in words before any picture (D8: any universe, fruit is only o
 <!-- rules:start -->
 ## Rules (every step, every story)
 
+- **Ask, never assume.** Rida decides; you never fill a gap with a guess. At the start of every step, ask him the
+  questions of the step's `## Ask first` that his messages and the story's files do not already answer — in one
+  message, short, multiple choice when you can (your recommendation first, and he can always answer in his own
+  words). A name, an age, a species, a look, a colour, a line, a place, a length, a number of episodes, a music, a
+  budget: if Rida has not said it and no file of this story says it, ask. When he says "you decide", give your pick
+  in one line and wait for his yes. Show what you will write before writing a file; ask before every lock and every
+  paid batch. Nothing comes from another story or from an example unless he says so. When in doubt, ask.
 - **Roles.** You (Claude) write and direct in the chat; the `showrunner` connector's tools are your hands;
   Rida decides. Talk to Rida in plain words, in the language he writes in; no tool names, paths or JSON unless he
   asks. The story's files are in English, except the spoken lines, which are in the story's language (fr or en).
@@ -48,6 +55,18 @@ The art is agreed in words before any picture (D8: any universe, fruit is only o
 - `store_read 01-universe.md` (the skeleton `story_create` wrote).
 - The proven example: `stories/faille-d-amour/01-universe.md` (fruit people, a 3D cartoon in the manner of a
   feature animation). Its Medium is the one batch a was made with; borrow its shape, not its fruit.
+
+## Ask first
+
+Before proposing any direction:
+
+- The medium: 3D cartoon (feature-animation look), claymation, anime, painted 2D, something else?
+- What a head is in this world (one fruit per character? vegetables too? animals?) and how the body looks
+  (human body in clothes, or the whole character is the object?).
+- Where and when: a city, a country, a period; office, villa, village…?
+- Colours and light he wants (warm, neon, pastel; day or night mostly)?
+- What must never appear on screen?
+- A picture to aim at? (He can attach images; you describe what you see and ask what to keep.)
 
 ## Template
 

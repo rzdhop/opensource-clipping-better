@@ -54,7 +54,10 @@ IMAGE_TASKS = {"t2i", "edit"}           # templates served by the images endpoin
 # RunPod Serverless list prices per second (check against the invoice); billed = execution time (DEC-316).
 RATES = {"video": 0.00053, "images": 1.58 / 3600}
 
-INSTRUCTIONS = """showrunner: the AI Story toolbox (plan 36). You (Claude) are the writer and the director; these
+INSTRUCTIONS = """showrunner: the AI Story toolbox (plan 36). Before any story work, load the skill "story-director"
+(the entry point: it asks Rida, finds where the story stands and loads the skill of each step: story-concepts,
+story-universe, story-cast, story-script, story-shots, story-clips, story-assemble, story-next-episode); load each
+step's skill before doing that step. Ask Rida, never assume. You (Claude) are the writer and the director; these
 tools are the hands. A story is a folder (stories/<slug>/): 00-brief.md, 01-universe.md (the art, agreed in chat
 first), 02-cast/<char>/sheet.md (+ full_body.png, voice_ref.wav), 03-places/, epNN/script.md, shots.json,
 takes.json. Rules: every GPU job costs money — say the count and the cost and wait for Rida's go before submitting;

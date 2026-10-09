@@ -36,6 +36,10 @@ PROMPT_SKILLS = ("story-cast", "story-shots", "story-clips")
 # The order Rida goes through (plan 36 §2.2): each skill's "## Next" names the one after it.
 ORDER = ("story-concepts", "story-universe", "story-cast", "story-script", "story-shots", "story-clips",
          "story-assemble", "story-next-episode")
+# The entry points Rida calls by name (they replace the old account skills of the same names): they ask, find
+# where the story stands and load the step skill; they carry the rules, no prompt guide.
+ENTRY = ("story-director", "fruit-drama-episode")
+ALL = ENTRY + ORDER
 
 
 def rules() -> str:
@@ -78,7 +82,7 @@ def expected(name: str, text: str) -> str:
 def build(check: bool = False) -> list:
     """Write (or with *check*, only compare) every skill's rules block; returns the skills out of date."""
     stale = []
-    for name in ORDER:
+    for name in ALL:
         path = skill_path(name)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
@@ -95,7 +99,7 @@ def zip_all(out_dir: str) -> list:
     """``<out_dir>/<name>.zip`` with ``<name>/SKILL.md`` inside (the claude.ai upload format)."""
     os.makedirs(out_dir, exist_ok=True)
     made = []
-    for name in ORDER:
+    for name in ALL:
         dest = os.path.join(out_dir, f"{name}.zip")
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(skill_path(name), f"{name}/SKILL.md")
@@ -113,7 +117,7 @@ def main() -> int:
         if stale:
             print("stale shared block: " + ", ".join(stale))
             return 1
-        print(f"{len(ORDER)} skills up to date")
+        print(f"{len(ALL)} skills up to date")
     else:
         print(f"rules written into: {', '.join(stale) or 'nothing (all up to date)'}")
     if args.zip:
