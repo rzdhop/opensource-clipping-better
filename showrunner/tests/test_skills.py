@@ -108,6 +108,18 @@ def test_the_upgrade_rida_asked_for_is_in_every_layer():
     assert "punch_in" in step("6-assemble") and "pieces" in step("6-assemble")
 
 
+def test_the_pace_rules_rida_asked_for_are_in_every_layer():
+    """Rida, 2026-10-11: the talking pace. Lines without "…", voices without slow words, the faster take kept,
+    the pauses tightened by the assembly."""
+    guide = _flat(B.read("PROMPTS.md"))
+    assert guide.count("quick and natural") >= 4 and "never says slow" in guide
+    assert "A quick pace" in B.read("SKILL.md")
+    assert 'no "…" inside a line' in _flat(step("4-script")).lower() or 'No "…" inside a line' in step("4-script")
+    assert "never a slow word" in _flat(step("3-cast"))
+    assert "keep the faster one" in _flat(step("5b-clips"))
+    assert "tighten" in step("6-assemble") and "tightened_s" in step("6-assemble")
+
+
 @pytest.mark.parametrize("name", B.STEPS)
 def test_each_step_has_its_sections_in_order(name):
     body = step(name)

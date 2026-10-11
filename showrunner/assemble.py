@@ -7,8 +7,12 @@ subtitles), ``final.json`` (the report) and ``final_sheet.jpg``. Rules:
 
 - **Approved clips only.** A shot without an approved take stops the assembly, naming every such shot;
   a shot is never filled with a still, a hold or a zoom (DEC-317).
-- **A clip is never slowed, stretched or frozen.** Each clip is cut after its last scripted word + 0.3 s
-  when it runs on more than 1 s past it (the clip check's ``end_s``), else kept whole.
+- **A clip is never slowed, stretched or frozen.** Each clip is cut 0.3 s after its voice really stops (the
+  first pause after the clip check's ``end_s``, at most 0.5 s past it).
+- **Tightened pauses** (on by default): a silence longer than 0.45 s between the first and the last scripted
+  word is shortened to 0.2 s, picture and sound cut together (the lips stay in sync); the cut is always a change
+  of framing, so it reads as an edit, never as a jump. A pause holding an SFX cue is kept, and so is a pause that
+  would leave a piece shorter than 0.8 s. ``"tighten": false`` (per shot or episode) keeps every pause.
 - **The clip's own sound is the voice track** (path a, D7: picture and voice come together).
 - Subtitles from the clip check's timings (the scripted text, one colour per speaker, the speaker's name
   above), drawn by libass from an ASS file (ffmpeg 6.1's drawtext drops accented tails).
@@ -30,9 +34,11 @@ The recipe is copied from ``productions/faille_damour/render_ep01.py`` (styles, 
      "hook": {"text": "...", "seconds": 2.5} | null,
      "card": {"lines": ["Faille d'amour", "Partie 2 demain"], "seconds": 1.5} | null,
      "punch_in": true,                                  # optional, default true: the punch-in edit
+     "tighten": true,                                   # optional, default true: long pauses shortened
      "shots": [{"id": "s01", "characters": ["paloma", "rida"],          # left to right in the picture
                 "positions": {"rida": "left"},                          # optional override: left | center | right
-                "punch_in": false,                                      # optional: this clip stays wide
+                "punch_in": false,                                      # optional: this clip stays wide (and whole)
+                "tighten": false,                                       # optional: this clip keeps its pauses
                 "lines": [{"speaker": "paloma", "text": "..."}],
                 "sfx": [{"file": "assets/sfx/soap/gasp_crowd.wav", "at": 1.2, "gain": 0.8}], ...}]}
 """
@@ -55,8 +61,11 @@ from showrunner.store import Story, StoreError, sections  # noqa: E402
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FONTS = os.path.join(REPO_ROOT, "assets", "fonts")
 W, H, FPS = 1080, 1920, 24
-TRIM_PAD_S = 0.3      # kept after the last scripted word
-TRIM_AFTER_S = 1.0    # a clip is cut only when it runs on longer than this past its last word
+TRIM_PAD_S = 0.3      # kept after the voice really stops
+VOICE_END_MAX_S = 0.5 # the voice may run this far past the last word the clip check timed (its end is often early)
+PAUSE_MIN_S = 0.3     # the shortest silence the pause finder reports
+PAUSE_MAX_S = 0.45    # a pause longer than this inside the speech is tightened...
+PAUSE_KEEP_S = 0.2    # ...to this (picture and sound cut together, so the lips stay in sync)
 SUB_TAIL_S = 0.25     # a subtitle stays this long after its line
 CARD_SECONDS = 1.5
 VOICE_GAIN = 1.6
@@ -210,6 +219,92 @@ def punch_filter(framing: str, zoom: float) -> str:
             f"scale={W}:{H},setsar=1")
 
 
+# ------------------------------------------------------------------ the pauses
+
+def voice_end(end_s: float, silences: list) -> float:
+    """Where the voice really stops: the start of the first pause that runs past the last scripted word (the
+    speech-to-text end is often a few tenths early), never more than VOICE_END_MAX_S after it."""
+    after = [s for s, e in silences if e > end_s + 0.05]
+    return end_s if not after else min(max(after[0], end_s), end_s + VOICE_END_MAX_S)
+
+
+def pauses_to_cut(shot: dict, timed: list, silences: list, trim: float, *, enabled: bool = True) -> list:
+    """``[(start, end)]`` on the clip's clock to leave out: the middle of every pause longer than PAUSE_MAX_S
+    between the first and the last scripted word, PAUSE_KEEP_S of it kept. Never a pause holding an SFX cue, never
+    one that would leave a piece shorter than PIECE_MIN_S, nothing when the clip stays wide."""
+    if not enabled or shot.get("tighten") is False or shot.get("punch_in") is False:
+        return []
+    spans = [(r["start_s"], r["end_s"]) for r in timed if r.get("start_s") is not None and r.get("end_s") is not None]
+    if not spans:
+        return []
+    first, last = spans[0][0], max(e for _, e in spans)
+    cues = [float(c.get("at", 0.0)) for c in shot.get("sfx") or []]
+    out, prev = [], 0.0
+    for s, e in silences:
+        s, e = max(s, first), min(e, last)
+        if e - s <= PAUSE_MAX_S or any(s - 0.1 <= c <= e + 0.1 for c in cues):
+            continue
+        a, b = frames_floor(s + PAUSE_KEEP_S / 2), frames_floor(e - PAUSE_KEEP_S / 2)
+        if b <= a or a - prev < PIECE_MIN_S:
+            continue
+        out.append((a, b))
+        prev = b
+    if out and trim - out[-1][1] < PIECE_MIN_S:
+        out.pop()
+    return out
+
+
+def kept_spans(cut_out: list, trim: float) -> list:
+    """The parts of ``[0, trim]`` left once *cut_out* is removed."""
+    spans, a = [], 0.0
+    for x, y in cut_out:
+        spans.append((a, x))
+        a = y
+    return spans + [(a, trim)]
+
+
+def out_time(t: float, cut_out: list) -> float:
+    """A time on the clip's clock moved onto the tightened clip's clock."""
+    return t - sum(min(max(t - x, 0.0), y - x) for x, y in cut_out)
+
+
+def _speaker_at(shot: dict, timed: list, t: float) -> str | None:
+    """The speaker of the line being said (or about to be said) at *t*."""
+    for line, row in zip(shot.get("lines") or [], timed):
+        if row.get("end_s") is not None and row["end_s"] > t:
+            return line.get("speaker")
+    return None
+
+
+def _flip(shot: dict, timed: list, piece: dict) -> dict:
+    """The other framing for a piece that follows a tightened pause: wide after a punch-in, else a punch-in on
+    the speaker (their side in a two- or three-character clip, the centre otherwise)."""
+    if piece["framing"] != "wide":
+        return {"framing": "wide", "zoom": 1.0}
+    sides = _sides(shot)
+    side = sides.get(_speaker_at(shot, timed, piece["start"])) if len(sides) >= 2 else None
+    return {"framing": side, "zoom": PUNCH_SIDE} if side else {"framing": "center", "zoom": PUNCH_SOLO}
+
+
+def edit(shot: dict, timed: list, trim: float, cut_out: list, *, enabled: bool = True) -> list:
+    """The pieces of one clip on its own clock, the tightened pauses left out: the punch-in framings split at
+    each cut, and the piece after a cut always framed differently from the one before it (an edit, not a jump)."""
+    base = pieces(shot, timed, trim, enabled=enabled)
+    if not cut_out:
+        return base
+    out = []
+    for a, b in kept_spans(cut_out, trim):
+        part = _merge([{**p, "start": max(p["start"], a), "end": min(p["end"], b)}
+                       for p in base if p["end"] > a and p["start"] < b])
+        if out and part[0]["framing"] == out[-1]["framing"]:
+            part[0] = {**part[0], **_flip(shot, timed, part[0])}
+            if len(part) > 1 and part[1]["framing"] == part[0]["framing"]:
+                nxt = part.pop(1)
+                part[0] = {**part[0], "end": nxt["end"]}
+        out += part
+    return [{**p, "start": round(p["start"], 4), "end": round(p["end"], 4)} for p in out]
+
+
 # ------------------------------------------------------------------ the plan
 
 def _speakers(story: Story) -> dict:
@@ -234,35 +329,41 @@ def plan(story: Story, n: int) -> dict:
                             f"(a shot is never filled with a still)")
     speakers = _speakers(story)
     punch_in = sheet.get("punch_in", True) is not False
+    tighten = punch_in and sheet.get("tighten", True) is not False
     segments, events, t = [], [], 0.0
     for shot in sheet["shots"]:
         take = story.approved_take(n, shot["id"])
         clip = story.path(take["path"])
         info = verify.probe(clip)
         verdict = take.get("verdict") or {}
+        silences = verify.silences(clip, min_s=PAUSE_MIN_S) if info["has_audio"] else []
         end_s = verdict.get("end_s")
-        trim = info["duration_s"]
-        if end_s is not None and info["duration_s"] - end_s > TRIM_AFTER_S:
-            trim = end_s + TRIM_PAD_S
+        trim = info["duration_s"] if end_s is None else voice_end(end_s, silences) + TRIM_PAD_S
         trim = frames_floor(min(trim, info["duration_s"]))
         timed = verdict.get("lines") or []
+        cut_out = pauses_to_cut(shot, timed, silences, trim, enabled=tighten)
         for k, line in enumerate(shot.get("lines") or []):
             row = timed[k] if k < len(timed) else {}
             if row.get("start_s") is None:
                 events.append({"shot": shot["id"], "speaker": line["speaker"], "text": line["text"], "start": None})
                 continue
-            start = t + row["start_s"]
-            end = t + min(row["end_s"] + SUB_TAIL_S, trim)
+            start = row["start_s"]
+            end = min(row["end_s"] + SUB_TAIL_S, trim)
             nxt = timed[k + 1] if k + 1 < len(timed) else {}
             if nxt.get("start_s") is not None:
-                end = min(end, t + nxt["start_s"] - 0.02)
+                end = min(end, nxt["start_s"] - 0.02)
             who = speakers.get(line["speaker"], {"name": line["speaker"].upper(), "colour": PALETTE[0]})
             events.append({"shot": shot["id"], "speaker": line["speaker"], "name": who["name"], "colour": who["colour"],
-                           "text": line["text"], "start": round(start, 3), "end": round(end, 3)})
+                           "text": line["text"], "start": round(t + out_time(start, cut_out), 3),
+                           "end": round(t + out_time(end, cut_out), 3)})
+        seconds = trim - sum(y - x for x, y in cut_out)
         segments.append({"shot": shot["id"], "take": take["take"], "clip": clip, "start": round(t, 3),
-                         "seconds": trim, "source_s": info["duration_s"], "has_audio": info["has_audio"],
-                         "pieces": pieces(shot, timed, trim, enabled=punch_in), "sfx": shot.get("sfx") or []})
-        t += trim
+                         "seconds": seconds, "trim": trim, "source_s": info["duration_s"],
+                         "has_audio": info["has_audio"], "cut_out": cut_out,
+                         "tightened_s": round(trim - seconds, 3),
+                         "pieces": edit(shot, timed, trim, cut_out, enabled=punch_in),
+                         "sfx": [{**c, "at": out_time(float(c.get("at", 0.0)), cut_out)} for c in shot.get("sfx") or []]})
+        t += seconds
     card = sheet.get("card") or {"lines": [story.meta.get("title", ""), CARD_TEXT[story.language].format(n=n + 1)]}
     card = {"lines": [x for x in card.get("lines", []) if x], "seconds": float(card.get("seconds") or CARD_SECONDS)}
     return {"segments": segments, "events": events, "card": card, "card_start": round(t, 3),
@@ -302,14 +403,15 @@ def ffmpeg_command(cut: dict, ass_name: str, dest: str, *, preset: str = "medium
         args += ["-i", seg["clip"]]
         v = k
         k += 1
+        src_s = seg.get("trim", seg["seconds"])          # the clip's own clock, before the pauses are tightened
         if seg["has_audio"]:
             a = f"{v}:a"
         else:
-            args += ["-f", "lavfi", "-t", f"{seg['seconds']}", "-i", "anullsrc=r=48000:cl=stereo"]
+            args += ["-f", "lavfi", "-t", f"{src_s}", "-i", "anullsrc=r=48000:cl=stereo"]
             a, k = f"{k}:a", k + 1
-        T = f"{seg['seconds']:.4f}"
+        T = f"{src_s:.4f}"
         n = len(seg_labels)
-        parts = seg.get("pieces") or [{"start": 0.0, "end": seg["seconds"], "framing": "wide", "zoom": 1.0}]
+        parts = seg.get("pieces") or [{"start": 0.0, "end": src_s, "framing": "wide", "zoom": 1.0}]
         base = (f"[{v}:v]trim=duration={T},setpts=PTS-STARTPTS,scale={W}:{H}:force_original_aspect_ratio=increase,"
                 f"crop={W}:{H},fps={FPS},format=yuv420p,setsar=1")
         if len(parts) == 1 and not punch_filter(parts[0]["framing"], parts[0]["zoom"]):
@@ -323,8 +425,17 @@ def ffmpeg_command(cut: dict, ass_name: str, dest: str, *, preset: str = "medium
                 vf.append(f"[p{n}_{j}]trim=start={p['start']:.4f}:end={p['end']:.4f},setpts=PTS-STARTPTS"
                           + (f",{crop}" if crop else "") + f"[q{n}_{j}]")
             vf.append("".join(f"[q{n}_{j}]" for j in range(len(parts))) + f"concat=n={len(parts)}:v=1:a=0[v{n}]")
-        vf.append(f"[{a}]atrim=duration={T},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,"
-                  f"volume={VOICE_GAIN}[a{n}]")
+        voice = (f"[{a}]atrim=duration={T},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,"
+                 f"volume={VOICE_GAIN}")
+        kept = kept_spans(seg.get("cut_out") or [], src_s)
+        if len(kept) == 1:
+            vf.append(f"{voice}[a{n}]")
+        else:
+            # The tightened pauses: the sound is cut at the same points as the picture (inside the silence).
+            vf.append(f"{voice},asplit={len(kept)}" + "".join(f"[b{n}_{j}]" for j in range(len(kept))))
+            for j, (x, y) in enumerate(kept):
+                vf.append(f"[b{n}_{j}]atrim=start={x:.4f}:end={y:.4f},asetpts=PTS-STARTPTS[c{n}_{j}]")
+            vf.append("".join(f"[c{n}_{j}]" for j in range(len(kept))) + f"concat=n={len(kept)}:v=0:a=1[a{n}]")
         seg_labels.append(len(seg_labels))
     card_s = cut["card"]["seconds"]
     args += ["-f", "lavfi", "-i", f"color=c=0x0B0B10:s={W}x{H}:r={FPS}:d={card_s}",
@@ -388,6 +499,7 @@ def assemble(story: Story, n: int, *, preset: str = "medium") -> dict:
               "width": info["width"], "height": info["height"], "fps": info["fps"], "mean_db": info["mean_db"],
               "max_db": info["max_db"], "subtitles": events, "sheet": story.rel(sheet),
               "cuts": sum(len(s["pieces"]) for s in cut["segments"]),
+              "tightened_s": round(sum(s["tightened_s"] for s in cut["segments"]), 2),
               "unsubtitled": [e["shot"] for e in cut["events"] if e["start"] is None],
               "segments": [{k: v for k, v in s.items() if k not in ("clip", "sfx")} | {"clip": story.rel(s["clip"])}
                            for s in cut["segments"]], "bgm": (cut.get("bgm") or {}).get("file")}

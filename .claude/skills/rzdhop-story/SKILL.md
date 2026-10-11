@@ -60,6 +60,8 @@ never do a step from memory or from this page. Read `PROMPTS.md` before writing 
   - **Readable text** on a sign or a prop is welcome, in one or two words.
   - **The camera holds still inside every clip**: the energy comes from the edit, where the assembly punches in on
     each speaker automatically.
+  - **A quick pace**: lines without "…" and voices without slow words; the assembly shortens every pause over
+    0.45 s (picture and sound cut together, always on a change of framing) and cuts each clip right after its voice.
 
   The patterns are in `PROMPTS.md`.
 - **One universe per story** (any universe, not fruit only): only what the story's own files say is assumed.

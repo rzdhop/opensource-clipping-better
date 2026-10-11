@@ -36,7 +36,8 @@ For every shot, the whole episode in one batch:
      and props of the keyframe are fine);
    - the universe kept, no camera drift (a slow push-in on a one-character clip is the usual one).
 
-   Keep the best.
+   Keep the best. When two takes look as good, keep the faster one: the lines are the same, so the take whose
+   speech is shorter (`end_s` − `start_s` of its check) talks faster — two seeds can differ by 1.8×.
 5. `vc_clip(story, N, "sNN", "vK")` → `vc_fetch(…)`: the same picture with every line in its speaker's locked voice
    (a new take). → `approve_take(story, N, "sNN", <the voiced take>, note="Claude's pick: <why>")`.
 
@@ -64,7 +65,7 @@ When every shot has an approved voiced take, go straight on to `steps/6-assemble
 
 - [ ] No open jobs left behind before a new batch.
 - [ ] Every clip prompt written from its pattern (Medium and Heads word for word, the script's exact lines with how
-      each is said, each speaker's voice, the action, the closing sentence).
+      each is said, each speaker's voice ending `quick and natural`, the action, the closing sentence).
 - [ ] No kept take with writing drawn over the picture or a background person speaking.
 - [ ] Every take checked with `verify_take`; only an `ok` take is kept.
 - [ ] Every kept take re-voiced with the locked voices before it is approved.

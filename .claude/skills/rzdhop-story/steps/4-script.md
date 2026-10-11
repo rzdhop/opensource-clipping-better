@@ -45,6 +45,9 @@ How the episode feels (every story, every universe):
   believable: a telenovela, never a gag.
 - **Busy places**: most scenes happen where people are (an open space, a café, a party, a street, a hall); the
   peak happens in front of witnesses. An empty place is a choice for an intimate scene, not the default.
+- **Lines that flow**: no "…" inside a line and at most two short sentences per line; a dramatic pause goes
+  between two lines or two clips, never inside one (the clip model stops 0.5–2 s at every "…" and full stop). The
+  assembly shortens what is left.
 - **Text on screen** is welcome when it tells the story at a glance: a sign, a folder, a phone screen, in one or
   two words.
 - No silent shot unless the scene needs one: someone talks in nearly every clip. The assembly adds the faster cuts
@@ -90,6 +93,7 @@ feel empty>
 - [ ] Budget per shot: a 5 s clip says ≤ 10 words in all, a 10 s clip ≤ 22 (≈ 2.4 words/s after a beat of
       silence). Count the words of every shot's lines together.
 - [ ] Every line says how it is said; every shot has one physical action; a silent shot says what the face shows.
+- [ ] No "…" inside a line, at most two sentences per line; no delivery that is a pause (hesitating, slowly).
 - [ ] Every speaker has a locked sheet and a locked voice; every place has a plate with a full `## Setting` (no
       people in it) and its `## Extras`; most scenes are in busy places.
 - [ ] Each character sounds like their `## How they speak`; nobody explains the plot.

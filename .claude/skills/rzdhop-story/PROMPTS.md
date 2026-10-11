@@ -94,11 +94,11 @@ vertical 9:16 framing, the main characters sharp and large in the foreground.
 Use the provided start image as the first frame. <Medium> <Head>. Setting: <Setting>. <Name> talks to someone just
 off-screen beside the camera, in three-quarter view, the eyeline passing just past the lens and never looking into
 it, as in a conversation scene of a drama, and says in <French|English>, <how it is said>, with the voice of
-<Voice (en)>: "<line>" The mouth moves naturally with every word, a small head tilt, a breath before and a beat of
-silence after the line. <The action: a tear rolls down, a fist hits the table…> <Extras action, if any: behind,
-out of focus, the coworkers keep walking past in silence.> Medium close-up, the camera holds still on the speaker,
-soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. One continuous,
-clean cinematic shot from the first frame to the last.
+<Voice (en)>, quick and natural: "<line>" The mouth moves naturally with every word, a small head tilt, a breath
+before and a beat of silence after the line. <The action: a tear rolls down, a fist hits the table…> <Extras action,
+if any: behind, out of focus, the coworkers keep walking past in silence.> Medium close-up, the camera holds still on
+the speaker, soft natural motion only. Audio: the clear voice close to the microphone, quiet room tone, no music. One
+continuous, clean cinematic shot from the first frame to the last.
 ```
 
 **Clip, two or three characters** (`ltx25_i2v_speech`, 10 s; the s22 pattern — the default: most clips have two or
@@ -107,11 +107,11 @@ three characters and three short lines)
 ```
 Use the provided start image as the first frame. <Medium> <Head A>. <Head B>. Setting: <Setting>. They speak in turn,
 each one's mouth moving only on their own line, the other listening and reacting: <A> says in <language>, <how it is
-said>, with the voice of <Voice A>: "<line>" <B> says in <language>, <how it is said>, with the voice of <Voice B>:
-"<line>" <A> says in <language>, <how it is said>, with the voice of <Voice A>: "<line>" <Extras action: behind
-them, out of focus, the coworkers freeze, turn their heads and stare in silence.> Medium two-shot, the camera holds
-still. Audio: two distinct voices close to the microphone, quiet room tone, no music. One continuous, clean
-cinematic shot from the first frame to the last.
+said>, with the voice of <Voice A>, quick and natural: "<line>" <B> says in <language>, <how it is said>, with the
+voice of <Voice B>, quick and natural: "<line>" <A> says in <language>, <how it is said>, with the voice of <Voice A>,
+quick and natural: "<line>" <Extras action: behind them, out of focus, the coworkers freeze, turn their heads and
+stare in silence.> Medium two-shot, the camera holds still. Audio: two distinct voices close to the microphone, quiet
+room tone, no music. One continuous, clean cinematic shot from the first frame to the last.
 ```
 
 - `<how it is said>`: the script's delivery in a few words — `shouting, shocked and furious, her voice shaking`,
@@ -120,6 +120,11 @@ cinematic shot from the first frame to the last.
 - When a sheet's voice carries a mood that fights the line (a "smiling", "playful" voice on a sad line), keep only its
   age and timbre words in the prompt (`the voice of a bright young woman, here small and broken`): the mood word draws
   a smile on the face. The locked voice is laid on afterwards anyway.
+- **Pace** (the clip model obeys a slow word far more than a fast one: "honeyed and slow, every word weighed" gave
+  the slowest lines of Bouc émissaire, "fast-talking" changed little). In a clip prompt the voice keeps its age,
+  timbre and attitude and ends with `quick and natural`; it never says slow, measured, weighed, drawn-out,
+  deliberate, lazy or hesitant. `<how it is said>` shows the emotion by intensity (shouting, trembling, icy, through
+  gritted teeth), never by pauses (hesitating, slowly, trailing off, with a long pause).
 - Extras stay silent and keep their action small; never give them a line or a mouth movement.
 
 **Clip, silent reaction** (`ltx25_i2v_speech`, 5 s — rare: a scene plays better with someone talking)

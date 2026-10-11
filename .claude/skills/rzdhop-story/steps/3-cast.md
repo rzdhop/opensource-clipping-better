@@ -71,7 +71,8 @@ picture is made again; the voice stays).
 mark>; <the body and outfit, colours named>, <one signature item>, <the hands rule of the universe>
 
 ## Voice (en)
-<age, tone, pace, texture, in English>
+<age, timbre, attitude, texture, in English — never a slow word (slow, measured, weighed, drawn-out): the clip
+model obeys it and every line drags>
 
 ## Voice (fr)
 <the same in French>
